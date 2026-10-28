@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- v2: submit -> parallel review (legal + quality + security) -> approval (escalates after timer) -> end -->
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:flowable="http://flowable.org/bpmn"
+             targetNamespace="http://dms.example/workflow">
+  <process id="documentReview" name="Document review and approval" isExecutable="true">
+    <startEvent id="submitted" name="Document submitted" flowable:initiator="initiator"/>
+    <sequenceFlow id="f1" sourceRef="submitted" targetRef="forkReview"/>
+
+    <parallelGateway id="forkReview" name="Start parallel review"/>
+    <sequenceFlow id="f2" sourceRef="forkReview" targetRef="reviewLegal"/>
+    <sequenceFlow id="f3" sourceRef="forkReview" targetRef="reviewQuality"/>
+    <sequenceFlow id="f3b" sourceRef="forkReview" targetRef="reviewSecurity"/>
+
+    <userTask id="reviewLegal" name="Legal review" flowable:candidateGroups="reviewers-legal"/>
+    <userTask id="reviewQuality" name="Quality review" flowable:candidateGroups="reviewers-quality"/>
+    <userTask id="reviewSecurity" name="Security review" flowable:candidateGroups="reviewers-security"/>
+
+    <sequenceFlow id="f4" sourceRef="reviewLegal" targetRef="joinReview"/>
+    <sequenceFlow id="f5" sourceRef="reviewQuality" targetRef="joinReview"/>
+    <sequenceFlow id="f5b" sourceRef="reviewSecurity" targetRef="joinReview"/>
+    <parallelGateway id="joinReview" name="Reviews complete"/>
+    <sequenceFlow id="f6" sourceRef="joinReview" targetRef="approve"/>
+
+    <userTask id="approve" name="Approve document" flowable:candidateGroups="approvers"/>
+    <!-- Interrupting boundary timer: if approval is not done in time, the approval task is
+         cancelled and an escalation task for the managers group is created (reassignment). -->
+    <boundaryEvent id="approvalOverdue" name="Approval overdue" attachedToRef="approve" cancelActivity="true">
+      <timerEventDefinition>
+        <timeDuration>${approvalTimeout}</timeDuration>
+      </timerEventDefinition>
+    </boundaryEvent>
+    <sequenceFlow id="f7" sourceRef="approvalOverdue" targetRef="approveEscalated"/>
+    <userTask id="approveEscalated" name="Approve document (escalated)" flowable:candidateGroups="approval-managers"/>
+
+    <sequenceFlow id="f8" sourceRef="approve" targetRef="done"/>
+    <sequenceFlow id="f9" sourceRef="approveEscalated" targetRef="done"/>
+    <endEvent id="done" name="Review finished"/>
+  </process>
+</definitions>
