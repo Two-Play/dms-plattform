@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Open – spike required |
+| Status | Accepted (spike DMS-21, 2026-10-28) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -12,7 +12,7 @@ Already in place: PostgreSQL driver `42.7.14`, HikariCP `7.1.0` and Flyway `13.1
 
 ## Decision
 
-Still open. Recommendation until the spike: Magnum `1.3.1` (core, JDBC, synchronous) with a thin custom ZIO wrapper (`ZIO.attemptBlocking`, transaction as `ZLayer`/scope). The `magnumzio` module is not used, as it only exists as `2.0.0-M4` (milestone).
+Magnum `1.3.1` (core only, JDBC, synchronous) with a thin custom ZIO wrapper. The transaction is owned by our own primitive: one connection per transaction, held in a ZIO `FiberRef`, which Magnum and Flowable (0006) both join. `magnumzio` (only `2.0.0-M4`), `magnumpg` and ZIO Quill are not used.
 
 ## Alternatives considered
 
@@ -41,9 +41,37 @@ Still open. Recommendation until the spike: Magnum `1.3.1` (core, JDBC, synchron
 - No compile-time checking of SQL against the schema; safeguarded only by integration tests (Testcontainers `0.44.1`).
 - Until the spike result is available, there is uncertainty for all modules with persistence.
 
+## Spike result (DMS-21, 2026-10-28)
+
+Details, code and exact error messages: [`spikes/db-access/README.md`](../../spikes/db-access/README.md). All suites ran against PostgreSQL 17 (Magnum 13 tests, Quill 12, plain JDBC 1).
+
+| Criterion | Magnum 1.3.1 + wrapper | ZIO Quill 4.x | Plain JDBC |
+|---|---|---|---|
+| 1 RLS tenant context, no leak into the pool | Pass | Pass | Pass |
+| 2 `SKIP LOCKED`, two concurrent workers | Pass (40 jobs, no double claim) | Pass | – |
+| 3 JSONB | Pass (opaque type codec) | Pass (raw SQL) | – |
+| 4 Append-only audit, typed errors | Pass, commit errors typed | Commit failure becomes a defect; errors must be `Throwable` | – |
+| 5 Shared connection with Flowable | Pass: `DbTx` built from the connection in our FiberRef | Only by seeding Quill's internal connection FiberRef (two FiberRefs to keep in sync) | Pass |
+| 6 Clean compile, 10 repositories × 5 queries | 9.3 s | 24.5 s | 6.5 s |
+| Runtime dependencies | 1 artifact | 49 artifacts (~60 MB, incl. Scala 2.13 compiler, scalameta) | none |
+
+Findings that apply to every option:
+
+- `SET LOCAL app.tenant_id = ?` cannot take a bind parameter; the tenant is set with `select set_config('app.tenant_id', ?, true)`.
+- With no tenant set, the RLS policy raises an error instead of returning zero rows: decision needed in 0014.
+- PostgreSQL reports an RLS violation and a missing grant with the same SQLSTATE 42501; error mapping must not rely on the code alone.
+- Forked fibers inside a transaction share its connection: no parallelism inside a transaction.
+
+Risk: `DbTx` has a `private[magnum]` constructor, so a three-line bridge lives in Magnum's package and must be re-checked on every Magnum upgrade (likely to change with Magnum 2.x).
+
 ## Follow-ups
 
-Spike criteria (evaluate per candidate):
+- Add `com.augustnagro::magnum` 1.3.1; build the transaction primitive (`Db.transact`, FiberRef connection, `set_config` tenant, typed `DbError` by SQLSTATE) as a shared layer used by documents, audit and workflow.
+- `Jsonb` opaque type codec; Testcontainers test layer running the Flyway migrations.
+- Separate database roles: migration owner vs. application role without `BYPASSRLS`; `dms.audit_event` gets only `SELECT, INSERT`.
+- Code review rule: no forked fibers inside `Db.transact`.
+
+Original spike criteria (evaluate per candidate):
 
 1. `SET LOCAL app.tenant_id` at the start of the transaction; demonstrate that RLS policies take effect and that the context does not leak into the pool.
 2. Job retrieval with `FOR UPDATE SKIP LOCKED` under two parallel workers without double processing.
