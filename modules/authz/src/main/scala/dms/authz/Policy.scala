@@ -66,6 +66,29 @@ object Policy:
           )
         )
 
+      case ReadDocument =>
+        def participant(roles: Role*)    = roles.exists(has) && isParticipant
+        def readable(condition: Boolean) =
+          grantIf(
+            condition,
+            s"version in status ${resource.status.getOrElse("none")} is not visible to this caller"
+          )
+        resource.status match
+          case Some(Published | ReviewDue) => permissions(subject, roles, ReadPublished, resource)
+          case Some(Draft)                 => readable(has(Author) || has(Owner))
+          case Some(InReview)              => readable(has(Author) || has(Owner) || participant(Reviewer))
+          case Some(InApproval)            =>
+            readable(has(Author) || has(Owner) || participant(Reviewer, Approver))
+          case Some(Approved) =>
+            readable(
+              has(Author) || has(Owner) || participant(Reviewer, Approver) ||
+                resource.approvedBy.contains(subject.userId)
+            )
+          case Some(Superseded) =>
+            readable(roles.exists(_ != TenantAdmin))
+          case Some(Withdrawn | Archived) => readable(has(Owner) || has(RecordsManager) || has(Auditor))
+          case Some(Destroyed) | None     => Decision.Deny("there is no readable document version")
+
       case CreateFromTemplate =>
         grantIf(has(Author) || has(Owner), "creating documents requires the author or owner role")
 

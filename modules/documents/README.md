@@ -45,3 +45,43 @@ Each `FieldBinding` names the statuses in which the field is required (`Required
 - `POST /api/v1/document-classes/{id}/validate` with `{"values": {...}, "targetStatus": "InReview", "version": 1}` returns `{complete, issues:[{field,label,code,message}]}` for editors. System fields are skipped unless `includeSystemFields` is `true`. Open to every signed-in user of the tenant.
 
 Metadata values in JSON: `{"type":"Text","value":"ACME"}`, `{"type":"Amount","value":1200.5,"currency":"EUR"}`, `{"type":"Selection","code":"3m"}`, `{"type":"Many","values":[...]}`.
+
+## Version model (DMS-38, ADR 0021)
+
+Business concept 5.1, 5.2. `api`, package `dms.documents` (pure):
+
+- `Document`: stable identity (class and profile version, title, owner, author, template and template version).
+- `DocumentVersion`: one complete version package: number (`VersionNo`, the number it gets on approval), working state, status (`DocumentStatus`), change kind (`ChangeKind.Major`/`Minor` with reason), validity scope, class and template version, structured content (`TemplateContent`, a copy of the template content incl. locked flags, pinning clause versions), field values (`FieldEntry`: `MetadataValue` + `ValueOrigin` `Manual`, `System(source)` or `Computed`), metadata snapshot (taken on approval), rendition (object key, object version, SHA-256), author and approver.
+- `Versioning`: open statuses (Draft, InReview, InApproval), valid statuses (Published, ReviewDue), frozen statuses (all others); `next` (first version 1.0, major for content changes, minor for editorial ones, counted from the highest approved number), `nextWorkingState` (counted continuously), `label` (`1.1-draft.3` while open, `1.1` afterwards), `scopeKey` (sorted values of the `scope` field, `""` = unrestricted).
+
+Tables (migration V9):
+
+- `dms.document`: identity, pinned class and template version (foreign keys incl. tenant), title and owner (the only updatable columns). Insert only from a `Released` template version (trigger).
+- `dms.document_version`: one row per version package (content and values as `jsonb`). Guard trigger `document_version_guard`: versions start as drafts; only drafts change content, values, working state, scope and pinned versions; working states never decrease; status changes only along `Lifecycle` (a test compares both); metadata snapshot and approver are recorded once, on InApproval → Approved; the rendition is frozen from approval on; no deletes. Check constraints: approved versions have snapshot, approver and rendition checksum; the approver is not the author; minor versions have a reason. Partial unique indexes: one open version per document (`document_version_one_open`), one valid version per document and scope (`document_version_one_valid`), a version number once per document (withdrawn drafts give it back).
+- `dms.document_working_state`: one snapshot per saved working state, insert-only.
+- RLS with `dms.current_tenant()` on all three; `dms_app` may select and insert, and update only the columns listed in the migration.
+
+## Creating documents from templates (DMS-37)
+
+Business concept 4.3 (manual and hybrid creation), US-02.1. `core`, package `dms.documents.core`:
+
+- `DocumentService` (inside `Db.transact(tenant)`):
+  - `create(NewDocument(templateId, templateVersion, title, values), actor)`: only from a `Released` template version (409 otherwise; the database checks it again). Creates the document and version 1.0 as a draft (`1.0-draft.1`) with the template content (sections incl. locked flags, clause references) and binds it to the template version and the class profile version of the template.
+  - Field values: entered values (`ValueOrigin.Manual`, or `System(source)` from a business system) are validated against the class profile for status Draft (`Validation.validate`); the platform adds `documentId`, `documentClass`, `version`, `template`, `templateVersion` (`System("dms")`); computed fields of the template are evaluated (`Resolver.computedValues`) and stored as `Computed`. Platform fields, status, checksum and computed fields cannot be entered (`not_editable`). The retention rule can be entered until it is derived from the class.
+  - `updateDraft(id, DraftChange(title, values, content), actor)`: only drafts; entered values are replaced, computed values recomputed, the working state increases and is stored in `dms.document_working_state`. A changed content must keep locked sections and their order and title (`EditRules` from DMS-36; deviation requests are not stored yet, so locked text cannot change) and the template's computed fields, and must fit the class profile (template check).
+  - `submit(id, actor)`: `Validation.checkTransition(profile, values, Draft, Submit)`; blocked with `Incomplete(InReview, issues)` while fields required in review are missing.
+  - `changeStatus(versionId, event, actor)`: further lifecycle events for the workflow: approval by a person other than the author (`Lifecycle.approve`) takes the metadata snapshot and needs the rendition checksum; publication supersedes the valid version of the same scope. `attachRendition` records the rendition of an open version. `newVersion(id, Major | Minor, reason, actor)` starts the next version from the valid one (one open version at a time; a minor version needs a reason).
+  - Every change is recorded in the audit trail (`document.created`, `document.draft-changed`, `document.submitted`, `document.approved`, `document.published`, `document.status-changed`, `document.version-created`, `document.rendition-attached`) and creation, status changes and new versions are published to the outbox (`document.created`, `document.submitted`, `document.status-changed`, `document.version-created`), in the same transaction.
+- `TemplateSource`: the documents module's view of templates (versions, content check, computed fields, content format), implemented in `app` (`DocumentTemplates`) with `TemplateService`, `TemplateCompiler`, `Resolver` and `ContentJson`.
+
+HTTP (module `app`, `DocumentApi`):
+
+| Method | Path | Purpose | Authorization |
+|---|---|---|---|
+| POST | `/api/v1/documents` | Create from a released template version (`{"templateId","templateVersion","title","values":{...}}`) | `CreateFromTemplate` in the class scope |
+| GET | `/api/v1/documents/{id}` | Document with its open (or latest readable) version | `ReadDocument` on a version |
+| GET | `/api/v1/documents/{id}/versions` | Versions the caller may read | `ReadDocument` per version |
+| PUT | `/api/v1/documents/{id}/draft` | Change values, title and content of the draft | `EditDraft` |
+| POST | `/api/v1/documents/{id}/submit` | Submit for review | `EditDraft` |
+
+Validation errors return 422 with `issues` (`[{field,label,code,message}]`): `invalid_values` for entered values, `incomplete` for a blocked submission. Values in responses carry their origin: `{"value":{...},"origin":"System","source":"dms"}`.

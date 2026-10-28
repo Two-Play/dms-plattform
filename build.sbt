@@ -48,7 +48,7 @@ lazy val authz = module("authz", "modules/authz")
 
 lazy val templatesApi      = apiModule("templates")
 lazy val templatesCore     = templatesCoreModule.dependsOn(templatesApi, documentsApi, auditApi)
-lazy val documentsApi      = apiModule("documents")
+lazy val documentsApi      = apiModule("documents").dependsOn(templatesApi)
 lazy val documentsCore     = documentsCoreModule.dependsOn(documentsApi, templatesApi, auditApi)
 lazy val workflowApi       = apiModule("workflow")
 lazy val workflowCore      = coreModule("workflow").dependsOn(workflowApi, documentsApi)

@@ -3,7 +3,7 @@ package dms.app
 import dms.audit.core.{AuditTrailLive, TsaTrust}
 import dms.authz.{Authorizer, RoleAssignments}
 import dms.db.Db
-import dms.documents.core.DocumentClassService
+import dms.documents.core.{DocumentClassService, DocumentService}
 import dms.identity.{Authenticator, TenantDirectory, TokenVerifier}
 import dms.storage.ObjectStore
 import dms.templates.core.TemplateService
@@ -22,14 +22,15 @@ object Main extends ZIOAppDefault:
     Runtime.removeDefaultLoggers >>> SLF4J.slf4j >+>
       Runtime.setConfigProvider(TypesafeConfigProvider.fromResourcePath())
 
-  private type Env = DocumentClassApi.Env & TemplateApi.Env
+  private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
       DocumentClassApi.endpoints.map(_.widen[Env]) ++
       TemplateApi.endpoints.map(_.widen[Env]) ++
       TemplateLifecycleApi.endpoints.map(_.widen[Env]) ++
-      TemplatePreviewApi.endpoints.map(_.widen[Env])
+      TemplatePreviewApi.endpoints.map(_.widen[Env]) ++
+      DocumentApi.endpoints.map(_.widen[Env])
 
   private val docs =
     SwaggerInterpreter()
@@ -61,6 +62,8 @@ object Main extends ZIOAppDefault:
           AuditTrailLive.layer,
           DocumentClassService.layer,
           DocumentClassProfiles.layer,
-          TemplateService.layer
+          TemplateService.layer,
+          DocumentTemplates.layer,
+          DocumentService.layer
         )
     yield ()

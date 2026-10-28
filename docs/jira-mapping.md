@@ -110,7 +110,7 @@ Note: Jira limits sprint names to fewer than 30 characters; the names therefore 
 
 ## Follow-up issues (added 2026-10-28)
 
-Open points from DMS-29 and DMS-30, created after review of sprint 2.
+Open points found in review, created after each sprint (first: DMS-29 and DMS-30 after sprint 2).
 
 | Planning ID | Jira key | Type | Sprint | SP | Origin |
 |---|---|---|---|---|---|
@@ -118,3 +118,9 @@ Open points from DMS-29 and DMS-30, created after review of sprint 2.
 | T-12.2 | DMS-74 | Task | Sprint 2 | 3 | DMS-29: chain head checkpoints in write-once storage |
 | T-12.3 | DMS-75 | Task | Sprint 3 | 2 | DMS-29: schedule daily anchoring and checkpoints (with DMS-31) |
 | T-08.1 | DMS-76 | Task | Backlog (R2) | 3 | DMS-30: multipart upload above 5 GB |
+| T-01.1 | DMS-77 | Task | Sprint 5 | – | DMS-34: exact decimal amounts in computed fields |
+| – | DMS-78 | Bug | Sprint 5 | – | DMS-27: start page crashed while the OIDC session loaded |
+| US-01.1 | DMS-79 | Task | Sprint 6 | – | DMS-36/37: store deviation requests for locked sections |
+| US-03.2 | DMS-80 | Task | Sprint 6 | – | DMS-39: system fields not marked missing; visual check of the preview |
+| T-02.2 | DMS-81 | Task | Backlog (MVP) | – | DMS-38: minor version confirmation, language and scope in the validity key, retention from class |
+| T-02.2 | DMS-82 | Task | Backlog (MVP) | – | DMS-38: compact working states, privileged destruction path |

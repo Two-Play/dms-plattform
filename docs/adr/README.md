@@ -34,3 +34,4 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0018](0018-authorization-policy.md) | Authorization as an in-app policy (RBAC + ABAC) | Accepted | medium |
 | [0019](0019-metadata-model.md) | Metadata as JSONB values validated against versioned profiles | Accepted | medium |
 | [0020](0020-template-expressions-cel.md) | Template expressions in CEL (Common Expression Language) | Accepted | medium |
+| [0021](0021-document-versions.md) | Document versions as full version packages, frozen by database guards | Accepted | medium |

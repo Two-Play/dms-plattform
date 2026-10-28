@@ -25,6 +25,7 @@ object PolicySpec extends ZIOSpecDefault:
   /** Resource on which the action is meaningful, with the caller in no special relation to it. */
   private def base(action: Action): Resource = action match
     case ReadPublished       => document(Published)
+    case ReadDocument        => document(Draft)
     case CreateFromTemplate  => Resource(tenant, documentClassPath = List("policy"))
     case EditDraft           => document(Draft)
     case CommentInReview     => document(InReview)
@@ -176,6 +177,32 @@ object PolicySpec extends ZIOSpecDefault:
             now
           )
           .isPermitted
+      )
+    },
+    test("the visibility of a document version follows its status (business concept 5.1)") {
+      def reads(status: DocumentStatus, roles: Role*)(adjust: Resource => Resource = identity) =
+        permitted(roles, ReadDocument, adjust(document(status)))
+      val participant = (r: Resource) => r.copy(assignedParticipants = Set(user))
+      assertTrue(
+        reads(Draft, Author)(),
+        reads(Draft, Owner)(),
+        !reads(Draft, Reader)(),
+        !reads(Draft, Reviewer)(participant),
+        !reads(Draft, TenantAdmin)(),
+        !reads(InReview, Reviewer)(),
+        reads(InReview, Reviewer)(participant),
+        !reads(InReview, Approver)(participant),
+        reads(InApproval, Approver)(participant),
+        reads(Approved, Approver)(_.copy(approvedBy = Set(user))),
+        !reads(Approved, Reader)(),
+        reads(Published, Reader)(),
+        reads(ReviewDue, Reader)(),
+        !reads(Published, TenantAdmin)(),
+        reads(Superseded, Reader)(),
+        !reads(Archived, Reader)(),
+        reads(Archived, RecordsManager)(),
+        reads(Withdrawn, Owner)(),
+        !reads(Destroyed, RecordsManager)()
       )
     },
     test("every denial carries a reason") {
