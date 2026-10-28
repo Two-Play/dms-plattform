@@ -18,7 +18,7 @@ object AuditTrailSpec extends ZIOSpecDefault:
 
   /** Application connections (role dms_app, subject to RLS), owner connections and the services under test.
     */
-  final case class Env(app: Db, owner: Db, trail: AuditTrail, anchoring: AuditAnchoring)
+  final case class Env(app: Db, owner: Db, trail: AuditTrail, anchoring: AuditAnchoring, trust: TsaTrust)
 
   private val appUserSql =
     """do $$ begin
@@ -36,20 +36,28 @@ object AuditTrailSpec extends ZIOSpecDefault:
     })(c => ZIO.attemptBlocking(c.stop()).orDie)
   )
 
-  private val env: ZLayer[PostgreSQLContainer & TimestampAuthority, Throwable, Env] = ZLayer.scoped(
-    for
-      c <- ZIO.service[PostgreSQLContainer]
-      _ <- ZIO.attemptBlocking {
-        val connection = java.sql.DriverManager.getConnection(c.jdbcUrl, c.username, c.password)
-        try connection.createStatement().execute(appUserSql)
-        finally connection.close()
-      }
-      _     <- Migrations.migrate(c.jdbcUrl, c.username, c.password)
-      app   <- dataSource(DbConfig(c.jdbcUrl, "dms_app_user", "dms-app-test", poolSize = 8))
-      owner <- dataSource(DbConfig(c.jdbcUrl, c.username, c.password, poolSize = 2))
-      tsa   <- ZIO.service[TimestampAuthority]
-    yield Env(Db(app), Db(owner), AuditTrailLive(Db(app)), AuditAnchoring(Db(app), tsa))
-  )
+  private val env: ZLayer[PostgreSQLContainer & TimestampAuthority & TsaTrust, Throwable, Env] =
+    ZLayer.scoped(
+      for
+        c <- ZIO.service[PostgreSQLContainer]
+        _ <- ZIO.attemptBlocking {
+          val connection = java.sql.DriverManager.getConnection(c.jdbcUrl, c.username, c.password)
+          try connection.createStatement().execute(appUserSql)
+          finally connection.close()
+        }
+        _     <- Migrations.migrate(c.jdbcUrl, c.username, c.password)
+        app   <- dataSource(DbConfig(c.jdbcUrl, "dms_app_user", "dms-app-test", poolSize = 8))
+        owner <- dataSource(DbConfig(c.jdbcUrl, c.username, c.password, poolSize = 2))
+        tsa   <- ZIO.service[TimestampAuthority]
+        trust <- ZIO.service[TsaTrust]
+      yield Env(
+        Db(app),
+        Db(owner),
+        AuditTrailLive(Db(app), trust),
+        AuditAnchoring(Db(app), tsa, trust),
+        trust
+      )
+    )
 
   private def dataSource(config: DbConfig): ZIO[Scope, Throwable, DataSource] =
     Db.dataSource(config).build.map(_.get[DataSource])
@@ -250,7 +258,7 @@ object AuditTrailSpec extends ZIOSpecDefault:
           again.isEmpty,
           stored.size == 1,
           stored.head.chainHeadHash.sameElements(head),
-          Rfc3161.verify(stored.head.token, head).isRight,
+          Rfc3161.verify(stored.head.token, head, env.trust).isRight,
           report.ok,
           report.anchorsChecked == 1,
           report.entriesChecked == 4L
@@ -305,6 +313,31 @@ object AuditTrailSpec extends ZIOSpecDefault:
       yield assertTrue(
         truncated.violation.map(v => (v.chainSeq, v.kind)) == Some((3L, Violation.Kind.MissingEntry)),
         forged.violation.map(v => (v.chainSeq, v.kind)) == Some((2L, Violation.Kind.AnchorMismatch))
+      )
+    },
+    test("tokens from a TSA outside the trust anchors are rejected") {
+      ZIO.scoped(
+        for
+          env      <- ZIO.service[Env]
+          t        <- newTenantZ
+          _        <- recordMany(2, t)
+          foreign  <- TestTsa.make("Foreign CA")
+          rejected <- AuditAnchoring(env.app, foreign.authority, env.trust).anchor(t).either
+          accepted <- AuditAnchoring(env.app, foreign.authority, foreign.trust).anchor(t)
+          stored   <- env.owner.transactSystem(Db.sql(ChainStore.anchors(t.value)))
+          report   <- verify(t)
+        yield assertTrue(
+          rejected.left.exists(_.toString.contains("not trusted")),
+          accepted.isDefined,
+          Rfc3161
+            .verify(stored.head.token, stored.head.chainHeadHash, TsaTrust(Nil))
+            .left
+            .exists(
+              _.contains("no trusted TSA certificates")
+            ),
+          // The trail trusts only the test CA, so the anchor from the foreign TSA counts as a mismatch.
+          report.violation.map(_.kind) == Some(Violation.Kind.AnchorMismatch)
+        )
       )
     }
   ).provideShared((container ++ TestTsa.layer) >>> env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

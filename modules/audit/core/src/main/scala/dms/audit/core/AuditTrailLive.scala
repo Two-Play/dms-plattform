@@ -11,7 +11,7 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 
 /** [[AuditTrail]] on `dms.audit_event` with one hash chain per tenant (ADR 0017). */
-final class AuditTrailLive(db: Db) extends AuditTrail:
+final class AuditTrailLive(db: Db, trust: TsaTrust) extends AuditTrail:
 
   def record(event: AuditEvent): IO[DbError, AuditRecordId] =
     for
@@ -21,10 +21,10 @@ final class AuditTrailLive(db: Db) extends AuditTrail:
     yield AuditRecordId(seq)
 
   def verify(tenant: TenantId): IO[DbError, VerificationReport] =
-    db.transact(tenant)(Db.sql(ChainVerifier.verify(tenant)))
+    db.transact(tenant)(Db.sql(ChainVerifier.verify(tenant, trust)))
 
 object AuditTrailLive:
-  val layer: ZLayer[Db, Nothing, AuditTrail] = ZLayer.fromFunction(AuditTrailLive(_))
+  val layer: ZLayer[Db & TsaTrust, Nothing, AuditTrail] = ZLayer.fromFunction(AuditTrailLive(_, _))
 
   private def append(event: AuditEvent, occurredAt: Instant)(using DbTx): Long =
     val tenant = ChainStore.currentTenant
@@ -53,7 +53,7 @@ object AuditTrailLive:
 /** Walks a tenant's chain in order and stops at the first violation. */
 private[core] object ChainVerifier:
 
-  def verify(tenant: TenantId)(using DbTx): VerificationReport =
+  def verify(tenant: TenantId, trust: TsaTrust)(using DbTx): VerificationReport =
     val anchors   = ChainStore.anchors(tenant.value)
     val bySeq     = anchors.groupBy(_.anchoredUntilSeq)
     var checked   = 0L
@@ -78,7 +78,7 @@ private[core] object ChainVerifier:
         fail(e.chainSeq, Violation.Kind.HashMismatch, "stored hash does not match the entry's content")
       else
         val anchorProblem =
-          bySeq.getOrElse(e.chainSeq, Vector.empty).iterator.map(checkAnchor(_, stored.hash))
+          bySeq.getOrElse(e.chainSeq, Vector.empty).iterator.map(checkAnchor(_, stored.hash, trust))
         anchorProblem.collectFirst { case Some(problem) => problem } match
           case Some(problem) => fail(e.chainSeq, Violation.Kind.AnchorMismatch, problem)
           case None          =>
@@ -108,10 +108,10 @@ private[core] object ChainVerifier:
       violation = violation
     )
 
-  private def checkAnchor(anchor: StoredAnchor, entryHash: Array[Byte]): Option[String] =
+  private def checkAnchor(anchor: StoredAnchor, entryHash: Array[Byte], trust: TsaTrust): Option[String] =
     if !MessageDigest.isEqual(anchor.chainHeadHash, entryHash) then
       Some("anchored chain head hash does not match the entry's hash")
-    else Rfc3161.verify(anchor.token, anchor.chainHeadHash).left.toOption
+    else Rfc3161.verify(anchor.token, anchor.chainHeadHash, trust).left.toOption
 
   private def sameHash(a: Option[Array[Byte]], b: Option[Array[Byte]]): Boolean = (a, b) match
     case (None, None)       => true

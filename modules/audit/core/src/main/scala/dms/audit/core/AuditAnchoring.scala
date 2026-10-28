@@ -14,7 +14,7 @@ final case class Anchor(tenant: TenantId, anchoredUntilSeq: Long, chainHeadHash:
   * A timestamp proves that the chain up to the anchored entry existed unchanged at the TSA's time; an
   * operator who rewrites the whole chain afterwards cannot produce matching tokens.
   */
-final class AuditAnchoring(db: Db, tsa: TimestampAuthority):
+final class AuditAnchoring(db: Db, tsa: TimestampAuthority, trust: TsaTrust):
 
   /** Timestamps the current chain head of `tenant` and stores the token. Returns `None` if the chain is empty
     * or its head is already anchored.
@@ -31,7 +31,7 @@ final class AuditAnchoring(db: Db, tsa: TimestampAuthority):
       case Some((seq, hash)) =>
         for
           token <- tsa.timestamp(hash)
-          time  <- ZIO.fromEither(Rfc3161.verify(token, hash)).mapError(TimestampError(_))
+          time  <- ZIO.fromEither(Rfc3161.verify(token, hash, trust)).mapError(TimestampError(_))
           _     <- db.transact(tenant)(
             Db.sql(ChainStore.insertAnchor(tenant.value, StoredAnchor(seq, hash, tsa.url, token), time))
           )
@@ -56,5 +56,5 @@ final class AuditAnchoring(db: Db, tsa: TimestampAuthority):
       .unit
 
 object AuditAnchoring:
-  val layer: ZLayer[Db & TimestampAuthority, Nothing, AuditAnchoring] =
-    ZLayer.fromFunction(AuditAnchoring(_, _))
+  val layer: ZLayer[Db & TimestampAuthority & TsaTrust, Nothing, AuditAnchoring] =
+    ZLayer.fromFunction(AuditAnchoring(_, _, _))

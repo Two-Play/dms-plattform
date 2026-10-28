@@ -54,12 +54,12 @@ Canonical serialization: length-prefixed fields with a format byte were chosen o
 - Changes after the last anchor (up to one day) are only protected against people who cannot recompute hashes.
 - Deleting only the newest, not yet anchored entries is not detectable by the chain alone.
 - The `details` hash depends on PostgreSQL's `jsonb` text output, which has been stable for years but is not a formal standard; a change would need a new hash format.
-- Signer certificates of TSA tokens are checked for signature validity, not yet against a trusted root.
+- Signer certificates of TSA tokens are checked for signature validity, timestamping key usage and a valid chain to configured trust anchors (DMS-73, 2026-10-28); revocation is not checked yet.
 - Dependency on BouncyCastle (`bcpkix`) and on the availability of the TSA (anchoring retries the next day).
 
 ## Follow-ups
 
-- Must be done: choose a production TSA (qualified per eIDAS or contractually bound) and configure its trust anchor; verify the TSA certificate chain.
+- Must be done: choose a production TSA (qualified per eIDAS or contractually bound) and configure its trust anchor (chain verification exists since DMS-73); decide on revocation checking.
 - Must be done: wire `AuditAnchoring.daily` and a scheduled `verify` with a report into the application (7.3 "regular integrity check"), including the list of tenants for system jobs.
 - Must be done: audit report export per document, period or person (7.3).
 - Must be done: re-timestamp tokens before the TSA certificate or algorithm expires (long-term archiving, RFC 4998 style).
