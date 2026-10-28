@@ -24,7 +24,7 @@ Read by Vite from `.env.local` (not committed) or the environment. `VITE_*` valu
 | `VITE_OIDC_ISSUER`     | `http://localhost:8085` | ZITADEL issuer (OIDC authority)                                                                                                                                                        |
 | `VITE_OIDC_CLIENT_ID`  | required                | OIDC client id (`DMS_ZITADEL_CLIENT_ID`)                                                                                                                                               |
 | `VITE_OIDC_PROJECT_ID` | none                    | ZITADEL project id (`DMS_ZITADEL_PROJECT_ID`); requests scope `urn:zitadel:iam:org:project:id:<id>:aud` so the access token audience contains the project, which the backend validates |
-| `VITE_API_BASE_URL`    | `/api`                  | Base URL of the DMS API                                                                                                                                                                |
+| `VITE_API_BASE_URL`    | empty (same origin)     | Base URL of the DMS API                                                                                                                                                                |
 | `DMS_BACKEND_URL`      | `http://localhost:8080` | Dev server only: where the `/api` proxy forwards to                                                                                                                                    |
 
 Redirect URI is `<origin>/callback`, post-logout URI `<origin>/`; both are registered by `scripts/zitadel-setup.sh` for `http://localhost:5173`. Requested scopes: `openid profile email offline_access`, `urn:zitadel:iam:user:resourceowner` (organization id claim, which the backend maps to the tenant), `urn:zitadel:iam:org:project:roles` (project roles claim) and the project audience scope. Tokens are kept in `sessionStorage` and renewed silently with the refresh token.
@@ -56,7 +56,7 @@ DMS_OPENAPI_URL=http://localhost:8091/docs/docs.yaml npm run api:generate
 
 ## Dev proxy
 
-The app calls the API under `/api`; the Vite dev server forwards `/api/*` to `DMS_BACKEND_URL` with the prefix stripped (`/api/health` → `http://localhost:8080/health`). `VITE_API_BASE_URL` stands for the backend root, so paths from the OpenAPI document are used unchanged: a backend path `/api/v1/me` is requested as `/api/api/v1/me` and forwarded to `http://localhost:8080/api/v1/me`. The browser therefore only talks to its own origin, and the backend needs no CORS configuration. In production a reverse proxy (or the backend itself) is expected to serve the UI and the API under one origin; otherwise set `VITE_API_BASE_URL` to the API URL and add CORS to the backend.
+The app calls the API on its own origin with the backend's paths unchanged (`/health`, `/api/v1/...`); the Vite dev server forwards `/api` and `/health` to `DMS_BACKEND_URL`. The browser therefore only talks to its own origin, and the backend needs no CORS configuration. In production a reverse proxy (or the backend itself) is expected to serve the UI and the API under one origin; otherwise set `VITE_API_BASE_URL` to the API URL and add CORS to the backend.
 
 ## Routing
 

@@ -14,5 +14,5 @@ export const config = {
   /** Optional ZITADEL project id; adds the project audience scope when set. */
   oidcProjectId: import.meta.env.VITE_OIDC_PROJECT_ID,
   /** Defaults to `/api`, which the Vite dev server proxies to the backend. */
-  apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? '/api',
+  apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? '',
 }

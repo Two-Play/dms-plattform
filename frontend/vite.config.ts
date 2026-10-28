@@ -7,7 +7,7 @@ import { defineConfig, loadEnv } from 'vite'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  // Backend the dev server proxies `/api/*` to (prefix stripped). Not a VITE_ variable,
+  // Backend the dev server proxies API paths to, unchanged. Not a VITE_ variable,
   // so it never ends up in the client bundle.
   const backend = env.DMS_BACKEND_URL ?? 'http://localhost:8080'
 
@@ -24,12 +24,10 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       strictPort: true,
+      // Same paths as the backend, so the browser only talks to its own origin (no CORS needed).
       proxy: {
-        '/api': {
-          target: backend,
-          changeOrigin: true,
-          rewrite: (p) => p.replace(/^\/api/, ''),
-        },
+        '/api': { target: backend, changeOrigin: true },
+        '/health': { target: backend, changeOrigin: true },
       },
     },
     test: {
