@@ -1020,7 +1020,8 @@ final class DocumentService(
       _ <- publish(
         if event == LifecycleEvent.Submit then "document.submitted" else "document.status-changed",
         document,
-        updated
+        updated,
+        Some(current.status)
       )
     yield updated
 
@@ -1112,7 +1113,16 @@ final class DocumentService(
       .mapError(DocumentError.Database(_))
       .unit
 
-  private def publish(eventType: String, document: Document, v: DocumentVersion) =
+  /** @param previous
+    *   for status changes the status before, so that subscribers tell a publication (from Approved) from a
+    *   recertification (from ReviewDue, DMS-58)
+    */
+  private def publish(
+      eventType: String,
+      document: Document,
+      v: DocumentVersion,
+      previous: Option[DocumentStatus] = None
+  ) =
     val payload = Json.Obj(
       (List(
         "documentId"      -> Json.Str(document.id.value.toString),
@@ -1128,7 +1138,8 @@ final class DocumentService(
         // Minor versions take the editorial workflow path (DMS-46); acknowledgement per version (6.3).
         "changeKind"              -> Json.Str(v.changeKind.toString),
         "requiresAcknowledgement" -> Json.Bool(v.requiresAcknowledgement)
-      ) ++ v.validFrom.map(d => "validFrom" -> Json.Str(d.toString)))*
+      ) ++ v.validFrom.map(d => "validFrom" -> Json.Str(d.toString)) ++
+        previous.map(p => "previousStatus" -> Json.Str(p.toString)))*
     )
     Outbox
       .publish("document", document.id.value, eventType, Jsonb(payload.toJson))
