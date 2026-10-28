@@ -693,17 +693,35 @@ object DocumentApi:
       v: DocumentVersion,
       participants: Map[UUID, Set[UserId]] = Map.empty
   ): Resource =
-    val values = v.metadata
+    versionResource(
+      tenant,
+      details.profile.classPath.map(_.value),
+      details.document.ownerId,
+      v.status,
+      v.createdBy,
+      v.metadata,
+      v.releasedBy
+    ).copy(assignedParticipants = participants.getOrElse(v.id, Set.empty))
+
+  /** The resource of a document version from its parts, e.g. for versions read without their content. */
+  private[app] def versionResource(
+      tenant: dms.kernel.TenantId,
+      classPath: List[String],
+      ownerId: Option[UserId],
+      status: DocumentStatus,
+      createdBy: UserId,
+      values: Map[String, MetadataValue],
+      releasedBy: Option[UserId]
+  ): Resource =
     Resource(
       tenant,
       organizationalUnit = text(values, "organizationalUnit"),
-      documentClassPath = details.profile.classPath.map(_.value),
+      documentClassPath = classPath,
       confidentiality = confidentiality(values),
-      status = Some(v.status),
-      authorId = Some(v.createdBy),
-      ownerId = details.document.ownerId,
-      assignedParticipants = participants.getOrElse(v.id, Set.empty),
-      approvedBy = v.releasedBy.toSet
+      status = Some(status),
+      authorId = Some(createdBy),
+      ownerId = ownerId,
+      approvedBy = releasedBy.toSet
     )
 
   private def documentView(

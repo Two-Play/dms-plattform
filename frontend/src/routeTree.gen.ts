@@ -14,6 +14,7 @@ import { Route as CallbackRouteImport } from './routes/callback'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
+import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppTasksRouteImport } from './routes/_app/tasks'
 import { Route as AppTemplatesRouteImport } from './routes/_app/templates'
 import { Route as AppDocumentsIndexRouteImport } from './routes/_app/documents/index'
@@ -42,6 +43,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppAdminRoute = AppAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSearchRoute = AppSearchRouteImport.update({
+  id: '/search',
+  path: '/search',
   getParentRoute: () => AppRoute,
 } as any)
 const AppTasksRoute = AppTasksRouteImport.update({
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/callback': typeof CallbackRoute
   '/sign-in': typeof SignInRoute
   '/admin': typeof AppAdminRoute
+  '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
   '/templates': typeof AppTemplatesRoute
   '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
@@ -85,6 +92,7 @@ export interface FileRoutesByTo {
   '/callback': typeof CallbackRoute
   '/sign-in': typeof SignInRoute
   '/admin': typeof AppAdminRoute
+  '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
   '/templates': typeof AppTemplatesRoute
   '/': typeof AppIndexRoute
@@ -98,6 +106,7 @@ export interface FileRoutesById {
   '/callback': typeof CallbackRoute
   '/sign-in': typeof SignInRoute
   '/_app/admin': typeof AppAdminRoute
+  '/_app/search': typeof AppSearchRoute
   '/_app/tasks': typeof AppTasksRoute
   '/_app/templates': typeof AppTemplatesRoute
   '/_app/': typeof AppIndexRoute
@@ -112,6 +121,7 @@ export interface FileRouteTypes {
     | '/callback'
     | '/sign-in'
     | '/admin'
+    | '/search'
     | '/tasks'
     | '/templates'
     | '/documents/$documentId'
@@ -122,6 +132,7 @@ export interface FileRouteTypes {
     | '/callback'
     | '/sign-in'
     | '/admin'
+    | '/search'
     | '/tasks'
     | '/templates'
     | '/'
@@ -134,6 +145,7 @@ export interface FileRouteTypes {
     | '/callback'
     | '/sign-in'
     | '/_app/admin'
+    | '/_app/search'
     | '/_app/tasks'
     | '/_app/templates'
     | '/_app/'
@@ -185,6 +197,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/search': {
+      id: '/_app/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof AppSearchRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/tasks': {
       id: '/_app/tasks'
       path: '/tasks'
@@ -225,6 +244,7 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
+  AppSearchRoute: typeof AppSearchRoute
   AppTasksRoute: typeof AppTasksRoute
   AppTemplatesRoute: typeof AppTemplatesRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -235,6 +255,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
+  AppSearchRoute: AppSearchRoute,
   AppTasksRoute: AppTasksRoute,
   AppTemplatesRoute: AppTemplatesRoute,
   AppIndexRoute: AppIndexRoute,

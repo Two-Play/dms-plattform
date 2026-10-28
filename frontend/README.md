@@ -70,6 +70,7 @@ TanStack Router with **file-based routing**: the Vite plugin generates `src/rout
 | `/documents/new`                                    | `routes/_app/documents/new.tsx`         | signed in; "New document" with live preview (DMS-39)                        |
 | `/documents/$documentId`                            | `routes/_app/documents/$documentId.tsx` | signed in; a document: continue and submit a draft, workflow state (DMS-90) |
 | `/tasks`                                            | `routes/_app/tasks.tsx`                 | signed in; task inbox with votes and read confirmations (DMS-48)            |
+| `/search`                                           | `routes/_app/search.tsx`                | signed in; full-text search and "valid on" history (DMS-52, DMS-53)         |
 | anything else                                       | `components/not-found-page.tsx`         | 404 page                                                                    |
 
 The protected layout checks `context.auth.isAuthenticated` in `beforeLoad` and redirects to `/sign-in?redirect=<path>`. After sign-in the original path is carried through the OIDC `state` and restored on `/callback` (only same-origin paths are accepted).
@@ -81,10 +82,11 @@ src/
   api/           generated schema, typed client, query definitions (templates.ts: catalog, fields, preview;
                  documents.ts: list, document, workflow, save and submit; workflow.ts: my tasks, votes;
                  me.ts: user and business roles; acknowledgements.ts: read confirmations;
+                 search.ts: full-text search, "valid on" list and CSV export;
                  errors.ts: ApiError with field issues)
   auth/          oidc-client-ts UserManager, scopes, return-path check
   components/    app shell, pages and cards; ui/ holds shadcn/ui components; documents/ the document pages;
-                 tasks/ the task inbox and the vote dialog
+                 tasks/ the task inbox and the vote dialog; search/ the search page
   lib/           utilities, theme switch
   routes/        file-based routes (files starting with "-" are ignored by the router)
   test/          Vitest setup
@@ -136,7 +138,13 @@ For templates with reference fields (`references` in the fields response), the p
 - The document page of a published version that requires acknowledgement (`components/documents/acknowledgement-panel.tsx`, DMS-47) records the opening when it is displayed (`POST …/opened`), reads the caller's state (`GET …/versions/{versionId}/acknowledgement`) and offers "Acknowledge" once the opening is recorded; afterwards it shows the acknowledgement with version and time.
 - Vote dialog: decisions Approve, Approve with conditions and Request changes (review steps) or Reject (approval steps); a reason is required for everything except a plain approval (checked before sending; the backend answers 422 too). On `401 reauthentication_required` the dialog explains why, remembers the vote and offers "Sign in again" (see API client above). After a vote the task list, the document and its workflow are reloaded.
 - The document page's "Review and approval" card shows the caller's open tasks on the document with the same "Vote…" button.
-- Navigation by role (`GET /api/v1/me`, `useMe` in `api/me.ts`): Home, Documents and Tasks for everyone, Templates for template designers, Admin for tenant administrators (both still placeholders). Hiding entries is a convenience; the API enforces the permissions.
+- Navigation by role (`GET /api/v1/me`, `useMe` in `api/me.ts`): Home, Documents, Search and Tasks for everyone, Templates for template designers, Admin for tenant administrators (both still placeholders). Hiding entries is a convenience; the API enforces the permissions.
+
+## Search and "valid on" (DMS-52, DMS-53)
+
+- `/search` (`components/search/search-page.tsx`) keeps its state in the URL (`q`, `class`, `status`, `lang`, `page`, `validOn`; parsed in `search-params.ts`), so searches can be bookmarked. Search text and the facets class, status and language call `GET /api/v1/search` (20 hits per page, Previous/Next). The search endpoint is built separately (DMS-52); `api/search.ts` types its contract by hand until it is in the generated schema, and a 404 shows "Search is not available yet" instead of an error.
+- Snippets contain `<mark>…</mark>` highlights. `snippetParts` (`components/search/snippet.ts`) splits them at these tags and everything is rendered as React text; any other markup in a snippet stays visible text and is never interpreted (no `dangerouslySetInnerHTML`).
+- A "Valid on" date switches to `GET /api/v1/documents/valid-at?date=…&class=…`: per document and validity scope the version in force at the end of that day (tenant time zone), with status now, validity period and approver (and the approver a deputy acted for). The class facet is computed from the listed versions; the search text is not applied. "Export CSV" fetches `…/valid-at/export.csv` with the access token and hands the file to the browser as a blob (the name comes from `Content-Disposition`).
 
 ## Notes
 

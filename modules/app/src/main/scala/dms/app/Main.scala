@@ -35,6 +35,8 @@ object Main extends ZIOAppDefault:
       TemplateLifecycleApi.endpoints.map(_.widen[Env]) ++
       TemplatePreviewApi.endpoints.map(_.widen[Env]) ++
       TemplateImpactApi.endpoints.map(_.widen[Env]) ++
+      // Before the document endpoints: `/documents/valid-at` must not be read as a document id.
+      ValidAtApi.endpoints.map(_.widen[Env]) ++
       DocumentApi.endpoints.map(_.widen[Env]) ++
       RenditionApi.endpoints.map(_.widen[Env]) ++
       AcknowledgementApi.endpoints.map(_.widen[Env]) ++

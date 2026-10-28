@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-10-28, implemented in DMS-45, DMS-46) |
+| Status | Accepted (2026-10-28, implemented in DMS-45, DMS-46; addendum DMS-53) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -78,3 +78,19 @@ Given: `validFrom` is a core field required from review on (ADR 0019); versions 
 ## Reversibility
 
 **medium**: The scheduling is one job kind and a periodic tick; replacing it (e.g. by a sweep at midnight) changes `PublicationJobs` only. The database guarantee is an additive trigger and column; dropping it is a migration. The editorial path is a built-in definition chosen in one place of `ApprovalWorkflow`; cases already started keep their pinned definition.
+
+## Addendum (DMS-53, 2026-10-28): reading the validity history
+
+US-09.1 asks which version of each document was in force on a date, with an export for auditors. The switch decided above makes the history a pure read of `dms.document_version`: a version is in force from its effective start, 00:00 of `valid_from` in the tenant's time zone but never before `published_at` (a version approved after its valid-from date is not valid retroactively), until the effective start of the version in `superseded_by`. A date means its last moment in the tenant's time zone, so the scheduled switch a few seconds after 00:00 shows the new version for that date. Superseded and archived versions count; destroyed ones do not.
+
+| Criterion | Chosen: query on PostgreSQL per request | Validity periods in the search index | Materialized period table (written on publication) |
+|---|---|---|---|
+| Source of truth | The rows the guards protect (V9, V12, V15) | Derived copy; lags behind and can be rebuilt incompletely | Second copy in the same transaction; needs backfill and its own guards |
+| Consistency with the switch | Same transaction semantics as publication | Eventually consistent | Consistent if every writer maintains it |
+| Effort | One query, rule as a pure function (`Validity`) | Index mapping, reindex on supersession, permission filter in the index | Migration, trigger or service code, backfill |
+| Scale | One pass over ever-valid versions of the tenant with a coarse SQL filter; fine for thousands of documents | Best for large tenants and full text | Indexed lookups |
+
+Authorization stays as decided in ADR 0018: each listed version is filtered with `ReadDocument` in its current status (superseded versions for every business role of the class, archived versions for owners, records managers and auditors; confidentiality applies). The CSV export uses UTF-8 with BOM and semicolons because the tenants' spreadsheets run with German regional settings.
+
+- Consequences: no migration; the full-text search (ADR 0029) stays a derived index and is not consulted for "valid on". Very large tenants may need an index on `published_at` or a period table later.
+- Reversibility: high; the endpoint reads only, replacing the query (e.g. by the search index) changes `DocumentStore.validityCandidates`.
