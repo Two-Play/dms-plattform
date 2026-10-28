@@ -26,6 +26,27 @@ final class DocumentTemplates(service: TemplateService, profiles: ProfileSource)
       content: TemplateContent,
       values: Map[String, MetadataValue]
   ): IO[DocumentError, Map[String, MetadataValue]] =
+    evaluate(template, content, values)(Resolver.computedValues)
+      .map(_.flatMap((key, value) => metadataValue(value).map(key -> _)))
+
+  def missingComputed(
+      template: TemplateVersion,
+      content: TemplateContent,
+      values: Map[String, MetadataValue]
+  ): IO[DocumentError, Map[String, List[String]]] =
+    evaluate(template, content, values)(Resolver.missingComputed)
+      .map(_.map(m => m.key -> m.missingInputs).toMap)
+
+  /** Compiles `content` against the profile the template was designed against and evaluates its computed
+    * fields with the profile values among `values` (computed values are left out).
+    */
+  private def evaluate[A](
+      template: TemplateVersion,
+      content: TemplateContent,
+      values: Map[String, MetadataValue]
+  )(
+      f: (CompiledTemplate, Map[String, FieldValue]) => Either[ResolveError, A]
+  ): IO[DocumentError, A] =
     for
       profile <- profiles
         .profile(template.documentClassId, template.documentClassVersion)
@@ -38,9 +59,9 @@ final class DocumentTemplates(service: TemplateService, profiles: ProfileSource)
         case (key, value) if schema.variable(key).isDefined => key -> ProfileSchema.fieldValue(value)
       }
       result <- ZIO
-        .fromEither(Resolver.computedValues(compiled, fieldValues))
+        .fromEither(f(compiled, fieldValues))
         .mapError(e => DocumentError.Invalid(List(s"a computed field cannot be evaluated: ${e.message}")))
-    yield result.flatMap((key, value) => metadataValue(value).map(key -> _))
+    yield result
 
   def encode(content: TemplateContent): String              = ContentJson.encodeStored(content)
   def decode(json: String): Either[String, TemplateContent] = ContentJson.decodeStored(json)

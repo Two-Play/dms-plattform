@@ -56,6 +56,22 @@ Conditions, repeat collections and computed fields are CEL expressions, using th
 
 CEL has no decimal type; expressions keep calculating with doubles. Input amounts are exact `BigDecimal`s. A computed amount (a map with `amount` and `currency`) is converted back via the shortest decimal representation of the double and rounded **half up** (commercial rounding) to the minor unit of its currency (`Money.round`, ISO 4217 digits as used for printing). This makes the typical cases exact (`0.10 + 0.20 = 0.30`, `3 × 33.33 = 99.99`, `19 % of 100.05 = 19.01`, `1.005 → 1.01`). Remaining limit: intermediate results carry about 15–16 significant digits, which is ample for contract amounts below 10^12; rounding to the cent happens once, at the end of each computed field. Alternative rejected for now: a custom decimal type with CEL extension functions (more code, non-standard expressions for template designers).
 
+## Addendum (DMS-83, 2026-10-28): computed fields without input values
+
+Problem: computed fields saw missing optional fields as empty values like conditions do, so `monthlyFee.amount * termMonths` printed `0` without a term, and an author could take that for a real value.
+
+Decision: computed fields evaluate missing fields as CEL **unknowns** (`PartialVars` with one attribute pattern per field without value, planner runtime). A computed field whose result depends on an unknown has no value itself; it records the fields it read (transitively through other computed fields). CEL's commutative logic absorbs unknowns that do not decide the result, so expressions that check first (`'termMonths' in present_fields ? ... : ...`, `!('endDate' in present_fields) || ...`) keep their value. Conditions and repeat collections keep the empty-value convention: a missing field reads as its empty value, a computed field without value as the result of its expression with empty values (what it was before), so existing templates choose the same branches; if even that fails (e.g. a division by an empty number), a condition that reads it fails with a message naming the missing fields.
+
+Alternatives considered:
+
+| | Unknowns (chosen) | Trace reads via the evaluation listener | Static dependencies (identifiers of the expression) |
+|---|---|---|---|
+| Guarded expressions (`present_fields`, `\|\|`, `? :`) | Keep their value | Keep their value only if the branch is not evaluated; `x > 0.0 \|\| true` becomes missing | Always missing when they mention the field |
+| Errors from empty values (division by `0.0`) | Cannot occur, the value is never made up | Still occur and fail the resolution | Cannot occur |
+| Cost | Pattern check per variable access, only when fields are missing | One callback per step (already there for the budget) | None at runtime |
+
+Consequences: positive: no invented values in previews and stored metadata; the preview names the fields a computed value needs (`dms-missing-computed`, `data-missing-inputs`); a document cannot be approved while computed fields have no value (`TemplateSource.missingComputed`, checked on `Approve`; the fields they read count as required for approval). Negative: computed fields and conditions now treat missing fields differently, which template designers must know (documented in the templates README); templates that relied on `0` for an empty optional field in a computed field must guard it with `present_fields`. Follow-up: the template designer's test mode could flag computed fields that become missing for generated empty-optional cases. Reversibility: high; the change is confined to `Resolver` and `Cel.Budget.evaluate`.
+
 ## Reversibility
 
 **medium**: Expressions are stored as text in the template content; compilation and evaluation are confined to `TemplateCompiler` and `Resolver` in `templates-core`. Replacing CEL means a new compiler/evaluator and migrating stored expressions of released template versions (which must stay renderable), e.g. by keeping CEL for content format 1.

@@ -112,6 +112,8 @@
   color: var(--dms-missing);
   font-weight: 600;
 }
+/* A computed field without value names the fields it needs, e.g. "(missing: Monthly fee)". */
+.dms-document .dms-missing-hint { font-style: italic; font-weight: 400; }
 
 /* Fields the platform sets (document ID, version, approval date) have no value before the first save. They
  * are not missing: shown neutrally with the label and a hint such as "assigned on save". */

@@ -5,7 +5,16 @@ import dev.cel.common.types.{CelKind, CelType, ListType, MapType, SimpleType}
 import dev.cel.common.{CelAbstractSyntaxTree, CelOptions}
 import dev.cel.compiler.{CelCompiler, CelCompilerFactory}
 import dev.cel.parser.CelStandardMacro
-import dev.cel.runtime.{CelEvaluationException, CelEvaluationListener, CelRuntime, CelRuntimeFactory}
+import dev.cel.runtime.{
+  CelAttribute,
+  CelAttributePattern,
+  CelEvaluationException,
+  CelEvaluationListener,
+  CelRuntime,
+  CelRuntimeFactory,
+  CelUnknownSet,
+  PartialVars
+}
 import dms.templates.*
 
 import java.time.{Instant, LocalDate, ZoneOffset}
@@ -90,8 +99,10 @@ private[core] object Cel:
     case FieldValue.ListOf(vs) => vs.map(toCel).asJava
     case FieldValue.Record(fs) => fs.map((k, v) => k -> toCel(v)).asJava
 
-  /** The value CEL sees for a missing field, so that expressions do not fail on empty optional fields; use
-    * `present_fields` to tell an empty value apart.
+  /** The value conditions and repeats see for a missing field, so that they do not fail on empty optional
+    * fields; use `present_fields` to tell an empty value apart. Computed fields never see these values: there
+    * a missing field is unknown (see [[Budget.evaluate]]), so a computed field that reads it has no value
+    * instead of a made-up one (DMS-83).
     */
   def zero(valueType: ValueType): Object = valueType match
     case ValueType.Text | ValueType.PersonRef | ValueType.DocumentRef | ValueType.Selection(_) => ""
@@ -101,6 +112,19 @@ private[core] object Cel:
     case ValueType.Date      => Instant.EPOCH
     case ValueType.YesNo     => java.lang.Boolean.FALSE
     case ValueType.ListOf(_) => java.util.List.of()
+
+  /** The variables an evaluation result depends on if it is unknown because it read a variable without a
+    * value; `None` for a known result.
+    */
+  def unknownVariables(result: Object): Option[Set[String]] = result match
+    case u: CelUnknownSet =>
+      Some(
+        u.attributes.asScala.iterator
+          .flatMap(_.qualifiers.asScala.headOption)
+          .collect { case q if q.kind == CelAttribute.Qualifier.Kind.AS_STRING => q.asString }
+          .toSet
+      )
+    case _ => None
 
   /** Converts an evaluation result back; maps with exactly `amount` and `currency` become amounts. */
   def fromCel(value: Any): Either[String, FieldValue] = value match
@@ -192,10 +216,17 @@ private[core] object Cel:
       if System.nanoTime() > deadline then
         throw BudgetExceeded(s"the evaluation took longer than ${limits.timeoutMillis} ms")
 
-    /** Evaluates `program`; fails with a message on errors, throws [[BudgetExceeded]] when a limit is hit. */
+    /** Evaluates `program`; fails with a message on errors, throws [[BudgetExceeded]] when a limit is hit.
+      *
+      * Variables in `unknown` have no value. Reading one makes the result a [[CelUnknownSet]] (see
+      * [[unknownVariables]]) instead of an error; CEL's logical operators and the conditional operator absorb
+      * unknowns that do not decide the result, e.g. `'x' in present_fields ? x : 0.0` stays known without
+      * `x`.
+      */
     def evaluate(
         program: CelRuntime.Program,
-        activation: java.util.Map[String, Object]
+        activation: java.util.Map[String, Object],
+        unknown: Iterable[String] = Nil
     ): Either[String, Object] =
       var steps    = 0
       val listener = new CelEvaluationListener:
@@ -207,7 +238,12 @@ private[core] object Cel:
             )
           if (steps & 63) == 0 then checkTime()
       checkTime()
-      try Right(program.trace(activation, listener))
+      try
+        if unknown.isEmpty then Right(program.trace(activation, listener))
+        else
+          val patterns = unknown.iterator.map(CelAttributePattern.create).toList.asJava
+          val vars     = PartialVars.of(name => java.util.Optional.ofNullable(activation.get(name)), patterns)
+          Right(program.trace(vars, listener))
       catch
         case e: CelEvaluationException =>
           budgetCause(e) match

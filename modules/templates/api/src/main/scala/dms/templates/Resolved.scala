@@ -21,17 +21,21 @@ enum ResolvedInline:
   /** A placeholder replaced by its formatted value. */
   case Value(path: String, text: String)
 
-  /** A placeholder without value: renders as a visible marker in drafts (business concept 4.2). */
-  case Missing(path: String, required: Boolean)
+  /** A placeholder without value: renders as a visible marker in drafts (business concept 4.2).
+    *
+    * @param missingInputs
+    *   for a computed field without value: the fields without value it reads (DMS-83); empty otherwise
+    */
+  case Missing(path: String, required: Boolean, missingInputs: List[String])
 
   case LineBreak
 
   def plainText: String = this match
-    case Text(value, _)       => value
-    case Value(_, text)       => text
-    case Missing(path, true)  => s"[missing: $path]"
-    case Missing(path, false) => s"[$path]"
-    case LineBreak            => "\n"
+    case Text(value, _)          => value
+    case Value(_, text)          => text
+    case Missing(path, true, _)  => s"[missing: $path]"
+    case Missing(path, false, _) => s"[$path]"
+    case LineBreak               => "\n"
 
 enum ResolvedBlock:
   case Heading(level: Int, content: List[ResolvedInline])
@@ -55,17 +59,27 @@ enum ResolvedBlock:
 /** Which branch a conditional took during a resolution; inside repeats a conditional may take both. */
 final case class BranchOutcome(location: Location, condition: String, outcomes: Set[Boolean])
 
+/** A computed field without value because its expression reads fields that have none (DMS-83).
+  *
+  * @param missingInputs
+  *   the fields without value the expression read, directly or through other computed fields, in schema order
+  */
+final case class MissingComputed(key: String, missingInputs: List[String])
+
 /** Result of resolving a template with field values.
   *
   * @param missingRequired
   *   paths of required values that were missing; a document with missing required values cannot be released
   * @param branches
   *   the outcome of every conditional that was evaluated, in document order
+  * @param missingComputed
+  *   computed fields without value, in definition order; a document with such fields cannot be approved
   */
 final case class Resolution(
     content: ResolvedContent,
     missingRequired: List[String],
-    branches: List[BranchOutcome]
+    branches: List[BranchOutcome],
+    missingComputed: List[MissingComputed]
 )
 
 enum ResolveError:

@@ -74,6 +74,26 @@ object PreviewSpec extends ZIOSpecDefault:
         )
       )
     },
+    test("computed fields that read a missing value are marked missing with the field they need (DMS-83)") {
+      val r = run(PreviewFixtures.values - "termMonths")
+      val m = run(PreviewFixtures.values - "monthlyFee", Language.De)
+      assertTrue(
+        r.html.contains(
+          "<span class=\"dms-missing dms-missing-required dms-missing-computed\" data-field=\"totalValue\" " +
+            "data-required=\"true\" data-missing-inputs=\"termMonths\">totalValue " +
+            "<span class=\"dms-missing-hint\">(missing: Term in months)</span></span>"
+        ),
+        r.html.contains("€12,500.00"),
+        !r.html.contains("data-field=\"annualFee\" data-required"),
+        r.missingRequired == List(MissingValue("termMonths", "Term in months")),
+        m.html.contains(
+          "data-field=\"annualFee\" data-required=\"true\" data-missing-inputs=\"monthlyFee\">annualFee " +
+            "<span class=\"dms-missing-hint\">(fehlt: Monthly fee)</span></span>"
+        ),
+        !m.html.contains(">0<"),
+        m.missingRequired == List(MissingValue("monthlyFee", "Monthly fee"))
+      )
+    },
     test("blank values count as missing") {
       val r = run(PreviewFixtures.values + ("clientName" -> MetadataValue.Text("  ")))
       assertTrue(r.missingRequired.map(_.field).contains("clientName"), r.issues.isEmpty)
@@ -89,7 +109,7 @@ object PreviewSpec extends ZIOSpecDefault:
       )
       assertTrue(
         r.html.nonEmpty,
-        r.missingRequired.map(_.field) == List("clientName"),
+        r.missingRequired.map(_.field) == List("clientName", "termMonths"),
         r.issues.map(i => (i.field, i.code)) == List(
           Some("clientName")   -> "wrong_type",
           Some("termMonths")   -> "out_of_range",
