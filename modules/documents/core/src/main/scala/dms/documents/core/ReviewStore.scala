@@ -139,6 +139,13 @@ private[core] object ReviewStore:
              order by r.decided_at desc, r.id
              limit $limit""".query[TaskRow].run()).map(_.toTask).toList
 
+  /** Every review task of a document, the earliest first (evidence reports, DMS-57). */
+  def tasksOfDocument(document: DocumentId)(using DbTx): List[ReviewTask] =
+    sql"""select id, document_id, version_id, due_on, created_at, status, decided_at, decided_by, next_due_on,
+                 new_version_id, comment
+          from dms.document_review where document_id = ${document.value}
+          order by created_at, id""".query[TaskRow].run().map(_.toTask).toList
+
   /** Records the decision on an open task; `false` if it was decided already. */
   def decide(task: ReviewTask)(using DbTx): Boolean =
     sql"""update dms.document_review

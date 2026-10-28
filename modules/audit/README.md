@@ -102,3 +102,23 @@ The unprotected window shrinks to the checkpoint interval.
 ## Scheduling (DMS-75)
 
 `AuditJobs` turns the periodic work into jobs of the PostgreSQL job queue (ADR 0010): `tick` enqueues one `audit.checkpoint` job per tenant and checkpoint window and one `audit.anchor` job per tenant and day (due at `anchorHourUtc`). Idempotency keys (`audit.checkpoint:<tenant>:<window>`, `audit.anchor:<tenant>:<date>`) make it safe for every instance to tick; the job runner makes sure only one worker runs each job, with retries. The app (`dms.app.Background`) runs the scheduler and a job runner; settings under `dms.audit` (`checkpointIntervalSeconds`, default 300; `anchorHourUtc`, default 2; `tsaUrl`; `tsaTrustedCertificates`). Without trusted TSA certificates anchoring is disabled with a warning and only checkpoints run.
+
+## Evidence reports (DMS-57)
+
+ADR [0034](../../docs/adr/0034-evidence-reports.md). `AuditEvidence` (api) gives the evidence report of a document read access to the chain: `entriesOf(objectId)` returns the stored entries about an object with their hashes (inside `Db.transact`), `integrity(tenant)` runs the full verification including the newest checkpoint (`AuditCheckpoints.verify`) and adds the newest anchor (`anchoredUntilSeq`, TSA time) and the newest checkpoint position. If object storage cannot be read, the verification falls back to links, hashes and anchors and reports `checkpointProblem`. The application builds it with the configured TSA trust anchors (`dms.audit.tsaTrustedCertificates`), so anchors are checked; without trust anchors any stored anchor fails verification (fail closed).
+
+`EvidenceReportRegistry` / `EvidenceReportStore` keep the generated reports in `dms.evidence_report` (migration V21): id, document, payload format, creation time, creator, the payload text and its SHA-256. Insert-only (trigger `dms.reject_modification`, select/insert grants for `dms_app`), RLS per tenant, and a check constraint `sha256 = encode(sha256(convert_to(payload, 'UTF8')), 'hex')`, so no row can carry a checksum that does not match its payload.
+
+### Report format 1 (`dms.evidence-report/1`)
+
+The payload is a JSON object with `format`, `reportId`, `createdAt`, `createdBy`, `tenantId`, `document`, `versions` (each with status, change kind and reason, creator, release, validity period, content SHA-256, rendition, deviation requests, workflow cases with every vote — round, step, lane, voter, `actingFor` (deputy), decision, reason, time, sign-in time, content SHA-256, invalidation — and the approval, acknowledgement rate and entries, periodic review tasks), `legalHolds`, `auditTrail` (the document's chain entries with `chainSeq` and stored `hash`), `integrity` and `notes`. Persons are user ids (no display-name source yet). Times are ISO 8601 UTC.
+
+It is serialized canonically: object keys sorted by UTF-16 code units at every level, no whitespace, absent optional fields left out, strings escaped as JSON. The **report checksum** is the lowercase hex SHA-256 of the UTF-8 bytes of exactly this text.
+
+`integrity.status` is `Violated` if the chain verification found a violation, the document's entries are not in the verified part of the chain, a rendition read back from object storage does not match its stored SHA-256, the stored content of an approved version no longer has the SHA-256 its approval bound (DMS-41), or the metadata snapshot names a different rendition checksum; `Incomplete` if nothing is violated but something could not be checked (object storage unavailable, checkpoints unreadable); otherwise `Intact`. Entries after the newest anchor or checkpoint are listed in `findings` (not yet anchored) without changing the status.
+
+### Verifying a report
+
+1. Download the JSON form: `GET /api/v1/documents/{id}/evidence-reports/{reportId}` returns the registered payload byte for byte (`ETag` and `Repr-Digest` carry its SHA-256).
+2. Compute `sha256sum` of the downloaded file. It must equal the checksum printed in the footer of every page of the PDF (`SHA-256 (JSON payload)`), the `sha256` returned on creation, and the `details.sha256` of the audit entry `document.evidence-report-created` of the document (which is itself protected by the hash chain, anchors and checkpoints).
+3. The PDF (`GET …/evidence-reports/{reportId}.pdf`, PDF/A-2b) is printed from the registered JSON on request; its file identifier is the first 32 hex digits of the checksum and its keywords contain `sha256:<checksum>`.

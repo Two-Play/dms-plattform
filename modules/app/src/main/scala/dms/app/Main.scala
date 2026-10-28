@@ -1,7 +1,7 @@
 package dms.app
 
 import dms.archive.core.LegalHoldService
-import dms.audit.core.{AuditTrailLive, TsaTrust}
+import dms.audit.core.{AuditTrailLive, EvidenceReportStore, TsaTrust}
 import dms.authz.{Authorizer, Groups, RoleAssignments}
 import dms.db.Db
 import dms.documents.core.{AcknowledgementService, DocumentClassService, DocumentService, ReviewService}
@@ -29,7 +29,8 @@ object Main extends ZIOAppDefault:
 
   private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
     PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env &
-    SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env
+    SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env &
+    EvidenceReportApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -51,7 +52,8 @@ object Main extends ZIOAppDefault:
       SearchApi.endpoints.map(_.widen[Env]) ++
       GroupApi.endpoints.map(_.widen[Env]) ++
       LegalHoldApi.endpoints.map(_.widen[Env]) ++
-      ComplianceApi.endpoints.map(_.widen[Env])
+      ComplianceApi.endpoints.map(_.widen[Env]) ++
+      EvidenceReportApi.endpoints.map(_.widen[Env])
 
   private val docs =
     SwaggerInterpreter()
@@ -112,6 +114,8 @@ object Main extends ZIOAppDefault:
           ZLayer.succeed(cfg.search.settings),
           OpenSearch.layer,
           SearchDocuments.layer,
-          SearchIndex.layer
+          SearchIndex.layer,
+          EvidenceReportApi.auditEvidence(cfg.audit),
+          EvidenceReportStore.layer
         )
     yield ()

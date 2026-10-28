@@ -1071,6 +1071,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/evidence-report': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Creates the evidence report of a document: version chain, review and approval steps with persons, reasons and timestamps, acknowledgement rates, reviews, legal holds, audit entries and the integrity status. Registered with the SHA-256 of its JSON form and audited. Requires the auditor or records manager role. */
+    post: operations['postApiV1DocumentsIdEvidence-report']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/evidence-reports/{reportFile}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description An evidence report as PDF/A-2b, printed from the registered JSON; every page names the report id and the SHA-256 of the JSON form. Requires the auditor or records manager role. */
+    get: operations['getApiV1DocumentsIdEvidence-reportsReportfile']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/evidence-reports/{reportId}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The JSON form of an evidence report, byte for byte as registered: its SHA-256 is the report checksum (also sent as Repr-Digest and ETag). Requires the auditor or records manager role. */
+    get: operations['getApiV1DocumentsIdEvidence-reportsReportid']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -1724,6 +1775,22 @@ export interface components {
       /** Format: double */
       threshold: number
       exceedsThreshold: boolean
+    }
+    /** EvidenceReportView */
+    EvidenceReportView: {
+      /** Format: uuid */
+      id: string
+      /** Format: uuid */
+      documentId: string
+      /** Format: date-time */
+      createdAt: string
+      createdBy: string
+      sha256: string
+      format: string
+      integrityStatus: string
+      findings?: string[]
+      jsonUrl: string
+      pdfUrl: string
     }
     /** FacetCountView */
     FacetCountView: {
@@ -5902,6 +5969,136 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter documentId, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1DocumentsIdEvidence-report': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['EvidenceReportView']
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsIdEvidence-reportsReportfile': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Report id followed by .pdf */
+        reportFile: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          /** @description SHA-256 of the JSON form */
+          'X-Evidence-Report-Sha256': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/pdf': string
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsIdEvidence-reportsReportid': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Report id */
+        reportId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          ETag: string
+          /** @description SHA-256 of the body (RFC 9530) */
+          'Repr-Digest': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': string
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter reportId */
       400: {
         headers: {
           [name: string]: unknown

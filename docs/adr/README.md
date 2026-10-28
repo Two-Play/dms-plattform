@@ -47,4 +47,5 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0031](0031-legal-holds.md) | Legal holds: hold records per matter covering documents, a database guard against destruction, object legal hold on renditions | Accepted | medium |
 | [0032](0032-access-groups-for-confidential-documents.md) | Access groups for confidential documents: managed per tenant in the platform, named in a core field | Accepted | medium |
 | [0033](0033-version-comparison.md) | Version comparison computed on request from the structured version packages; the change reason is the author's change summary | Accepted | high |
+| [0034](0034-evidence-reports.md) | Evidence reports: assembled on request, registered as canonical JSON with its SHA-256, PDF/A printed from the registered JSON | Accepted | medium |
 | [0036](0036-compliance-cockpit.md) | Compliance cockpit: a compliance officer role, figures computed on request, names only with a stated and audited purpose | Accepted | high |

@@ -170,6 +170,12 @@ final class LegalHoldService(audit: AuditTrail):
   def list(active: Option[Boolean]): IO[LegalHoldError, List[LegalHold]] =
     sql(holds(active = active))
 
+  /** Every hold that covers or covered `document`, active and released, the latest first (evidence reports,
+    * DMS-57).
+    */
+  def holdsOf(document: DocumentId): IO[LegalHoldError, List[LegalHold]] =
+    sql(holds(document = Some(document.value)))
+
   /** The documents a hold covers, in the order they were added. */
   def documents(id: LegalHoldId): IO[LegalHoldError, List[HeldDocument]] =
     sql(

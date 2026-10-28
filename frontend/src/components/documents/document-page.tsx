@@ -17,6 +17,7 @@ import { DocumentEditor } from './new-document-page'
 import { StatusBadge } from './status-badge'
 import { WorkflowPanel } from './workflow-panel'
 import { AcknowledgementPanel } from './acknowledgement-panel'
+import { EvidenceReportAction } from './evidence-report-panel'
 import { VersionHistory } from './version-history'
 
 /** Whether the page shows the acknowledgement card for a version: valid and requiring it. */
@@ -153,6 +154,7 @@ export function DocumentPage({ documentId }: { documentId: string }) {
                 />
               </div>
             )}
+            <EvidenceReportAction documentId={document.data.id} />
           </div>
           <AccessNote document={document.data} />
           {document.data.current.status === 'Draft' ? (
