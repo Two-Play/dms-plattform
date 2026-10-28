@@ -39,6 +39,7 @@ object Main extends ZIOAppDefault:
       // Before the document endpoints: `/documents/valid-at` must not be read as a document id.
       ValidAtApi.endpoints.map(_.widen[Env]) ++
       DocumentApi.endpoints.map(_.widen[Env]) ++
+      VersionCompareApi.endpoints.map(_.widen[Env]) ++
       RenditionApi.endpoints.map(_.widen[Env]) ++
       AcknowledgementApi.endpoints.map(_.widen[Env]) ++
       WorkflowApi.endpoints.map(_.widen[Env]) ++

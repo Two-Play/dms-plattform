@@ -91,7 +91,9 @@ final case class EditorialCheckView(
 final case class NewVersion(
     /** Major (change of content, full workflow) or Minor (editorial correction, shortened workflow). */
     changeKind: String,
-    /** Required for Minor: why the change is editorial. */
+    /** The author's change summary, shown above version comparisons (DMS-54). Required for Minor: why the
+      * change is editorial; optional for Major.
+      */
     reason: Option[String],
     /** Whether publishing the version asks readers for a new acknowledgement. Default: yes for Major, the
       * configured default (`dms.documents.minorVersionsRequireAcknowledgement`, normally no) for Minor.
@@ -109,6 +111,7 @@ final case class DocumentVersionView(
     status: String,
     /** Major or Minor. */
     changeKind: String,
+    /** The author's change summary given when the version was started. */
     changeReason: Option[String],
     /** Validity scope derived from the scope field; empty: unrestricted. */
     scope: String,
