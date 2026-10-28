@@ -53,6 +53,12 @@ trait ObjectStore:
     */
   def delete(key: String, versionId: String, bypassGovernance: Boolean = false): IO[StorageError, Unit]
 
+  /** Keys that start with `prefix`, in ascending order (latest versions only; deleted keys are skipped). */
+  def listKeys(prefix: String): IO[StorageError, List[String]]
+
+  /** All versions of exactly `key`, newest first. */
+  def versions(key: String): IO[StorageError, List[dms.storage.ObjectVersion]]
+
 object ObjectStore:
 
   /** S3 client for the configured endpoint: path-style, static credentials, JDK URL connection HTTP client.

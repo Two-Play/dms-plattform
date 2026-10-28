@@ -10,6 +10,7 @@ import zio.stream.ZStream
 import java.io.InputStream
 import java.security.{DigestInputStream, MessageDigest}
 import java.util.concurrent.atomic.AtomicBoolean
+import scala.jdk.CollectionConverters.*
 
 /** [[ObjectStore]] on the AWS SDK v2 synchronous S3 client. Blocking calls run on the blocking pool. */
 final class S3ObjectStore(s3: S3Client, bucket: String) extends ObjectStore:
@@ -92,6 +93,33 @@ final class S3ObjectStore(s3: S3Client, bucket: String) extends ObjectStore:
           legalHold = r.objectLockLegalHoldStatus() == ObjectLockLegalHoldStatus.ON
         )
       }
+
+  def listKeys(prefix: String): IO[StorageError, List[String]] =
+    ZIO
+      .attemptBlocking(
+        s3.listObjectsV2Paginator(ListObjectsV2Request.builder().bucket(bucket).prefix(prefix).build())
+          .contents()
+          .iterator()
+          .asScala
+          .map(_.key())
+          .toList
+          .sorted
+      )
+      .mapError(StorageError.from(prefix, None))
+
+  def versions(key: String): IO[StorageError, List[ObjectVersion]] =
+    ZIO
+      .attemptBlocking(
+        s3.listObjectVersionsPaginator(ListObjectVersionsRequest.builder().bucket(bucket).prefix(key).build())
+          .versions()
+          .iterator()
+          .asScala
+          .filter(_.key() == key)
+          // S3 lists the versions of a key newest first; timestamps have only second precision.
+          .map(v => ObjectVersion(v.key(), v.versionId()))
+          .toList
+      )
+      .mapError(StorageError.from(key, None))
 
   def setLegalHold(key: String, versionId: String, on: Boolean): IO[StorageError, Unit] =
     val status = if on then ObjectLockLegalHoldStatus.ON else ObjectLockLegalHoldStatus.OFF

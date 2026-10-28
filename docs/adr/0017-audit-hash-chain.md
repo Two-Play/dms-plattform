@@ -65,6 +65,10 @@ Canonical serialization: length-prefixed fields with a format byte were chosen o
 - Must be done: re-timestamp tokens before the TSA certificate or algorithm expires (long-term archiving, RFC 4998 style).
 - Ruled out: storing audit entries without a chain or hashing in the database (`pgcrypto`), since the format must be verifiable outside PostgreSQL.
 
+## Addendum (DMS-74, 2026-10-28): checkpoints in write-once storage
+
+The window after the last daily anchor is narrowed by checkpoints: the chain head is copied into object storage with Object Lock in compliance mode (ADR 0016) and verification compares the chain with the newest checkpoint. A database owner can no longer cut entries off the end of the chain unnoticed once a checkpoint covers them; the remaining window equals the checkpoint interval (scheduled with DMS-75). Alternatives considered: anchoring every entry with a TSA (cost and latency per write), a second database (same administrators), checkpoints in a table (same owner can change it).
+
 ## Reversibility
 
 **medium**: The hash format is versioned (`hash_format`), so a new serialization can be introduced for new entries without rewriting old ones. Changing the chain structure (e.g. to a Merkle tree) or the anchoring method only affects `audit-core` and new tables; existing chains and tokens stay verifiable with the old procedure.

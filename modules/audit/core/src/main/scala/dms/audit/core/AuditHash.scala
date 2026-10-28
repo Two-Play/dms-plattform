@@ -79,4 +79,5 @@ object AuditHash:
     field(entry.correlationId.flatMap(uuid))
     out.toByteArray
 
-  def hex(bytes: Array[Byte]): String = HexFormat.of().formatHex(bytes)
+  def hex(bytes: Array[Byte]): String  = HexFormat.of().formatHex(bytes)
+  def unhex(text: String): Array[Byte] = HexFormat.of().parseHex(text)
