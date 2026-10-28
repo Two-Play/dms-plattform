@@ -434,8 +434,8 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
         event <- LifecycleEvent.values.toSet
         to    <- Lifecycle.transition(from, event).toOption
       yield (from.toString, to.toString)
-      // V12 replaces the guard of V9; both must allow exactly the lifecycle's transitions.
-      val pairs = List("V9__document_versions.sql", "V12__deviation_requests.sql").map { file =>
+      // V10 replaces the guard of V9; both must allow exactly the lifecycle's transitions.
+      val pairs = List("V9__document_versions.sql", "V10__deviation_requests.sql").map { file =>
         val migration = scala.io.Source.fromResource(s"db/migration/$file").mkString
         """\('(\w+)', '(\w+)'\)""".r
           .findAllMatchIn(migration)

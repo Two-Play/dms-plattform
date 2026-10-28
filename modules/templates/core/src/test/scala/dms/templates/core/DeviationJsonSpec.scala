@@ -60,7 +60,7 @@ object DeviationJsonSpec extends ZIOSpecDefault:
         DeviationJson.decodeStored(json) == Right(report)
       )
     },
-    test("an empty report is the column default of migration V12") {
+    test("an empty report is the column default of migration V10") {
       assertTrue(
         DeviationJson.encodeStored(DeviationReport(Nil)) == """{"format":1,"deviations":[]}""",
         DeviationJson.decodeStored("""{"format":1,"deviations":[]}""") == Right(DeviationReport(Nil))

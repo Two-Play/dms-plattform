@@ -106,10 +106,10 @@ Business concept 4.1, US-01.1. The standard text of a locked template section ma
 - `newVersion` carries the active requests of the valid version over to the new draft (`basedOn` = original request), so its deviations stay permitted and need the extra review again.
 - No outbox event per request: like draft changes, requests are internal to the draft; the workflow learns the outcome from `requiresExtraReview` on submission.
 
-Tables (migration V12):
+Tables (migration V10):
 
 - `dms.document_deviation_request`: one row per request (`section_id`, `reason`, `requested_by`, `requested_at`, `based_on`, `withdrawn_by`, `withdrawn_at`). Partial unique index `document_deviation_request_active` (one active request per version and section). Guard trigger: inserts and withdrawals only while the version is `Draft`; only the withdrawal columns change, once; no deletes. RLS with `dms.current_tenant()`; `dms_app` may select and insert, and update only `withdrawn_by`, `withdrawn_at`.
-- `dms.document_version.deviation_report` (`jsonb`, stored format of `templates-core` `DeviationJson`, `{"format":1,"deviations":[...]}`): changes only while the version is a draft (V12 extends the V9 guard).
+- `dms.document_version.deviation_report` (`jsonb`, stored format of `templates-core` `DeviationJson`, `{"format":1,"deviations":[...]}`): changes only while the version is a draft (V10 extends the V9 guard).
 
 HTTP (module `app`, `DocumentApi`):
 

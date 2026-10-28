@@ -100,7 +100,7 @@ object DocumentServiceSpec extends ZIOSpecDefault:
     def encode(content: TemplateContent): String              = content.toJson
     def decode(json: String): Either[String, TemplateContent] = json.fromJson[TemplateContent]
 
-    // The column default of migration V12 is the empty report of the real format, {"format":1,"deviations":[]}.
+    // The column default of migration V10 is the empty report of the real format, {"format":1,"deviations":[]}.
     def encodeReport(report: DeviationReport): String               = report.toJson
     def decodeReport(json: String): Either[String, DeviationReport] = json.fromJson[DeviationReport]
 

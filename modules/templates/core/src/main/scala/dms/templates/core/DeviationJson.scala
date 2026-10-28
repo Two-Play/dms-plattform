@@ -7,7 +7,7 @@ import zio.json.*
 import zio.json.ast.Json
 
 /** JSON codecs for the deviation report (DMS-36), used for the `deviation_report` column of document versions
-  * (migration V12) and by the HTTP API.
+  * (migration V10) and by the HTTP API.
   *
   * Sum types carry their case name in a `type` field like the content, e.g.
   * `{"type":"TextReplaced","from":"30 days","to":"60 days"}` or `{"type":"Cell","row":1,"column":0}`. Stored

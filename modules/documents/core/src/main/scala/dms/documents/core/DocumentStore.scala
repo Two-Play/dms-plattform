@@ -21,7 +21,7 @@ trait ContentCodec:
   def encodeReport(report: DeviationReport): String
   def decodeReport(json: String): Either[String, DeviationReport]
 
-/** SQL for documents, document versions (migration V9) and deviation requests (V12). Runs inside `Db.sql`
+/** SQL for documents, document versions (migration V9) and deviation requests (V10). Runs inside `Db.sql`
   * within `Db.transact(tenant)`; row-level security limits all rows to the current tenant. The guard triggers
   * reject changes to versions that are not drafts and status changes outside the lifecycle.
   */

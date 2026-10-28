@@ -54,4 +54,4 @@ Deviation requests are rows in `dms.document_deviation_request`, one per request
 
 ## Reversibility
 
-**high**: Rationale: the table and the report column are additive (migration V12). Switching to an on-demand report means dropping the column and computing `DeviationReport.compare` in the read path; the API types stay the same.
+**high**: Rationale: the table and the report column are additive (migration V10). Switching to an on-demand report means dropping the column and computing `DeviationReport.compare` in the read path; the API types stay the same.
