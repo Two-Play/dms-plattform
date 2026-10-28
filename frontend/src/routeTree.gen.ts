@@ -20,6 +20,7 @@ import { Route as AppTemplatesRouteImport } from './routes/_app/templates'
 import { Route as AppDocumentsIndexRouteImport } from './routes/_app/documents/index'
 import { Route as AppDocumentsDocumentIdRouteImport } from './routes/_app/documents/$documentId'
 import { Route as AppDocumentsNewRouteImport } from './routes/_app/documents/new'
+import { Route as AppDocumentsDocumentIdCompareRouteImport } from './routes/_app/documents/$documentId_.compare'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -75,6 +76,12 @@ const AppDocumentsNewRoute = AppDocumentsNewRouteImport.update({
   path: '/documents/new',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDocumentsDocumentIdCompareRoute =
+  AppDocumentsDocumentIdCompareRouteImport.update({
+    id: '/documents/$documentId_/compare',
+    path: '/documents/$documentId/compare',
+    getParentRoute: () => AppRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -87,6 +94,7 @@ export interface FileRoutesByFullPath {
   '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/documents/new': typeof AppDocumentsNewRoute
   '/documents/': typeof AppDocumentsIndexRoute
+  '/documents/$documentId/compare': typeof AppDocumentsDocumentIdCompareRoute
 }
 export interface FileRoutesByTo {
   '/callback': typeof CallbackRoute
@@ -99,6 +107,7 @@ export interface FileRoutesByTo {
   '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/documents/new': typeof AppDocumentsNewRoute
   '/documents': typeof AppDocumentsIndexRoute
+  '/documents/$documentId/compare': typeof AppDocumentsDocumentIdCompareRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -113,6 +122,7 @@ export interface FileRoutesById {
   '/_app/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/_app/documents/new': typeof AppDocumentsNewRoute
   '/_app/documents/': typeof AppDocumentsIndexRoute
+  '/_app/documents/$documentId_/compare': typeof AppDocumentsDocumentIdCompareRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -127,6 +137,7 @@ export interface FileRouteTypes {
     | '/documents/$documentId'
     | '/documents/new'
     | '/documents/'
+    | '/documents/$documentId/compare'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/callback'
@@ -139,6 +150,7 @@ export interface FileRouteTypes {
     | '/documents/$documentId'
     | '/documents/new'
     | '/documents'
+    | '/documents/$documentId/compare'
   id:
     | '__root__'
     | '/_app'
@@ -152,6 +164,7 @@ export interface FileRouteTypes {
     | '/_app/documents/$documentId'
     | '/_app/documents/new'
     | '/_app/documents/'
+    | '/_app/documents/$documentId_/compare'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -239,6 +252,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDocumentsNewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/documents/$documentId_/compare': {
+      id: '/_app/documents/$documentId_/compare'
+      path: '/documents/$documentId/compare'
+      fullPath: '/documents/$documentId/compare'
+      preLoaderRoute: typeof AppDocumentsDocumentIdCompareRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -251,6 +271,7 @@ interface AppRouteChildren {
   AppDocumentsDocumentIdRoute: typeof AppDocumentsDocumentIdRoute
   AppDocumentsNewRoute: typeof AppDocumentsNewRoute
   AppDocumentsIndexRoute: typeof AppDocumentsIndexRoute
+  AppDocumentsDocumentIdCompareRoute: typeof AppDocumentsDocumentIdCompareRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -262,6 +283,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDocumentsDocumentIdRoute: AppDocumentsDocumentIdRoute,
   AppDocumentsNewRoute: AppDocumentsNewRoute,
   AppDocumentsIndexRoute: AppDocumentsIndexRoute,
+  AppDocumentsDocumentIdCompareRoute: AppDocumentsDocumentIdCompareRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

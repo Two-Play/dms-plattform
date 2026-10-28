@@ -537,6 +537,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/compare': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Compares two versions of a document: word-level text changes per section and block (inserted, deleted, structural changes), changed field values with their origin and changed metadata, with the change summaries of the versions in between. Both versions must be readable by the caller (403 otherwise); 404 if a version does not belong to the document. */
+    get: operations['getApiV1DocumentsIdCompare']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/{id}/versions/{versionId}/rendition': {
     parameters: {
       query?: never
@@ -909,6 +926,17 @@ export interface components {
        */
       type: 'Block'
     }
+    /** BlockDiffView */
+    BlockDiffView: {
+      path?: components['schemas']['PathStep'][]
+      location: string
+      kind: string
+      /** Format: int32 */
+      level?: number
+      status: string
+      spans?: components['schemas']['TextSpanView'][]
+      changes?: components['schemas']['StructureChangeView'][]
+    }
     /** BlocksDeleted */
     BlocksDeleted: {
       blocks?: components['schemas']['Block'][]
@@ -1006,6 +1034,17 @@ export interface components {
       fieldType: components['schemas']['FieldType']
       multiple?: boolean
     }
+    /** ChangeSummaryView */
+    ChangeSummaryView: {
+      /** Format: uuid */
+      versionId: string
+      version: string
+      changeKind: string
+      summary?: string
+      createdBy: string
+      /** Format: date-time */
+      createdAt: string
+    }
     /** ChangeTemplateStatus */
     ChangeTemplateStatus: {
       status: string
@@ -1064,6 +1103,19 @@ export interface components {
       clauseKey: string
       /** Format: int32 */
       version: number
+    }
+    /** ComparedVersionView */
+    ComparedVersionView: {
+      /** Format: uuid */
+      versionId: string
+      version: string
+      status: string
+      changeKind: string
+      createdBy: string
+      /** Format: date-time */
+      createdAt: string
+      /** Format: date-time */
+      releasedAt?: string
     }
     /** ComputedField */
     ComputedField: {
@@ -1963,6 +2015,17 @@ export interface components {
       locked: boolean
       blocks?: components['schemas']['Block'][]
     }
+    /** SectionDiffView */
+    SectionDiffView: {
+      id: string
+      titleBefore?: string
+      titleAfter?: string
+      status: string
+      moved: boolean
+      lockedBefore?: boolean
+      lockedAfter?: boolean
+      blocks?: components['schemas']['BlockDiffView'][]
+    }
     /** SectionMoved */
     SectionMoved: {
       /**
@@ -2048,6 +2111,12 @@ export interface components {
       /** Format: date-time */
       createdAt: string
       createdBy: string
+    }
+    /** StructureChangeView */
+    StructureChangeView: {
+      kind: string
+      from?: string
+      to?: string
     }
     /** SuccessorView */
     SuccessorView: {
@@ -2261,6 +2330,15 @@ export interface components {
        */
       type: 'Text'
     }
+    /** TextComparisonView */
+    TextComparisonView: {
+      changed: boolean
+      /** Format: int32 */
+      insertedWords: number
+      /** Format: int32 */
+      deletedWords: number
+      sections?: components['schemas']['SectionDiffView'][]
+    }
     /** TextDeleted */
     TextDeleted: {
       text: string
@@ -2288,6 +2366,11 @@ export interface components {
        * @enum {string}
        */
       type: 'TextReplaced'
+    }
+    /** TextSpanView */
+    TextSpanView: {
+      kind: string
+      text: string
     }
     /** Then */
     Then: {
@@ -2362,6 +2445,29 @@ export interface components {
        * @enum {string}
        */
       type: 'Value'
+    }
+    /** ValueChangeView */
+    ValueChangeView: {
+      key: string
+      label: string
+      before?: components['schemas']['MetadataValue']
+      after?: components['schemas']['MetadataValue']
+      originBefore?: string
+      sourceBefore?: string
+      originAfter?: string
+      sourceAfter?: string
+    }
+    /** VersionComparisonView */
+    VersionComparisonView: {
+      /** Format: uuid */
+      documentId: string
+      title: string
+      from: components['schemas']['ComparedVersionView']
+      to: components['schemas']['ComparedVersionView']
+      summaries?: components['schemas']['ChangeSummaryView'][]
+      text: components['schemas']['TextComparisonView']
+      fields?: components['schemas']['ValueChangeView'][]
+      metadata?: components['schemas']['ValueChangeView'][]
     }
     /** VoteView */
     VoteView: {
@@ -3853,6 +3959,50 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdCompare: {
+    parameters: {
+      query: {
+        /** @description Id of the version compared from, usually the earlier one */
+        from: string
+        /** @description Id of the version compared to, usually the later one */
+        to: string
+      }
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['VersionComparisonView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: query parameter from, Invalid value for: query parameter to */
       400: {
         headers: {
           [name: string]: unknown

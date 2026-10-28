@@ -218,6 +218,8 @@ function renderAt(path: string) {
           : ok(state.document)
       case '/api/v1/documents/{id}/workflow':
         return ok(state.cases)
+      case '/api/v1/documents/{id}/versions':
+        return ok([state.document.current])
       case '/api/v1/workflow/tasks':
         return ok([])
       case '/api/v1/documents/{id}/versions/{versionId}/acknowledgement':

@@ -62,16 +62,17 @@ The app calls the API on its own origin with the backend's paths unchanged (`/he
 
 TanStack Router with **file-based routing**: the Vite plugin generates `src/routeTree.gen.ts` from `src/routes/` (committed so `tsc` works before the first build; do not edit by hand). File-based routing gives automatic code splitting per route and fully typed links without maintaining a route tree manually.
 
-| Route                                               | File                                    | Access                                                                      |
-| --------------------------------------------------- | --------------------------------------- | --------------------------------------------------------------------------- |
-| `/sign-in`                                          | `routes/sign-in.tsx`                    | public landing and sign-in page                                             |
-| `/callback`                                         | `routes/callback.tsx`                   | OIDC redirect target                                                        |
-| `/`, `/documents`, `/templates`, `/tasks`, `/admin` | `routes/_app/*`                         | signed in; `_app.tsx` is the pathless protected layout (app shell)          |
-| `/documents/new`                                    | `routes/_app/documents/new.tsx`         | signed in; "New document" with live preview (DMS-39)                        |
-| `/documents/$documentId`                            | `routes/_app/documents/$documentId.tsx` | signed in; a document: continue and submit a draft, workflow state (DMS-90) |
-| `/tasks`                                            | `routes/_app/tasks.tsx`                 | signed in; task inbox with votes and read confirmations (DMS-48)            |
-| `/search`                                           | `routes/_app/search.tsx`                | signed in; full-text search and "valid on" history (DMS-52, DMS-53)         |
-| anything else                                       | `components/not-found-page.tsx`         | 404 page                                                                    |
+| Route                                               | File                                             | Access                                                                      |
+| --------------------------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------- |
+| `/sign-in`                                          | `routes/sign-in.tsx`                             | public landing and sign-in page                                             |
+| `/callback`                                         | `routes/callback.tsx`                            | OIDC redirect target                                                        |
+| `/`, `/documents`, `/templates`, `/tasks`, `/admin` | `routes/_app/*`                                  | signed in; `_app.tsx` is the pathless protected layout (app shell)          |
+| `/documents/new`                                    | `routes/_app/documents/new.tsx`                  | signed in; "New document" with live preview (DMS-39)                        |
+| `/documents/$documentId`                            | `routes/_app/documents/$documentId.tsx`          | signed in; a document: continue and submit a draft, workflow state (DMS-90) |
+| `/documents/$documentId/compare?from=…&to=…`        | `routes/_app/documents/$documentId_.compare.tsx` | signed in; comparison of two versions (DMS-54)                              |
+| `/tasks`                                            | `routes/_app/tasks.tsx`                          | signed in; task inbox with votes and read confirmations (DMS-48)            |
+| `/search`                                           | `routes/_app/search.tsx`                         | signed in; full-text search and "valid on" history (DMS-52, DMS-53)         |
+| anything else                                       | `components/not-found-page.tsx`                  | 404 page                                                                    |
 
 The protected layout checks `context.auth.isAuthenticated` in `beforeLoad` and redirects to `/sign-in?redirect=<path>`. After sign-in the original path is carried through the OIDC `state` and restored on `/callback` (only same-origin paths are accepted).
 
@@ -83,6 +84,7 @@ src/
                  documents.ts: list, document, workflow, save and submit; workflow.ts: my tasks, votes;
                  me.ts: user and business roles; acknowledgements.ts: read confirmations;
                  search.ts: full-text search, "valid on" list and CSV export;
+                 versions.ts: version history and version comparison;
                  errors.ts: ApiError with field issues)
   auth/          oidc-client-ts UserManager, scopes, return-path check
   components/    app shell, pages and cards; ui/ holds shadcn/ui components; documents/ the document pages;
@@ -145,6 +147,11 @@ For templates with reference fields (`references` in the fields response), the p
 - `/search` (`components/search/search-page.tsx`) keeps its state in the URL (`q`, `class`, `status`, `lang`, `page`, `validOn`; parsed in `search-params.ts`), so searches can be bookmarked. Search text and the facets class, status and language call `GET /api/v1/search` (20 hits per page, Previous/Next). The endpoint (DMS-51/52, ADR 0029) is typed by the generated schema; only versions the caller may read are counted and returned, and a 404 (backend without search) shows "Search is not available yet" instead of an error.
 - Snippets contain `<mark>…</mark>` highlights. `snippetParts` (`components/search/snippet.ts`) splits them at these tags and everything is rendered as React text; any other markup in a snippet stays visible text and is never interpreted (no `dangerouslySetInnerHTML`).
 - A "Valid on" date switches to `GET /api/v1/documents/valid-at?date=…&class=…`: per document and validity scope the version in force at the end of that day (tenant time zone), with status now, validity period and approver (and the approver a deputy acted for). The class facet is computed from the listed versions; the search text is not applied. "Export CSV" fetches `…/valid-at/export.csv` with the access token and hands the file to the browser as a blob (the name comes from `Content-Disposition`).
+
+## Version history and comparison (DMS-54)
+
+- The document page lists the versions the caller may read (`GET /api/v1/documents/{id}/versions`) newest first with status, change kind and the author's change summary. Two picked versions ("Compare selected versions", the older one becomes `from`) or "Changes since …" on a version open `/documents/$documentId/compare?from=…&to=…` (`components/documents/version-compare-page.tsx`).
+- The comparison (`GET /api/v1/documents/{id}/compare`, ADR 0033) shows the change summaries on top, then tabs for text, field values and metadata. Text changes are marked with `<ins>`/`<del>` (with screen reader labels); "Show unchanged text" adds the unchanged sections and blocks. All content is rendered as React text, never as HTML. A 403 (one of the versions is not readable) is explained on the page.
 
 ## Notes
 
