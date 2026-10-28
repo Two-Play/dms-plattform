@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Format, compile, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # sbt-tpolecat CI mode: compiler warnings fail the build.
+      SBT_TPOLECAT_CI: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: sbt
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Check formatting
+        run: sbt -batch scalafmtCheckAll scalafmtSbtCheck
+
+      - name: Compile and test
+        run: sbt -batch test
+
+      - name: Package application
+        run: sbt -batch app/stage
