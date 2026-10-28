@@ -21,10 +21,13 @@ enum Role:
   *
   * `Review` is casting a review vote (business concept 6.1, DMS-40): only for participants the workflow
   * assigned to the step, who hold a business role taking part in reviews.
+  *
+  * `Recertify` is confirming a valid version without a change in the periodic review (business concept 6.2,
+  * US-07.1): only the document's owner, who holds the owner role.
   */
 enum Action:
   case ReadPublished, ReadDocument, CreateFromTemplate, EditDraft, CommentInReview, Review, Approve, Publish,
-    Withdraw,
+    Withdraw, Recertify,
     EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
     ManageRetention, Destroy, ViewHistory, Configure
 

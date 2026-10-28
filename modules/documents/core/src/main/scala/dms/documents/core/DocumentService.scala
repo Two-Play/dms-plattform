@@ -23,7 +23,7 @@ import zio.json.*
 import zio.json.ast.Json
 
 import java.time.temporal.ChronoUnit
-import java.time.{Instant, ZoneId}
+import java.time.{Instant, LocalDate, ZoneId}
 import java.util.UUID
 
 enum DocumentError:
@@ -315,7 +315,9 @@ final class DocumentService(
       val status    = DocumentStatus.valueOf(r.status)
       val from      = Validity.effectiveStart(r.validFrom, r.publishedAt.toInstant, zone)
       val until     =
-        r.successorPublishedAt.map(p => Validity.effectiveStart(r.successorValidFrom, p.toInstant, zone))
+        r.successorPublishedAt
+          .map(p => Validity.effectiveStart(r.successorValidFrom, p.toInstant, zone))
+          .orElse(r.withdrawnAt.map(_.toInstant))
       // A replaced version without a recorded successor has no known end; it is not reported as in force.
       val period = ValidityPeriod(from, until.orElse(Option.unless(Versioning.isValid(status))(from)))
       Option.when(
@@ -774,12 +776,7 @@ final class DocumentService(
       )
 
   private def profile(classId: DocumentClassId, version: Int): IO[DocumentError, MetadataProfile] =
-    classes.profile(classId, Some(version)).mapError {
-      case MetadataError.NotFound(m) => DocumentError.NotFound(m)
-      case MetadataError.Invalid(p)  => DocumentError.Invalid(p)
-      case MetadataError.Conflict(m) => DocumentError.Conflict(m)
-      case MetadataError.Database(e) => DocumentError.Database(e)
-    }
+    classes.profile(classId, Some(version)).mapError(metadataError)
 
   /** Validates the entered values for a draft and adds the system and computed values. */
   private def prepare(
@@ -908,6 +905,12 @@ final class DocumentService(
       validFrom    = snapshot.flatMap(_ => Publication.validFrom(current.metadata))
       supersededBy = successor.filter(_ => target == DocumentStatus.Superseded)
       _ <- ZIO.when(target == DocumentStatus.Published)(supersedeValid(document, current, actor))
+      // A version that becomes valid gets its review date (US-07.1), kept outside the frozen package (V18).
+      reviewDueOn <- ZIO
+        .when(current.status == DocumentStatus.Approved && target == DocumentStatus.Published)(
+          reviewDate(document, current, now)
+        )
+        .map(_.flatten)
       _ <- sql(
         DocumentStore.changeStatus(
           current.id,
@@ -922,6 +925,7 @@ final class DocumentService(
       )
         .filterOrFail(identity)(changedConcurrently(current))
         .mapError(conflict(s"document ${document.id.value} already has a valid version in this scope"))
+      _ <- ZIO.foreachDiscard(reviewDueOn)(d => sql(ReviewStore.setDueOn(current.id, d)))
       updated = current.copy(
         status = target,
         updatedAt = now,
@@ -941,7 +945,8 @@ final class DocumentService(
           "from"  -> Json.Str(current.status.toString),
           "to"    -> Json.Str(target.toString)
         ) ++ validFrom.map(d => "validFrom" -> Json.Str(d.toString)) ++
-          supersededBy.map(s => "supersededBy" -> Json.Str(s.toString)))*
+          supersededBy.map(s => "supersededBy" -> Json.Str(s.toString)) ++
+          reviewDueOn.map(d => "reviewDueOn" -> Json.Str(d.toString)))*
       )
       _ <- record(actor, statusAction(event), updated, details)
       _ <- publish(
@@ -950,6 +955,21 @@ final class DocumentService(
         updated
       )
     yield updated
+
+  /** The review date of a version that becomes valid now: from its valid-from date (or today in the tenant's
+    * time zone), the class's interval and the `nextReview` value it was approved with (see [[Review.dueOn]]).
+    */
+  private def reviewDate(
+      document: Document,
+      v: DocumentVersion,
+      now: Instant
+  ): IO[DocumentError, Option[LocalDate]] =
+    for
+      policy <- classes.reviewPolicy(document.classId).mapError(metadataError)
+      zone   <- sql(DocumentStore.tenantZone)
+      values     = v.metadataSnapshot.fold(v.metadata)(_.values)
+      nextReview = values.get(NextReviewField).collect { case MetadataValue.Date(d) => d }
+    yield Review.dueOn(v.validFrom.getOrElse(LocalDate.ofInstant(now, zone)), nextReview, policy)
 
   /** A version is never published before 00:00 of its valid-from date in the tenant's time zone (DMS-45); the
     * publication job publishes it then.
@@ -1010,7 +1030,7 @@ final class DocumentService(
     yield ()
 
   private def record(actor: UserId, action: String, v: DocumentVersion, details: Json.Obj) =
-    val automated = actor == Scheduler
+    val automated = isPlatform(actor)
     audit
       .record(
         AuditEvent(
@@ -1060,10 +1080,16 @@ object DocumentService:
   /** The platform as actor of scheduled publications (DMS-45); recorded as technical actor. */
   val Scheduler: UserId = UserId("system:publication")
 
-  private val TitleField  = "title"
-  private val StatusField = "status"
-  private val OwnerField  = "owner"
-  private val Sha256      = "[0-9a-f]{64}".r
+  /** Actors of the platform itself (`system:...`, e.g. [[Scheduler]]): recorded as technical actors through
+    * the automation channel.
+    */
+  def isPlatform(actor: UserId): Boolean = actor.value.startsWith("system:")
+
+  private val TitleField      = "title"
+  private val StatusField     = "status"
+  private val OwnerField      = "owner"
+  private val NextReviewField = "nextReview"
+  private val Sha256          = "[0-9a-f]{64}".r
 
   /** Longest accepted reason of a deviation request. */
   val MaxReasonLength: Int = 4000
@@ -1083,6 +1109,13 @@ object DocumentService:
     )
 
   private def sql[A](f: DbTx ?=> A): IO[DocumentError, A] = Db.sql(f).mapError(DocumentError.Database(_))
+
+  /** A metadata error as document error, e.g. when a class used by a document cannot be read. */
+  def metadataError(error: MetadataError): DocumentError = error match
+    case MetadataError.NotFound(m) => DocumentError.NotFound(m)
+    case MetadataError.Invalid(p)  => DocumentError.Invalid(p)
+    case MetadataError.Conflict(m) => DocumentError.Conflict(m)
+    case MetadataError.Database(e) => DocumentError.Database(e)
 
   /** The current time at the precision PostgreSQL stores (microseconds), so that a value and its stored form
     * are equal, e.g. the requests inside a deviation report.

@@ -651,15 +651,21 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
         event <- LifecycleEvent.values.toSet
         to    <- Lifecycle.transition(from, event).toOption
       yield (from.toString, to.toString)
-      // V10 replaces the guard of V9; both must allow exactly the lifecycle's transitions.
-      val pairs = List("V9__document_versions.sql", "V10__deviation_requests.sql").map { file =>
+      def pairs(file: String) =
         val migration = scala.io.Source.fromResource(s"db/migration/$file").mkString
         """\('(\w+)', '(\w+)'\)""".r
           .findAllMatchIn(migration)
           .map(m => (m.group(1), m.group(2)))
           .filter((a, b) => names(a) && names(b))
           .toSet
-      }
-      assertTrue(pairs.forall(_ == lifecycle))
+      // V18 replaces the guard of V10 (which replaced V9's) and allows exactly the lifecycle's transitions;
+      // the earlier ones lacked only the withdrawal of a valid version (DMS-55).
+      val withdrawValid = Set(("Published", "Withdrawn"), ("ReviewDue", "Withdrawn"))
+      assertTrue(
+        pairs("V18__periodic_review.sql") == lifecycle,
+        List("V9__document_versions.sql", "V10__deviation_requests.sql").forall(f =>
+          pairs(f) == lifecycle -- withdrawValid
+        )
+      )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

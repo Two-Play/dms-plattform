@@ -2,7 +2,14 @@ package dms.app
 
 import dms.audit.core.*
 import dms.db.Db
-import dms.documents.core.{DocumentService, PublicationJobs, PublicationScheduleConfig}
+import dms.documents.core.{
+  DocumentService,
+  PublicationJobs,
+  PublicationScheduleConfig,
+  ReviewJobs,
+  ReviewScheduleConfig,
+  ReviewService
+}
 import dms.integration.{JobRunner, OutboxRelay, WorkerConfig}
 import dms.rendering.RenditionRequest
 import dms.rendering.core.RenditionJobs
@@ -14,9 +21,9 @@ import zio.*
 import java.lang.management.ManagementFactory
 import java.net.http.HttpClient
 
-/** Background processing of this instance: the job runner (audit, publication, rendition and search jobs),
-  * the outbox relay and the schedulers of periodic audit jobs, scheduled publications and the search
-  * synchronization.
+/** Background processing of this instance: the job runner (audit, publication, review, rendition and search
+  * jobs), the outbox relay and the schedulers of periodic audit jobs, scheduled publications, the periodic
+  * review check and the search synchronization.
   *
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
   * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029).
@@ -25,11 +32,12 @@ object Background:
 
   def run(
       config: AppConfig
-  ): ZIO[Db & S3Client & DocumentService & RenditionJobs & SearchIndex, Throwable, Nothing] =
+  ): ZIO[Db & S3Client & DocumentService & ReviewService & RenditionJobs & SearchIndex, Throwable, Nothing] =
     for
       db        <- ZIO.service[Db]
       s3        <- ZIO.service[S3Client]
       documents <- ZIO.service[DocumentService]
+      reviews   <- ZIO.service[ReviewService]
       rendering <- ZIO.service[RenditionJobs]
       search    <- ZIO.service[SearchIndex]
       tsa = TsaConfig(config.audit.tsaUrl, trustedCertificates = config.audit.tsaTrustedCertificates)
@@ -53,10 +61,11 @@ object Background:
         documents,
         PublicationScheduleConfig(config.documents.publicationCheckSeconds.seconds)
       )
+      reviewJobs = ReviewJobs(db, reviews, ReviewScheduleConfig(config.documents.reviewCheckSeconds.seconds))
       searchJobs = SearchJobs(db, search, config.search.settings)
       runner     = JobRunner(
         db,
-        jobs.handlers ++ publications.handlers ++ searchJobs.handlers +
+        jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers +
           (RenditionRequest.JobKind -> rendering.handle),
         WorkerConfig(s"${workerName(config)}-jobs")
       )
@@ -65,6 +74,7 @@ object Background:
         .raceFirst(relay.run)
         .raceFirst(jobs.schedule)
         .raceFirst(publications.schedule)
+        .raceFirst(reviewJobs.schedule)
         .raceFirst(searchJobs.schedule)
     yield nothing
 

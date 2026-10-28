@@ -5,6 +5,7 @@ import com.dimafeng.testcontainers.PostgreSQLContainer
 import dms.audit.*
 import dms.db.{Db, DbConfig, DbError, Migrations}
 import dms.documents.DocumentStatus.*
+import dms.documents.ReviewPolicy
 import dms.documents.metadata.*
 import dms.kernel.{TenantId, UserId}
 import org.testcontainers.utility.DockerImageName
@@ -325,6 +326,48 @@ object DocumentClassServiceSpec extends ZIOSpecDefault:
         ),
         events.forall(_.actor.id == admin.value),
         events.last.target == AuditObject("document-class", Some(cls.classId.value), Some("2"))
+      )
+    },
+    test("review settings are stored per class version, kept by later versions and validated") {
+      val yearly = ReviewPolicy(Some(12), 30)
+      for
+        e       <- ZIO.service[Env]
+        t       <- newTenant(e.owner)
+        _       <- e.audit.set(Nil)
+        created <- as(t)(
+          _.createClass("policy", None, ClassDraft("Policy", None, Nil, review = Some(yearly)), admin)
+        )
+        kept    <- as(t)(_.newClassVersion(created.classId, ClassDraft("Policy (v2)", None, Nil), admin))
+        changed <- as(t)(
+          _.newClassVersion(
+            created.classId,
+            ClassDraft("Policy (v3)", None, Nil, review = Some(ReviewPolicy())),
+            admin
+          )
+        )
+        current  <- as(t)(_.reviewPolicy(created.classId))
+        versions <- as(t)(_.classVersions(created.classId))
+        invalid  <- as(t)(
+          _.newClassVersion(
+            created.classId,
+            ClassDraft("Policy (v4)", None, Nil, review = Some(ReviewPolicy(Some(0), 400))),
+            admin
+          )
+        ).either
+        plain  <- as(t)(_.createClass("form", None, ClassDraft("Form", None, Nil), admin))
+        events <- e.audit.get
+      yield assertTrue(
+        created.review == yearly,
+        kept.review == yearly,
+        changed.review == ReviewPolicy(None, 60),
+        current == ReviewPolicy(None, 60),
+        versions.map(_.review) == List(yearly, yearly, ReviewPolicy()),
+        invalid.left.exists {
+          case MetadataError.Invalid(problems) => problems.size == 2
+          case _                               => false
+        },
+        plain.review == ReviewPolicy.default,
+        events.head.details.value.replace(" ", "").contains("""{"intervalMonths":12,"leadDays":30}""")
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

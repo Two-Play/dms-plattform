@@ -43,5 +43,6 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0027](0027-acknowledgements.md) | Acknowledgements: readers of a valid version acknowledge it after an explicit opening, insert-only | Accepted | medium |
 | [0028](0028-deputies-for-workflow-participants.md) | Deputies for workflow participants: time-limited deputyships resolved when tasks are read | Accepted | medium |
 | [0029](0029-search-index.md) | Search index: one OpenSearch index per tenant, permission filter in the query, outbox plus periodic synchronization | Accepted (addendum DMS-101) | low |
+| [0030](0030-periodic-review-and-recertification.md) | Periodic review: review date outside the frozen version, review tasks as rows, a daily check through the job queue | Accepted | medium |
 | [0032](0032-access-groups-for-confidential-documents.md) | Access groups for confidential documents: managed per tenant in the platform, named in a core field | Accepted | medium |
 | [0033](0033-version-comparison.md) | Version comparison computed on request from the structured version packages; the change reason is the author's change summary | Accepted | high |

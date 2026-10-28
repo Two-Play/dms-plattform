@@ -3,7 +3,7 @@ package dms.documents.core
 import com.augustnagro.magnum.DbTx
 import dms.audit.*
 import dms.db.{Db, DbError, Jsonb}
-import dms.documents.DocumentStatus
+import dms.documents.{DocumentStatus, ReviewPolicy}
 import dms.documents.metadata.*
 import dms.documents.core.MetadataJson.given
 import dms.kernel.UserId
@@ -33,12 +33,16 @@ final case class FieldDraft(
   *
   * @param parentVersion
   *   the parent's profile version to inherit from; default: the parent's latest version
+  * @param review
+  *   periodic review settings (US-07.1); default: those of the previous version, or none and 60 days lead
+  *   time for a new class
   */
 final case class ClassDraft(
     label: String,
     description: Option[String],
     fields: List[FieldBinding],
-    parentVersion: Option[Int] = None
+    parentVersion: Option[Int] = None,
+    review: Option[ReviewPolicy] = None
 )
 
 /** Manages document classes and field definitions of the current tenant (business concept 3.1, 3.2).
@@ -116,8 +120,10 @@ final class DocumentClassService(audit: AuditTrail):
             parentRef,
             draft.label,
             draft.description,
-            draft.fields
+            draft.fields,
+            draft.review.getOrElse(ReviewPolicy.default)
           )
+          _ <- reviewProblems(cls)
           _ <- resolve(cls)
         yield cls
       }
@@ -145,8 +151,10 @@ final class DocumentClassService(audit: AuditTrail):
             parent = parentRef,
             label = draft.label,
             description = draft.description,
-            fields = draft.fields
+            fields = draft.fields,
+            review = draft.review.getOrElse(latest.review)
           )
+          _ <- reviewProblems(cls)
           _ <- resolve(cls)
         yield cls
       }
@@ -154,6 +162,10 @@ final class DocumentClassService(audit: AuditTrail):
         .mapError(conflict(s"class ${next.key} was changed concurrently"))
       _ <- recordClass("document-class.version-created", next, actor)
     yield next
+
+  /** The periodic review settings of a class: those of its latest version (US-07.1). */
+  def reviewPolicy(id: DocumentClassId): IO[MetadataError, ReviewPolicy] =
+    sql(MetadataStore.latestClassVersion(id)).someOrFail(classNotFound(id)).map(_.review)
 
   /** The effective profile of a class version (default: latest), including inherited and core fields. */
   def profile(id: DocumentClassId, version: Option[Int] = None): IO[MetadataError, MetadataProfile] =
@@ -198,7 +210,11 @@ final class DocumentClassService(audit: AuditTrail):
         "key"           -> Json.Str(cls.key.value),
         "label"         -> Json.Str(cls.label),
         "parentVersion" -> cls.parent.fold(Json.Null)(p => Json.Num(p.version)),
-        "fields"        -> cls.fields.toJsonAST.getOrElse(Json.Null)
+        "fields"        -> cls.fields.toJsonAST.getOrElse(Json.Null),
+        "review"        -> Json.Obj(
+          "intervalMonths" -> cls.review.intervalMonths.fold(Json.Null)(Json.Num(_)),
+          "leadDays"       -> Json.Num(cls.review.leadDays)
+        )
       )
     )
 
@@ -228,6 +244,10 @@ object DocumentClassService:
   private def conflict(message: String)(error: MetadataError): MetadataError = error match
     case MetadataError.Database(DbError.UniqueViolation(_, _)) => MetadataError.Conflict(message)
     case other                                                 => other
+
+  private def reviewProblems(cls: DocumentClassVersion): Either[MetadataError, Unit] =
+    val problems = cls.review.problems
+    Either.cond(problems.isEmpty, (), MetadataError.Invalid(problems))
 
   private def noParent(draft: ClassDraft): Either[MetadataError, Option[ClassRef]] =
     if draft.parentVersion.isDefined then

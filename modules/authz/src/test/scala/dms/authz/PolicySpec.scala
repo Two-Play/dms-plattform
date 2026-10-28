@@ -33,6 +33,7 @@ object PolicySpec extends ZIOSpecDefault:
     case Approve             => document(InApproval)
     case Publish             => document(Approved)
     case Withdraw            => document(Published)
+    case Recertify           => document(ReviewDue)
     case EditTemplates       => Resource(tenant, documentClassPath = List("policy"))
     case ReleaseTemplate     => Resource(tenant, authorId = Some(other))
     case ReadTemplateCatalog => Resource(tenant)
@@ -48,6 +49,7 @@ object PolicySpec extends ZIOSpecDefault:
       case (EditDraft, Reviewer)      => r.copy(status = Some(InReview), assignedParticipants = Set(user))
       case (Review, _)                => r.copy(assignedParticipants = Set(user))
       case (Approve, Owner)           => r.copy(ownerMayApprove = true)
+      case (Recertify, _)             => r.copy(ownerId = Some(user))
       case (Publish, Approver)        => r.copy(approvedBy = Set(user))
       case (ViewHistory, Author)      => r.copy(authorId = Some(user))
       case (ViewHistory, Reviewer)    => r.copy(assignedParticipants = Set(user))
@@ -75,6 +77,7 @@ object PolicySpec extends ZIOSpecDefault:
     Approve             -> List(Never, Never, Partial, Never, Full, Never, Never, Never, Never),
     Publish             -> List(Never, Never, Full, Never, Partial, Never, Never, Never, Never),
     Withdraw            -> List(Never, Never, Full, Never, Full, Never, Never, Never, Never),
+    Recertify           -> List(Never, Never, Partial, Never, Never, Never, Never, Never, Never),
     EditTemplates       -> List(Never, Never, Never, Never, Never, Full, Never, Never, Never),
     ReleaseTemplate     -> List(Never, Never, Never, Never, Never, Full, Never, Never, Never),
     ReadTemplateCatalog -> List(Full, Full, Full, Full, Full, Full, Full, Full, Never),
@@ -127,7 +130,8 @@ object PolicySpec extends ZIOSpecDefault:
         !permitted(Seq(Reader), ReadPublished, document(Draft)),
         !permitted(Seq(Approver), Approve, document(Draft)),
         !permitted(Seq(Reviewer), Review, document(InApproval).copy(assignedParticipants = Set(user))),
-        !permitted(Seq(Owner), Publish, document(InApproval))
+        !permitted(Seq(Owner), Publish, document(InApproval)),
+        !permitted(Seq(Owner), Recertify, document(Superseded).copy(ownerId = Some(user)))
       )
     },
     test("assignments scoped to an organizational unit or class only cover matching resources") {

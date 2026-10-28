@@ -20,14 +20,16 @@ final case class ValidityPeriod(from: Instant, until: Option[Instant]):
   */
 object Validity:
 
-  /** Statuses of versions that were in force at some time: valid ones and the ones that replaced or archived
-    * them. Destroyed versions are left out: their content no longer exists.
+  /** Statuses of versions that were in force at some time: valid ones and the ones that replaced, withdrew
+    * (US-07.1; only versions that were published) or archived them. Destroyed versions are left out: their
+    * content no longer exists.
     */
   val EverValid: Set[DocumentStatus] =
     Set(
       DocumentStatus.Published,
       DocumentStatus.ReviewDue,
       DocumentStatus.Superseded,
+      DocumentStatus.Withdrawn,
       DocumentStatus.Archived
     )
 
