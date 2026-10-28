@@ -52,6 +52,15 @@ Events are written to an outbox table in the same transaction as the business ch
 - Criteria for introducing Kafka: sustained > 100 jobs/s, external event subscribers or a need for replay.
 - Ruled out: sending directly to external systems within the business transaction.
 
+## Implementation (DMS-31, 2026-10-28)
+
+- Lease-based claiming instead of holding a transaction open during the handler: `dms.job_claim` / `dms.outbox_claim` set `locked_until` with `FOR UPDATE SKIP LOCKED` and commit; the handler runs in its own transactions; `*_complete` / `*_fail` finish the item. Expired leases are claimed again (at-least-once).
+- Workers claim only the job kinds they handle, so rolling updates do not burn attempts of new job kinds.
+- Retries with exponential backoff up to `max_attempts`, then status `dead` with the last error.
+- Idempotency keys (`unique`) make periodic enqueueing from several instances safe.
+- Workers run without tenant context, so claiming goes through `security definer` functions (migration V6); tenant jobs are only enqueued for the current tenant, system jobs without tenant.
+- Tested with two workers on separate connection pools (40 jobs, each processed exactly once), crash takeover after lease expiry, retries and dead jobs, outbox rollback and retry.
+
 ## Reversibility
 
 **low**: The outbox remains even with a broker; a relay would forward entries to Kafka. Workers would only need to switch their source, provided the job interface is abstracted.
