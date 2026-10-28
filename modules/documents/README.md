@@ -218,7 +218,7 @@ Business concept 12, US-15.1. Compliance officers (role `ComplianceOfficer`) see
 
 - `core`: `DocumentService.currentlyValid` (every valid version with document, class path, review date and acknowledgement requirement, one query); `AcknowledgementService.acknowledgersOfValid` (acknowledgers per valid version that requires acknowledgement) and `acknowledgersOf(versionId)`.
 - `authz`: `Audience` decides `ReadPublished` for all users of the tenant at once (users with equal assignments and groups are decided once per version; author and owner individually); `RoleAssignments.activeAt`, `Groups.currentMemberships`.
-- No table; the role is allowed by migration V22.
+- No table; the role is allowed by migration V20.
 
 HTTP (module `app`, `ComplianceApi`):
 

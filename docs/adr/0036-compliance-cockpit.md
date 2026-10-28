@@ -16,11 +16,11 @@ Given:
 - Business concept 10.2: acknowledgement and access records must not be used to monitor performance or behaviour; evaluations are purpose-bound and possibly governed by an agreement with the works council.
 - Reviews (ADR 0030): a valid version has `review_due_on`; the daily check moves it to ReviewDue on that date; recertification sets a new date. Acknowledgements (ADR 0027): the audience of a valid version that requires acknowledgement is everyone who may read it (`ReadPublished`), evaluated per request, not stored; ADR 0027 notes that this costs one policy decision per version and reader.
 - Organizational unit, confidentiality and allowed groups are core fields of the version (ADR 0019, 0032); the owner is a column of the document.
-- Deny by default, also for existence and metadata (business concept 2.3). Other changes of the same sprint use migrations V20 (DMS-57) and V21 (DMS-58), so this change uses V22.
+- Deny by default, also for existence and metadata (business concept 2.3). This change merged first in its sprint and uses migration V20 (DMS-57 uses V21, DMS-58 V22).
 
 ## Decision
 
-1. **New business role `ComplianceOfficer`.** Added to `Role` and to the database check of `dms.role_assignment` (migration V22). Its rights (the business concept's matrix has no column for it; PolicySpec documents the column):
+1. **New business role `ComplianceOfficer`.** Added to `Role` and to the database check of `dms.role_assignment` (migration V20). Its rights (the business concept's matrix has no column for it; PolicySpec documents the column):
    - `ReadPublished` like every business role (so drill-down from the cockpit to a document works; as for every business role in scope, the officer belongs to the acknowledgement audience of ADR 0027).
    - `MonitorCompliance` (new action): see a valid version in the cockpit with its review deadline and its acknowledgement rate. Only compliance officers; decided per version, so an assignment restricted to an organizational unit or class subtree limits the cockpit to that scope, and confidential versions are counted only if the officer is cleared for them (author, owner, allowed group).
    - `ViewAcknowledgementPersons` (new action): see who has not acknowledged a valid version. Compliance officers in scope, and the document's owner (owner role and owner of the document) for their own documents.
@@ -36,7 +36,7 @@ Given:
 |---|---|---|---|
 | Fits the business concept (2.2) | Yes: its own role with exactly this task | Auditor is temporary, read-only, scoped to an audit; monitoring deadlines and escalating is not its job | Records management and configuration are other jobs; administrators see no content |
 | Purpose limitation | The role is the documented purpose | Auditors would see escalation data for every audit | Mixes duties |
-| Effort | Enum value, migration V22, matrix column, dev setup | None | None |
+| Effort | Enum value, migration V20, matrix column, dev setup | None | None |
 | Matrix tests | One more column | Unchanged | Unchanged |
 
 | Criterion (names of readers) | Chosen: separate endpoint, stated purpose + reason, audited | Names in the cockpit lists for every officer | No names at all |
@@ -46,7 +46,7 @@ Given:
 | Works council agreement | Purpose values and the audit entry can be referenced | Hard to justify | – |
 | Effort | One endpoint, one audit action, a dialog | Less | Least |
 
-| Criterion (acknowledgement figures) | Chosen: computed on request, profiles × versions | Periodically refreshed summary table (V22) | Policy per user and version (as the open list of ADR 0027) |
+| Criterion (acknowledgement figures) | Chosen: computed on request, profiles × versions | Periodically refreshed summary table (new migration) | Policy per user and version (as the open list of ADR 0027) |
 |---|---|---|---|
 | Freshness | Exact at request time | Up to one refresh interval old; role changes and new acknowledgements appear late | Exact |
 | Consistency with `Policy` | Same decision function, no second implementation | Needs the same computation in a job plus invalidation | Same |
@@ -73,7 +73,7 @@ A SQL-only aggregate (joining role assignments to versions by unit and class pat
 - Compliance officers are acknowledgement readers like every business role in scope.
 - The reason is passed as a query parameter (the specified GET endpoint); it can appear in access logs and must not contain personal data.
 - The cockpit shows user ids, not display names; the platform has no user directory yet.
-- V22 is applied after V19 while V20/V21 are developed in parallel; a database migrated with V22 first needs those migrations merged before or Flyway's out-of-order setting (merge order V20, V21, V22).
+- Migration V20 merged first; V21 (DMS-57) and V22 (DMS-58) follow in order.
 
 ## Follow-ups
 
