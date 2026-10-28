@@ -21,7 +21,7 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0005](0005-zitadel-identitaet.md) | ZITADEL as identity provider | Accepted | medium |
 | [0006](0006-flowable-workflow.md) | Flowable as embedded workflow engine | Accepted (validated by spike) | medium |
 | [0007](0007-strukturiertes-inhaltsformat.md) | Structured content format is primary, DOCX for import/export only | Accepted | high |
-| [0008](0008-rendering-weasyprint.md) | Rendering HTML → PDF/A with WeasyPrint, validation with veraPDF | Proposed (determinism spike) | low |
+| [0008](0008-rendering-weasyprint.md) | Rendering HTML → PDF/A with WeasyPrint, validation with veraPDF | Accepted (spike DMS-23) | low |
 | [0009](0009-persistenz.md) | PostgreSQL, S3 with Object Lock, OpenSearch | Accepted | medium |
 | [0010](0010-outbox-und-jobs-in-postgres.md) | Transactional outbox and job queue in PostgreSQL | Accepted | low |
 | [0011](0011-java-21-lts.md) | Java 21 LTS as runtime | Accepted | low |

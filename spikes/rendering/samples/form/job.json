@@ -1,0 +1,13 @@
+{
+  "tenant_id": "7c1e2f0a-5b8d-4f61-9a3e-0d2c4b6a8e10",
+  "document_id": "FRM-2026-0007",
+  "version": 1,
+  "title": "Access Request Form",
+  "author": "IT Service Management",
+  "description": "Request for access to applications and shared folders",
+  "lang": "en",
+  "valid_from": "2026-11-15",
+  "released_at": "2026-10-27T09:05:41+01:00",
+  "pdf_variant": "pdf/a-2b",
+  "content": "content.html"
+}

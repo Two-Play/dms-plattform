@@ -1,0 +1,13 @@
+{
+  "tenant_id": "7c1e2f0a-5b8d-4f61-9a3e-0d2c4b6a8e10",
+  "document_id": "CTR-2026-0318",
+  "version": 2,
+  "title": "IT Service Agreement",
+  "author": "Legal Department",
+  "description": "Framework agreement for managed IT services incl. service levels and data processing annex",
+  "lang": "en",
+  "valid_from": "2027-01-01",
+  "released_at": "2026-10-24T11:17:58+02:00",
+  "pdf_variant": "pdf/a-3b",
+  "content": "content.html"
+}

@@ -1,0 +1,9 @@
+image built with --no-cache: sha256:3ebafc23b4cb9493913653c047a37cab523a67fa662529cc431d402675817bd4 (pipeline image: sha256:44575b346c43d8e541e93154a25d5a1653e9551141f9ee97041340d8f223acd9)
+deterministic mode, one render each:
+e3851a5e5a830eb147b76c8d7a1284ccb7ec9c1d66f45333f65aa1ca0ee59050  out/rebuild/contract-2b.pdf
+b2c75470b1c188f2f9cdca33a23b84e8fe3e0e57554400b0dc344c7259dc2105  out/rebuild/form-2b.pdf
+c071225c4eacd5e3a302947f737b2b934af52486811e056058cd45efa0e575bc  out/rebuild/policy-2b.pdf
+e980aed04ca610b910b407a370fa0fc7ea4a52b57f12dfd2cbcf42315a7adbfd  out/rebuild/contract-3b.pdf
+24965d4c2131b1ef081afc66904562fbe5f915b65ae3407ae9e90fb1b9ac194f  out/rebuild/form-3b.pdf
+32c5eb5bdf5d0b1363b71c6310a491873a4c03065fdb4f44393417f85a4c22d4  out/rebuild/policy-3b.pdf
+process wall time incl. Python start-up and imports (rebuilt image): policy 729 ms, contract 1673 ms
