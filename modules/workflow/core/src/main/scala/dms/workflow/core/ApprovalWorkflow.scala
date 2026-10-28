@@ -286,6 +286,12 @@ final class ApprovalWorkflow(
   def caseOfVersion(versionId: UUID): IO[WorkflowError, Option[CaseDetails]] =
     sql(WorkflowStore.caseOfVersion(versionId)).flatMap(ZIO.foreach(_)(r => details(r.id)))
 
+  /** The approvals of the given versions by version id (approver, deputy's principal, time), e.g. for the
+    * validity history (DMS-53). Versions approved without a workflow case are missing.
+    */
+  def approvals(versionIds: List[UUID]): IO[WorkflowError, Map[UUID, Approval]] =
+    sql(WorkflowStore.approvalsOfVersions(versionIds)).map(_.map(a => a.versionId -> a).toMap)
+
   // ---- internals ------------------------------------------------------------------------------------------
 
   private def open(subject: ReviewSubject, actor: UserId): IO[WorkflowError, UUID] =

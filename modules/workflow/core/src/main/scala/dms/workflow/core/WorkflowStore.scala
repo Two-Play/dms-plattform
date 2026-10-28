@@ -309,19 +309,34 @@ private[core] object WorkflowStore:
       .query[ApprovalRow]
       .run()
       .headOption
-      .map((id, caseId, versionId, label, sha, by, authAt, at, actingFor) =>
-        Approval(
-          id,
-          caseId,
-          versionId,
-          label,
-          sha,
-          UserId(by),
-          authAt.toInstant,
-          at.toInstant,
-          actingFor.map(UserId(_))
-        )
-      )
+      .map(toApproval)
+
+  /** The approvals of the given versions; versions without one are missing. */
+  def approvalsOfVersions(versionIds: List[UUID])(using DbTx): List[Approval] =
+    if versionIds.isEmpty then Nil
+    else
+      val ids = versionIds.distinct.map(_.toString).toArray
+      sql"""select id, case_id, version_id, version_label, content_sha256, approved_by, authenticated_at,
+                   approved_at, acting_for
+            from dms.workflow_approval where version_id = any(cast($ids as uuid[]))"""
+        .query[ApprovalRow]
+        .run()
+        .map(toApproval)
+        .toList
+
+  private def toApproval(row: ApprovalRow): Approval =
+    val (id, caseId, versionId, label, sha, by, authAt, at, actingFor) = row
+    Approval(
+      id,
+      caseId,
+      versionId,
+      label,
+      sha,
+      UserId(by),
+      authAt.toInstant,
+      at.toInstant,
+      actingFor.map(UserId(_))
+    )
 
   def json(d: WorkflowDefinition): Jsonb = Jsonb(d.toJson)
 

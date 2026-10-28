@@ -5,6 +5,7 @@ import dms.audit.*
 import dms.db.queue.Outbox
 import dms.db.{Db, DbError, Jsonb}
 import dms.documents.*
+import dms.documents.core.DocumentJson.given
 import dms.documents.core.MetadataJson.given
 import dms.documents.metadata.*
 import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
@@ -151,6 +152,34 @@ final case class DocumentSettings(
 object DocumentSettings:
   val default: DocumentSettings = DocumentSettings()
 
+/** A version in force at a moment (US-09.1, DMS-53), with its document and what authorization needs: the
+  * field values (organizational unit, confidentiality) and the author.
+  *
+  * @param classPath
+  *   class keys of the document's class from the root
+  * @param status
+  *   the status of the version now, e.g. Superseded for a version that was replaced since
+  * @param period
+  *   when the version was in force (see [[Validity]])
+  */
+final case class ValidVersion(
+    document: Document,
+    classPath: List[String],
+    versionId: UUID,
+    number: VersionNo,
+    status: DocumentStatus,
+    scope: String,
+    values: Map[String, FieldEntry],
+    createdBy: UserId,
+    releasedBy: Option[UserId],
+    releasedAt: Option[Instant],
+    validFrom: Option[java.time.LocalDate],
+    period: ValidityPeriod
+):
+  def label: String = Versioning.label(number, status, 1)
+
+  def metadata: Map[String, MetadataValue] = values.map((k, e) => k -> e.value)
+
 /** An approved version waiting for its publication at `dueAt` (00:00 of its valid-from date in the tenant's
   * time zone).
   */
@@ -264,6 +293,65 @@ final class DocumentService(
         yield DocumentDetails(d, versions, profile)
       )
     yield details
+
+  /** The time zone of the tenant; validity switches at 00:00 there (DMS-45). */
+  def tenantZone: IO[DocumentError, ZoneId] = sql(DocumentStore.tenantZone)
+
+  /** The version of every document and validity scope that was in force at `at` (US-09.1, DMS-53), by title.
+    * Only versions that were published count: from 00:00 of their valid-from date in the tenant's time zone
+    * (or their publication, if later) until their successor became valid. `classKey` limits the result to a
+    * class and its subclasses. The caller decides which of them may be read.
+    */
+  def validAt(at: Instant, classKey: Option[String] = None): IO[DocumentError, List[ValidVersion]] =
+    for
+      zone       <- sql(DocumentStore.tenantZone)
+      candidates <- sql(DocumentStore.validityCandidates(at))
+      profiles   <- ZIO.foreach(candidates.map(r => (r.classId, r.classVersion)).distinct)((id, version) =>
+        profile(DocumentClassId(id), version).map(p => (id, version) -> p.classPath.map(_.value))
+      )
+      paths = profiles.toMap
+    yield candidates.flatMap { r =>
+      val classPath = paths((r.classId, r.classVersion))
+      val status    = DocumentStatus.valueOf(r.status)
+      val from      = Validity.effectiveStart(r.validFrom, r.publishedAt.toInstant, zone)
+      val until     =
+        r.successorPublishedAt.map(p => Validity.effectiveStart(r.successorValidFrom, p.toInstant, zone))
+      // A replaced version without a recorded successor has no known end; it is not reported as in force.
+      val period = ValidityPeriod(from, until.orElse(Option.unless(Versioning.isValid(status))(from)))
+      Option.when(
+        Validity.EverValid.contains(status) && period.contains(at) && classKey.forall(classPath.contains)
+      )(
+        ValidVersion(
+          Document(
+            DocumentId(r.documentId),
+            DocumentClassId(r.classId),
+            r.classVersion,
+            r.title,
+            r.ownerId.map(UserId(_)),
+            UserId(r.authorId),
+            TemplateId(r.templateId),
+            r.templateVersion,
+            r.documentCreatedAt.toInstant
+          ),
+          classPath,
+          r.versionId,
+          VersionNo(r.major, r.minor),
+          status,
+          r.scope,
+          r.fieldValues.value
+            .fromJson[Map[String, FieldEntry]]
+            .fold(
+              e => throw IllegalStateException(s"cannot read the field values of version ${r.versionId}: $e"),
+              identity
+            ),
+          UserId(r.createdBy),
+          r.releasedBy.map(UserId(_)),
+          r.releasedAt.map(_.toInstant),
+          r.validFrom,
+          period
+        )
+      )
+    }
 
   /** How documents use the versions of `template` before `version` (US-01.2): document versions per template
     * version and status, and the open versions with title and author only. The caller decides who may see it;
