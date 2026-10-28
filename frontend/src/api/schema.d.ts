@@ -762,6 +762,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/search': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Searches the published documents the caller may read: full text (German and English stemming) over title, content and field values, filtered by class, status and language, with facet counts and snippets. Hits, total and facet counts only cover versions the caller may read. */
+    get: operations['getApiV1Search']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/search/rebuild': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Rebuilds the caller's tenant's search index from the database: fills a new index and switches to it in one step; searches keep working meanwhile. Requires the tenant administrator role. */
+    post: operations['postApiV1AdminSearchRebuild']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -1346,6 +1380,12 @@ export interface components {
       threshold: number
       exceedsThreshold: boolean
     }
+    /** FacetCountView */
+    FacetCountView: {
+      value: string
+      /** Format: int64 */
+      count: number
+    }
     /** FieldBindingView */
     FieldBindingView: {
       key: string
@@ -1868,6 +1908,53 @@ export interface components {
        * @enum {string}
        */
       type: 'Row'
+    }
+    /** SearchFacetsView */
+    SearchFacetsView: {
+      class?: components['schemas']['FacetCountView'][]
+      status?: components['schemas']['FacetCountView'][]
+      language?: components['schemas']['FacetCountView'][]
+    }
+    /** SearchHitView */
+    SearchHitView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title: string
+      versionLabel: string
+      classPath?: string[]
+      status: string
+      /** Format: date */
+      validFrom?: string
+      snippet: string
+      /** Format: date */
+      validUntil?: string
+      language?: string
+      organizationalUnit?: string
+      /** Format: double */
+      score?: number
+    }
+    /** SearchRebuildView */
+    SearchRebuildView: {
+      index: string
+      /** Format: int32 */
+      documents: number
+      /** Format: int32 */
+      versions: number
+      /** Format: int64 */
+      tookMillis: number
+    }
+    /** SearchResultView */
+    SearchResultView: {
+      /** Format: int64 */
+      total: number
+      /** Format: int32 */
+      page: number
+      /** Format: int32 */
+      size: number
+      hits?: components['schemas']['SearchHitView'][]
+      facets: components['schemas']['SearchFacetsView']
     }
     /** Section */
     Section: {
@@ -4431,6 +4518,82 @@ export interface operations {
         }
         content: {
           'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1Search: {
+    parameters: {
+      query?: {
+        /** @description Query text: words, "phrases", prefix*, -excluded. Empty: list by filter. */
+        q?: string
+        /** @description Class keys; a class includes its subclasses. Repeat or separate with commas. */
+        class?: string[]
+        /** @description Published, ReviewDue, Superseded. Default: the valid versions (Published, ReviewDue). */
+        status?: string[]
+        /** @description Languages of the documents, e.g. de, en */
+        lang?: string[]
+        /** @description 1-based page, default 1 */
+        page?: number
+        /** @description Hits per page, 1 to 100, default 20 */
+        size?: number
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SearchResultView']
+        }
+      }
+      /** @description Invalid value for: query parameter page, Invalid value for: query parameter size */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1AdminSearchRebuild: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SearchRebuildView']
         }
       }
       default: {
