@@ -11,12 +11,31 @@ final case class HttpConfig(port: Int)
 /** Credentials of the schema owner, used only by [[Migrate]]. */
 final case class MigrationConfig(user: String, password: String)
 
+/** Periodic audit work (DMS-75, ADR 0017).
+  *
+  * @param tsaTrustedCertificates
+  *   PEM files of the TSA's CA; without them daily RFC 3161 anchoring is disabled and only checkpoints run
+  */
+final case class AuditConfig(
+    checkpointIntervalSeconds: Int,
+    anchorHourUtc: Int,
+    tsaUrl: String,
+    tsaTrustedCertificates: List[String]
+)
+
+/** @param name
+  *   worker identity owning job leases; defaults to host name and process id
+  */
+final case class WorkerSettings(name: Option[String])
+
 final case class AppConfig(
     http: HttpConfig,
     auth: AuthConfig,
     database: DbConfig,
     migration: MigrationConfig,
-    storage: StorageConfig
+    storage: StorageConfig,
+    audit: AuditConfig,
+    worker: WorkerSettings
 )
 
 object AppConfig:

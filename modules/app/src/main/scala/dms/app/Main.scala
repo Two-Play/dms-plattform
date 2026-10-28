@@ -2,6 +2,7 @@ package dms.app
 
 import dms.db.Db
 import dms.identity.{Authenticator, TenantDirectory, TokenVerifier}
+import dms.storage.ObjectStore
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import sttp.tapir.swagger.bundle.SwaggerInterpreter
 import sttp.tapir.ztapir.*
@@ -31,8 +32,7 @@ object Main extends ZIOAppDefault:
     for
       cfg <- ZIO.config(AppConfig.config)
       _   <- ZIO.logInfo(s"DMS platform ${AppBuildInfo.version} starting on port ${cfg.http.port}")
-      _   <- Server
-        .serve(routes)
+      _   <- (Server.serve(routes) <&> Background.run(cfg))
         .provide(
           Server.defaultWithPort(cfg.http.port),
           ZLayer.succeed(cfg.auth),
@@ -40,6 +40,8 @@ object Main extends ZIOAppDefault:
           Db.dataSource(cfg.database),
           Db.layer,
           TenantDirectory.layer,
-          Authenticator.layer
+          Authenticator.layer,
+          ZLayer.succeed(cfg.storage),
+          ObjectStore.client
         )
     yield ()

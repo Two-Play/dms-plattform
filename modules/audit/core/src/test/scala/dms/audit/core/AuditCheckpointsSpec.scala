@@ -3,6 +3,7 @@ package dms.audit.core
 import com.augustnagro.magnum.*
 import com.dimafeng.testcontainers.{GenericContainer, PostgreSQLContainer}
 import dms.audit.*
+import dms.db.queue.JobQueue
 import dms.db.{Db, DbConfig, DbError, Jsonb, Migrations}
 import dms.kernel.TenantId
 import dms.storage.*
@@ -182,6 +183,27 @@ object AuditCheckpointsSpec extends ZIOSpecDefault:
       yield assertTrue(
         delete.left.exists(_.isInstanceOf[StorageError.Locked]),
         report.violation.map(v => (v.chainSeq, v.kind)) == Some((2L, Violation.Kind.CheckpointMismatch))
+      )
+    },
+    test("ticks of several instances schedule each checkpoint job once, and the job writes the checkpoint") {
+      for
+        env <- ZIO.service[Env]
+        t   <- newTenant
+        _   <- record(2, t)
+        jobs = AuditJobs(env.app, None, env.checkpoints, AuditScheduleConfig(checkpointInterval = 5.minutes))
+        now  = java.time.Instant.parse("2026-11-02T09:01:00Z")
+        first   <- jobs.tick(now)
+        second  <- jobs.tick(now.plusSeconds(60)) // another instance, same 5-minute window
+        claimed <- JobQueue.claim(env.app, "test-worker", jobs.handlers.keySet, 100, 1.minute)
+        mine = claimed.filter(_.tenant.contains(t))
+        _       <- ZIO.foreachDiscard(mine)(job => jobs.handlers(job.kind)(job).mapError(RuntimeException(_)))
+        written <- env.store.listKeys(s"audit-checkpoints/${t.value}/")
+      yield assertTrue(
+        first >= 1,
+        second == 0,
+        mine.map(_.kind) == List(AuditJobs.CheckpointKind),
+        written == List(f"audit-checkpoints/${t.value}/${2L}%020d"),
+        !jobs.handlers.contains(AuditJobs.AnchorKind) // no trusted TSA configured: anchoring is not scheduled
       )
     },
     test("checkpoint format round-trips and rejects unknown formats") {
