@@ -16,6 +16,7 @@ object Versions {
   val magnum        = "1.3.1"
   val bouncyCastle  = "1.86"
   val awsSdk        = "2.57.5"
+  val zioJson       = "1.1.1" // same as tapir-json-zio
 }
 
 object Dependencies {
@@ -54,6 +55,9 @@ object Dependencies {
     "org.flywaydb"   % "flyway-database-postgresql" % Versions.flyway,
     "com.zaxxer"     % "HikariCP"                   % Versions.hikari
   )
+
+  /** JSON for metadata profiles stored as jsonb (ADR 0019). */
+  val json = Seq("dev.zio" %% "zio-json" % Versions.zioJson)
 
   val magnum = Seq("com.augustnagro" %% "magnum" % Versions.magnum)
 

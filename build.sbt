@@ -49,7 +49,7 @@ lazy val authz = module("authz", "modules/authz")
 lazy val templatesApi      = apiModule("templates")
 lazy val templatesCore     = coreModule("templates").dependsOn(templatesApi)
 lazy val documentsApi      = apiModule("documents")
-lazy val documentsCore     = coreModule("documents").dependsOn(documentsApi, templatesApi, auditApi)
+lazy val documentsCore     = documentsCoreModule.dependsOn(documentsApi, templatesApi, auditApi)
 lazy val workflowApi       = apiModule("workflow")
 lazy val workflowCore      = coreModule("workflow").dependsOn(workflowApi, documentsApi)
 lazy val renderingApi      = apiModule("rendering")
@@ -62,6 +62,12 @@ lazy val auditApi          = apiModule("audit").dependsOn(db)
 lazy val auditCore         = coreModule("audit").dependsOn(auditApi).settings(auditCoreSettings)
 lazy val notificationsApi  = apiModule("notifications")
 lazy val notificationsCore = coreModule("notifications").dependsOn(notificationsApi)
+
+/** Document classes and metadata profiles (ADR 0019): JSON columns; integration tests against PostgreSQL. */
+def documentsCoreModule: Project = coreModule("documents").settings(
+  libraryDependencies ++= Dependencies.json ++ Dependencies.integrationTest ++
+    Dependencies.logging.map(_ % Test)
+)
 
 /** Audit trail (ADR 0017): RFC 3161 timestamping; integration tests against PostgreSQL. */
 lazy val auditCoreSettings = Seq(
@@ -91,7 +97,8 @@ lazy val app = module("app", "modules/app")
     notificationsCore
   )
   .settings(
-    libraryDependencies ++= Dependencies.http ++ Dependencies.config ++ Dependencies.logging,
+    libraryDependencies ++= Dependencies.http ++ Dependencies.config ++ Dependencies.logging ++
+      Dependencies.integrationTest,
     Compile / mainClass := Some("dms.app.Main"),
     Compile / sourceGenerators += Def.task {
       val file = (Compile / sourceManaged).value / "dms" / "app" / "AppBuildInfo.scala"
