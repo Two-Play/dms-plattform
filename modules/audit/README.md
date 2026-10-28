@@ -97,4 +97,8 @@ Timestamp anchors are written once a day, so entries after the last anchor could
 
 `AuditCheckpoints.verify(tenant)` runs the chain verification and then checks every version of the newest checkpoint: the chain must reach its position and the entry there must have the recorded hash. A cut tail or a rewritten chain shows up as `CheckpointMismatch`. A forged later version of a checkpoint object (the bucket is versioned, locked versions cannot be removed) is detected as well.
 
-The unprotected window shrinks to the checkpoint interval; scheduling (e.g. every 5 minutes per tenant) follows with DMS-75.
+The unprotected window shrinks to the checkpoint interval.
+
+## Scheduling (DMS-75)
+
+`AuditJobs` turns the periodic work into jobs of the PostgreSQL job queue (ADR 0010): `tick` enqueues one `audit.checkpoint` job per tenant and checkpoint window and one `audit.anchor` job per tenant and day (due at `anchorHourUtc`). Idempotency keys (`audit.checkpoint:<tenant>:<window>`, `audit.anchor:<tenant>:<date>`) make it safe for every instance to tick; the job runner makes sure only one worker runs each job, with retries. The app (`dms.app.Background`) runs the scheduler and a job runner; settings under `dms.audit` (`checkpointIntervalSeconds`, default 300; `anchorHourUtc`, default 2; `tsaUrl`; `tsaTrustedCertificates`). Without trusted TSA certificates anchoring is disabled with a warning and only checkpoints run.
