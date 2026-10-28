@@ -39,6 +39,13 @@ private[core] object ChainStore:
       "select chain_seq, hash from dms.audit_event where tenant_id = ? order by chain_seq desc limit 1"
     )(_.setObject(1, tenant))(rs => (rs.getLong(1), rs.getBytes(2))).headOption
 
+  /** Hash of the entry at `seq`, if it exists. */
+  def hashAt(tenant: UUID, seq: Long)(using DbTx): Option[Array[Byte]] =
+    query("select hash from dms.audit_event where tenant_id = ? and chain_seq = ?") { ps =>
+      ps.setObject(1, tenant)
+      ps.setLong(2, seq)
+    }(_.getBytes(1)).headOption
+
   /** The PostgreSQL text form of `json` as `jsonb`; this is what is stored and therefore what is hashed. */
   def normalizeJson(json: String)(using DbTx): String =
     query("select cast(? as jsonb)::text")(_.setString(1, json))(_.getString(1)).head

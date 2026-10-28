@@ -242,5 +242,20 @@ object ObjectStoreSpec extends ZIOSpecDefault:
     test("bucket setup is idempotent") {
       for _ <- ObjectStore.bucketSetup
       yield assertCompletes
+    },
+    test("keys are listed by prefix and versions of one key newest first") {
+      for
+        s      <- ZIO.service[ObjectStore]
+        prefix <- ZIO.succeed(s"list/${UUID.randomUUID()}/")
+        _      <- s.put(s"${prefix}b", bytes("b"), "text/plain")
+        first  <- s.put(s"${prefix}a", bytes("a1"), "text/plain")
+        second <- s.put(s"${prefix}a", bytes("a2"), "text/plain")
+        _      <- s.put(s"${prefix}ab", bytes("ab"), "text/plain")
+        keys   <- s.listKeys(prefix)
+        all    <- s.versions(s"${prefix}a")
+      yield assertTrue(
+        keys == List(s"${prefix}a", s"${prefix}ab", s"${prefix}b"),
+        all.map(_.versionId) == List(second.version.versionId, first.version.versionId)
+      )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

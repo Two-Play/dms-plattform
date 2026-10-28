@@ -60,3 +60,6 @@ object Violation:
 
     /** A timestamp anchor does not match the chain, or its RFC 3161 token is invalid. */
     case AnchorMismatch
+
+    /** A checkpoint in write-once storage does not match the chain, e.g. because the chain was truncated. */
+    case CheckpointMismatch
