@@ -64,8 +64,8 @@ final case class WebhookSubscription(
 /** One delivery of an event to a subscription: the delivery log entry.
   *
   * @param status
-  *   `pending` (not tried yet), `retrying` (failed, tried again later), `delivered`, `dead` (given up after the
-  *   last attempt or blocked), `skipped` (subscription deactivated or deleted before it was sent)
+  *   `pending` (not tried yet), `retrying` (failed, tried again later), `delivered`, `dead` (given up after
+  *   the last attempt or blocked), `skipped` (subscription deactivated or deleted before it was sent)
   */
 final case class WebhookDelivery(
     id: UUID,

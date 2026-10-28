@@ -31,8 +31,8 @@ object WebhookSignature:
   def sign(secret: String, id: String, timestamp: Long, body: String): String =
     "v1," + Base64.getEncoder.encodeToString(hmac(key(secret), s"$id.$timestamp.$body"))
 
-  /** Checks a `webhook-signature` header (space-separated `v1,<sig>` entries) as a receiver would; compares in
-    * constant time.
+  /** Checks a `webhook-signature` header (space-separated `v1,<sig>` entries) as a receiver would; compares
+    * in constant time.
     */
   def verify(secret: String, id: String, timestamp: Long, body: String, header: String): Boolean =
     val expected = sign(secret, id, timestamp, body).getBytes(StandardCharsets.US_ASCII)

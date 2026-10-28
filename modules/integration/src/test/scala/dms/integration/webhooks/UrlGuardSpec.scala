@@ -60,10 +60,10 @@ object UrlGuardSpec extends ZIOSpecDefault:
     test("private networks can be opened for receivers inside the company network, never loopback") {
       val company = WebhookSettings(allowPrivateNetworks = true)
       for
-        privateOk  <- blocked("https://10.1.2.3/hook", company)
-        loopback   <- blocked("https://127.0.0.1/hook", company)
-        metadata   <- blocked("https://169.254.169.254/", company)
-        plainHttp  <- ZIO.succeed(UrlGuard.parse("http://10.1.2.3/hook", company).isLeft)
+        privateOk <- blocked("https://10.1.2.3/hook", company)
+        loopback  <- blocked("https://127.0.0.1/hook", company)
+        metadata  <- blocked("https://169.254.169.254/", company)
+        plainHttp <- ZIO.succeed(UrlGuard.parse("http://10.1.2.3/hook", company).isLeft)
       yield assertTrue(!privateOk, loopback, metadata, plainHttp)
     },
     test("address classification") {

@@ -35,8 +35,8 @@ object CurrentVersion:
     *
     * With a scope: the valid version whose scope key is the scope, else the only valid version whose scope
     * key contains it. Without a scope: the valid version without restriction (empty scope), else the only
-    * valid version. If nothing is valid, a version that was valid and is now withdrawn (or archived after
-    * the withdrawal) makes the resolution [[Resolution.Withdrawn]].
+    * valid version. If nothing is valid, a version that was valid and is now withdrawn (or archived after the
+    * withdrawal) makes the resolution [[Resolution.Withdrawn]].
     */
   def resolve(versions: List[DocumentVersion], scope: Option[String]): Resolution =
     val requested = scope.map(_.trim).filter(_.nonEmpty)
@@ -44,10 +44,10 @@ object CurrentVersion:
     val valid     = matching.filter(v => Versioning.isValid(v.status))
     val preferred = requested.fold(valid.filter(_.scope.isEmpty))(s => valid.filter(_.scope == s))
     (preferred, valid) match
-      case (List(v), _)    => Resolution.Found(v)
-      case (_, List(v))    => Resolution.Found(v)
-      case (_, v :: more)  => Resolution.Ambiguous((v :: more).map(_.scope).distinct.sorted)
-      case (_, Nil)        =>
+      case (List(v), _)   => Resolution.Found(v)
+      case (_, List(v))   => Resolution.Found(v)
+      case (_, v :: more) => Resolution.Ambiguous((v :: more).map(_.scope).distinct.sorted)
+      case (_, Nil)       =>
         matching
           .filter(v => Ended.contains(v.status) && v.publishedAt.isDefined)
           .maxByOption(_.number)

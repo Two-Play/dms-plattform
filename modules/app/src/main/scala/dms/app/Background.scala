@@ -11,6 +11,7 @@ import dms.documents.core.{
   ReviewScheduleConfig,
   ReviewService
 }
+import dms.integration.webhooks.{HttpWebhookSender, WebhookJobs}
 import dms.integration.{JobRunner, OutboxRelay, WorkerConfig}
 import dms.rendering.RenditionRequest
 import dms.rendering.core.RenditionJobs
@@ -27,7 +28,9 @@ import java.net.http.HttpClient
   * periodic review check and the search synchronization.
   *
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
-  * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029).
+  * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029) and the webhooks
+  * (DMS-58, ADR 0035), which record a delivery and a job per subscription, so a receiver that is down never
+  * holds up the relay.
   */
 object Background:
 
@@ -65,14 +68,24 @@ object Background:
       reviewJobs = ReviewJobs(db, reviews, ReviewScheduleConfig(config.documents.reviewCheckSeconds.seconds))
       searchJobs = SearchJobs(db, search, config.search.settings)
       legalHolds = LegalHoldSync(db, S3ObjectStore(s3, config.storage.bucket))
-      runner     = JobRunner(
+      webhooks   = WebhookJobs(
+        db,
+        DocumentWebhookEvents(documents),
+        HttpWebhookSender(config.webhooks.settings),
+        config.webhooks.settings
+      )
+      runner = JobRunner(
         db,
         jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers ++
-          legalHolds.handlers +
+          legalHolds.handlers ++ webhooks.handlers +
           (RenditionRequest.JobKind -> rendering.handle),
         WorkerConfig(s"${workerName(config)}-jobs")
       )
-      relay = OutboxRelay(db, searchJobs.deliver, WorkerConfig(s"${workerName(config)}-outbox"))
+      relay = OutboxRelay(
+        db,
+        event => searchJobs.deliver(event) *> webhooks.deliver(event),
+        WorkerConfig(s"${workerName(config)}-outbox")
+      )
       nothing <- runner.run
         .raceFirst(relay.run)
         .raceFirst(jobs.schedule)

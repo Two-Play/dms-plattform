@@ -72,7 +72,8 @@ object WebhookJobsSpec extends ZIOSpecDefault:
     def describe(event: OutboxEvent): IO[String, Option[WebhookNotification]] =
       ZIO.fromEither(event.payload.value.fromJson[Json.Obj]).map { payload =>
         val eventType = payload.get("type").collect { case Json.Str(s) => s }
-        val path      = payload.get("classPath").collect { case Json.Arr(a) => a.collect { case Json.Str(s) => s } }
+        val path      =
+          payload.get("classPath").collect { case Json.Arr(a) => a.collect { case Json.Str(s) => s } }
         eventType.map(t =>
           WebhookNotification(
             t,
@@ -90,10 +91,18 @@ object WebhookJobsSpec extends ZIOSpecDefault:
     WebhookSettings(allowedHosts = Set("127.0.0.1"), timeout = 2.seconds, maxAttempts = maxAttempts)
 
   private def worker(name: String) =
-    WorkerConfig(name, batchSize = 20, lease = 30.seconds, pollInterval = 50.millis, retryBase = Duration.Zero)
+    WorkerConfig(
+      name,
+      batchSize = 20,
+      lease = 30.seconds,
+      pollInterval = 50.millis,
+      retryBase = Duration.Zero
+    )
 
   private def jobs(maxAttempts: Int = 5): ZIO[Env, Nothing, WebhookJobs] =
-    ZIO.serviceWith[Env](e => WebhookJobs(e.app, TestEvents, HttpWebhookSender(settings(maxAttempts)), settings(maxAttempts)))
+    ZIO.serviceWith[Env](e =>
+      WebhookJobs(e.app, TestEvents, HttpWebhookSender(settings(maxAttempts)), settings(maxAttempts))
+    )
 
   private def subscribe(
       tenant: TenantId,
@@ -101,7 +110,9 @@ object WebhookJobsSpec extends ZIOSpecDefault:
       types: Set[String] = WebhookEventType.all,
       classes: Set[String] = Set.empty
   ): ZIO[Env, DbError, WebhookSubscription] =
-    ZIO.serviceWithZIO[Env](_.app.transact(tenant)(WebhookStore.create(url, secret, types, classes, None, "admin")))
+    ZIO.serviceWithZIO[Env](
+      _.app.transact(tenant)(WebhookStore.create(url, secret, types, classes, None, "admin"))
+    )
 
   private def emit(tenant: TenantId, eventType: String, classPath: List[String] = List("policy")) =
     ZIO.serviceWithZIO[Env](
@@ -110,14 +121,20 @@ object WebhookJobsSpec extends ZIOSpecDefault:
           "document",
           UUID.randomUUID(),
           "test.status-changed",
-          Jsonb(Json.Obj("type" -> Json.Str(eventType), "classPath" -> Json.Arr(classPath.map(Json.Str(_))*)).toJson)
+          Jsonb(
+            Json
+              .Obj("type" -> Json.Str(eventType), "classPath" -> Json.Arr(classPath.map(Json.Str(_))*))
+              .toJson
+          )
         )
       )
     )
 
   /** The outbox relay with the webhook subscriber, until it claims nothing. */
   private def relay(w: WebhookJobs): ZIO[Env, DbError, Unit] =
-    ZIO.serviceWithZIO[Env](e => OutboxRelay(e.app, w.deliver, worker("relay")).runOnce.repeatUntil(_ == 0).unit)
+    ZIO.serviceWithZIO[Env](e =>
+      OutboxRelay(e.app, w.deliver, worker("relay")).runOnce.repeatUntil(_ == 0).unit
+    )
 
   /** One run of the job runner over the due webhook jobs. */
   private def runJobs(w: WebhookJobs): ZIO[Env, DbError, Int] =
@@ -129,7 +146,12 @@ object WebhookJobsSpec extends ZIOSpecDefault:
   private def published(eventId: Long): ZIO[Env, DbError, Boolean] =
     ZIO.serviceWithZIO[Env](
       _.owner.transactSystem(
-        Db.sql(sql"select published_at is not null from dms.outbox_event where id = $eventId".query[Boolean].run().head)
+        Db.sql(
+          sql"select published_at is not null from dms.outbox_event where id = $eventId"
+            .query[Boolean]
+            .run()
+            .head
+        )
       )
     )
 
@@ -154,9 +176,27 @@ object WebhookJobsSpec extends ZIOSpecDefault:
         yield assertTrue(
           got.size == 1,
           id == logged.head.id.toString,
-          WebhookSignature.verify(secret, id, ts, request.body, request.header(WebhookSignature.SignatureHeader)),
-          !WebhookSignature.verify(secret, id, ts + 1, request.body, request.header(WebhookSignature.SignatureHeader)),
-          !WebhookSignature.verify(WebhookSignature.newSecret(), id, ts, request.body, request.header(WebhookSignature.SignatureHeader)),
+          WebhookSignature.verify(
+            secret,
+            id,
+            ts,
+            request.body,
+            request.header(WebhookSignature.SignatureHeader)
+          ),
+          !WebhookSignature.verify(
+            secret,
+            id,
+            ts + 1,
+            request.body,
+            request.header(WebhookSignature.SignatureHeader)
+          ),
+          !WebhookSignature.verify(
+            WebhookSignature.newSecret(),
+            id,
+            ts,
+            request.body,
+            request.header(WebhookSignature.SignatureHeader)
+          ),
           request.header("content-type") == "application/json",
           request.header("user-agent") == WebhookJobs.UserAgent,
           body.get("type").contains(Json.Str(WebhookEventType.Published)),
@@ -275,10 +315,12 @@ object WebhookJobsSpec extends ZIOSpecDefault:
           s        <- subscribe(t, receiver.url)
           _        <- emit(t, WebhookEventType.Published)
           _        <- relay(w)
-          _        <- env.app.transact(t)(WebhookStore.update(s.id, s.url, s.eventTypes, s.documentClasses, None, active = false))
-          _        <- runJobs(w)
-          d        <- deliveries(t, s)
-          got      <- receiver.requests
+          _        <- env.app.transact(t)(
+            WebhookStore.update(s.id, s.url, s.eventTypes, s.documentClasses, None, active = false)
+          )
+          _   <- runJobs(w)
+          d   <- deliveries(t, s)
+          got <- receiver.requests
         yield assertTrue(got.isEmpty, d.map(_.status) == List("skipped"))
       )
     },
@@ -290,7 +332,9 @@ object WebhookJobsSpec extends ZIOSpecDefault:
         _    <- subscribe(a, "https://intranet.example.com/hook")
         mine <- env.app.transact(a)(WebhookStore.list)
         seen <- env.app.transact(b)(WebhookStore.list)
-        rows <- env.app.transact(b)(Db.sql(sql"select count(*) from dms.webhook_delivery".query[Long].run().head))
+        rows <- env.app.transact(b)(
+          Db.sql(sql"select count(*) from dms.webhook_delivery".query[Long].run().head)
+        )
       yield assertTrue(mine.size == 1, seen.isEmpty, rows == 0L)
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

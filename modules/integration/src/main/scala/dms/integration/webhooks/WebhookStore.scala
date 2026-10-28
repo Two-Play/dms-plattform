@@ -56,8 +56,12 @@ object WebhookStore:
     Db.sql(
       sql"""insert into dms.webhook_subscription
               (tenant_id, url, secret, event_types, document_classes, description, created_by)
-            values (dms.current_tenant(), $url, $secret, array(select jsonb_array_elements_text(${json(eventTypes)})),
-                    array(select jsonb_array_elements_text(${json(documentClasses)})), $description, $createdBy)
+            values (dms.current_tenant(), $url, $secret, array(select jsonb_array_elements_text(${json(
+          eventTypes
+        )})),
+                    array(select jsonb_array_elements_text(${json(
+          documentClasses
+        )})), $description, $createdBy)
             returning id, url, array_to_json(event_types)::text, array_to_json(document_classes)::text, description, active,
                    created_by, created_at, updated_at""".query[SubscriptionRow].run().head
     ).map(subscription)
@@ -124,7 +128,9 @@ object WebhookStore:
     Db.sql(
       sql"""insert into dms.webhook_delivery
               (id, tenant_id, subscription_id, event_id, event_type, document_id, payload)
-            values ($id, dms.current_tenant(), $subscription, $eventId, $eventType, $documentId, ${Jsonb(payload)})
+            values ($id, dms.current_tenant(), $subscription, $eventId, $eventType, $documentId, ${Jsonb(
+          payload
+        )})
             on conflict (subscription_id, event_id) do nothing""".update.run() > 0
     )
 

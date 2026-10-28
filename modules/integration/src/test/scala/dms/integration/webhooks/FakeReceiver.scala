@@ -9,7 +9,11 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 
 /** A webhook receiver for tests on 127.0.0.1: records every request and answers with `status`. */
-final class FakeReceiver private (server: HttpServer, val status: AtomicInteger, received: Ref[Vector[FakeReceiver.Request]]):
+final class FakeReceiver private (
+    server: HttpServer,
+    val status: AtomicInteger,
+    received: Ref[Vector[FakeReceiver.Request]]
+):
   def url: String = s"http://127.0.0.1:${server.getAddress.getPort}/hook"
 
   def requests: UIO[Vector[FakeReceiver.Request]] = received.get
@@ -34,9 +38,12 @@ object FakeReceiver:
           "/hook",
           exchange =>
             val body    = String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)
-            val headers = exchange.getRequestHeaders.asScala.map((k, v) => k.toLowerCase -> v.asScala.mkString(",")).toMap
+            val headers =
+              exchange.getRequestHeaders.asScala.map((k, v) => k.toLowerCase -> v.asScala.mkString(",")).toMap
             Unsafe.unsafe(implicit u =>
-              Runtime.default.unsafe.run(received.update(_ :+ Request(headers, body))).getOrThrowFiberFailure()
+              Runtime.default.unsafe
+                .run(received.update(_ :+ Request(headers, body)))
+                .getOrThrowFiberFailure()
             )
             exchange.sendResponseHeaders(status.get, -1)
             exchange.close()

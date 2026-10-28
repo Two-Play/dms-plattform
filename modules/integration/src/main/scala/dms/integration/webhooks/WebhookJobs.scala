@@ -17,8 +17,8 @@ import scala.util.Try
   *      tenant, one delivery per matching subscription (with the exact body to send) and a job
   *      `webhook.deliver` for each. It only writes rows, so the outbox relay marks the event delivered only
   *      after every subscription has its delivery; a retried event finds them and adds nothing.
-  *   2. The job sends the delivery, signed (see [[WebhookSignature]]), after the SSRF check ([[UrlGuard]]).
-  *      A 2xx answer delivers it; anything else fails the job, which the job runner retries with exponential
+  *   2. The job sends the delivery, signed (see [[WebhookSignature]]), after the SSRF check ([[UrlGuard]]). A
+  *      2xx answer delivers it; anything else fails the job, which the job runner retries with exponential
   *      backoff until `maxAttempts`, then the delivery is `dead` (dead letter) and can be sent again by an
   *      administrator. A target the SSRF check blocks is dead at once.
   *
@@ -46,26 +46,20 @@ final class WebhookJobs(db: Db, events: WebhookEvents, sender: WebhookSender, se
       _             <- ZIO.foreachDiscard(subscriptions.filter(_.matches(notification))) { s =>
         val id = UUID.randomUUID()
         WebhookStore
-          .insertDelivery(id, s.id, event.id, notification.eventType, Some(notification.documentId), body(event, notification))
+          .insertDelivery(
+            id,
+            s.id,
+            event.id,
+            notification.eventType,
+            Some(notification.documentId),
+            body(event, notification)
+          )
           .flatMap(created => ZIO.when(created)(enqueue(id)))
       }
     yield ()
 
-  /** Sends a delivery again (e.g. a dead one, after the receiver was fixed). Runs inside
-    * `Db.transact(tenant)`.
-    */
-  def redeliver(deliveryId: UUID): IO[DbError, Unit] =
-    WebhookStore.reopen(deliveryId) *>
-      Clock.instant.flatMap(now =>
-        JobQueue
-          .enqueue(
-            DeliverKind,
-            payload(deliveryId),
-            idempotencyKey = Some(s"$DeliverKind:$deliveryId:${now.toEpochMilli}"),
-            maxAttempts = settings.maxAttempts
-          )
-          .unit
-      )
+  /** Sends a delivery again, see [[WebhookJobs.redeliver]]. */
+  def redeliver(deliveryId: UUID): IO[DbError, Unit] = WebhookJobs.redeliver(deliveryId, settings)
 
   private def enqueue(deliveryId: UUID): IO[DbError, Unit] =
     JobQueue
@@ -83,44 +77,50 @@ final class WebhookJobs(db: Db, events: WebhookEvents, sender: WebhookSender, se
       delivery <- ZIO.fromEither(deliveryOf(job.payload))
       target   <- db.transact(tenant)(WebhookStore.target(delivery)).mapError(describe)
       _        <- target match
-        case None                                                         => ZIO.unit
-        case Some(t) if t.status == WebhookDelivery.Delivered             => ZIO.unit
-        case Some(t) if t.status == WebhookDelivery.Skipped               => ZIO.unit
-        case Some(t) if !t.subscriptionActive                             =>
+        case None                                             => ZIO.unit
+        case Some(t) if t.status == WebhookDelivery.Delivered => ZIO.unit
+        case Some(t) if t.status == WebhookDelivery.Skipped   => ZIO.unit
+        case Some(t) if !t.subscriptionActive                 =>
           record(tenant)(WebhookStore.skip(t.deliveryId, "the subscription was deactivated or deleted"))
         case Some(t) => attempt(tenant, t, last = job.attempts >= job.maxAttempts)
     yield ()
 
   private def attempt(tenant: TenantId, t: DeliveryTarget, last: Boolean): IO[String, Unit] =
-    ZIO.fromEither(UrlGuard.parse(t.url, settings)).flatMap(uri => UrlGuard.check(uri, settings).as(uri)).either.flatMap {
-      case Left(blocked) =>
-        // Blocked targets do not become allowed by retrying: dead at once.
-        record(tenant)(WebhookStore.recordAttempt(t.deliveryId, WebhookDelivery.Dead, None, Some(blocked))) *>
-          ZIO.logWarning(s"Webhook delivery ${t.deliveryId} blocked: $blocked")
-      case Right(uri) =>
-        for
-          now <- Clock.instant
-          timestamp = now.getEpochSecond
-          id        = t.deliveryId.toString
-          headers   = List(
-            WebhookSignature.IdHeader        -> id,
-            WebhookSignature.TimestampHeader -> timestamp.toString,
-            WebhookSignature.SignatureHeader -> WebhookSignature.sign(t.secret, id, timestamp, t.payload),
-            "User-Agent"                     -> UserAgent
-          )
-          answer <- sender.send(uri, headers, t.payload).either
-          failed = answer match
-            case Right(code) if code >= 200 && code < 300 => None
-            case Right(code)                              => Some(s"the receiver answered HTTP $code")
-            case Left(error)                              => Some(error)
-          status =
-            if failed.isEmpty then WebhookDelivery.Delivered
-            else if last then WebhookDelivery.Dead
-            else WebhookDelivery.Retrying
-          _ <- record(tenant)(WebhookStore.recordAttempt(t.deliveryId, status, answer.toOption, failed))
-          _ <- ZIO.foreachDiscard(failed)(ZIO.fail(_))
-        yield ()
-    }
+    ZIO
+      .fromEither(UrlGuard.parse(t.url, settings))
+      .flatMap(uri => UrlGuard.check(uri, settings).as(uri))
+      .either
+      .flatMap {
+        case Left(blocked) =>
+          // Blocked targets do not become allowed by retrying: dead at once.
+          record(tenant)(
+            WebhookStore.recordAttempt(t.deliveryId, WebhookDelivery.Dead, None, Some(blocked))
+          ) *>
+            ZIO.logWarning(s"Webhook delivery ${t.deliveryId} blocked: $blocked")
+        case Right(uri) =>
+          for
+            now <- Clock.instant
+            timestamp = now.getEpochSecond
+            id        = t.deliveryId.toString
+            headers   = List(
+              WebhookSignature.IdHeader        -> id,
+              WebhookSignature.TimestampHeader -> timestamp.toString,
+              WebhookSignature.SignatureHeader -> WebhookSignature.sign(t.secret, id, timestamp, t.payload),
+              "User-Agent"                     -> UserAgent
+            )
+            answer <- sender.send(uri, headers, t.payload).either
+            failed = answer match
+              case Right(code) if code >= 200 && code < 300 => None
+              case Right(code)                              => Some(s"the receiver answered HTTP $code")
+              case Left(error)                              => Some(error)
+            status =
+              if failed.isEmpty then WebhookDelivery.Delivered
+              else if last then WebhookDelivery.Dead
+              else WebhookDelivery.Retrying
+            _ <- record(tenant)(WebhookStore.recordAttempt(t.deliveryId, status, answer.toOption, failed))
+            _ <- ZIO.foreachDiscard(failed)(ZIO.fail(_))
+          yield ()
+      }
 
   private def record(tenant: TenantId)(work: IO[DbError, Unit]): IO[String, Unit] =
     db.transact(tenant)(work).mapError(describe)
@@ -137,6 +137,22 @@ final class WebhookJobs(db: Db, events: WebhookEvents, sender: WebhookSender, se
 object WebhookJobs:
   val DeliverKind = "webhook.deliver"
   val UserAgent   = "DMS-Webhooks/1"
+
+  /** Sends a delivery again with the same id and body (e.g. a dead one, after the receiver was fixed): sets
+    * it back to pending and enqueues a new job. Runs inside `Db.transact(tenant)`.
+    */
+  def redeliver(deliveryId: UUID, settings: WebhookSettings): IO[DbError, Unit] =
+    WebhookStore.reopen(deliveryId) *>
+      Clock.instant.flatMap(now =>
+        JobQueue
+          .enqueue(
+            DeliverKind,
+            payload(deliveryId),
+            idempotencyKey = Some(s"$DeliverKind:$deliveryId:${now.toEpochMilli}"),
+            maxAttempts = settings.maxAttempts
+          )
+          .unit
+      )
 
   private def payload(deliveryId: UUID): Jsonb =
     Jsonb(Json.Obj("deliveryId" -> Json.Str(deliveryId.toString)).toJson)
