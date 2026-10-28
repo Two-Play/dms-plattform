@@ -30,7 +30,7 @@ lazy val db = module("db", "modules/db")
   )
 
 lazy val identity = module("identity", "modules/identity")
-  .dependsOn(kernel)
+  .dependsOn(kernel, db)
   .settings(libraryDependencies ++= Dependencies.jwt)
 
 lazy val authz = module("authz", "modules/authz").dependsOn(kernel, identity)
