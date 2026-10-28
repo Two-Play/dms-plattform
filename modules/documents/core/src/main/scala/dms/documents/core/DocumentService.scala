@@ -265,6 +265,32 @@ final class DocumentService(
       )
     yield details
 
+  /** How documents use the versions of `template` before `version` (US-01.2): document versions per template
+    * version and status, and the open versions with title and author only. The caller decides who may see it;
+    * the rows are limited to the current tenant by row-level security.
+    */
+  def templateUsage(template: TemplateId, version: Int): IO[DocumentError, TemplateUsage] =
+    sql {
+      val counts = DocumentStore
+        .templateUsageCounts(template, version)
+        .map((v, status, versions, documents) =>
+          v -> StatusUsage(DocumentStatus.valueOf(status), versions.toInt, documents.toInt)
+        )
+      val documents                = DocumentStore.templateUsageDocuments(template, version).toMap
+      def byStatus(v: Option[Int]) = counts.collect { case (`v`, c) => c }.sortBy(_.status.ordinal)
+      TemplateUsage(
+        template,
+        version,
+        documents.get(None).fold(0)(_.toInt),
+        byStatus(None),
+        documents
+          .collect { case (Some(v), n) => VersionUsage(v, n.toInt, byStatus(Some(v))) }
+          .toList
+          .sortBy(_.templateVersion),
+        DocumentStore.openTemplateUses(template, version)
+      )
+    }
+
   /** Saves a changed draft as its next working state. Locked sections can only keep the template's text
     * unless a deviation request for the section is recorded (edit rules of the template); the computed fields
     * are those of the template. The deviation report is recomputed and stored with the draft.

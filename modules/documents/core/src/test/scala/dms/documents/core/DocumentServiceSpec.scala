@@ -886,6 +886,55 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         code(crmOverwritten) == Some(List("contractPartner" -> "not_editable"))
       )
     },
+    test(
+      "template usage counts document versions per earlier template version and status and lists open versions"
+    ) {
+      for
+        f         <- fixture
+        other     <- fixture
+        published <- published(f)
+        next      <- as(f.tenant)(_.newVersion(published, ChangeKind.Major, None, author))
+        created   <- create(f)
+        (draft, draftVersion) = created
+        onThree <- as(f.tenant)(
+          _.create(
+            NewDocument(
+              f.templateId,
+              3,
+              "Contract on version 3",
+              manual("termMonths" -> MetadataValue.Number(6))
+            ),
+            approver
+          )
+        )
+        _          <- create(other)
+        beforeOne  <- as(f.tenant)(_.templateUsage(f.templateId, 1))
+        beforeTwo  <- as(f.tenant)(_.templateUsage(f.templateId, 2))
+        beforeFour <- as(f.tenant)(_.templateUsage(f.templateId, 4))
+        foreign    <- as(other.tenant)(_.templateUsage(f.templateId, 4))
+      yield assertTrue(
+        beforeOne == TemplateUsage(f.templateId, 1, 0, Nil, Nil, Nil),
+        beforeTwo.byStatus == List(StatusUsage(Draft, 2, 2), StatusUsage(Published, 1, 1)),
+        beforeTwo.byVersion == List(VersionUsage(1, 2, beforeTwo.byStatus)),
+        beforeTwo.documents == 2,
+        beforeTwo.openVersions.map(o => (o.documentId, o.versionId, o.label, o.status, o.templateVersion)) ==
+          List(
+            (draft.id, draftVersion.id, "1.0-draft.1", Draft, 1),
+            (published, next.id, "2.0-draft.1", Draft, 1)
+          ),
+        beforeTwo.openVersions.map(o => (o.title, o.authorId)) ==
+          List(("Service contract ACME", author), ("Service contract ACME", author)),
+        // The new version of a published document keeps the template version of its basis.
+        next.templateVersion == 1,
+        beforeFour.byStatus == List(StatusUsage(Draft, 3, 3), StatusUsage(Published, 1, 1)),
+        beforeFour.byVersion.map(_.templateVersion) == List(1, 3),
+        beforeFour.byVersion.last == VersionUsage(3, 1, List(StatusUsage(Draft, 1, 1))),
+        beforeFour.documents == 3,
+        beforeFour.openVersions.head.documentId == onThree._1.id,
+        beforeFour.openVersions.head.authorId == approver,
+        foreign == TemplateUsage(f.templateId, 4, 0, Nil, Nil, Nil)
+      )
+    },
     test("tenants only see their own documents") {
       for
         f       <- fixture
