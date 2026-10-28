@@ -154,8 +154,9 @@ object TemplateApiSpec extends ZIOSpecDefault:
     jwt.sign(RSASSASigner(signingKey))
     jwt.serialize()
 
-  private val endpoints = TemplateApi.endpoints ++ TemplateLifecycleApi.endpoints
-  private val routes    = ZioHttpInterpreter().toHttp(endpoints)
+  private val endpoints =
+    TemplateApi.endpoints ++ TemplateLifecycleApi.endpoints ++ TemplatePreviewApi.endpoints
+  private val routes = ZioHttpInterpreter().toHttp(endpoints)
 
   private def call(user: UserId, method: String, path: String, body: Option[String] = None) =
     val url     = URL.decode(path).toOption.get
@@ -187,6 +188,8 @@ object TemplateApiSpec extends ZIOSpecDefault:
       assertTrue(
         docs.paths.pathItems.contains("/api/v1/admin/templates/{id}/versions/{version}/test"),
         docs.paths.pathItems.contains("/api/v1/templates"),
+        docs.paths.pathItems.contains("/api/v1/templates/{id}/versions/{version}/preview"),
+        docs.paths.pathItems.contains("/api/v1/templates/{id}/versions/{version}/fields"),
         docs.components.exists(c => c.schemas.contains("Block") && c.schemas.contains("ResolvedBlock"))
       )
     },
@@ -304,6 +307,54 @@ object TemplateApiSpec extends ZIOSpecDefault:
           .exists(_.exists(e => e.templateId == id && e.version == 1)),
         adminView._1 == Status.Forbidden,
         invalid._1 == Status.Conflict
+      )
+    },
+    test("authors get the form fields and a live preview of released versions only") {
+      for
+        classId <- contractClass.await
+        create  <- call(designer, "POST", "/api/v1/admin/templates", Some(template(classId)))
+        id      = created(create._2).templateId
+        preview = s"/api/v1/templates/$id/versions/1/preview"
+        values  =
+          """{"values":{"title":{"type":"Text","value":"<b>ACME</b>"},"termType":{"type":"Selection","code":"nope"}},"language":"de"}"""
+        draft <- call(author, "POST", preview, Some(values))
+        _     <- call(
+          designer,
+          "POST",
+          s"/api/v1/admin/templates/$id/versions/1/status",
+          Some("""{"status":"Testing"}""")
+        )
+        _ <- call(
+          designer2,
+          "POST",
+          s"/api/v1/admin/templates/$id/versions/1/status",
+          Some("""{"status":"Released"}""")
+        )
+        fields   <- call(author, "GET", s"/api/v1/templates/$id/versions/1/fields")
+        byAuthor <- call(author, "POST", preview, Some(values))
+        cached   <- call(author, "POST", preview, Some("""{"values":{}}"""))
+        byAdmin  <- call(admin, "POST", preview, Some(values))
+        badLang  <- call(author, "POST", preview, Some("""{"values":{},"language":"fr"}"""))
+        formFields = fields._2.fromJson[TemplateFieldsView].toOption
+        result     = byAuthor._2.fromJson[PreviewView].toOption
+        empty      = cached._2.fromJson[PreviewView].toOption
+      yield assertTrue(
+        draft._1 == Status.NotFound,
+        fields._1 == Status.Ok,
+        formFields.exists(
+          _.fields.take(2).map(f => (f.key, f.usedInTemplate)) == List("title" -> true, "termType" -> true)
+        ),
+        formFields.exists(f => !f.fields.exists(_.key == "documentId")),
+        byAuthor._1 == Status.Ok,
+        result.exists(_.html.contains("Entwurf – nicht gültig")),
+        result.exists(_.html.contains("&lt;b&gt;ACME&lt;/b&gt;")),
+        result.exists(_.html.contains("data-field=\"termType\"")),
+        result.exists(_.issues.map(i => (i.field, i.code)) == List(Some("termType") -> "unknown_option")),
+        result.exists(_.missingRequired.exists(_.field == "owner")),
+        empty.exists(_.missingRequired.headOption.contains(MissingValueView("title", "Title"))),
+        empty.exists(_.html.contains("dms-missing-required")),
+        byAdmin._1 == Status.Forbidden,
+        badLang._1 == Status.UnprocessableEntity
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

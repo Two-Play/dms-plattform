@@ -166,6 +166,35 @@ final class TemplateService(audit: AuditTrail, profiles: ProfileSource, limits: 
   /** Released versions only: the template catalog for authors. */
   def catalog: IO[TemplateError, List[TemplateVersion]] = sql(TemplateStore.released())
 
+  /** A released version compiled against its class profile, for creating documents and live previews
+    * (US-03.2). Versions in any other status are not found: authors only see the catalog.
+    *
+    * Compiled versions are cached by template id and version number. Released versions and class profile
+    * versions are immutable, and the version is always read first through row-level security, so the cache
+    * never hands out a template the caller's tenant cannot read.
+    */
+  def released(id: TemplateId, number: Int): IO[TemplateError, PreviewTemplate] =
+    for
+      v <- version(id, number)
+        .filterOrFail(_.status == TemplateStatus.Released)(
+          TemplateError.NotFound(s"template ${id.value} version $number is not released")
+        )
+      cached   <- ZIO.succeed(compiledCache.get(id -> number))
+      template <- cached match
+        case Some(t) => ZIO.succeed(t)
+        case None    =>
+          for
+            profile  <- profiles.profile(v.documentClassId, v.documentClassVersion)
+            compiled <- ZIO
+              .fromEither(TemplateCompiler.compile(v.content, ProfileSchema.from(profile), limits))
+              .mapError(TemplateError.InvalidContent(_))
+            t = PreviewTemplate(v, profile, compiled)
+            _ <- ZIO.succeed(compiledCache.put(id -> number, t))
+          yield t
+    yield template
+
+  private val compiledCache = LruCache[(TemplateId, Int), PreviewTemplate](256)
+
   /** Moves a version to `to`. Releasing requires an actor who neither created nor changed the version. */
   def changeStatus(
       id: TemplateId,
@@ -272,6 +301,15 @@ final class TemplateService(audit: AuditTrail, profiles: ProfileSource, limits: 
       )
       .mapError(TemplateError.Database(_))
       .unit
+
+/** A small thread-safe least-recently-used cache. */
+private[core] final class LruCache[K, V](maxEntries: Int):
+  private val entries = new java.util.LinkedHashMap[K, V](16, 0.75f, true):
+    override def removeEldestEntry(eldest: java.util.Map.Entry[K, V]): Boolean = this.size() > maxEntries
+
+  def get(key: K): Option[V]      = entries.synchronized(Option(entries.get(key)))
+  def put(key: K, value: V): Unit = entries.synchronized { entries.put(key, value); () }
+  def size: Int                   = entries.synchronized(entries.size)
 
 object TemplateService:
   val layer: URLayer[AuditTrail & ProfileSource, TemplateService] =

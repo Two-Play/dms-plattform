@@ -3,7 +3,14 @@ import path from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, searchForWorkspaceRoot } from 'vite'
+
+// The document stylesheet lives with the HTML renderer in the backend (modules/templates, DMS-39), so the
+// preview and the PDF rendering share one file.
+const documentStyles = path.resolve(
+  import.meta.dirname,
+  '../modules/templates/core/src/main/resources/dms/templates',
+)
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -19,11 +26,15 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
     ],
     resolve: {
-      alias: { '@': path.resolve(import.meta.dirname, './src') },
+      alias: {
+        '@': path.resolve(import.meta.dirname, './src'),
+        '@dms-document': documentStyles,
+      },
     },
     server: {
       port: 5173,
       strictPort: true,
+      fs: { allow: [searchForWorkspaceRoot(process.cwd()), documentStyles] },
       // Same paths as the backend, so the browser only talks to its own origin (no CORS needed).
       proxy: {
         '/api': { target: backend, changeOrigin: true },
