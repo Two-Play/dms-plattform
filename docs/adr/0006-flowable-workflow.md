@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (integration to be validated by a spike) |
+| Status | Accepted (validated by spike DMS-22 on 2026-10-28) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -39,13 +39,35 @@ Flowable runs embedded in the JVM and uses the same PostgreSQL instance. The doc
 - Flowable brings numerous tables of its own and its own thread pools (async executor) into the application.
 - The blocking Java API must be wrapped with `ZIO.attemptBlocking`; transaction boundaries between Flowable and our own DB access must be clarified.
 - Two state models (lifecycle and process instance) must be kept consistent.
-- Version choice open: Flowable `8.0.0` and `7.2.0` are available.
+- The shared transaction needs about 170–190 lines of glue that use Flowable `impl` packages (not public API); see spike result.
+
+## Spike result (DMS-22, 2026-10-28)
+
+Details, code and logs: [`spikes/flowable/README.md`](../../spikes/flowable/README.md).
+
+| Question | Result |
+|---|---|
+| Version | **8.0.0.** Same Java 17 baseline and API as 7.2.0 (identical spike code passes on both); Spring 7 core/beans, Jackson 3, no Spring Boot. `commons-logging` must be excluded (duplicate classes with `jcl-over-slf4j`). |
+| Engine without Spring | `StandaloneProcessEngineConfiguration` with HikariCP. Tables in their own schema **`flowable`** (32 tables with IDM and event registry disabled). Boot 1.5–3.9 s, about 22 MB heap. |
+| BPMN | Parallel review by two candidate groups, approval with boundary timer escalating to `approval-managers`; runs end to end, timer fires 0.1–0.6 s after due date. |
+| Shared transaction | **Works.** Own JDBC write and `completeTask` commit or roll back together (5 scenarios), via custom transaction interceptor, a data source bound to the current transaction's connection, a custom `TransactionContextFactory` and `transactionsExternallyManaged=true`; connection held in a ZIO `FiberRef`. Flowable's default mode demonstrably leaves inconsistent state. |
+| Process versioning | Running instances stay on their definition version; new starts use the latest. |
+| Correlation | Business key `"<documentId>:<version>"`, process variables `documentId`, `documentVersion`; Flowable `tenantId` per tenant. |
+
+Constraints that follow from it:
+
+- The database access layer (0012) must use **one connection per transaction, reachable from a FiberRef**, so Flowable can join.
+- Inside a transaction every engine call goes through `WorkflowService`; a direct engine call silently runs in its own transaction.
+- Deploy process definitions in their own transaction (the deployment cache is not transactional).
+- Fallback if the glue is rejected later: standalone engine as source of truth for the step, separate idempotent transaction for status and audit, plus a reconciliation job.
 
 ## Follow-ups
 
-- Spike: Flowable version (8.0.0 vs. 7.2.0), shared transaction with our own JDBC access (0012), tenant isolation via Flowable `tenantId`, behaviour under row-level security (0014), startup time and memory footprint.
+- Add `flowable-engine` 8.0.0 (excluding `commons-logging`) to `workflow-core`; put the transaction glue in one file with an integration test that runs on every Flowable upgrade.
+- Shared transaction primitive (`Tx.transact` with FiberRef connection) belongs in the database access layer (0012) so documents, audit and workflow join the same transaction.
+- Flowable DDL into Flyway with `databaseSchemaUpdate=false` in production.
+- Not yet covered: row-level security (0014) next to schema `flowable` (which must have no policies), retries on `FlowableOptimisticLockingException` at the review join, async executor on several nodes.
 - Encapsulation exclusively in the `workflow-core` module; no Flowable types in `workflow-api`.
-- Decide whether Flowable tables live in their own schema.
 - Ruled out: modelling the document status in BPMN; a separate workflow cluster.
 
 ## Reversibility

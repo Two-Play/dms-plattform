@@ -19,7 +19,7 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0003](0003-zio-2.md) | ZIO 2 as effect and runtime system | Accepted | high |
 | [0004](0004-build-sbt-1.md) | Build with sbt 1.12 | Accepted | low to medium |
 | [0005](0005-zitadel-identitaet.md) | ZITADEL as identity provider | Accepted | medium |
-| [0006](0006-flowable-workflow.md) | Flowable as embedded workflow engine | Accepted (spike for integration) | medium |
+| [0006](0006-flowable-workflow.md) | Flowable as embedded workflow engine | Accepted (validated by spike) | medium |
 | [0007](0007-strukturiertes-inhaltsformat.md) | Structured content format is primary, DOCX for import/export only | Accepted | high |
 | [0008](0008-rendering-weasyprint.md) | Rendering HTML → PDF/A with WeasyPrint, validation with veraPDF | Proposed (determinism spike) | low |
 | [0009](0009-persistenz.md) | PostgreSQL, S3 with Object Lock, OpenSearch | Accepted | medium |
