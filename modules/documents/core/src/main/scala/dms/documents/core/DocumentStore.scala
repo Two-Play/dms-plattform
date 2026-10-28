@@ -4,7 +4,7 @@ import com.augustnagro.magnum.*
 import dms.db.Jsonb
 import dms.documents.*
 import dms.documents.core.DocumentJson.given
-import dms.documents.metadata.DocumentClassId
+import dms.documents.metadata.{CoreFields, DocumentClassId}
 import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
 import dms.templates.{DeviationReport, SectionId, TemplateContent}
 import zio.json.*
@@ -137,32 +137,50 @@ private[core] object DocumentStore:
       .run()
       .toList
 
-  private type OpenUseRow = (UUID, UUID, String, String, Int, Int, Int, String, Int, OffsetDateTime)
+  private type OpenUseRow = (UUID, UUID, String, String, Int, Int, Int, String, Int, OffsetDateTime, Jsonb)
 
   /** Open versions on a version of `template` before `before` with the document title, the most recently
-    * changed first.
+    * changed first. The field values are read only to tell whether the version is restricted (confidentiality
+    * at least `Confidential`); they are not returned.
     */
   def openTemplateUses(template: TemplateId, before: Int)(using DbTx): List[OpenTemplateUse] =
     sql"""select v.document_id, v.id, d.title, v.created_by, v.major, v.minor, v.working_state, v.status,
-                 v.template_version, v.updated_at
+                 v.template_version, v.updated_at, v.field_values
           from dms.document_version v join dms.document d on d.id = v.document_id
           where v.template_id = ${template.value} and v.template_version < $before
             and v.status in ('Draft', 'InReview', 'InApproval')
           order by v.updated_at desc, v.id"""
       .query[OpenUseRow]
       .run()
-      .map { case (documentId, id, title, author, major, minor, workingState, status, templateVersion, at) =>
-        val s = DocumentStatus.valueOf(status)
-        OpenTemplateUse(
-          DocumentId(documentId),
-          id,
-          title,
-          UserId(author),
-          Versioning.label(VersionNo(major, minor), s, workingState),
-          s,
-          templateVersion,
-          at.toInstant
-        )
+      .map {
+        case (
+              documentId,
+              id,
+              title,
+              author,
+              major,
+              minor,
+              workingState,
+              status,
+              templateVersion,
+              at,
+              values
+            ) =>
+          val s       = DocumentStatus.valueOf(status)
+          val entries = values.value
+            .fromJson[Map[String, FieldEntry]]
+            .fold(e => throw IllegalStateException(s"cannot read field values of version $id: $e"), identity)
+          OpenTemplateUse(
+            DocumentId(documentId),
+            id,
+            title,
+            UserId(author),
+            Versioning.label(VersionNo(major, minor), s, workingState),
+            s,
+            templateVersion,
+            at.toInstant,
+            CoreFields.isRestricted(entries.map((k, e) => k -> e.value))
+          )
       }
       .toList
 

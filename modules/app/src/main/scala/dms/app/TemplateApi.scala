@@ -138,6 +138,10 @@ final case class TestCaseView(
     content: Option[ResolvedContent],
     /** The resolved text without markup. */
     text: Option[String],
+    /** The resolved content as HTML fragment (`article.dms-document`, marked "Draft – not valid"), like the
+      * live preview; style it with the document stylesheet. Empty when the case failed.
+      */
+    html: Option[String],
     missingRequired: List[String],
     branches: List[BranchView],
     error: Option[String]
@@ -273,11 +277,25 @@ object TemplateApi:
               .orElseFail(invalid(s"unknown language '${req.language.getOrElse("")}'; use en or de"))
             values = req.values.map(_.map((k, value) => k -> ProfileSchema.fieldValue(value)))
             run <- designer(p)(_.test(TemplateId(id), v, values, language))
-          yield testRunView(run)
+          yield testRunView(run, language)
+      )
+
+  val fields: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(admin / templateId / "versions" / versionNo / "fields")
+      .out(jsonBody[TemplateFieldsView])
+      .description(
+        "Fields of a version in any status, for template designers: the editable fields of the class profile " +
+          "with type, rules and requiredness, those the template uses first. 422 (invalid_content) if the " +
+          "content does not compile against the profile."
+      )
+      .tag("Templates")
+      .serverLogic(p =>
+        (id, v) => designer(p)(_.compiled(TemplateId(id), v)).map(TemplatePreviewApi.fieldsView)
       )
 
   def endpoints: List[ZServerEndpoint[Env, Any]] =
-    List(list, create, check, get, getVersion, newVersion, updateDraft, test)
+    List(list, create, check, get, getVersion, newVersion, updateDraft, test, fields)
 
   private def draft(req: TemplateRequest): TemplateDraft =
     TemplateDraft(req.name, req.description, req.documentClassId, req.documentClassVersion, req.content)
@@ -357,7 +375,8 @@ object TemplateApi:
   private def issueView(i: ContentIssue): ContentIssueView =
     ContentIssueView(locationView(i.location), i.message)
 
-  private def testRunView(run: TestRun): TestRunView =
+  private def testRunView(run: TestRun, language: Language): TestRunView =
+    val options = HtmlOptions.draft(language, run.template.labels, run.template.systemFields)
     def metadata(values: Map[String, FieldValue]): Map[String, MetadataValue] =
       values.flatMap((k, v) =>
         run.schema.variable(k).flatMap(x => ProfileSchema.metadataValue(v, x.valueType)).map(k -> _)
@@ -370,11 +389,13 @@ object TemplateApi:
             metadata(c.values),
             Some(r.content),
             Some(r.content.plainText),
+            Some(HtmlRenderer.render(r.content, options)),
             r.missingRequired,
             r.branches.map(b => BranchView(locationView(b.location), b.condition, b.outcomes.toList.sorted)),
             None
           )
-        case Left(e) => TestCaseView(c.name, metadata(c.values), None, None, Nil, Nil, Some(e.message))
+        case Left(e) =>
+          TestCaseView(c.name, metadata(c.values), None, None, None, Nil, Nil, Some(e.message))
     }
     val coverage =
       run.coverage.map(b => BranchView(locationView(b.location), b.condition, b.covered.toList.sorted))

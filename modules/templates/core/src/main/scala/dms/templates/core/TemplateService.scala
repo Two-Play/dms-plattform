@@ -48,11 +48,17 @@ final case class TemplateDraft(
     content: TemplateContent
 )
 
-/** Result of the test mode: each case with its resolution (or why it failed) and the branch coverage. */
+/** Result of the test mode: each case with its resolution (or why it failed) and the branch coverage.
+  *
+  * @param template
+  *   the tested version compiled against its class profile, for rendering the cases (field labels, system
+  *   fields)
+  */
 final case class TestRun(
     schema: TemplateSchema,
     cases: List[(TestCase, Either[ResolveError, Resolution])],
-    coverage: List[BranchCoverage]
+    coverage: List[BranchCoverage],
+    template: PreviewTemplate
 )
 
 /** Manages templates and their versions in the current tenant (business concept 4.1).
@@ -240,14 +246,27 @@ final class TemplateService(audit: AuditTrail, profiles: ProfileSource, limits: 
         .mapError(TemplateError.InvalidContent(_))
       problems = values.toList.flatMap(Resolver.checkValues(schema, _))
       _   <- ZIO.unless(problems.isEmpty)(ZIO.fail(TemplateError.Invalid(problems)))
-      run <- ZIO.attempt(runTests(compiled, values, language)).orDie
+      run <- ZIO.attempt(runTests(PreviewTemplate(v, profile, compiled), values, language)).orDie
     yield run
 
+  /** A version in any status compiled against its class profile, for template designers: the fields of a
+    * draft or a version in testing (DMS-98). Not cached, unlike [[released]]: drafts change.
+    */
+  def compiled(id: TemplateId, number: Int): IO[TemplateError, PreviewTemplate] =
+    for
+      v        <- version(id, number)
+      profile  <- profiles.profile(v.documentClassId, v.documentClassVersion)
+      compiled <- ZIO
+        .fromEither(TemplateCompiler.compile(v.content, ProfileSchema.from(profile), limits))
+        .mapError(TemplateError.InvalidContent(_))
+    yield PreviewTemplate(v, profile, compiled)
+
   private def runTests(
-      compiled: CompiledTemplate,
+      template: PreviewTemplate,
       values: Option[Map[String, FieldValue]],
       language: Language
   ) =
+    val compiled = template.compiled
     values match
       case Some(vs) =>
         val result   = Resolver.resolve(compiled, vs, language)
@@ -259,13 +278,14 @@ final class TemplateService(audit: AuditTrail, profiles: ProfileSource, limits: 
             outcomes.fold(Set.empty[Boolean])(_.outcomes)
           )
         }
-        TestRun(compiled.schema, List(TestCase("given values", vs) -> result), coverage)
+        TestRun(compiled.schema, List(TestCase("given values", vs) -> result), coverage, template)
       case None =>
         val suite = TestCases.generate(compiled, language)
         TestRun(
           compiled.schema,
           suite.cases.map(c => c -> Resolver.resolve(compiled, c.values, language)),
-          suite.coverage
+          suite.coverage,
+          template
         )
 
   private def validate(draft: TemplateDraft): IO[TemplateError, Unit] =

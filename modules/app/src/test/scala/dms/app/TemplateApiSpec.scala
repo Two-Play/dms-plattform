@@ -261,15 +261,25 @@ object TemplateApiSpec extends ZIOSpecDefault:
             """{"values":{"title":{"type":"Text","value":"ACME"},"termType":{"type":"Selection","code":"open"}}}"""
           )
         )
+        fieldsOfDraft <- call(designer, "GET", s"/api/v1/admin/templates/$id/versions/1/fields")
+        catalogFields <- call(designer, "GET", s"/api/v1/templates/$id/versions/1/fields")
         run      = generated._2.fromJson[TestRunView].toOption
         givenRun = withValues._2.fromJson[TestRunView].toOption
+        fields   = fieldsOfDraft._2.fromJson[TemplateFieldsView].toOption
       yield assertTrue(
         create._1 == Status.Created,
         created(create._2).status == "Draft",
         generated._1 == Status.Ok,
         run.exists(_.allBranchesCovered),
         run.exists(_.cases.forall(_.error.isEmpty)),
-        givenRun.exists(_.cases.head.text.contains("Contract\nTitle: ACME\nOpen-ended"))
+        givenRun.exists(_.cases.head.text.contains("Contract\nTitle: ACME\nOpen-ended")),
+        // Every case comes rendered like the live preview, marked as draft (DMS-98).
+        givenRun.exists(_.cases.head.html.exists(h => h.contains("dms-document") && h.contains("ACME"))),
+        run.exists(_.cases.forall(_.html.exists(_.contains("Entwurf – nicht gültig")))),
+        // Designers see the fields of a draft; the catalog only serves released versions.
+        fieldsOfDraft._1 == Status.Ok,
+        fields.exists(_.fields.exists(f => f.key == "termType" && f.usedInTemplate)),
+        catalogFields._1 == Status.NotFound
       )
     },
     test("release needs a second template designer; only released versions are in the catalog") {

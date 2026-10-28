@@ -29,6 +29,9 @@ final case class VersionUsage(templateVersion: Int, documents: Int, byStatus: Li
   *
   * @param authorId
   *   the author of the open version
+  * @param restricted
+  *   whether the version's confidentiality is at least `Confidential` (access restricted to named groups);
+  *   the impact analysis shows the title of such a version only to callers who may read it (DMS-98)
   */
 final case class OpenTemplateUse(
     documentId: DocumentId,
@@ -38,7 +41,8 @@ final case class OpenTemplateUse(
     label: String,
     status: DocumentStatus,
     templateVersion: Int,
-    updatedAt: Instant
+    updatedAt: Instant,
+    restricted: Boolean
 )
 
 /** How a template is used by documents on its versions before `beforeVersion` (US-01.2): the basis of the
