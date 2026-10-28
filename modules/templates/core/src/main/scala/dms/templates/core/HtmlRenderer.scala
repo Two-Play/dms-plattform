@@ -14,12 +14,17 @@ import java.nio.charset.StandardCharsets
   *   text of the draft banner and watermark, e.g. "Draft – not valid"; `None` for final renditions
   * @param title
   *   document title for the `<title>` of a stand-alone document
+  * @param systemFields
+  *   keys of the fields the platform sets (document ID, version, approval date, ...); before the first save
+  *   they have no value yet, so their placeholders show the label and a neutral hint instead of a
+  *   missing-value marker
   */
 final case class HtmlOptions(
     language: Language = Language.default,
     labels: Map[String, String] = Map.empty,
     draftMarking: Option[String] = None,
-    title: Option[String] = None
+    title: Option[String] = None,
+    systemFields: Set[String] = Set.empty
 )
 
 object HtmlOptions:
@@ -29,8 +34,17 @@ object HtmlOptions:
     case Language.De => "Entwurf – nicht gültig"
     case Language.En => "Draft – not valid"
 
-  def draft(language: Language, labels: Map[String, String] = Map.empty): HtmlOptions =
-    HtmlOptions(language, labels, Some(draftLabel(language)))
+  /** The hint next to a system field without a value, in the document language. */
+  def systemHint(language: Language): String = language match
+    case Language.De => "wird beim Speichern vergeben"
+    case Language.En => "assigned on save"
+
+  def draft(
+      language: Language,
+      labels: Map[String, String] = Map.empty,
+      systemFields: Set[String] = Set.empty
+  ): HtmlOptions =
+    HtmlOptions(language, labels, Some(draftLabel(language)), systemFields = systemFields)
 
 /** Renders resolved content as semantic HTML (ADR 0007, 0008): the browser preview shows the fragment of
   * [[render]], the PDF worker prints the stand-alone document of [[renderDocument]]. Both use the stylesheet
@@ -49,6 +63,8 @@ object HtmlOptions:
   *   - `div.dms-clause-ref[data-clause][data-clause-version]`, `div.dms-page-break`
   *   - `span.dms-value[data-field]` for a field value, `span.dms-missing[data-field][data-required]` (plus
   *     `dms-missing-required`) with the field label for a missing value
+  *   - `span.dms-system[data-field]` with the field label and `span.dms-system-hint` for a field the platform
+  *     sets that has no value yet ([[HtmlOptions.systemFields]])
   *   - marks as `strong`, `em`, `u`; line breaks as `br`
   */
 object HtmlRenderer:
@@ -186,6 +202,10 @@ object HtmlRenderer:
       case ResolvedInline.Text(value, marks) => marked(marks, out)(out(escape(value)))
       case ResolvedInline.Value(path, text)  =>
         out("<span class=\"dms-value\" data-field=\"", escape(path), "\">", escape(text), "</span>")
+      case ResolvedInline.Missing(path, _) if options.systemFields.contains(path.takeWhile(_ != '.')) =>
+        out("<span class=\"dms-system\" data-field=\"", escape(path), "\">")
+        out(escape(label(path, options.labels)), " <span class=\"dms-system-hint\">(")
+        out(escape(HtmlOptions.systemHint(options.language)), ")</span></span>")
       case ResolvedInline.Missing(path, required) =>
         out("<span class=\"dms-missing", if required then " dms-missing-required" else "")
         out("\" data-field=\"", escape(path), "\" data-required=\"", required.toString, "\">")

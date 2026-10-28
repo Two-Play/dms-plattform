@@ -177,6 +177,15 @@ object PreviewFixtures:
             Placeholder("startDate", Some("date:long")),
             Text(".")
           )
+        ),
+        Paragraph(
+          List(
+            Text("Contract number: "),
+            Placeholder("documentId"),
+            Text(", version "),
+            Placeholder("version"),
+            Text(".")
+          )
         )
       )
     ) :: (1 to 16).toList.map(clause) ++ List(annex),

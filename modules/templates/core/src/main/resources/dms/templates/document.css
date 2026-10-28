@@ -2,7 +2,7 @@
  * Document stylesheet (DMS-39): the single source of the look of rendered documents.
  *
  * Used by
- *   - the browser preview: the frontend imports this file (alias `@document-css`) and inserts the HTML fragment
+ *   - the browser preview: the frontend imports this file (alias `@dms-document`) and inserts the HTML fragment
  *     of `HtmlRenderer.render`;
  *   - the PDF worker (ADR 0008): `HtmlRenderer.renderDocument` embeds it into a stand-alone HTML document that
  *     WeasyPrint prints. The `@page` rules and `@media print` block only apply there.
@@ -26,6 +26,8 @@
   --dms-missing-bg: #fdecea;
   --dms-optional: #8a5a00;
   --dms-optional-bg: #fff4dc;
+  --dms-system: #3d4a5c;
+  --dms-system-bg: #eef1f5;
   position: relative;
   font-family: "Noto Serif", Georgia, "Times New Roman", serif;
   font-size: 10.5pt;
@@ -111,6 +113,19 @@
   font-weight: 600;
 }
 
+/* Fields the platform sets (document ID, version, approval date) have no value before the first save. They
+ * are not missing: shown neutrally with the label and a hint such as "assigned on save". */
+.dms-document .dms-system {
+  padding: 0 0.3em;
+  border-radius: 2px;
+  border: 1px dotted var(--dms-system);
+  background: var(--dms-system-bg);
+  color: var(--dms-system);
+  font-family: "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.9em;
+}
+.dms-document .dms-system-hint { font-style: italic; }
+
 /* Draft marking ("Draft – not valid"): a banner at the top and a diagonal watermark. */
 .dms-document .dms-draft-banner {
   margin: 0 0 5mm;
@@ -141,23 +156,58 @@
 }
 
 @media screen {
+  /* The paper look scales down with the space the preview gets: padding in % of the container width, so a
+   * narrow preview (phone, half of a laptop screen) keeps most of its width for text. */
   .dms-document {
+    box-sizing: border-box;
     max-width: 210mm;
     margin: 0 auto;
-    padding: 18mm 18mm 20mm;
+    padding: min(18mm, 8.5%) min(18mm, 8.5%) min(20mm, 9.5%);
     background: #fff;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-    overflow: hidden;
+    /* clip, not hidden: the article must not become a scroll container, so the watermark can stick. */
+    overflow: clip;
   }
   .dms-document .dms-page-break {
-    margin: 6mm -18mm;
+    margin: 6mm calc(-1 * min(18mm, 8.5%));
     border-top: 1px dashed #bbb;
   }
   .dms-document .dms-missing { cursor: pointer; }
+  /* A marker that wraps keeps its border and padding on both lines. */
+  .dms-document .dms-missing,
+  .dms-document .dms-system {
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
   .dms-document .dms-section[data-locked="true"] {
     border-left: 2px solid #d0d7e2;
-    margin-left: -4mm;
-    padding-left: calc(4mm - 2px);
+    margin-left: calc(-1 * min(4mm, 3%));
+    padding-left: calc(min(4mm, 3%) - 2px);
+  }
+  /* A table never grows wider than the page: long words in cells may break. */
+  .dms-document .dms-table th,
+  .dms-document .dms-table td { overflow-wrap: anywhere; }
+  /* The watermark stays in view while scrolling through a long draft instead of appearing once. */
+  .dms-document.dms-draft::before {
+    position: sticky;
+    top: 45%;
+    display: block;
+    height: 0;
+    line-height: 0;
+    font-size: clamp(24pt, 6vw, 40pt);
+    color: rgba(180, 35, 24, 0.13);
+  }
+}
+
+/* Narrow previews (the frontend makes the preview a size container): ragged text and smaller headings read
+ * better than justified text with wide gaps. */
+@media screen {
+  @container (max-width: 520px) {
+    .dms-document { font-size: 10pt; }
+    .dms-document .dms-paragraph { text-align: left; }
+    .dms-document .dms-heading-1 { font-size: 15pt; }
+    .dms-document .dms-list { padding-left: 5mm; }
+    .dms-document.dms-draft::before { font-size: 24pt; }
   }
 }
 

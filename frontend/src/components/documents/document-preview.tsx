@@ -105,8 +105,10 @@ export function DocumentPreview({ preview, updating, error, onFocusField }: Docu
           <TemplateIssues issues={preview.issues ?? []} />
           {preview.html && (
             // Mouse shortcut only: keyboard users reach the same fields through the list of missing values.
+            // A size container: the document stylesheet adapts to the width of the preview, not the screen.
+            // overflow-x-clip instead of overflow-auto, so the draft watermark can stick while scrolling.
             <div
-              className="overflow-auto rounded-lg bg-muted p-2 md:p-4"
+              className="@container overflow-x-clip rounded-lg bg-muted p-2 md:p-4"
               data-testid="document-preview"
               onClick={onClick}
               dangerouslySetInnerHTML={{ __html: preview.html }}
