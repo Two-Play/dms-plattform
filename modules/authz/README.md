@@ -16,4 +16,6 @@ Deputies (DMS-49, ADR 0028 and addendum to ADR 0018): `Authorizer.onBehalfOf(sub
 
 Document resources and search (DMS-51/52, ADR 0029 and addendum to ADR 0018): `DocumentResource(tenant, document, classPath, version, participants)` builds the `Resource` of a version from the document and its field values (`organizationalUnit`, `confidentiality`, optional `allowedGroups`); the document API and the search indexer use it, and the search's permission filter mirrors `Policy` on these attributes. `ConfigurationArea.Search` covers rebuilding the search index.
 
+Legal holds (DMS-56, ADR 0031 and addendum to ADR 0018): `ManageRetention` (records managers, matrix row "Retention / legal hold") covers legal holds. Hold-level operations check it on the tenant resource (records manager for the whole tenant), each document put under a hold on its `DocumentResource`.
+
 Single module without an `api`/`core` split.

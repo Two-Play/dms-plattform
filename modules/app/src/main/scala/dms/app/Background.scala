@@ -1,5 +1,6 @@
 package dms.app
 
+import dms.archive.core.LegalHoldSync
 import dms.audit.core.*
 import dms.db.Db
 import dms.documents.core.{
@@ -21,9 +22,9 @@ import zio.*
 import java.lang.management.ManagementFactory
 import java.net.http.HttpClient
 
-/** Background processing of this instance: the job runner (audit, publication, review, rendition and search
-  * jobs), the outbox relay and the schedulers of periodic audit jobs, scheduled publications, the periodic
-  * review check and the search synchronization.
+/** Background processing of this instance: the job runner (audit, publication, review, rendition, search and
+  * legal hold jobs), the outbox relay and the schedulers of periodic audit jobs, scheduled publications, the
+  * periodic review check and the search synchronization.
   *
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
   * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029).
@@ -63,9 +64,11 @@ object Background:
       )
       reviewJobs = ReviewJobs(db, reviews, ReviewScheduleConfig(config.documents.reviewCheckSeconds.seconds))
       searchJobs = SearchJobs(db, search, config.search.settings)
+      legalHolds = LegalHoldSync(db, S3ObjectStore(s3, config.storage.bucket))
       runner     = JobRunner(
         db,
-        jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers +
+        jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers ++
+          legalHolds.handlers +
           (RenditionRequest.JobKind -> rendering.handle),
         WorkerConfig(s"${workerName(config)}-jobs")
       )

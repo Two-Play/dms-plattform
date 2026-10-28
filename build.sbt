@@ -54,8 +54,8 @@ lazy val workflowApi       = apiModule("workflow")
 lazy val workflowCore      = workflowCoreModule.dependsOn(workflowApi, documentsApi, auditApi)
 lazy val renderingApi      = apiModule("rendering")
 lazy val renderingCore     = renderingCoreModule.dependsOn(renderingApi, documentsApi, auditApi)
-lazy val archiveApi        = apiModule("archive")
-lazy val archiveCore       = coreModule("archive").dependsOn(archiveApi, documentsApi)
+lazy val archiveApi        = apiModule("archive").dependsOn(db)
+lazy val archiveCore       = archiveCoreModule.dependsOn(archiveApi, documentsApi, auditApi)
 lazy val searchApi         = apiModule("search").dependsOn(documentsApi)
 lazy val searchCore        = searchCoreModule.dependsOn(searchApi, documentsApi, authz)
 lazy val auditApi          = apiModule("audit").dependsOn(db)
@@ -78,6 +78,14 @@ def searchCoreModule: Project = coreModule("search").settings(
     Dependencies.logging.map(_ % Test),
   // Not logback-test.xml: the app tests depend on these test classes and have their own logback-test.xml.
   Test / javaOptions += "-Dlogback.configurationFile=logback-search-test.xml"
+)
+
+/** Legal holds (ADR 0031): tables with RLS and guards, the legal hold on rendition objects in object storage.
+  * Tests start PostgreSQL and SeaweedFS with Testcontainers.
+  */
+def archiveCoreModule: Project = coreModule("archive").settings(
+  libraryDependencies ++= Dependencies.json ++ Dependencies.integrationTest ++ Dependencies.objectStorageTest ++
+    Dependencies.logging.map(_ % Test)
 )
 
 /** Approval workflows (ADR 0006, 0024): embedded Flowable; integration tests against PostgreSQL. */
