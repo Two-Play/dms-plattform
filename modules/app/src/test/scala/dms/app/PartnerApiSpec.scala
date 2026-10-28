@@ -19,6 +19,7 @@ import dms.integration.partners.*
 import dms.kernel.{TemplateId, TenantId, UserId}
 import dms.templates.*
 import dms.templates.core.{TemplateDraft, TemplateService}
+import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import sttp.tapir.ztapir.RichZServerEndpoint
@@ -103,7 +104,7 @@ object PartnerApiSpec extends ZIOSpecDefault:
     )
   )
 
-  private val database: ZLayer[Any, Throwable, Db] = ZLayer.scoped(
+  private val database: ZLayer[Any, Throwable, Db & DataSource] = ZLayer.scopedEnvironment(
     for
       c <- ZIO.acquireRelease(ZIO.attemptBlocking {
         val c = PostgreSQLContainer(DockerImageName.parse("postgres:17"))
@@ -116,13 +117,15 @@ object PartnerApiSpec extends ZIOSpecDefault:
         finally connection.close()
       }
       _     <- Migrations.migrate(c.jdbcUrl, c.username, c.password)
+      _     <- FlowableEngine.migrateSchema(c.jdbcUrl, c.username, c.password)
       owner <- dataSource(DbConfig(c.jdbcUrl, c.username, c.password, poolSize = 1)).map(Db(_))
       _     <- owner
         .transactSystem(
           Db.sql(sql"insert into dms.tenant (id, name) values (${tenantId.value}, ${"Tenant"})".update.run())
         )
         .orDieWith(e => RuntimeException(e.toString))
-      app <- dataSource(DbConfig(c.jdbcUrl, "dms_app_user", "dms-app-test", poolSize = 2)).map(Db(_))
+      appSource <- dataSource(DbConfig(c.jdbcUrl, "dms_app_user", "dms-app-test", poolSize = 2))
+      app       = Db(appSource)
       audit     = AuditTrailLive(app, TsaTrust(Nil))
       classes   = DocumentClassService(audit)
       templates = TemplateService(audit, DocumentClassProfiles(classes))
@@ -159,7 +162,7 @@ object PartnerApiSpec extends ZIOSpecDefault:
         .mapError(e => RuntimeException(e.toString))
         .orDie
       _ <- setup.succeed(released)
-    yield app
+    yield ZEnvironment(app, appSource)
   )
 
   private def dataSource(config: DbConfig): ZIO[Scope, Throwable, DataSource] =
@@ -176,7 +179,8 @@ object PartnerApiSpec extends ZIOSpecDefault:
     Authenticator(verifier, tenants)
   }
 
-  private type Env = Authenticator & Db & Authorizer & DocumentService & PartnerDirectory & TemplateService
+  private type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow & PartnerDirectory &
+    TemplateService
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -191,6 +195,12 @@ object PartnerApiSpec extends ZIOSpecDefault:
       TemplateService.layer,
       DocumentTemplates.layer,
       DocumentService.layer,
+      FlowableEngine.layer,
+      WorkflowDocuments.layer,
+      RoleDirectory.layer,
+      WorkflowExtraReview.layer,
+      ZLayer.succeed(WorkflowConfig.default),
+      ApprovalWorkflow.layer,
       ZLayer.succeed(directory)
     )
 
