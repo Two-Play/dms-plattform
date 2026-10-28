@@ -60,3 +60,7 @@ The search (ADR 0029) applies the read rules of `Policy` as a filter inside the 
 ## Addendum (DMS-101, 2026-10-28): groups from the platform instead of ZITADEL project roles
 
 The sentence "ZITADEL project roles are used as groups for confidential documents" is replaced by ADR 0032: `Subject.groups` are the caller's current memberships in the tenant's access groups (`dms.access_group_member`), and a version names its groups in the core field `allowedGroups`. `Policy.clearedFor` exposes the confidentiality rule on its own (used to filter task inboxes); the decision rules are unchanged. New configuration area `Groups` (administering access groups): `Configure` for tenant administrators.
+
+## Addendum (DMS-56, 2026-10-28): legal holds
+
+Legal holds (ADR 0031) use `ManageRetention`, the action of the matrix row "Retention / legal hold" (records managers only); no separate action. Operations on a hold (create, list, read, add documents, release) check it on the tenant resource (`Resource(tenant)`), so only a records manager assignment for the whole tenant qualifies; each document put under a hold is checked with `ManageRetention` on its `DocumentResource` (latest version), which applies class/unit scope and the confidentiality rules. The document view lists the active holds of a document only to callers with `ManageRetention` on it.
