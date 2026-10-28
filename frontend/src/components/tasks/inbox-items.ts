@@ -1,10 +1,11 @@
 import type { Acknowledgement } from '@/api/acknowledgements'
 import type { DocumentView } from '@/api/partners'
+import type { ReviewTask } from '@/api/reviews'
 import type { WorkflowTask } from '@/api/workflow'
 
 /**
- * Kinds of tasks in the inbox. `ReviewDate` (periodic review of a published document) has no source
- * in the API yet; it is listed so the inbox and its rendering are ready for it.
+ * Kinds of tasks in the inbox. `ReviewDate` is the periodic review of a valid version by the
+ * document owner (DMS-55): recertify, revise or withdraw.
  */
 export type InboxKind = 'Review' | 'Approval' | 'Acknowledgement' | 'ReviewDate'
 
@@ -25,7 +26,7 @@ interface InboxItemBase {
 export type InboxItem =
   | (InboxItemBase & { kind: 'Review' | 'Approval'; task: WorkflowTask })
   | (InboxItemBase & { kind: 'Acknowledgement'; acknowledgement: Acknowledgement })
-  | (InboxItemBase & { kind: 'ReviewDate' })
+  | (InboxItemBase & { kind: 'ReviewDate'; review: ReviewTask })
 
 export const kindLabels: Record<InboxKind, string> = {
   Review: 'Review',
@@ -60,6 +61,31 @@ export function acknowledgementItem(ack: Acknowledgement): InboxItem {
     versionLabel: ack.versionLabel,
     createdAt: ack.publishedAt ?? ack.validFrom ?? '',
     dueAt: undefined,
+  }
+}
+
+/** The decisions of a review task that need input: recertify (date, note) or withdraw (reason). */
+export type ReviewDecision = 'recertify' | 'withdraw'
+
+/** For plain dates (yyyy-mm-dd), which `Date.parse` reads as UTC midnight. */
+const plainDateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' })
+
+export function formatPlainDate(date: string): string {
+  return plainDateFormat.format(new Date(date))
+}
+
+/** An inbox item for a review task; its deadline is the review date (00:00 UTC of that day). */
+export function reviewItem(review: ReviewTask): InboxItem {
+  return {
+    key: `review:${review.id}`,
+    kind: 'ReviewDate',
+    review,
+    documentId: review.documentId,
+    title: review.title,
+    classPath: review.classPath ?? [],
+    versionLabel: review.versionLabel,
+    createdAt: review.createdAt,
+    dueAt: `${review.dueOn}T00:00:00Z`,
   }
 }
 

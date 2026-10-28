@@ -10,6 +10,7 @@ import {
 import { useApiClient } from '@/api/context'
 import { documentQuery } from '@/api/documents'
 import type { DocumentView } from '@/api/partners'
+import { invalidateAfterReview, openReviewTasksQuery, revise, type ReviewTask } from '@/api/reviews'
 import { decisionLabels, myTasksQuery, type WorkflowTask } from '@/api/workflow'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,13 +18,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   acknowledgementItem,
+  formatPlainDate,
   isOverdue,
   kindLabels,
+  reviewItem,
   sortInbox,
   workflowItem,
   type InboxItem,
+  type ReviewDecision,
 } from './inbox-items'
 import { PendingVoteNotice } from './pending-vote-notice'
+import { ReviewDialog } from './review-dialog'
 import { VoteDialog, type VoteDraft } from './vote-dialog'
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
@@ -31,10 +36,15 @@ const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
   timeStyle: 'short',
 })
-/** For plain dates (yyyy-mm-dd), which `Date.parse` reads as UTC midnight. */
-const plainDateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' })
 
 function ItemDate({ item, overdue }: { item: InboxItem; overdue: boolean }) {
+  if (item.kind === 'ReviewDate') {
+    return (
+      <span className={overdue ? 'font-medium text-destructive' : undefined}>
+        {overdue ? 'Review overdue since' : 'Review due'} {formatPlainDate(item.review.dueOn)}
+      </span>
+    )
+  }
   if (item.dueAt !== undefined) {
     return (
       <span className={overdue ? 'font-medium text-destructive' : undefined}>
@@ -59,8 +69,13 @@ function Context({ item }: { item: InboxItem }) {
     // User ids until a directory of display names exists (DMS-91 follow-up).
     if (candidates.length > 0) parts.push(`assigned to ${candidates.join(', ')}`)
   }
+  if (item.kind === 'ReviewDate') {
+    parts.push(
+      item.review.versionStatus === 'ReviewDue' ? 'review date reached' : 'valid, review ahead',
+    )
+  }
   if (item.kind === 'Acknowledgement' && item.acknowledgement.validFrom) {
-    parts.push(`valid from ${plainDateFormat.format(new Date(item.acknowledgement.validFrom))}`)
+    parts.push(`valid from ${formatPlainDate(item.acknowledgement.validFrom)}`)
   }
   return parts.length > 0 ? (
     <p className="text-xs break-words text-muted-foreground">{parts.join(' · ')}</p>
@@ -130,15 +145,77 @@ function AcknowledgementActions({
   )
 }
 
+function ReviewActions({
+  review,
+  onDecide,
+  onDone,
+}: {
+  review: ReviewTask
+  onDecide: (review: ReviewTask, decision: ReviewDecision) => void
+  onDone: (message: string) => void
+}) {
+  const client = useApiClient()
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const revision = useMutation({
+    mutationFn: () => revise(client, review.id),
+    onSuccess: async () => {
+      await invalidateAfterReview(queryClient, review.documentId)
+      onDone(`Revision started: a new draft of ${review.title} is open.`)
+      await navigate({ to: '/documents/$documentId', params: { documentId: review.documentId } })
+    },
+  })
+  return (
+    <div className="flex flex-col items-start gap-1 sm:items-end">
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          onClick={() => {
+            onDecide(review, 'recertify')
+          }}
+        >
+          Recertify…
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={revision.isPending}
+          onClick={() => {
+            revision.mutate()
+          }}
+        >
+          {revision.isPending ? 'Starting…' : 'Revise'}
+        </Button>
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={() => {
+            onDecide(review, 'withdraw')
+          }}
+        >
+          Withdraw…
+        </Button>
+      </div>
+      {revision.isError && (
+        <p role="alert" className="text-xs text-destructive">
+          {revision.error.message}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function InboxRow({
   item,
   now,
   onVote,
+  onReview,
   onDone,
 }: {
   item: InboxItem
   now: number
   onVote: (task: WorkflowTask) => void
+  onReview: (review: ReviewTask, decision: ReviewDecision) => void
   onDone: (message: string) => void
 }) {
   const overdue = isOverdue(item, now)
@@ -188,11 +265,7 @@ function InboxRow({
           <AcknowledgementActions ack={item.acknowledgement} onDone={onDone} />
         )}
         {item.kind === 'ReviewDate' && (
-          <Button size="sm" variant="outline" asChild>
-            <Link to="/documents/$documentId" params={{ documentId: item.documentId }}>
-              Open document
-            </Link>
-          </Button>
+          <ReviewActions review={item.review} onDecide={onReview} onDone={onDone} />
         )}
       </div>
     </li>
@@ -200,13 +273,15 @@ function InboxRow({
 }
 
 /**
- * Central task inbox (DMS-48): open review and approval tasks and read confirmations in one list,
- * overdue first, with the actions next to each task.
+ * Central task inbox (DMS-48): open review and approval tasks, read confirmations and periodic
+ * reviews of the caller's documents (DMS-55) in one list, overdue first, with the actions next to
+ * each task.
  */
 export function TaskInboxPage() {
   const client = useApiClient()
   const tasks = useQuery(myTasksQuery(client))
   const acknowledgements = useQuery(openAcknowledgementsQuery(client))
+  const reviews = useQuery(openReviewTasksQuery(client))
   const documentIds = [...new Set((tasks.data ?? []).map((t) => t.documentId))]
   const documents = useQueries({
     queries: documentIds.map((id) => documentQuery(client, id)),
@@ -219,6 +294,7 @@ export function TaskInboxPage() {
       ),
   })
   const [voting, setVoting] = useState<{ task: WorkflowTask; initial?: VoteDraft }>()
+  const [deciding, setDeciding] = useState<{ review: ReviewTask; decision: ReviewDecision }>()
   const [message, setMessage] = useState('')
   const [mountedAt] = useState(() => Date.now())
   // Overdue is judged against the time the tasks were loaded, so a refetch updates it.
@@ -228,19 +304,20 @@ export function TaskInboxPage() {
     [
       ...(tasks.data ?? []).map((t) => workflowItem(t, documents.get(t.documentId))),
       ...(acknowledgements.data ?? []).map(acknowledgementItem),
+      ...(reviews.data ?? []).map(reviewItem),
     ],
     now,
   )
   const overdueCount = items.filter((i) => isOverdue(i, now)).length
   const titleOf = (task: WorkflowTask) => documents.get(task.documentId)?.title
-  const loading = tasks.isPending || acknowledgements.isPending
+  const loading = tasks.isPending || acknowledgements.isPending || reviews.isPending
 
   return (
     <div className="space-y-6">
       <div className="space-y-1">
         <h1 className="font-heading text-2xl font-semibold">Tasks</h1>
         <p className="text-sm text-muted-foreground">
-          Reviews, approvals and read confirmations waiting for you.
+          Reviews, approvals, read confirmations and periodic reviews waiting for you.
         </p>
       </div>
       {tasks.data && (
@@ -275,6 +352,11 @@ export function TaskInboxPage() {
               {acknowledgements.error.message}
             </p>
           )}
+          {reviews.isError && (
+            <p role="alert" className="text-sm text-destructive">
+              {reviews.error.message}
+            </p>
+          )}
           {loading && <Skeleton className="h-16 w-full" />}
           {!loading && items.length === 0 && !tasks.isError && (
             <p className="text-sm text-muted-foreground">Nothing to do right now.</p>
@@ -289,6 +371,9 @@ export function TaskInboxPage() {
                   onVote={(task) => {
                     setVoting({ task })
                   }}
+                  onReview={(review, decision) => {
+                    setDeciding({ review, decision })
+                  }}
                   onDone={setMessage}
                 />
               ))}
@@ -296,6 +381,21 @@ export function TaskInboxPage() {
           )}
         </CardContent>
       </Card>
+      <ReviewDialog
+        task={deciding?.review}
+        decision={deciding?.decision ?? 'recertify'}
+        onClose={() => {
+          setDeciding(undefined)
+        }}
+        onDone={(review) => {
+          setDeciding(undefined)
+          setMessage(
+            review.status === 'Recertified'
+              ? `Recertified: ${review.title} ${review.versionLabel}, next review ${formatPlainDate(review.nextDueOn ?? review.dueOn)}.`
+              : `Withdrawn: ${review.title} ${review.versionLabel} is no longer in force.`,
+          )
+        }}
+      />
       <VoteDialog
         task={voting?.task}
         documentTitle={voting && titleOf(voting.task)}
