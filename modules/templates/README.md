@@ -54,3 +54,20 @@ Administration requires `EditTemplates` (template designer); `TemplateApi`, `Tem
 | GET | `/api/v1/templates` | Catalog: released versions only; every business role (`ReadTemplateCatalog`) |
 
 Releasing a version does not deprecate older released versions; deprecating is an explicit status change.
+
+## Locked sections and deviations (DMS-36)
+
+US-01.1, business concept 4.1. Pure domain logic in `templates-api`; persistence and the API follow with documents (sprint 5).
+
+**Edit rules** (`EditRules.check(template, document, requests, policy)` returns typed `EditViolation`s with section id and `reason`). A document has the template's structure; sections are matched by id.
+
+- Editable sections: content and title change freely; they may be removed and reordered among each other.
+- Locked sections: blocks may only change if a `DeviationRequest(sectionId, reason, requestedBy, requestedAt)` for the section exists. A request permits the edit; it does not approve it (that is the extra review step). Structural changes are never allowed, not even with a request: a locked section cannot be removed, renamed (title), unlocked or moved relative to any other retained template section (so an editable section cannot be moved across a locked one either).
+- New sections (ids not in the template): only with `EditPolicy.allowNewSections` (default true), never locked, and only where the nearest template sections before and after are editable; the start and end of the document count as editable. Runs of locked sections therefore stay contiguous.
+- Section ids are unique.
+
+**Deviation report** (`DeviationReport.compare(template, document, requests)`): every difference in locked sections, each with a `DeviationLocation` (section id, block path such as `block 2 › item 1 › block 0`, and the index of the first changed word token), the change and the requests of that section. Changes without a request are `unauthorized`. Reported changes: inserted/deleted/replaced text, formatting-only changes, inserted/removed/changed placeholders, changed conditions, repeats, clause references, heading levels and table header rows, inserted/deleted blocks, list items and table rows, and removed/moved/renamed/unlocked sections. Editable and new sections are not reported.
+
+**Diff approach:** an LCS edit script (O(n·m), no dependency) on word tokens (whitespace is not significant; a placeholder or line break is one token) gives one text change per run of changed words, plus placeholder changes for the placeholders in that run. Blocks, list items and table rows are aligned with the same LCS; within a changed run, blocks of the same kind are paired (second LCS) and compared recursively, table cells by column. Locations use document positions; deletions point to where the content was removed.
+
+**Workflow integration (sprint 6):** on submission the document workflow first rejects documents with `EditRules` violations (so unauthorized deviations never reach review), then calls `DeviationReport.requiresExtraReview(report)`; if true, it adds the additional review step configured for the document class (e.g. the legal department for "contract with clause deviation", business concept 6). The report is stored with the document version and shown to reviewers.
