@@ -107,6 +107,14 @@ object Policy:
           )
         )
 
+      case Review =>
+        requireStatus(InReview)(
+          grantIf(
+            isParticipant && (has(Author) || has(Owner) || has(Reviewer) || has(Approver)),
+            "review votes are cast by the participants the workflow assigned to the step"
+          )
+        )
+
       case Approve =>
         requireStatus(InApproval)(
           if isAuthor then Decision.Deny("segregation of duties: the author cannot approve their own version")

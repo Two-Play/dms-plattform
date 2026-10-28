@@ -8,4 +8,6 @@ Templates (business concept 4.1): `EditTemplates` covers creating and changing t
 
 Documents (business concept 5.1, DMS-37): `ReadDocument` reads a version in any status along the visibility column of the status model: drafts for authors and owners, review and approval additionally for assigned reviewers and approvers, approved versions also for their approver, published versions like `ReadPublished`, superseded versions for every business role, withdrawn and archived versions for owners, records managers and auditors. `CreateFromTemplate` and `EditDraft` (also used for submitting a draft) are checked on a `Resource` built from the document: class path of its profile, organizational unit, confidentiality, status, author of the version and owner.
 
+Workflows (business concept 6.1, DMS-40): `Review` (casting a review vote) is granted in status `InReview` to participants the workflow assigned to the task (`Resource.assignedParticipants`) who hold the author, owner, reviewer or approver role; approval votes use `Approve`. `RoleAssignments.holders` lists the holders of a role, from which the workflow resolves participants.
+
 Single module without an `api`/`core` split.

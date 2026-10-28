@@ -29,6 +29,7 @@ object PolicySpec extends ZIOSpecDefault:
     case CreateFromTemplate  => Resource(tenant, documentClassPath = List("policy"))
     case EditDraft           => document(Draft)
     case CommentInReview     => document(InReview)
+    case Review              => document(InReview)
     case Approve             => document(InApproval)
     case Publish             => document(Approved)
     case Withdraw            => document(Published)
@@ -45,6 +46,7 @@ object PolicySpec extends ZIOSpecDefault:
     val r = base(action)
     (action, role) match
       case (EditDraft, Reviewer)      => r.copy(status = Some(InReview), assignedParticipants = Set(user))
+      case (Review, _)                => r.copy(assignedParticipants = Set(user))
       case (Approve, Owner)           => r.copy(ownerMayApprove = true)
       case (Publish, Approver)        => r.copy(approvedBy = Set(user))
       case (ViewHistory, Author)      => r.copy(authorId = Some(user))
@@ -69,6 +71,7 @@ object PolicySpec extends ZIOSpecDefault:
     CreateFromTemplate  -> List(Never, Full, Full, Never, Never, Never, Never, Never, Never),
     EditDraft           -> List(Never, Full, Full, Partial, Never, Never, Never, Never, Never),
     CommentInReview     -> List(Never, Full, Full, Full, Full, Never, Never, Never, Never),
+    Review              -> List(Never, Partial, Partial, Partial, Partial, Never, Never, Never, Never),
     Approve             -> List(Never, Never, Partial, Never, Full, Never, Never, Never, Never),
     Publish             -> List(Never, Never, Full, Never, Partial, Never, Never, Never, Never),
     Withdraw            -> List(Never, Never, Full, Never, Full, Never, Never, Never, Never),
@@ -123,6 +126,7 @@ object PolicySpec extends ZIOSpecDefault:
         !permitted(Seq(Author), EditDraft, document(Published)),
         !permitted(Seq(Reader), ReadPublished, document(Draft)),
         !permitted(Seq(Approver), Approve, document(Draft)),
+        !permitted(Seq(Reviewer), Review, document(InApproval).copy(assignedParticipants = Set(user))),
         !permitted(Seq(Owner), Publish, document(InApproval))
       )
     },

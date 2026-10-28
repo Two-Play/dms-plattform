@@ -18,6 +18,7 @@ object Versions {
   val awsSdk        = "2.57.5"
   val zioJson       = "1.1.1" // same as tapir-json-zio
   val cel           = "0.15.0"
+  val flowable      = "8.0.0" // embedded workflow engine, see docs/adr/0006 and 0024
 }
 
 object Dependencies {
@@ -64,6 +65,13 @@ object Dependencies {
 
   /** Common Expression Language for template conditions and computed fields (ADR 0020). */
   val cel = Seq("dev.cel" % "cel" % Versions.cel)
+
+  /** Embedded BPMN engine (ADR 0006, 0024). `commons-logging` (from Spring 7) duplicates the classes of
+    * `jcl-over-slf4j`, which Flowable brings as well.
+    */
+  val flowable = Seq(
+    ("org.flowable" % "flowable-engine" % Versions.flowable).exclude("commons-logging", "commons-logging")
+  )
 
   val jwt = Seq("com.nimbusds" % "nimbus-jose-jwt" % Versions.nimbusJose)
 

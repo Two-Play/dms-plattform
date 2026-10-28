@@ -18,9 +18,12 @@ enum Role:
   * `ReadDocument` covers reading a document version in any status, following the visibility column of the
   * status model (business concept 5.1): drafts for authors and owners, review and approval additionally for
   * the assigned participants, published versions like `ReadPublished`.
+  *
+  * `Review` is casting a review vote (business concept 6.1, DMS-40): only for participants the workflow
+  * assigned to the step, who hold a business role taking part in reviews.
   */
 enum Action:
-  case ReadPublished, ReadDocument, CreateFromTemplate, EditDraft, CommentInReview, Approve, Publish,
+  case ReadPublished, ReadDocument, CreateFromTemplate, EditDraft, CommentInReview, Review, Approve, Publish,
     Withdraw,
     EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
     ManageRetention, Destroy, ViewHistory, Configure
