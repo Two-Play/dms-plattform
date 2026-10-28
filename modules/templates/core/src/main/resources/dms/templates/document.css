@@ -1,0 +1,167 @@
+/*
+ * Document stylesheet (DMS-39): the single source of the look of rendered documents.
+ *
+ * Used by
+ *   - the browser preview: the frontend imports this file (alias `@document-css`) and inserts the HTML fragment
+ *     of `HtmlRenderer.render`;
+ *   - the PDF worker (ADR 0008): `HtmlRenderer.renderDocument` embeds it into a stand-alone HTML document that
+ *     WeasyPrint prints. The `@page` rules and `@media print` block only apply there.
+ *
+ * Every rule is scoped to `.dms-document`, so the stylesheet does not leak into the application UI. Class
+ * names are part of the contract of `HtmlRenderer` (see modules/templates/README.md); change them together.
+ * Fonts: the worker image ships Noto Sans / Noto Serif only; browsers fall back to their serif and sans fonts.
+ */
+
+@page {
+  size: A4;
+  margin: 25mm 20mm 22mm 25mm;
+}
+
+.dms-document {
+  --dms-ink: #111;
+  --dms-accent: #0b3d6e;
+  --dms-rule: #777;
+  --dms-header-bg: #e6edf5;
+  --dms-missing: #b42318;
+  --dms-missing-bg: #fdecea;
+  --dms-optional: #8a5a00;
+  --dms-optional-bg: #fff4dc;
+  position: relative;
+  font-family: "Noto Serif", Georgia, "Times New Roman", serif;
+  font-size: 10.5pt;
+  line-height: 1.45;
+  color: var(--dms-ink);
+  hyphens: auto;
+  overflow-wrap: break-word;
+}
+
+.dms-document .dms-heading,
+.dms-document .dms-section-title,
+.dms-document .dms-table th,
+.dms-document .dms-draft-banner,
+.dms-document .dms-clause-ref {
+  font-family: "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+}
+
+.dms-document .dms-heading,
+.dms-document .dms-section-title {
+  color: var(--dms-accent);
+  font-weight: 700;
+  break-after: avoid;
+}
+.dms-document .dms-heading-1 { font-size: 18pt; margin: 0 0 4mm; }
+.dms-document .dms-heading-2,
+.dms-document .dms-section-title { font-size: 12.5pt; margin: 7mm 0 2mm; }
+.dms-document .dms-heading-3 { font-size: 11pt; margin: 4mm 0 1mm; color: var(--dms-ink); }
+.dms-document .dms-heading-4,
+.dms-document .dms-heading-5,
+.dms-document .dms-heading-6 { font-size: 10.5pt; margin: 3mm 0 1mm; color: var(--dms-ink); }
+
+.dms-document .dms-paragraph { margin: 0 0 2.5mm; text-align: justify; orphans: 3; widows: 3; }
+
+.dms-document .dms-list { margin: 0 0 2.5mm; padding-left: 7mm; }
+.dms-document ul.dms-list { list-style: disc; }
+.dms-document ol.dms-list { list-style: decimal; }
+.dms-document .dms-list > li { margin: 0 0 1mm; }
+.dms-document .dms-list > li > .dms-paragraph:last-child { margin-bottom: 0; }
+
+.dms-document .dms-table { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm; font-size: 9pt; }
+.dms-document .dms-table th,
+.dms-document .dms-table td {
+  border: 0.5pt solid var(--dms-rule);
+  padding: 1.2mm 2mm;
+  text-align: left;
+  vertical-align: top;
+}
+.dms-document .dms-table th { background: var(--dms-header-bg); }
+.dms-document .dms-table thead { display: table-header-group; }
+.dms-document .dms-table tr { break-inside: avoid; }
+.dms-document .dms-table .dms-paragraph { margin: 0; text-align: left; }
+
+/* Clause references are resolved by the rendering once the clause library exists (business concept 4.1). */
+.dms-document .dms-clause-ref {
+  margin: 0 0 2.5mm;
+  padding: 1mm 2mm;
+  border-left: 2pt solid var(--dms-rule);
+  font-size: 9pt;
+  color: #444;
+}
+
+.dms-document .dms-page-break { break-after: page; height: 0; }
+
+/* Locked sections hold vetted standard text (business concept 4.1). No visual mark in print. */
+.dms-document .dms-section[data-locked="true"] { position: relative; }
+
+/* Missing values: always visible, in the preview and in draft prints. */
+.dms-document .dms-missing {
+  padding: 0 0.3em;
+  border-radius: 2px;
+  border: 1px dashed var(--dms-optional);
+  background: var(--dms-optional-bg);
+  color: var(--dms-optional);
+  font-family: "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.9em;
+}
+.dms-document .dms-missing::before { content: "["; }
+.dms-document .dms-missing::after { content: "]"; }
+.dms-document .dms-missing-required {
+  border: 1px solid var(--dms-missing);
+  background: var(--dms-missing-bg);
+  color: var(--dms-missing);
+  font-weight: 600;
+}
+
+/* Draft marking ("Draft – not valid"): a banner at the top and a diagonal watermark. */
+.dms-document .dms-draft-banner {
+  margin: 0 0 5mm;
+  padding: 1.5mm 3mm;
+  border: 1pt solid var(--dms-missing);
+  color: var(--dms-missing);
+  font-size: 9pt;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.dms-document.dms-draft::before {
+  content: attr(data-watermark);
+  position: absolute;
+  top: 35%;
+  left: 0;
+  right: 0;
+  z-index: 0;
+  text-align: center;
+  font-family: "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  font-size: 48pt;
+  font-weight: 700;
+  color: rgba(180, 35, 24, 0.08);
+  transform: rotate(-30deg);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+@media screen {
+  .dms-document {
+    max-width: 210mm;
+    margin: 0 auto;
+    padding: 18mm 18mm 20mm;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+  }
+  .dms-document .dms-page-break {
+    margin: 6mm -18mm;
+    border-top: 1px dashed #bbb;
+  }
+  .dms-document .dms-missing { cursor: pointer; }
+  .dms-document .dms-section[data-locked="true"] {
+    border-left: 2px solid #d0d7e2;
+    margin-left: -4mm;
+    padding-left: calc(4mm - 2px);
+  }
+}
+
+@media print {
+  /* In print the watermark repeats on every page: WeasyPrint repeats fixed elements per page. */
+  .dms-document.dms-draft::before { position: fixed; top: 45%; }
+}

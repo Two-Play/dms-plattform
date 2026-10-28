@@ -71,3 +71,32 @@ US-01.1, business concept 4.1. Pure domain logic in `templates-api`; persistence
 **Diff approach:** an LCS edit script (O(n·m), no dependency) on word tokens (whitespace is not significant; a placeholder or line break is one token) gives one text change per run of changed words, plus placeholder changes for the placeholders in that run. Blocks, list items and table rows are aligned with the same LCS; within a changed run, blocks of the same kind are paired (second LCS) and compared recursively, table cells by column. Locations use document positions; deletions point to where the content was removed.
 
 **Workflow integration (sprint 6):** on submission the document workflow first rejects documents with `EditRules` violations (so unauthorized deviations never reach review), then calls `DeviationReport.requiresExtraReview(report)`; if true, it adds the additional review step configured for the document class (e.g. the legal department for "contract with clause deviation", business concept 6). The report is stored with the document version and shown to reviewers.
+
+## HTML rendering and preview (DMS-39)
+
+`core`, package `dms.templates.core`:
+
+- `HtmlRenderer.render(resolved, options)` turns `ResolvedContent` into a semantic HTML fragment (one `article.dms-document`); `renderDocument` wraps it into a stand-alone document with the stylesheet embedded, which is what the PDF worker (ADR 0008) prints. All text and attribute values are escaped; the content model has no raw HTML, so field values cannot inject markup. No scripts, ids, inline styles or external references.
+- `HtmlOptions`: document language (`lang`), field labels for missing-value markers, optional draft marking (`HtmlOptions.draft(language)`: "Draft – not valid" / "Entwurf – nicht gültig" as banner and watermark), title.
+- Markup contract (stable class names; the stylesheet and the frontend rely on them): `section.dms-section[data-section][data-locked]` with `h2.dms-section-title`; `h1`–`h6.dms-heading.dms-heading-N`; `p.dms-paragraph`; `ul|ol.dms-list`; `table.dms-table` with `thead` (`th scope=col`) for header rows; `div.dms-clause-ref[data-clause][data-clause-version]` (until the clause library resolves references); `div.dms-page-break`; `span.dms-value[data-field]` for field values; `span.dms-missing[data-field][data-required]` (plus `dms-missing-required`) showing the field label for missing values; `div.dms-draft-banner` and `article.dms-draft[data-watermark]` for drafts.
+- **Document stylesheet**: `core/src/main/resources/dms/templates/document.css` is the only copy. `HtmlRenderer.stylesheet` reads it for `renderDocument`; the frontend imports the same file through the Vite alias `@dms-document`. Every rule is scoped to `.dms-document`; screen-only rules (paper look, clickable missing values) are under `@media screen`, page size and margins under `@page`, the per-page watermark under `@media print`. The print-specific parts of the rendering spike (running header/footer, page x of y, clause counters) are added by the worker per job.
+- `Preview.run(template, values, language)` (US-03.2): checks the values against the class profile (`Validation.checkValues`), leaves out values that do not fit and blank values, resolves and renders with draft marking. Returns the HTML, the missing required fields (required for `Approved`, without fields the platform sets) with labels, and issues (`out_of_range`, `wrong_type`, `unknown_option`, `system_field`, ... per field; `evaluation_failed`, `limit_exceeded` for the whole template, then the HTML is empty).
+- `TemplateService.released(id, version)` loads a released version (other statuses: not found) and compiles it against its class profile; compiled versions are cached (LRU, 256 entries) by template id and version, which is safe because released versions and class profile versions never change and the version is always read through row-level security first. `PreviewTemplate.fields` lists the editable fields (no system fields), those the template uses (placeholders, conditions, repeats, computed fields) first.
+
+HTTP (module `app`, `TemplatePreviewApi`), both with `ReadTemplateCatalog` (every business role) and only for released versions:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/templates/{id}/versions/{version}/fields` | Form fields: key, label, description, type with rules, multiple, required, used in template |
+| POST | `/api/v1/templates/{id}/versions/{version}/preview` | `{values, language}` → `{html, missingRequired: [{field, label}], issues: [{field, label, code, message}]}`; resolution and rendering run outside the database transaction |
+
+### Performance
+
+Acceptance criterion: the preview updates within 2 s (p95) after a field change. `PreviewSpec` resolves and renders a realistic contract template 50 times (`PreviewFixtures`: about twelve printed pages, 6,500 words, 16 numbered clauses with conditions, a repeated service list, two annex tables of 30 and 5 rows, computed fields; 62 KB of HTML). Measured on a developer laptop (2026-10-28), server time without HTTP:
+
+| Path | Median | p95 |
+|---|---|---|
+| Compile + resolve + render (first preview of a version, cache miss) | 23.6 ms | 36.0 ms |
+| Resolve + render (compiled version cached) | 2.2 ms | 2.7 ms |
+
+During the full parallel test run the p95 rose to 76 ms and 4.4 ms. The test asserts p95 below 1 s and 250 ms respectively. In the browser the form waits 300 ms after the last change before it requests a preview, so the end-to-end delay is dominated by the debounce and the network.
