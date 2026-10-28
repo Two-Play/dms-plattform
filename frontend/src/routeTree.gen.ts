@@ -17,10 +17,11 @@ import { Route as AppAdminRouteImport } from './routes/_app/admin'
 import { Route as AppComplianceRouteImport } from './routes/_app/compliance'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppTasksRouteImport } from './routes/_app/tasks'
-import { Route as AppTemplatesRouteImport } from './routes/_app/templates'
 import { Route as AppDocumentsIndexRouteImport } from './routes/_app/documents/index'
 import { Route as AppDocumentsDocumentIdRouteImport } from './routes/_app/documents/$documentId'
 import { Route as AppDocumentsNewRouteImport } from './routes/_app/documents/new'
+import { Route as AppTemplatesIndexRouteImport } from './routes/_app/templates/index'
+import { Route as AppTemplatesTemplateIdRouteImport } from './routes/_app/templates/$templateId'
 import { Route as AppDocumentsDocumentIdCompareRouteImport } from './routes/_app/documents/$documentId_.compare'
 
 const AppRoute = AppRouteImport.update({
@@ -62,11 +63,6 @@ const AppTasksRoute = AppTasksRouteImport.update({
   path: '/tasks',
   getParentRoute: () => AppRoute,
 } as any)
-const AppTemplatesRoute = AppTemplatesRouteImport.update({
-  id: '/templates',
-  path: '/templates',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppDocumentsIndexRoute = AppDocumentsIndexRouteImport.update({
   id: '/documents/',
   path: '/documents/',
@@ -80,6 +76,16 @@ const AppDocumentsDocumentIdRoute = AppDocumentsDocumentIdRouteImport.update({
 const AppDocumentsNewRoute = AppDocumentsNewRouteImport.update({
   id: '/documents/new',
   path: '/documents/new',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTemplatesIndexRoute = AppTemplatesIndexRouteImport.update({
+  id: '/templates/',
+  path: '/templates/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTemplatesTemplateIdRoute = AppTemplatesTemplateIdRouteImport.update({
+  id: '/templates/$templateId',
+  path: '/templates/$templateId',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDocumentsDocumentIdCompareRoute =
@@ -97,10 +103,11 @@ export interface FileRoutesByFullPath {
   '/compliance': typeof AppComplianceRoute
   '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
-  '/templates': typeof AppTemplatesRoute
   '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/documents/new': typeof AppDocumentsNewRoute
+  '/templates/$templateId': typeof AppTemplatesTemplateIdRoute
   '/documents/': typeof AppDocumentsIndexRoute
+  '/templates/': typeof AppTemplatesIndexRoute
   '/documents/$documentId/compare': typeof AppDocumentsDocumentIdCompareRoute
 }
 export interface FileRoutesByTo {
@@ -110,11 +117,12 @@ export interface FileRoutesByTo {
   '/compliance': typeof AppComplianceRoute
   '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
-  '/templates': typeof AppTemplatesRoute
   '/': typeof AppIndexRoute
   '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/documents/new': typeof AppDocumentsNewRoute
+  '/templates/$templateId': typeof AppTemplatesTemplateIdRoute
   '/documents': typeof AppDocumentsIndexRoute
+  '/templates': typeof AppTemplatesIndexRoute
   '/documents/$documentId/compare': typeof AppDocumentsDocumentIdCompareRoute
 }
 export interface FileRoutesById {
@@ -126,11 +134,12 @@ export interface FileRoutesById {
   '/_app/compliance': typeof AppComplianceRoute
   '/_app/search': typeof AppSearchRoute
   '/_app/tasks': typeof AppTasksRoute
-  '/_app/templates': typeof AppTemplatesRoute
   '/_app/': typeof AppIndexRoute
   '/_app/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/_app/documents/new': typeof AppDocumentsNewRoute
+  '/_app/templates/$templateId': typeof AppTemplatesTemplateIdRoute
   '/_app/documents/': typeof AppDocumentsIndexRoute
+  '/_app/templates/': typeof AppTemplatesIndexRoute
   '/_app/documents/$documentId_/compare': typeof AppDocumentsDocumentIdCompareRoute
 }
 export interface FileRouteTypes {
@@ -143,10 +152,11 @@ export interface FileRouteTypes {
     | '/compliance'
     | '/search'
     | '/tasks'
-    | '/templates'
     | '/documents/$documentId'
     | '/documents/new'
+    | '/templates/$templateId'
     | '/documents/'
+    | '/templates/'
     | '/documents/$documentId/compare'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -156,11 +166,12 @@ export interface FileRouteTypes {
     | '/compliance'
     | '/search'
     | '/tasks'
-    | '/templates'
     | '/'
     | '/documents/$documentId'
     | '/documents/new'
+    | '/templates/$templateId'
     | '/documents'
+    | '/templates'
     | '/documents/$documentId/compare'
   id:
     | '__root__'
@@ -171,11 +182,12 @@ export interface FileRouteTypes {
     | '/_app/compliance'
     | '/_app/search'
     | '/_app/tasks'
-    | '/_app/templates'
     | '/_app/'
     | '/_app/documents/$documentId'
     | '/_app/documents/new'
+    | '/_app/templates/$templateId'
     | '/_app/documents/'
+    | '/_app/templates/'
     | '/_app/documents/$documentId_/compare'
   fileRoutesById: FileRoutesById
 }
@@ -243,13 +255,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTasksRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/templates': {
-      id: '/_app/templates'
-      path: '/templates'
-      fullPath: '/templates'
-      preLoaderRoute: typeof AppTemplatesRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/_app/documents/': {
       id: '/_app/documents/'
       path: '/documents'
@@ -271,6 +276,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDocumentsNewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/templates/': {
+      id: '/_app/templates/'
+      path: '/templates'
+      fullPath: '/templates/'
+      preLoaderRoute: typeof AppTemplatesIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/templates/$templateId': {
+      id: '/_app/templates/$templateId'
+      path: '/templates/$templateId'
+      fullPath: '/templates/$templateId'
+      preLoaderRoute: typeof AppTemplatesTemplateIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/documents/$documentId_/compare': {
       id: '/_app/documents/$documentId_/compare'
       path: '/documents/$documentId/compare'
@@ -286,11 +305,12 @@ interface AppRouteChildren {
   AppComplianceRoute: typeof AppComplianceRoute
   AppSearchRoute: typeof AppSearchRoute
   AppTasksRoute: typeof AppTasksRoute
-  AppTemplatesRoute: typeof AppTemplatesRoute
   AppIndexRoute: typeof AppIndexRoute
   AppDocumentsDocumentIdRoute: typeof AppDocumentsDocumentIdRoute
   AppDocumentsNewRoute: typeof AppDocumentsNewRoute
+  AppTemplatesTemplateIdRoute: typeof AppTemplatesTemplateIdRoute
   AppDocumentsIndexRoute: typeof AppDocumentsIndexRoute
+  AppTemplatesIndexRoute: typeof AppTemplatesIndexRoute
   AppDocumentsDocumentIdCompareRoute: typeof AppDocumentsDocumentIdCompareRoute
 }
 
@@ -299,11 +319,12 @@ const AppRouteChildren: AppRouteChildren = {
   AppComplianceRoute: AppComplianceRoute,
   AppSearchRoute: AppSearchRoute,
   AppTasksRoute: AppTasksRoute,
-  AppTemplatesRoute: AppTemplatesRoute,
   AppIndexRoute: AppIndexRoute,
   AppDocumentsDocumentIdRoute: AppDocumentsDocumentIdRoute,
   AppDocumentsNewRoute: AppDocumentsNewRoute,
+  AppTemplatesTemplateIdRoute: AppTemplatesTemplateIdRoute,
   AppDocumentsIndexRoute: AppDocumentsIndexRoute,
+  AppTemplatesIndexRoute: AppTemplatesIndexRoute,
   AppDocumentsDocumentIdCompareRoute: AppDocumentsDocumentIdCompareRoute,
 }
 
