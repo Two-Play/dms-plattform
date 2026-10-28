@@ -57,7 +57,7 @@ Releasing a version does not deprecate older released versions; deprecating is a
 
 ## Locked sections and deviations (DMS-36)
 
-US-01.1, business concept 4.1. Pure domain logic in `templates-api`; persistence and the API follow with documents (sprint 5).
+US-01.1, business concept 4.1. Pure domain logic in `templates-api`; requests are stored per document version and the report with it since DMS-79 (see modules/documents/README.md, ADR 0022). `templates-core` `DeviationJson` holds the JSON format of the report (stored form `{"format":1,"deviations":[...]}`).
 
 **Edit rules** (`EditRules.check(template, document, requests, policy)` returns typed `EditViolation`s with section id and `reason`). A document has the template's structure; sections are matched by id.
 
@@ -70,7 +70,7 @@ US-01.1, business concept 4.1. Pure domain logic in `templates-api`; persistence
 
 **Diff approach:** an LCS edit script (O(n·m), no dependency) on word tokens (whitespace is not significant; a placeholder or line break is one token) gives one text change per run of changed words, plus placeholder changes for the placeholders in that run. Blocks, list items and table rows are aligned with the same LCS; within a changed run, blocks of the same kind are paired (second LCS) and compared recursively, table cells by column. Locations use document positions; deletions point to where the content was removed.
 
-**Workflow integration (sprint 6):** on submission the document workflow first rejects documents with `EditRules` violations (so unauthorized deviations never reach review), then calls `DeviationReport.requiresExtraReview(report)`; if true, it adds the additional review step configured for the document class (e.g. the legal department for "contract with clause deviation", business concept 6). The report is stored with the document version and shown to reviewers.
+**Workflow integration (sprint 6):** on submission the document workflow first rejects documents with `EditRules` violations (so unauthorized deviations never reach review), then calls `DeviationReport.requiresExtraReview(report)`; if true, it adds the additional review step configured for the document class (e.g. the legal department for "contract with clause deviation", business concept 6). The report is stored with the document version (`DocumentVersion.deviations`, `DocumentVersion.requiresExtraReview` in `documents-api`) and shown to reviewers (`GET /api/v1/documents/{id}/versions/{versionId}/deviations`).
 
 ## HTML rendering and preview (DMS-39)
 

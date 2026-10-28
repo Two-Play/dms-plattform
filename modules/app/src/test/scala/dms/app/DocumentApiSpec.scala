@@ -19,6 +19,7 @@ import dms.documents.metadata.*
 import dms.identity.*
 import dms.kernel.{TemplateId, TenantId, UserId}
 import dms.templates.*
+import dms.templates.core.ContentJson.given
 import dms.templates.core.{TemplateDraft, TemplateService}
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
@@ -248,7 +249,10 @@ object DocumentApiSpec extends ZIOSpecDefault:
       assertTrue(
         docs.paths.pathItems.contains("/api/v1/documents"),
         docs.paths.pathItems.contains("/api/v1/documents/{id}/draft"),
-        docs.paths.pathItems.contains("/api/v1/documents/{id}/submit")
+        docs.paths.pathItems.contains("/api/v1/documents/{id}/submit"),
+        docs.paths.pathItems.contains("/api/v1/documents/{id}/deviation-requests"),
+        docs.paths.pathItems.contains("/api/v1/documents/{id}/deviation-requests/{requestId}/withdraw"),
+        docs.paths.pathItems.contains("/api/v1/documents/{id}/versions/{versionId}/deviations")
       )
     },
     test("authors create documents from released templates; readers and administrators cannot") {
@@ -388,6 +392,95 @@ object DocumentApiSpec extends ZIOSpecDefault:
         submitted._2.fromJson[DocumentVersionView].toOption.exists(_.status == "InReview"),
         editAfter._1 == Status.Forbidden,
         outbox == 2L
+      )
+    },
+    test("authors request deviations for locked sections; reviewers read the deviation report") {
+      val deviating = content.copy(sections =
+        content.sections.map(s =>
+          if s.locked then
+            s.copy(blocks =
+              List(
+                Block.Paragraph(
+                  List(
+                    Inline.Text("Between "),
+                    Inline.Placeholder("contractPartner"),
+                    Inline.Text(" and its affiliates")
+                  )
+                )
+              )
+            )
+          else s
+        )
+      )
+      val draftBody               = s"""{"values":{$reviewValues},"content":${deviating.toJson}}"""
+      def request(reason: String) = Some(s"""{"sectionId":"parties","reason":"$reason"}""")
+      for
+        doc <- createDocument(reviewValues)
+        path = s"/api/v1/documents/${doc.id}"
+        byReader <- call(reader, "POST", s"$path/deviation-requests", request("Affiliates"))
+        noReason <- call(author, "POST", s"$path/deviation-requests", request(" "))
+        unlocked <- call(
+          author,
+          "POST",
+          s"$path/deviation-requests",
+          Some("""{"sectionId":"terms","reason":"x"}""")
+        )
+        withoutIt <- call(author, "PUT", s"$path/draft", Some(draftBody))
+        requested <- call(author, "POST", s"$path/deviation-requests", request("Affiliates"))
+        duplicate <- call(author, "POST", s"$path/deviation-requests", request("Again"))
+        changed   <- call(author, "PUT", s"$path/draft", Some(draftBody))
+        version   = changed._2.fromJson[DocumentVersionView].toOption
+        versionId = version.map(_.id).getOrElse(UUID.randomUUID())
+        report  <- call(author, "GET", s"$path/versions/$versionId/deviations")
+        hidden  <- call(reader, "GET", s"$path/versions/$versionId/deviations")
+        unknown <- call(author, "GET", s"$path/versions/${UUID.randomUUID()}/deviations")
+        requestId = requested._2.fromJson[DeviationsView].toOption.flatMap(_.requests.headOption).map(_.id)
+        withdrawn <- call(
+          author,
+          "POST",
+          s"$path/deviation-requests/${requestId.getOrElse(UUID.randomUUID())}/withdraw"
+        )
+        blocked   <- call(author, "POST", s"$path/submit")
+        _         <- call(author, "POST", s"$path/deviation-requests", request("Affiliates, really"))
+        submitted <- call(author, "POST", s"$path/submit")
+        late      <- call(author, "POST", s"$path/deviation-requests", request("Late"))
+        frozen    <- call(author, "GET", s"$path/versions/$versionId/deviations")
+        view       = report._2.fromJson[DeviationsView].toOption
+        afterWd    = withdrawn._2.fromJson[DeviationsView].toOption
+        frozenView = frozen._2.fromJson[DeviationsView].toOption
+      yield assertTrue(
+        byReader._1 == Status.Forbidden,
+        noReason._1 == Status.UnprocessableEntity,
+        unlocked._1 == Status.UnprocessableEntity,
+        withoutIt._1 == Status.UnprocessableEntity,
+        requested._1 == Status.Created,
+        duplicate._1 == Status.Conflict,
+        changed._1 == Status.Ok,
+        version.exists(_.requiresExtraReview),
+        report._1 == Status.Ok,
+        view.exists(_.requiresExtraReview),
+        view.exists(
+          _.deviations.map(d => (d.section, d.change, d.authorized, d.reasons)) ==
+            List(
+              (
+                "parties",
+                dms.templates.DeviationChange.TextInserted("and its affiliates"),
+                true,
+                List("Affiliates")
+              )
+            )
+        ),
+        view.exists(_.deviations.forall(_.location.startsWith("parties"))),
+        hidden._1 == Status.Forbidden,
+        unknown._1 == Status.NotFound,
+        withdrawn._1 == Status.Ok,
+        afterWd.exists(v => !v.requiresExtraReview && v.deviations.forall(!_.authorized)),
+        afterWd.exists(_.requests.map(_.active) == List(false)),
+        blocked._1 == Status.UnprocessableEntity,
+        submitted._1 == Status.Ok,
+        // In review, nobody may edit the draft (EditDraft), so its requests cannot change either.
+        late._1 == Status.Forbidden,
+        frozenView.exists(v => v.status == "InReview" && v.requiresExtraReview && v.requests.size == 2)
       )
     },
     test("the document, its audit entry and its outbox event commit or roll back together") {

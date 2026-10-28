@@ -45,6 +45,9 @@ final class DocumentTemplates(service: TemplateService, profiles: ProfileSource)
   def encode(content: TemplateContent): String              = ContentJson.encodeStored(content)
   def decode(json: String): Either[String, TemplateContent] = ContentJson.decodeStored(json)
 
+  def encodeReport(report: DeviationReport): String               = DeviationJson.encodeStored(report)
+  def decodeReport(json: String): Either[String, DeviationReport] = DeviationJson.decodeStored(json)
+
 object DocumentTemplates:
   val layer: URLayer[TemplateService & ProfileSource, TemplateSource] =
     ZLayer.fromFunction(DocumentTemplates(_, _))

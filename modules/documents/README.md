@@ -68,10 +68,10 @@ Business concept 4.3 (manual and hybrid creation), US-02.1. `core`, package `dms
 - `DocumentService` (inside `Db.transact(tenant)`):
   - `create(NewDocument(templateId, templateVersion, title, values), actor)`: only from a `Released` template version (409 otherwise; the database checks it again). Creates the document and version 1.0 as a draft (`1.0-draft.1`) with the template content (sections incl. locked flags, clause references) and binds it to the template version and the class profile version of the template.
   - Field values: entered values (`ValueOrigin.Manual`, or `System(source)` from a business system) are validated against the class profile for status Draft (`Validation.validate`); the platform adds `documentId`, `documentClass`, `version`, `template`, `templateVersion` (`System("dms")`); computed fields of the template are evaluated (`Resolver.computedValues`) and stored as `Computed`. Platform fields, status, checksum and computed fields cannot be entered (`not_editable`). The retention rule can be entered until it is derived from the class.
-  - `updateDraft(id, DraftChange(title, values, content), actor)`: only drafts; entered values are replaced, computed values recomputed, the working state increases and is stored in `dms.document_working_state`. A changed content must keep locked sections and their order and title (`EditRules` from DMS-36; deviation requests are not stored yet, so locked text cannot change) and the template's computed fields, and must fit the class profile (template check).
-  - `submit(id, actor)`: `Validation.checkTransition(profile, values, Draft, Submit)`; blocked with `Incomplete(InReview, issues)` while fields required in review are missing.
+  - `updateDraft(id, DraftChange(title, values, content), actor)`: only drafts; entered values are replaced, computed values recomputed, the working state increases and is stored in `dms.document_working_state`. A changed content must keep locked sections and their order and title (`EditRules` from DMS-36 with the active deviation requests of the version: locked text only changes in sections with a request, see DMS-79 below) and the template's computed fields, and must fit the class profile (template check). The deviation report is recomputed and stored.
+  - `submit(id, actor)`: `Validation.checkTransition(profile, values, Draft, Submit)`; blocked with `Incomplete(InReview, issues)` while fields required in review are missing, and with `Invalid` while the content has unauthorized deviations (`EditRules` violations).
   - `changeStatus(versionId, event, actor)`: further lifecycle events for the workflow: approval by a person other than the author (`Lifecycle.approve`) takes the metadata snapshot and needs the rendition checksum; publication supersedes the valid version of the same scope. `attachRendition` records the rendition of an open version. `newVersion(id, Major | Minor, reason, actor)` starts the next version from the valid one (one open version at a time; a minor version needs a reason).
-  - Every change is recorded in the audit trail (`document.created`, `document.draft-changed`, `document.submitted`, `document.approved`, `document.published`, `document.status-changed`, `document.version-created`, `document.rendition-attached`) and creation, status changes and new versions are published to the outbox (`document.created`, `document.submitted`, `document.status-changed`, `document.version-created`), in the same transaction.
+  - Every change is recorded in the audit trail (`document.created`, `document.draft-changed`, `document.submitted`, `document.approved`, `document.published`, `document.status-changed`, `document.version-created`, `document.rendition-attached`, `document.deviation-requested`, `document.deviation-withdrawn`) and creation, status changes and new versions are published to the outbox (`document.created`, `document.submitted`, `document.status-changed`, `document.version-created`; the payload includes `requiresExtraReview`), in the same transaction.
 - `TemplateSource`: the documents module's view of templates (versions, content check, computed fields, content format), implemented in `app` (`DocumentTemplates`) with `TemplateService`, `TemplateCompiler`, `Resolver` and `ContentJson`.
 
 HTTP (module `app`, `DocumentApi`):
@@ -85,3 +85,38 @@ HTTP (module `app`, `DocumentApi`):
 | POST | `/api/v1/documents/{id}/submit` | Submit for review | `EditDraft` |
 
 Validation errors return 422 with `issues` (`[{field,label,code,message}]`): `invalid_values` for entered values, `incomplete` for a blocked submission. Values in responses carry their origin: `{"value":{...},"origin":"System","source":"dms"}`.
+
+## Deviation requests and deviation report (DMS-79, ADR 0022)
+
+Business concept 4.1, US-01.1. The standard text of a locked template section may only change in a document if a deviation request (section, reason, requester, time) is recorded for that section on the draft. A request permits the change; the additional review step of the document class approves it.
+
+**For the workflow (DMS-40)**: read `DocumentVersion.requiresExtraReview` (`documents-api`), which is `DeviationReport.requiresExtraReview(version.deviations)`: true if the submitted content has at least one deviation from a locked section with a request. A version in review never has unauthorized deviations (submission rejects them). The flag is also in the payload of every document outbox event (`document.submitted`, `document.status-changed`, ...). The full report is `DocumentVersion.deviations` (`dms.templates.DeviationReport`: location, change and the requests of the section per deviation); it is frozen with the version once it leaves Draft.
+
+`api`, package `dms.documents`:
+
+- `RecordedDeviationRequest`: a stored request (id, version, section, reason, requester, time, `basedOn` for carried-over requests, withdrawal). `request` / `RecordedDeviationRequest.active(list)` give the `DeviationRequest`s that `EditRules` and `DeviationReport` take.
+- `DocumentVersion.deviations: DeviationReport` (default empty) and `DocumentVersion.requiresExtraReview`.
+
+`core`, `DocumentService` (inside `Db.transact(tenant)`):
+
+- `requestDeviation(documentId, sectionId, reason, actor)`: only on a draft (409); the section must be a locked section of the template and the reason non-blank, at most 4000 characters (422); one active request per section (409). Recomputes and stores the report; audit `document.deviation-requested`.
+- `withdrawDeviation(documentId, requestId, actor)`: only on a draft; the row is kept with who and when. A section that still deviates becomes an unauthorized deviation: content changes must restore its text and submission is blocked until then or until it is requested again. Audit `document.deviation-withdrawn`.
+- `deviationRequests(versionId)`: all requests of a version, active and withdrawn.
+- `updateDraft` passes the active requests to `EditRules` and stores the recomputed report; `submit` (and `changeStatus` with `Submit`) checks `EditRules` again and stores the final report.
+- `newVersion` carries the active requests of the valid version over to the new draft (`basedOn` = original request), so its deviations stay permitted and need the extra review again.
+- No outbox event per request: like draft changes, requests are internal to the draft; the workflow learns the outcome from `requiresExtraReview` on submission.
+
+Tables (migration V10):
+
+- `dms.document_deviation_request`: one row per request (`section_id`, `reason`, `requested_by`, `requested_at`, `based_on`, `withdrawn_by`, `withdrawn_at`). Partial unique index `document_deviation_request_active` (one active request per version and section). Guard trigger: inserts and withdrawals only while the version is `Draft`; only the withdrawal columns change, once; no deletes. RLS with `dms.current_tenant()`; `dms_app` may select and insert, and update only `withdrawn_by`, `withdrawn_at`.
+- `dms.document_version.deviation_report` (`jsonb`, stored format of `templates-core` `DeviationJson`, `{"format":1,"deviations":[...]}`): changes only while the version is a draft (V10 extends the V9 guard).
+
+HTTP (module `app`, `DocumentApi`):
+
+| Method | Path | Purpose | Authorization |
+|---|---|---|---|
+| POST | `/api/v1/documents/{id}/deviation-requests` | Request a deviation (`{"sectionId","reason"}`); 201 with the draft's report | `EditDraft` |
+| POST | `/api/v1/documents/{id}/deviation-requests/{requestId}/withdraw` | Withdraw a request of the draft; the draft's report | `EditDraft` |
+| GET | `/api/v1/documents/{id}/versions/{versionId}/deviations` | Report and requests of a version, e.g. for reviewers | `ReadDocument` on that version |
+
+The report view: `{versionId, version, status, requiresExtraReview, requests:[{id,sectionId,reason,requestedBy,requestedAt,basedOn,active,withdrawnBy,withdrawnAt}], deviations:[{section,path,token,location,change,authorized,reasons}]}`; `change` carries a `type` discriminator, e.g. `{"type":"TextReplaced","from":"30 days","to":"60 days"}`. Version views carry `requiresExtraReview` too.

@@ -132,6 +132,26 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
                       released_at = now()
                   where id = $version""".update.run()
 
+  private def insertRequest(version: UUID, section: String, reason: String = "Customer requirement")(using
+      DbTx
+  ): UUID =
+    val id = UUID.randomUUID()
+    val _  = sql"""insert into dms.document_deviation_request
+                     (id, tenant_id, version_id, section_id, reason, requested_by)
+                   values ($id, dms.current_tenant(), $version, $section, $reason, ${"author"})""".update
+      .run()
+    id
+
+  private def withdraw(request: UUID)(using DbTx): Int =
+    sql"""update dms.document_deviation_request set withdrawn_by = ${"author"}, withdrawn_at = now()
+          where id = $request""".update.run()
+
+  private def updateReport(version: UUID, deviations: String = "[{}]")(using DbTx): Int =
+    sql"""update dms.document_version set deviation_report = ${Jsonb(
+        s"""{"format":1,"deviations":$deviations}"""
+      )}
+          where id = $version""".update.run()
+
   private def isGuardViolation(e: Either[DbError, ?]): Boolean =
     e.left.exists(_.isInstanceOf[DbError.AppendOnlyViolation])
 
@@ -321,21 +341,108 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
         isGuardViolation(ownerUpdate)
       )
     },
+    test("deviation requests are recorded and withdrawn only while the version is a draft") {
+      for
+        f   <- fixture
+        doc <- asApp(f.tenant)(insertDocument(f))
+        v   <- asApp(f.tenant)(insertVersion(f, doc, 1))
+        r1  <- asApp(f.tenant)(insertRequest(v, "liability"))
+        r2  <- asApp(f.tenant)(insertRequest(v, "payment"))
+        // One active request per section; a withdrawn one makes room for a new one.
+        duplicate <- asApp(f.tenant)(insertRequest(v, "liability")).either
+        withdrawn <- asApp(f.tenant)(withdraw(r1))
+        again     <- asApp(f.tenant)(insertRequest(v, "liability")).either
+        twice     <- asApp(f.tenant)(withdraw(r1)).either
+        reworded  <- asApp(f.tenant)(
+          sql"update dms.document_deviation_request set reason = 'other' where id = $r2".update.run()
+        ).either
+        ownerReworded <- ZIO.serviceWithZIO[Env](
+          _.owner
+            .transactSystem(
+              Db.sql(
+                sql"update dms.document_deviation_request set reason = 'other' where id = $r2".update.run()
+              )
+            )
+            .either
+        )
+        delete <- asApp(f.tenant)(
+          sql"delete from dms.document_deviation_request where id = $r2".update.run()
+        ).either
+        ownerDelete <- ZIO.serviceWithZIO[Env](
+          _.owner
+            .transactSystem(
+              Db.sql(sql"delete from dms.document_deviation_request where id = $r2".update.run())
+            )
+            .either
+        )
+        report <- asApp(f.tenant)(updateReport(v))
+        // Submission freezes the requests and the report.
+        _              <- asApp(f.tenant)(setStatus(v, "InReview"))
+        afterSubmit    <- asApp(f.tenant)(insertRequest(v, "termination")).either
+        withdrawLater  <- asApp(f.tenant)(withdraw(r2)).either
+        reportInReview <- asApp(f.tenant)(updateReport(v, "[{},{}]")).either
+        // A rejected version is a draft again.
+        _        <- asApp(f.tenant)(setStatus(v, "Draft"))
+        reopened <- asApp(f.tenant)(withdraw(r2))
+      yield assertTrue(
+        isUnique(duplicate, "document_deviation_request_active"),
+        withdrawn == 1,
+        again.isRight,
+        isGuardViolation(twice),
+        reworded.left.exists(_.isInstanceOf[DbError.PermissionDenied]),
+        isGuardViolation(ownerReworded),
+        delete.left.exists(_.isInstanceOf[DbError.PermissionDenied]),
+        isGuardViolation(ownerDelete),
+        report == 1,
+        isGuardViolation(afterSubmit),
+        isGuardViolation(withdrawLater),
+        isGuardViolation(reportInReview),
+        reopened == 1
+      )
+    },
+    test("a request needs a reason and a section") {
+      for
+        f         <- fixture
+        doc       <- asApp(f.tenant)(insertDocument(f))
+        v         <- asApp(f.tenant)(insertVersion(f, doc, 1))
+        noReason  <- asApp(f.tenant)(insertRequest(v, "liability", reason = " ")).either
+        noSection <- asApp(f.tenant)(insertRequest(v, " ")).either
+      yield assertTrue(noReason.isLeft, noSection.isLeft)
+    },
+    test("tenants only see their own deviation requests") {
+      for
+        f     <- fixture
+        other <- fixture
+        doc   <- asApp(f.tenant)(insertDocument(f))
+        v     <- asApp(f.tenant)(insertVersion(f, doc, 1))
+        r     <- asApp(f.tenant)(insertRequest(v, "liability"))
+        own   <- asApp(f.tenant)(
+          sql"select count(*) from dms.document_deviation_request".query[Long].run().head
+        )
+        foreign <- asApp(other.tenant)(
+          sql"select count(*) from dms.document_deviation_request".query[Long].run().head
+        )
+        foreignWithdraw <- asApp(other.tenant)(withdraw(r))
+        // Requests for another tenant's version fail: the composite foreign key includes the tenant.
+        crossInsert <- asApp(other.tenant)(insertRequest(v, "payment")).either
+      yield assertTrue(own == 1L, foreign == 0L, foreignWithdraw == 0, crossInsert.isLeft)
+    },
     test("the status transitions of the guard are those of the lifecycle") {
-      val migration = scala.io.Source
-        .fromResource("db/migration/V9__document_versions.sql")
-        .mkString
-      val names = DocumentStatus.values.map(_.toString).toSet
-      val pairs = """\('(\w+)', '(\w+)'\)""".r
-        .findAllMatchIn(migration)
-        .map(m => (m.group(1), m.group(2)))
-        .filter((a, b) => names(a) && names(b))
-        .toSet
+      val names     = DocumentStatus.values.map(_.toString).toSet
       val lifecycle = for
         from  <- DocumentStatus.values.toSet
         event <- LifecycleEvent.values.toSet
         to    <- Lifecycle.transition(from, event).toOption
       yield (from.toString, to.toString)
-      assertTrue(pairs == lifecycle)
+      // V10 replaces the guard of V9; both must allow exactly the lifecycle's transitions.
+      val pairs = List("V9__document_versions.sql", "V10__deviation_requests.sql").map { file =>
+        val migration = scala.io.Source.fromResource(s"db/migration/$file").mkString
+        """\('(\w+)', '(\w+)'\)""".r
+          .findAllMatchIn(migration)
+          .map(m => (m.group(1), m.group(2)))
+          .filter((a, b) => names(a) && names(b))
+          .toSet
+      }
+      assertTrue(pairs.forall(_ == lifecycle))
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

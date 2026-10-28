@@ -6,20 +6,24 @@ import dms.documents.*
 import dms.documents.core.DocumentJson.given
 import dms.documents.metadata.DocumentClassId
 import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
-import dms.templates.TemplateContent
+import dms.templates.{DeviationReport, SectionId, TemplateContent}
 import zio.json.*
 
 import java.time.{Instant, OffsetDateTime, ZoneOffset}
 import java.util.UUID
 
-/** Reads and writes the structured content in the stored template content format (module `templates`). */
+/** Reads and writes the structured content and the deviation report in the stored formats of the templates
+  * module.
+  */
 trait ContentCodec:
   def encode(content: TemplateContent): String
   def decode(json: String): Either[String, TemplateContent]
+  def encodeReport(report: DeviationReport): String
+  def decodeReport(json: String): Either[String, DeviationReport]
 
-/** SQL for documents and document versions (migration V9). Runs inside `Db.sql` within `Db.transact(tenant)`;
-  * row-level security limits all rows to the current tenant. The guard triggers reject changes to versions
-  * that are not drafts and status changes outside the lifecycle.
+/** SQL for documents, document versions (migration V9) and deviation requests (V10). Runs inside `Db.sql`
+  * within `Db.transact(tenant)`; row-level security limits all rows to the current tenant. The guard triggers
+  * reject changes to versions that are not drafts and status changes outside the lifecycle.
   */
 private[core] object DocumentStore:
 
@@ -48,7 +52,20 @@ private[core] object DocumentStore:
       createdAt: OffsetDateTime,
       updatedAt: OffsetDateTime,
       releasedBy: Option[String],
-      releasedAt: Option[OffsetDateTime]
+      releasedAt: Option[OffsetDateTime],
+      deviationReport: Jsonb
+  ) derives DbCodec
+
+  final case class DeviationRequestRow(
+      id: UUID,
+      versionId: UUID,
+      sectionId: String,
+      reason: String,
+      requestedBy: String,
+      requestedAt: OffsetDateTime,
+      basedOn: Option[UUID],
+      withdrawnBy: Option[String],
+      withdrawnAt: Option[OffsetDateTime]
   ) derives DbCodec
 
   def document(id: DocumentId)(using DbTx): Option[Document] =
@@ -74,7 +91,7 @@ private[core] object DocumentStore:
     sql"""select id, document_id, major, minor, working_state, status, change_kind, change_reason, scope,
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
-                 released_by, released_at
+                 released_by, released_at, deviation_report
           from dms.document_version where document_id = ${id.value} order by major, minor, created_at"""
       .query[VersionRow]
       .run()
@@ -86,7 +103,7 @@ private[core] object DocumentStore:
     sql"""select id, document_id, major, minor, working_state, status, change_kind, change_reason, scope,
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
-                 released_by, released_at
+                 released_by, released_at, deviation_report
           from dms.document_version where id = $id for update"""
       .query[VersionRow]
       .run()
@@ -98,7 +115,7 @@ private[core] object DocumentStore:
     sql"""select id, document_id, major, minor, working_state, status, change_kind, change_reason, scope,
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
-                 released_by, released_at
+                 released_by, released_at, deviation_report
           from dms.document_version
           where document_id = ${id.value} and status in ('Draft', 'InReview', 'InApproval') for update"""
       .query[VersionRow]
@@ -110,20 +127,50 @@ private[core] object DocumentStore:
     val _ = sql"""insert into dms.document_version
                     (id, tenant_id, document_id, major, minor, working_state, status, change_kind, change_reason,
                      scope, class_version, template_id, template_version, content, field_values, created_by,
-                     status_changed_by)
+                     status_changed_by, deviation_report)
                   values (${v.id}, dms.current_tenant(), ${v.documentId.value}, ${v.number.major},
                           ${v.number.minor}, ${v.workingState}, ${v.status.toString}, ${v.changeKind.toString},
                           ${v.changeReason}, ${v.scope}, ${v.classVersion}, ${v.templateId.value},
                           ${v.templateVersion}, ${Jsonb(codec.encode(v.content))}, ${Jsonb(v.values.toJson)},
-                          ${v.createdBy.value}, ${v.createdBy.value})""".update.run()
+                          ${v.createdBy.value}, ${v.createdBy.value},
+                          ${Jsonb(codec.encodeReport(v.deviations))})""".update.run()
 
   /** Saves a changed draft with its next working state; a stale rendition is dropped. */
   def updateDraft(v: DocumentVersion, codec: ContentCodec)(using DbTx): Boolean =
     sql"""update dms.document_version
           set content = ${Jsonb(codec.encode(v.content))}, field_values = ${Jsonb(v.values.toJson)},
               working_state = ${v.workingState}, scope = ${v.scope}, rendition_key = null,
-              rendition_version = null, rendition_sha256 = null, updated_at = now()
+              rendition_version = null, rendition_sha256 = null,
+              deviation_report = ${Jsonb(codec.encodeReport(v.deviations))}, updated_at = now()
           where id = ${v.id} and status = 'Draft'""".update.run() == 1
+
+  /** Stores the deviation report of a draft, e.g. after a deviation request. */
+  def updateDeviationReport(id: UUID, report: DeviationReport, codec: ContentCodec)(using DbTx): Boolean =
+    sql"""update dms.document_version
+          set deviation_report = ${Jsonb(codec.encodeReport(report))}, updated_at = now()
+          where id = $id and status = 'Draft'""".update.run() == 1
+
+  /** All deviation requests of a version, active and withdrawn, oldest first. */
+  def deviationRequests(versionId: UUID)(using DbTx): List[RecordedDeviationRequest] =
+    sql"""select id, version_id, section_id, reason, requested_by, requested_at, based_on, withdrawn_by,
+                 withdrawn_at
+          from dms.document_deviation_request where version_id = $versionId order by requested_at, id"""
+      .query[DeviationRequestRow]
+      .run()
+      .map(toDeviationRequest)
+      .toList
+
+  def insertDeviationRequest(r: RecordedDeviationRequest)(using DbTx): Unit =
+    val _ = sql"""insert into dms.document_deviation_request
+                    (id, tenant_id, version_id, section_id, reason, requested_by, requested_at, based_on)
+                  values (${r.id}, dms.current_tenant(), ${r.versionId}, ${r.sectionId.value}, ${r.reason},
+                          ${r.requestedBy.value}, ${OffsetDateTime.ofInstant(r.requestedAt, ZoneOffset.UTC)},
+                          ${r.basedOn})""".update.run()
+
+  def withdrawDeviationRequest(id: UUID, by: UserId, at: Instant)(using DbTx): Boolean =
+    sql"""update dms.document_deviation_request
+          set withdrawn_by = ${by.value}, withdrawn_at = ${OffsetDateTime.ofInstant(at, ZoneOffset.UTC)}
+          where id = $id and withdrawn_at is null""".update.run() == 1
 
   def insertWorkingState(v: DocumentVersion, savedBy: UserId, codec: ContentCodec)(using DbTx): Unit =
     val _ = sql"""insert into dms.document_working_state
@@ -209,5 +256,24 @@ private[core] object DocumentStore:
       r.createdAt.toInstant,
       r.updatedAt.toInstant,
       r.releasedBy.map(UserId(_)),
-      r.releasedAt.map(_.toInstant)
+      r.releasedAt.map(_.toInstant),
+      codec
+        .decodeReport(r.deviationReport.value)
+        .fold(
+          e => throw IllegalStateException(s"cannot read the deviation report of version ${r.id}: $e"),
+          identity
+        )
+    )
+
+  private def toDeviationRequest(r: DeviationRequestRow): RecordedDeviationRequest =
+    RecordedDeviationRequest(
+      r.id,
+      r.versionId,
+      SectionId(r.sectionId),
+      r.reason,
+      UserId(r.requestedBy),
+      r.requestedAt.toInstant,
+      r.basedOn,
+      r.withdrawnBy.map(UserId(_)),
+      r.withdrawnAt.map(_.toInstant)
     )
