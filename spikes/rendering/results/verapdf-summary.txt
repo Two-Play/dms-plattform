@@ -1,0 +1,12 @@
+PASS /data/out/deterministic/A/policy-2b-1.pdf 2b
+PASS /data/out/deterministic/A/policy-3b-1.pdf 3b
+PASS /data/out/deterministic/A/contract-2b-1.pdf 2b
+PASS /data/out/deterministic/A/contract-3b-1.pdf 3b
+PASS /data/out/deterministic/A/form-2b-1.pdf 2b
+PASS /data/out/deterministic/A/form-3b-1.pdf 3b
+PASS /data/out/tagged/policy-ua-1.pdf ua1
+PASS /data/out/tagged/policy-a-2a.pdf 2a
+PASS /data/out/tagged/contract-a-3a-ua1.pdf 3a
+PASS /data/out/tagged/contract-a-3a-ua1.pdf ua1
+PASS /data/out/tagged/form-a-2a-ua1.pdf 2a
+PASS /data/out/tagged/form-a-2a-ua1.pdf ua1

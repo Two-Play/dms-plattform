@@ -1,0 +1,8 @@
+mode=default runs_per_container=10 containers=2 image=sha256:44575b346c43d8e541e93154a25d5a1653e9551141f9ee97041340d8f223acd9 B_ARGS=
+sample     flavor  renders distinct_sha256  sha256
+policy     2b           20              1  66cfa34391cbe89e7a165acc4ad717538e775095f36e16a38aaa0f3e486f3c7f
+policy     3b           20             20  0397ea8933d78a6ab94f15257937f2fd457c0e82289881e22b5bbf771983a70b
+contract   2b           20              1  344d169d88b123427c541736f47dc8c348ae6cc1bb2b52c7d3534bbe49eb39ff
+contract   3b           20             20  1fd6509767da44810dbb9ee80ca12c8896474117fde5f05b74bd32694cadd7e5
+form       2b           20              1  6b8e90cafa0ca44015fdf2501a1f781577ccf4f0a6f18414123768f9e43711a8
+form       3b           20             20  053b74b7805177fd468878a4bb601e7401b7c7a32c4cbdb2b2125857f60836a1

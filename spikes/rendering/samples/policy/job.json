@@ -1,0 +1,13 @@
+{
+  "tenant_id": "7c1e2f0a-5b8d-4f61-9a3e-0d2c4b6a8e10",
+  "document_id": "POL-2026-0042",
+  "version": 3,
+  "title": "Information Security Policy",
+  "author": "Office of the Chief Information Security Officer",
+  "description": "Binding rules for handling information and IT systems",
+  "lang": "en",
+  "valid_from": "2026-11-01",
+  "released_at": "2026-10-20T14:32:05+02:00",
+  "pdf_variant": "pdf/a-2b",
+  "content": "content.html"
+}

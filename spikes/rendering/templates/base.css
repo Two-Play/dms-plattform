@@ -1,0 +1,55 @@
+/* Spike DMS-23: shared print stylesheet (corporate design stand-in).
+   Header/footer content is generated per job by render.py (page_css). */
+
+@page {
+  size: A4;
+  margin: 25mm 20mm 22mm 25mm;
+  @top-left { width: 60%; vertical-align: bottom; padding-bottom: 3mm; border-bottom: 0.5pt solid #888; font: 8pt "Noto Sans"; color: #444; }
+  @top-right { width: 40%; text-align: right; vertical-align: bottom; padding-bottom: 3mm; border-bottom: 0.5pt solid #888; font: 8pt "Noto Sans"; color: #444; }
+  @bottom-left { width: 60%; vertical-align: top; padding-top: 3mm; border-top: 0.5pt solid #888; font: 8pt "Noto Sans"; color: #444; }
+  @bottom-right { width: 40%; text-align: right; vertical-align: top; padding-top: 3mm; border-top: 0.5pt solid #888; font: 8pt "Noto Sans"; color: #444; }
+}
+
+html {
+  font-family: "Noto Serif";
+  font-size: 10.5pt;
+  line-height: 1.45;
+  color: #111;
+  hyphens: auto;
+}
+
+h1, h2, h3, th, .label { font-family: "Noto Sans"; }
+h1 { font-size: 18pt; margin: 0 0 4mm; color: #0b3d6e; }
+h2 { font-size: 12.5pt; margin: 7mm 0 2mm; color: #0b3d6e; break-after: avoid; }
+h3 { font-size: 11pt; margin: 4mm 0 1mm; break-after: avoid; }
+p { margin: 0 0 2.5mm; text-align: justify; orphans: 3; widows: 3; }
+
+.doc-info { font-family: "Noto Sans"; font-size: 9pt; border: 0.5pt solid #888; padding: 2mm 3mm; margin-bottom: 6mm; }
+.doc-info td { padding: 0.5mm 3mm 0.5mm 0; border: none; }
+
+table { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm; font-size: 9pt; }
+th, td { border: 0.5pt solid #777; padding: 1.2mm 2mm; text-align: left; vertical-align: top; }
+th { background: #e6edf5; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+td.num, th.num { text-align: right; }
+
+/* Numbered clause list: 1., 1.1, 1.1.1 */
+ol.clauses, ol.clauses ol { list-style: none; counter-reset: clause; padding-left: 0; }
+ol.clauses > li { counter-increment: clause; margin-top: 4mm; }
+ol.clauses > li > h2::before { content: counter(clause) ". "; }
+ol.clauses ol > li { counter-increment: clause; margin: 1.5mm 0 1.5mm 10mm; text-align: justify; }
+ol.clauses ol > li::before { content: counters(clause, ".") " "; margin-left: -10mm; display: inline-block; width: 10mm; font-family: "Noto Sans"; font-size: 9.5pt; }
+ol.clauses > li > h2 { margin-top: 0; }
+
+.annex { break-before: page; }
+.signatures { margin-top: 12mm; display: flex; gap: 15mm; break-inside: avoid; }
+.signatures div { flex: 1; border-top: 0.5pt solid #111; padding-top: 1mm; font-size: 9pt; font-family: "Noto Sans"; }
+
+/* Form */
+.field { border-bottom: 0.5pt solid #555; min-height: 6mm; font-family: "Noto Sans"; }
+.label { font-size: 8pt; color: #333; }
+.box { display: inline-block; width: 3.2mm; height: 3.2mm; border: 0.7pt solid #111; margin-right: 1.5mm; vertical-align: -0.4mm; position: relative; }
+.box.checked::after { content: ""; position: absolute; left: 0.6mm; top: 0.6mm; width: 2mm; height: 2mm; background: #111; }
+.choices { text-align: left; }
+.choices > span { margin-right: 6mm; white-space: nowrap; }

@@ -1,0 +1,32 @@
+# python3 pdfdiff.py out/naive/A/contract-3b-1.pdf out/naive/B/contract-3b-1.pdf
+objects: 26 vs 26, differing: 5
+--- object 64
+  A: b'ce>/Size 435/CreationDate (D:20261028111643Z)/ModDate (D:20261028111643Z)>>/Filter /FlateDecode/Length 281>>\ns'
+  B: b'ce>/Size 435/CreationDate (D:20261028111750Z)/ModDate (D:20261028111750Z)>>/Filter /FlateDecode/Length 281>>\ns'
+--- object 88
+  A: b'btype /XML/Filter /FlateDecode/Length 962>>\nstream:<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n<x:xmpme'
+  B: b'btype /XML/Filter /FlateDecode/Length 961>>\nstream:<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n<x:xmpme'
+--- object 90
+  A: b'ker spike-1)/CreationDate (D:20261028111643Z)/ModDate (D:20261028111643Z)>>'
+  B: b'ker spike-1)/CreationDate (D:20261028111750Z)/ModDate (D:20261028111750Z)>>'
+--- object 91
+  A: b'2]/Size 92/Root 2 0 R/Info 89 0 R/ID [(7787dc8486ef119c9508d645f414d5b9) (7787dc8486ef119c9508d645f414d5b9)]/F'
+  B: b'2]/Size 92/Root 2 0 R/Info 89 0 R/ID [(7cf2489893403f80f18ac8a75032e814) (7cf2489893403f80f18ac8a75032e814)]/F'
+--- object trailer
+  A: b'c8486ef119c9508d645f414d5b9) (7787dc8486ef119c9508d645f414d5b9)]/Filter /FlateDecode/Length 255>>\nstream\nx\xda-\xcf\xbb'
+  B: b'9893403f80f18ac8a75032e814) (7cf2489893403f80f18ac8a75032e814)]/Filter /FlateDecode/Length 256>>\nstream\nx\xda-\xcf\xb9J'
+
+# python3 pdfdiff.py out/default/A/contract-3b-1.pdf out/default/B/contract-3b-1.pdf
+objects: 26 vs 26, differing: 3
+--- object 64
+  A: b'ce>/Size 435/CreationDate (D:20261028111432Z)/ModDate (D:20261028111432Z)>>/Filter /FlateDecode/Length 281>>\ns'
+  B: b'ce>/Size 435/CreationDate (D:20261028111538Z)/ModDate (D:20261028111538Z)>>/Filter /FlateDecode/Length 281>>\ns'
+--- object 91
+  A: b' 2]/Size 92/Root 2 0 R/Info 89 0 R/ID [(146981e5d1b6706c4e861a4ac428f2a7) (146981e5d1b6706c4e861a4ac428f2a7)]/'
+  B: b' 2]/Size 92/Root 2 0 R/Info 89 0 R/ID [(a3993c80faa86b9ed6426d687ca12455) (a3993c80faa86b9ed6426d687ca12455)]/'
+--- object trailer
+  A: b'd1b6706c4e861a4ac428f2a7) (146981e5d1b6706c4e861a4ac428f2a7)]/Filter /FlateDecode/Length 258>>\nstream\nx\xda-\xd29/DQ'
+  B: b'faa86b9ed6426d687ca12455) (a3993c80faa86b9ed6426d687ca12455)]/Filter /FlateDecode/Length 258>>\nstream\nx\xda-\xd29/DQ'
+
+# python3 pdfdiff.py out/deterministic/A/contract-3b-1.pdf out/deterministic/B/contract-3b-10.pdf
+objects: 26 vs 26, differing: 0
