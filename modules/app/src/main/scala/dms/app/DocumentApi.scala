@@ -8,10 +8,12 @@ import dms.documents.core.MetadataJson.given
 import dms.documents.metadata.{FieldIssue, MetadataProfile, MetadataValue}
 import dms.identity.{Authenticator, Principal}
 import dms.kernel.{DocumentId, TemplateId, UserId}
-import dms.templates.TemplateContent
+import dms.templates.{DeviationChange, Inline, PathStep, SectionId, TemplateContent}
 import dms.templates.core.ContentJson.given
+import dms.templates.core.DeviationJson.given
 import sttp.model.StatusCode
 import sttp.tapir.Schema
+import sttp.tapir.generic.Configuration
 import sttp.tapir.json.zio.jsonBody
 import sttp.tapir.ztapir.*
 import zio.*
@@ -21,6 +23,7 @@ import java.time.Instant
 import java.util.UUID
 import scala.util.Try
 
+import DeviationSchemas.given
 import MetadataSchemas.given
 import TemplateSchemas.given
 
@@ -83,7 +86,68 @@ final case class DocumentVersionView(
     createdAt: Instant,
     updatedAt: Instant,
     releasedBy: Option[String],
-    releasedAt: Option[Instant]
+    releasedAt: Option[Instant],
+    /** True if the content has authorized deviations from locked template sections: the workflow adds the
+      * additional review step. Details: `GET /api/v1/documents/{id}/versions/{versionId}/deviations`.
+      */
+    requiresExtraReview: Boolean
+) derives JsonCodec,
+      Schema
+
+/** Tapir schemas for the deviation report; sum types carry a `type` discriminator like their JSON codecs. */
+object DeviationSchemas:
+  given Configuration              = Configuration.default.withDiscriminator("type")
+  given Schema[Inline.Placeholder] = Schema.derived
+  given Schema[PathStep]           = Schema.derived
+  given Schema[DeviationChange]    = Schema.derived
+
+final case class RequestDeviation(
+    /** Id of a locked section of the template. */
+    sectionId: String,
+    /** Why the standard text has to change; required. */
+    reason: String
+) derives JsonCodec,
+      Schema
+
+final case class DeviationRequestView(
+    id: UUID,
+    sectionId: String,
+    reason: String,
+    requestedBy: String,
+    requestedAt: Instant,
+    /** The request of the previous version this one was carried over from. */
+    basedOn: Option[UUID],
+    active: Boolean,
+    withdrawnBy: Option[String],
+    withdrawnAt: Option[Instant]
+) derives JsonCodec,
+      Schema
+
+/** A change of the standard text of a locked section. */
+final case class DeviationView(
+    section: String,
+    /** Block path inside the section, e.g. `[{"type":"Block","index":2},{"type":"Item","index":1}]`. */
+    path: List[PathStep],
+    /** Index of the first changed word of a heading or paragraph. */
+    token: Option[Int],
+    /** Readable location, e.g. `liability › block 2 › word 5`. */
+    location: String,
+    change: DeviationChange,
+    /** True if the section has an active deviation request. */
+    authorized: Boolean,
+    reasons: List[String]
+) derives JsonCodec,
+      Schema
+
+/** The deviation report of a version with its deviation requests, for authors and reviewers. */
+final case class DeviationsView(
+    versionId: UUID,
+    version: String,
+    status: String,
+    requiresExtraReview: Boolean,
+    /** All requests of the version, including withdrawn ones, oldest first. */
+    requests: List[DeviationRequestView],
+    deviations: List[DeviationView]
 ) derives JsonCodec,
       Schema
 
@@ -107,7 +171,8 @@ final case class DocumentView(
   *
   * Creating requires `CreateFromTemplate` in the scope of the template's document class; reading requires
   * `ReadDocument` on a version (by status: drafts for authors and owners, published versions for readers);
-  * changing and submitting a draft require `EditDraft`.
+  * changing and submitting a draft and requesting or withdrawing deviations require `EditDraft`; the
+  * deviation report of a version requires `ReadDocument` on it.
   */
 object DocumentApi:
   type Env = Authenticator & Db & Authorizer & DocumentService
@@ -219,7 +284,88 @@ object DocumentApi:
           }
       )
 
-  def endpoints: List[ZServerEndpoint[Env, Any]] = List(create, get, versions, updateDraft, submit)
+  private val deviationRequests = documents / documentId / "deviation-requests"
+
+  val requestDeviation: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.post
+      .in(deviationRequests)
+      .in(jsonBody[RequestDeviation])
+      .out(statusCode(StatusCode.Created).and(jsonBody[DeviationsView]))
+      .description(
+        "Records a deviation request for a locked section of the draft's template: with a reason, the section's " +
+          "standard text may be changed; the change then needs the additional review step. One active request " +
+          "per section (409); unknown or editable sections and empty reasons are rejected (422). Returns the " +
+          "draft's deviation report."
+      )
+      .tag("Documents")
+      .serverLogic(p =>
+        (id, req) =>
+          inTransaction(p) { ctx =>
+            for
+              details <- ctx.service.get(DocumentId(id))
+              open    <- openVersion(details)
+              _       <- ctx.check(Action.EditDraft, resource(p, details, open))
+              result  <- ctx.service.requestDeviation(
+                DocumentId(id),
+                SectionId(req.sectionId.trim),
+                req.reason,
+                p.userId
+              )
+              requests <- ctx.service.deviationRequests(result._2.id)
+            yield deviationsView(result._2, requests)
+          }
+      )
+
+  val withdrawDeviation: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.post
+      .in(deviationRequests / path[UUID]("requestId").description("Deviation request id") / "withdraw")
+      .out(jsonBody[DeviationsView])
+      .description(
+        "Withdraws a deviation request while the version is a draft. A section that still deviates then blocks " +
+          "submission until its standard text is restored or the deviation is requested again. Returns the " +
+          "draft's deviation report."
+      )
+      .tag("Documents")
+      .serverLogic(p =>
+        (id, requestId) =>
+          inTransaction(p) { ctx =>
+            for
+              details  <- ctx.service.get(DocumentId(id))
+              open     <- openVersion(details)
+              _        <- ctx.check(Action.EditDraft, resource(p, details, open))
+              updated  <- ctx.service.withdrawDeviation(DocumentId(id), requestId, p.userId)
+              requests <- ctx.service.deviationRequests(updated.id)
+            yield deviationsView(updated, requests)
+          }
+      )
+
+  val deviations: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(
+        documents / documentId / "versions" / path[UUID]("versionId").description("Version id") / "deviations"
+      )
+      .out(jsonBody[DeviationsView])
+      .description(
+        "The deviation report of a version (changes of locked template sections with location, change and the " +
+          "author's reasons) and its deviation requests, e.g. for the additional review step"
+      )
+      .tag("Documents")
+      .serverLogic(p =>
+        (id, versionId) =>
+          inTransaction(p) { ctx =>
+            for
+              details <- ctx.service.get(DocumentId(id))
+              version <- ZIO
+                .fromOption(details.versions.find(_.id == versionId))
+                .orElseFail(DocumentError.NotFound(s"document $id has no version $versionId"))
+              _        <- ctx.check(Action.ReadDocument, resource(p, details, version))
+              requests <- ctx.service.deviationRequests(versionId)
+            yield deviationsView(version, requests)
+          }
+      )
+
+  def endpoints: List[ZServerEndpoint[Env, Any]] =
+    List(create, get, versions, updateDraft, submit, requestDeviation, withdrawDeviation, deviations)
 
   /** What a request may use inside its transaction. */
   private final class Context(val service: DocumentService, authz: Authorizer, subject: Subject):
@@ -355,7 +501,43 @@ object DocumentApi:
       v.createdAt,
       v.updatedAt,
       v.releasedBy.map(_.value),
-      v.releasedAt
+      v.releasedAt,
+      v.requiresExtraReview
+    )
+
+  private[app] def deviationsView(
+      v: DocumentVersion,
+      requests: List[RecordedDeviationRequest]
+  ): DeviationsView =
+    DeviationsView(
+      v.id,
+      v.label,
+      v.status.toString,
+      v.requiresExtraReview,
+      requests.map(r =>
+        DeviationRequestView(
+          r.id,
+          r.sectionId.value,
+          r.reason,
+          r.requestedBy.value,
+          r.requestedAt,
+          r.basedOn,
+          r.active,
+          r.withdrawnBy.map(_.value),
+          r.withdrawnAt
+        )
+      ),
+      v.deviations.deviations.map(d =>
+        DeviationView(
+          d.section.value,
+          d.location.path,
+          d.location.token,
+          d.location.show,
+          d.change,
+          d.authorized,
+          d.reasons
+        )
+      )
     )
 
   private def issueViews(issues: List[FieldIssue]): Option[List[IssueView]] =

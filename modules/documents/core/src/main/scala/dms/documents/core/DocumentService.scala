@@ -8,11 +8,21 @@ import dms.documents.*
 import dms.documents.core.MetadataJson.given
 import dms.documents.metadata.*
 import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
-import dms.templates.{EditRules, TemplateContent, TemplateStatus, TemplateVersion}
+import dms.templates.{
+  DeviationReport,
+  DeviationRequest,
+  EditRules,
+  SectionId,
+  TemplateContent,
+  TemplateStatus,
+  TemplateVersion
+}
 import zio.*
 import zio.json.*
 import zio.json.ast.Json
 
+import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 enum DocumentError:
@@ -186,8 +196,9 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       profile  <- profile(document.classId, document.classVersion)
     yield DocumentDetails(document, versions, profile)
 
-  /** Saves a changed draft as its next working state. Locked sections can only keep the template's text (edit
-    * rules of the template); the computed fields are those of the template.
+  /** Saves a changed draft as its next working state. Locked sections can only keep the template's text
+    * unless a deviation request for the section is recorded (edit rules of the template); the computed fields
+    * are those of the template. The deviation report is recomputed and stored with the draft.
     */
   def updateDraft(id: DocumentId, change: DraftChange, actor: UserId): IO[DocumentError, DocumentVersion] =
     for
@@ -200,8 +211,9 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       )
       template <- templates.version(current.templateId, current.templateVersion)
       profile  <- profile(document.classId, current.classVersion)
+      requests <- activeRequests(current.id)
       content = change.content.getOrElse(current.content)
-      _ <- ZIO.when(change.content.exists(_ != current.content))(checkContent(template, content))
+      _ <- ZIO.when(change.content.exists(_ != current.content))(checkContent(template, content, requests))
       title = change.title.getOrElse(titleOf(current).getOrElse(document.title))
       values <- prepare(profile, template, content, change.values, title, id, current.number)
       next = current.copy(
@@ -209,7 +221,8 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
         content = content,
         values = values,
         scope = Versioning.scopeKey(metadataOf(values)),
-        rendition = None
+        rendition = None,
+        deviations = DeviationReport.compare(template.content, content, requests)
       )
       _ <- sql(DocumentStore.updateDraft(next, templates)).filterOrFail(identity)(changedConcurrently(next))
       _ <- sql {
@@ -302,9 +315,14 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       workingState <- sql(DocumentStore.workingStates(id, number)).map(Versioning.nextWorkingState)
       template     <- templates.version(base.templateId, base.templateVersion)
       profile      <- profile(document.classId, base.classVersion)
+      baseRequests <- sql(DocumentStore.deviationRequests(base.id)).map(_.filter(_.active))
       now          <- Clock.instant
+      versionId = UUID.randomUUID()
+      carried   = baseRequests.map(r =>
+        r.copy(id = UUID.randomUUID(), versionId = versionId, basedOn = Some(r.id))
+      )
       version = base.copy(
-        id = UUID.randomUUID(),
+        id = versionId,
         number = number,
         workingState = workingState,
         status = DocumentStatus.Draft,
@@ -317,24 +335,171 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
         createdAt = now,
         updatedAt = now,
         releasedBy = None,
-        releasedAt = None
+        releasedAt = None,
+        deviations = DeviationReport.compare(template.content, base.content, carried.map(_.request))
       )
       _ <- sql {
         DocumentStore.insertVersion(version, templates)
         DocumentStore.insertWorkingState(version, actor, templates)
+        carried.foreach(DocumentStore.insertDeviationRequest)
       }.mapError(conflict(s"document ${id.value} was changed concurrently"))
       _ <- record(
         actor,
         "document.version-created",
         version,
         Json.Obj(
-          "basedOn"    -> Json.Str(base.label),
-          "changeKind" -> Json.Str(kind.toString),
-          "reason"     -> changeReason.fold(Json.Null)(Json.Str(_))
+          "basedOn"           -> Json.Str(base.label),
+          "changeKind"        -> Json.Str(kind.toString),
+          "reason"            -> changeReason.fold(Json.Null)(Json.Str(_)),
+          "deviationRequests" -> Json.Arr(carried.map(r => Json.Str(r.id.toString))*)
         )
       )
       _ <- publish("document.version-created", document, version)
     yield version
+
+  /** All deviation requests of a version, active and withdrawn, oldest first. */
+  def deviationRequests(versionId: UUID): IO[DocumentError, List[RecordedDeviationRequest]] =
+    sql(DocumentStore.deviationRequests(versionId))
+
+  /** Records a deviation request for a locked section of the template on the open draft (US-01.1): it permits
+    * changing the section's standard text; the additional review step approves the change. One active request
+    * per section; the reason is required. The deviation report is recomputed and stored with the draft.
+    */
+  def requestDeviation(
+      id: DocumentId,
+      section: SectionId,
+      reason: String,
+      actor: UserId
+  ): IO[DocumentError, (RecordedDeviationRequest, DocumentVersion)] =
+    for
+      current  <- lockDraft(id)
+      template <- templates.version(current.templateId, current.templateVersion)
+      text = reason.trim
+      _ <- ZIO.when(text.isEmpty)(ZIO.fail(DocumentError.Invalid(List("a deviation request needs a reason"))))
+      _ <- ZIO.when(text.length > MaxReasonLength)(
+        ZIO.fail(DocumentError.Invalid(List(s"the reason must not exceed $MaxReasonLength characters")))
+      )
+      _ <- ZIO.unless(template.content.sections.exists(s => s.id == section && s.locked))(
+        ZIO.fail(
+          DocumentError.Invalid(
+            List(
+              s"'${section.value}' is not a locked section of the template; only locked sections need a request"
+            )
+          )
+        )
+      )
+      existing <- sql(DocumentStore.deviationRequests(current.id))
+      _        <- ZIO.when(existing.exists(r => r.active && r.sectionId == section))(
+        ZIO.fail(alreadyRequested(section))
+      )
+      now <- databaseNow
+      request = RecordedDeviationRequest(
+        UUID.randomUUID(),
+        current.id,
+        section,
+        text,
+        actor,
+        now,
+        None,
+        None,
+        None
+      )
+      _ <- sql(DocumentStore.insertDeviationRequest(request)).mapError {
+        case DocumentError.Database(DbError.UniqueViolation(_, _)) => alreadyRequested(section)
+        case other                                                 => other
+      }
+      updated <- storeDeviations(current, template, existing :+ request)
+      _       <- record(
+        actor,
+        "document.deviation-requested",
+        updated,
+        Json.Obj(
+          "requestId" -> Json.Str(request.id.toString),
+          "section"   -> Json.Str(section.value),
+          "reason"    -> Json.Str(text)
+        )
+      )
+    yield (request, updated)
+
+  /** Withdraws an active deviation request of the open draft. A section that still deviates is then an
+    * unauthorized deviation: further content changes must restore its standard text, and submission is
+    * blocked until they do or the deviation is requested again.
+    */
+  def withdrawDeviation(id: DocumentId, requestId: UUID, actor: UserId): IO[DocumentError, DocumentVersion] =
+    for
+      current  <- lockDraft(id)
+      existing <- sql(DocumentStore.deviationRequests(current.id))
+      request  <- ZIO
+        .fromOption(existing.find(_.id == requestId))
+        .orElseFail(
+          DocumentError.NotFound(s"deviation request $requestId does not exist for version ${current.label}")
+        )
+      _ <- ZIO.unless(request.active)(
+        ZIO.fail(DocumentError.Conflict(s"deviation request $requestId is already withdrawn"))
+      )
+      now <- databaseNow
+      _   <- sql(DocumentStore.withdrawDeviationRequest(requestId, actor, now))
+        .filterOrFail(identity)(DocumentError.Conflict(s"deviation request $requestId is already withdrawn"))
+      template <- templates.version(current.templateId, current.templateVersion)
+      withdrawn = request.copy(withdrawnBy = Some(actor), withdrawnAt = Some(now))
+      updated <- storeDeviations(
+        current,
+        template,
+        existing.map(r => if r.id == requestId then withdrawn else r)
+      )
+      _ <- record(
+        actor,
+        "document.deviation-withdrawn",
+        updated,
+        Json.Obj("requestId" -> Json.Str(requestId.toString), "section" -> Json.Str(request.sectionId.value))
+      )
+    yield updated
+
+  /** The open version of a document, locked, if it is a draft. */
+  private def lockDraft(id: DocumentId): IO[DocumentError, DocumentVersion] =
+    for
+      current <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
+      _       <- ZIO.unless(Versioning.isEditable(current.status))(
+        ZIO.fail(
+          DocumentError.Conflict(
+            s"version ${current.label} is ${current.status}; deviation requests only change while it is a draft"
+          )
+        )
+      )
+    yield current
+
+  private def activeRequests(versionId: UUID): IO[DocumentError, List[DeviationRequest]] =
+    sql(DocumentStore.deviationRequests(versionId)).map(RecordedDeviationRequest.active)
+
+  /** Recomputes and stores the deviation report of a draft for the given requests. */
+  private def storeDeviations(
+      current: DocumentVersion,
+      template: TemplateVersion,
+      requests: List[RecordedDeviationRequest]
+  ): IO[DocumentError, DocumentVersion] =
+    val report =
+      DeviationReport.compare(template.content, current.content, RecordedDeviationRequest.active(requests))
+    sql(DocumentStore.updateDeviationReport(current.id, report, templates))
+      .filterOrFail(identity)(changedConcurrently(current))
+      .as(current.copy(deviations = report))
+
+  /** On submission: the content must follow the edit rules with the active requests (no unauthorized
+    * deviation reaches review), and the deviation report is stored as reviewers will see it.
+    */
+  private def checkDeviations(current: DocumentVersion): IO[DocumentError, DocumentVersion] =
+    for
+      template <- templates.version(current.templateId, current.templateVersion)
+      requests <- activeRequests(current.id)
+      violations = EditRules.check(template.content, current.content, requests).map(_.reason)
+      _ <- ZIO.unless(violations.isEmpty)(ZIO.fail(DocumentError.Invalid(violations)))
+      report = DeviationReport.compare(template.content, current.content, requests)
+      updated <-
+        if report == current.deviations then ZIO.succeed(current)
+        else
+          sql(DocumentStore.updateDeviationReport(current.id, report, templates))
+            .filterOrFail(identity)(changedConcurrently(current))
+            .as(current.copy(deviations = report))
+    yield updated
 
   private def released(id: TemplateId, version: Int): IO[DocumentError, TemplateVersion] =
     templates
@@ -380,16 +545,21 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       computed <- templates.computed(template, content, metadataOf(base))
     yield base ++ computed.map((k, v) => k -> FieldEntry(v, ValueOrigin.Computed))
 
-  /** Edit rules for a changed content: locked sections keep the template's text (deviation requests are not
-    * stored yet), computed fields stay those of the template, and the content must fit the profile.
+  /** Edit rules for a changed content: locked sections keep the template's text unless a deviation request
+    * for the section is recorded, computed fields stay those of the template, and the content must fit the
+    * profile.
     */
-  private def checkContent(template: TemplateVersion, content: TemplateContent): IO[DocumentError, Unit] =
+  private def checkContent(
+      template: TemplateVersion,
+      content: TemplateContent,
+      requests: List[DeviationRequest]
+  ): IO[DocumentError, Unit] =
     val computed = Option
       .when(content.computed != template.content.computed)(
         "computed fields are defined by the template and cannot be changed in a document"
       )
       .toList
-    val violations = EditRules.check(template.content, content, requests = Nil).map(_.reason)
+    val violations = EditRules.check(template.content, content, requests).map(_.reason)
     for
       _ <- ZIO.unless(computed.isEmpty && violations.isEmpty)(
         ZIO.fail(DocumentError.Invalid(computed ++ violations))
@@ -400,11 +570,15 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
 
   private def transition(
       document: Document,
-      current: DocumentVersion,
+      before: DocumentVersion,
       event: LifecycleEvent,
       actor: UserId
   ): IO[DocumentError, DocumentVersion] =
     for
+      current <-
+        if event == LifecycleEvent.Submit && before.status == DocumentStatus.Draft then
+          checkDeviations(before)
+        else ZIO.succeed(before)
       profile <- profile(document.classId, current.classVersion)
       values = statusMetadata(current)
       target <- ZIO
@@ -499,7 +673,9 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       "classId"         -> Json.Str(document.classId.value.toString),
       "classVersion"    -> Json.Num(v.classVersion),
       "templateId"      -> Json.Str(v.templateId.value.toString),
-      "templateVersion" -> Json.Num(v.templateVersion)
+      "templateVersion" -> Json.Num(v.templateVersion),
+      // True if the workflow adds the additional review step for deviations (DMS-79).
+      "requiresExtraReview" -> Json.Bool(v.requiresExtraReview)
     )
     Outbox
       .publish("document", document.id.value, eventType, Jsonb(payload.toJson))
@@ -514,6 +690,9 @@ object DocumentService:
   private val StatusField = "status"
   private val OwnerField  = "owner"
   private val Sha256      = "[0-9a-f]{64}".r
+
+  /** Longest accepted reason of a deviation request. */
+  val MaxReasonLength: Int = 4000
 
   /** Fields only the platform sets. Other system fields of the core profile (the retention rule) can be
     * entered until they are derived from the class configuration.
@@ -530,6 +709,11 @@ object DocumentService:
     )
 
   private def sql[A](f: DbTx ?=> A): IO[DocumentError, A] = Db.sql(f).mapError(DocumentError.Database(_))
+
+  /** The current time at the precision PostgreSQL stores (microseconds), so that a value and its stored form
+    * are equal, e.g. the requests inside a deviation report.
+    */
+  private val databaseNow: UIO[Instant] = Clock.instant.map(_.truncatedTo(ChronoUnit.MICROS))
 
   /** Values the platform sets: identifiers, class, version number and template. */
   private def systemValues(
@@ -590,6 +774,9 @@ object DocumentService:
     DocumentError.NotFound(s"document ${id.value} does not exist")
 
   private def versionNotFound(id: UUID) = DocumentError.NotFound(s"document version $id does not exist")
+
+  private def alreadyRequested(section: SectionId) =
+    DocumentError.Conflict(s"section '${section.value}' already has an active deviation request")
 
   private def noOpenVersion(id: DocumentId) =
     DocumentError.Conflict(s"document ${id.value} has no open version")

@@ -35,3 +35,4 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0019](0019-metadata-model.md) | Metadata as JSONB values validated against versioned profiles | Accepted | medium |
 | [0020](0020-template-expressions-cel.md) | Template expressions in CEL (Common Expression Language) | Accepted | medium |
 | [0021](0021-document-versions.md) | Document versions as full version packages, frozen by database guards | Accepted | medium |
+| [0022](0022-deviation-requests.md) | Deviation requests as rows per version, deviation report stored with the version | Accepted | high |

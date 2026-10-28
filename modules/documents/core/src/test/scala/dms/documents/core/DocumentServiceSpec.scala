@@ -58,6 +58,15 @@ object DocumentServiceSpec extends ZIOSpecDefault:
     given JsonCodec[ComputedField]   = DeriveJsonCodec.gen
     given JsonCodec[TemplateContent] = DeriveJsonCodec.gen
 
+    given JsonCodec[UserId]             = JsonCodec.string.transform(UserId(_), _.value)
+    given JsonCodec[Inline.Placeholder] = DeriveJsonCodec.gen
+    given JsonCodec[PathStep]           = DeriveJsonCodec.gen
+    given JsonCodec[DeviationLocation]  = DeriveJsonCodec.gen
+    given JsonCodec[DeviationChange]    = DeriveJsonCodec.gen
+    given JsonCodec[DeviationRequest]   = DeriveJsonCodec.gen
+    given JsonCodec[Deviation]          = DeriveJsonCodec.gen
+    given JsonCodec[DeviationReport]    = DeriveJsonCodec.gen
+
   /** Template versions by id and number; computes `totalValue = monthlyFee.amount * termMonths`. */
   private object Templates extends TemplateSource:
     import Codecs.given
@@ -90,6 +99,10 @@ object DocumentServiceSpec extends ZIOSpecDefault:
 
     def encode(content: TemplateContent): String              = content.toJson
     def decode(json: String): Either[String, TemplateContent] = json.fromJson[TemplateContent]
+
+    // The column default of migration V12 is the empty report of the real format, {"format":1,"deviations":[]}.
+    def encodeReport(report: DeviationReport): String               = report.toJson
+    def decodeReport(json: String): Either[String, DeviationReport] = json.fromJson[DeviationReport]
 
   private val env: ZLayer[Any, Throwable, Env] = ZLayer.scoped(
     for
@@ -134,6 +147,27 @@ object DocumentServiceSpec extends ZIOSpecDefault:
       )
     ),
     computed = List(ComputedField("totalValue", "monthlyFee.amount * termMonths"))
+  )
+
+  private val Parties = SectionId("parties")
+
+  /** The template content with standard text added to the locked section `parties`. */
+  private val deviating = content.copy(sections =
+    content.sections.map(s =>
+      if s.locked then
+        s.copy(blocks =
+          List(
+            Block.Paragraph(
+              List(
+                Inline.Text("Between "),
+                Inline.Placeholder("contractPartner"),
+                Inline.Text(" and its affiliates")
+              )
+            )
+          )
+        )
+      else s
+    )
   )
 
   private def fixture: ZIO[Env, Any, Fixture] =
@@ -421,6 +455,160 @@ object DocumentServiceSpec extends ZIOSpecDefault:
           case _                        => false
         },
         details.versions.map(_.workingState) == List(1)
+      )
+    },
+    test("a locked section changes with a deviation request; the deviation report is stored with the draft") {
+      for
+        f       <- fixture
+        created <- create(f)
+        (doc, _) = created
+        without <- as(f.tenant)(
+          _.updateDraft(doc.id, DraftChange(None, initialValues, Some(deviating)), author)
+        ).either
+        editable  <- as(f.tenant)(_.requestDeviation(doc.id, SectionId("terms"), "Why not", author)).either
+        unknown   <- as(f.tenant)(_.requestDeviation(doc.id, SectionId("nope"), "Why not", author)).either
+        noReason  <- as(f.tenant)(_.requestDeviation(doc.id, Parties, "  ", author)).either
+        requested <- as(f.tenant)(
+          _.requestDeviation(doc.id, Parties, " The customer insists on affiliates ", author)
+        )
+        (request, afterRequest) = requested
+        duplicate <- as(f.tenant)(_.requestDeviation(doc.id, Parties, "Again", author)).either
+        updated   <- as(f.tenant)(
+          _.updateDraft(doc.id, DraftChange(None, initialValues, Some(deviating)), author)
+        )
+        stored   <- as(f.tenant)(_.get(doc.id)).map(_.versions.head)
+        requests <- as(f.tenant)(_.deviationRequests(updated.id))
+        audit    <- ZIO.serviceWithZIO[Env](_.audit.get)
+      yield assertTrue(
+        without.left.exists {
+          case DocumentError.Invalid(p) =>
+            p.exists(_.contains("'parties' was changed without a deviation request"))
+          case _ => false
+        },
+        editable.left.exists(_.isInstanceOf[DocumentError.Invalid]),
+        unknown.left.exists(_.isInstanceOf[DocumentError.Invalid]),
+        noReason.left.exists(_.isInstanceOf[DocumentError.Invalid]),
+        duplicate.left.exists(_.isInstanceOf[DocumentError.Conflict]),
+        request.reason == "The customer insists on affiliates",
+        request.requestedBy == author,
+        // A request alone does not deviate yet.
+        afterRequest.deviations.isEmpty,
+        !afterRequest.requiresExtraReview,
+        updated.content == deviating,
+        updated.deviations.deviations.map(d => (d.section, d.change)) ==
+          List(Parties -> DeviationChange.TextInserted("and its affiliates")),
+        updated.deviations.deviations.forall(_.reasons == List("The customer insists on affiliates")),
+        updated.requiresExtraReview,
+        stored.deviations == updated.deviations,
+        requests == List(request),
+        audit.exists(e =>
+          e.action == "document.deviation-requested" && e.details.value.contains(request.id.toString) &&
+            e.details.value.contains("affiliates")
+        )
+      )
+    },
+    test(
+      "withdrawn requests leave unauthorized deviations that block submission; submission freezes requests"
+    ) {
+      for
+        f       <- fixture
+        created <- create(f, reviewValues)
+        (doc, _) = created
+        requested <- as(f.tenant)(_.requestDeviation(doc.id, Parties, "Affiliates", author))
+        _ <- as(f.tenant)(_.updateDraft(doc.id, DraftChange(None, reviewValues, Some(deviating)), author))
+        withdrawn <- as(f.tenant)(_.withdrawDeviation(doc.id, requested._1.id, author))
+        twice     <- as(f.tenant)(_.withdrawDeviation(doc.id, requested._1.id, author)).either
+        missing   <- as(f.tenant)(_.withdrawDeviation(doc.id, UUID.randomUUID(), author)).either
+        blocked   <- as(f.tenant)(_.submit(doc.id, author)).either
+        again     <- as(f.tenant)(_.requestDeviation(doc.id, Parties, "Affiliates, really", author))
+        submitted <- as(f.tenant)(_.submit(doc.id, author))
+        late      <- as(f.tenant)(_.requestDeviation(doc.id, Parties, "Late", author)).either
+        lateOut   <- as(f.tenant)(_.withdrawDeviation(doc.id, again._1.id, author)).either
+        stored    <- as(f.tenant)(_.get(doc.id)).map(_.versions.head)
+        requests  <- as(f.tenant)(_.deviationRequests(submitted.id))
+        payload   <- ZIO.serviceWithZIO[Env](
+          _.owner.transactSystem(
+            Db.sql(
+              sql"""select payload::text from dms.outbox_event
+                    where aggregate_id = ${doc.id.value} and event_type = 'document.submitted'"""
+                .query[String]
+                .run()
+                .head
+            )
+          )
+        )
+        audit <- ZIO.serviceWithZIO[Env](_.audit.get)
+      yield assertTrue(
+        withdrawn.deviations.deviations.nonEmpty,
+        withdrawn.deviations.deviations.forall(_.unauthorized),
+        !withdrawn.requiresExtraReview,
+        twice.left.exists(_.isInstanceOf[DocumentError.Conflict]),
+        missing.left.exists(_.isInstanceOf[DocumentError.NotFound]),
+        blocked.left.exists {
+          case DocumentError.Invalid(p) =>
+            p.exists(_.contains("'parties' was changed without a deviation request"))
+          case _ => false
+        },
+        submitted.status == InReview,
+        submitted.requiresExtraReview,
+        submitted.deviations.deviations.forall(_.reasons == List("Affiliates, really")),
+        stored.deviations == submitted.deviations,
+        late.left.exists(_.isInstanceOf[DocumentError.Conflict]),
+        lateOut.left.exists(_.isInstanceOf[DocumentError.Conflict]),
+        requests.map(r => (r.reason, r.active)) == List("Affiliates" -> false, "Affiliates, really" -> true),
+        requests.head.withdrawnBy.contains(author),
+        payload.replace(" ", "").contains("\"requiresExtraReview\":true"),
+        audit.exists(e => e.action == "document.deviation-withdrawn" && e.details.value.contains("parties"))
+      )
+    },
+    test("a submission without deviations does not require the extra review") {
+      for
+        f       <- fixture
+        created <- create(f, reviewValues)
+        (doc, _) = created
+        // A request without a change of the section is no deviation.
+        _         <- as(f.tenant)(_.requestDeviation(doc.id, Parties, "Maybe later", author))
+        submitted <- as(f.tenant)(_.submit(doc.id, author))
+      yield assertTrue(submitted.deviations.isEmpty, !submitted.requiresExtraReview)
+    },
+    test("a new version carries over the active deviation requests of the valid version") {
+      for
+        f       <- fixture
+        created <- create(f, reviewValues)
+        (doc, v1) = created
+        requested <- as(f.tenant)(_.requestDeviation(doc.id, Parties, "Affiliates", author))
+        _  <- as(f.tenant)(_.updateDraft(doc.id, DraftChange(None, reviewValues, Some(deviating)), author))
+        _  <- as(f.tenant)(_.submit(doc.id, author))
+        _  <- as(f.tenant)(_.changeStatus(v1.id, ReviewPassed, UserId("reviewer-1")))
+        _  <- as(f.tenant)(_.attachRendition(v1.id, Rendition("renditions/1.pdf", None, "e" * 64), author))
+        _  <- as(f.tenant)(_.changeStatus(v1.id, Approve, approver))
+        _  <- as(f.tenant)(_.changeStatus(v1.id, Publish, approver))
+        v2 <- as(f.tenant)(_.newVersion(doc.id, ChangeKind.Major, None, author))
+        carried  <- as(f.tenant)(_.deviationRequests(v2.id))
+        original <- as(f.tenant)(_.deviationRequests(v1.id))
+        // The carried-over request keeps permitting the deviation in the new draft.
+        edited <- as(f.tenant)(
+          _.updateDraft(
+            doc.id,
+            DraftChange(
+              None,
+              reviewValues,
+              Some(
+                deviating.copy(sections =
+                  deviating.sections.map(s => if s.locked then s else s.copy(blocks = Nil))
+                )
+              )
+            ),
+            author
+          )
+        )
+      yield assertTrue(
+        carried.map(r => (r.sectionId, r.reason, r.requestedBy, r.basedOn)) ==
+          List((Parties, "Affiliates", author, Some(requested._1.id))),
+        original == List(requested._1),
+        v2.content == deviating,
+        v2.requiresExtraReview,
+        edited.requiresExtraReview
       )
     },
     test("submission is blocked while required fields are missing, then moves the draft to review") {

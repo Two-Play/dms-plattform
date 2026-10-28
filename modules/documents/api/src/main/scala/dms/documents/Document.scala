@@ -2,7 +2,7 @@ package dms.documents
 
 import dms.documents.metadata.{DocumentClassId, MetadataValue}
 import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
-import dms.templates.{Block, TemplateContent}
+import dms.templates.{Block, DeviationReport, TemplateContent}
 
 import java.time.Instant
 import java.util.UUID
@@ -74,6 +74,10 @@ final case class Document(
   *   field values with their origin; computed values are not profile fields
   * @param createdBy
   *   the author of this version; they cannot approve it
+  * @param deviations
+  *   the deviation report of the content against the template (DMS-79): every change of a locked section with
+  *   the active deviation requests of its section; stored with the version and frozen with it once it leaves
+  *   Draft
   */
 final case class DocumentVersion(
     id: UUID,
@@ -95,9 +99,16 @@ final case class DocumentVersion(
     createdAt: Instant,
     updatedAt: Instant,
     releasedBy: Option[UserId],
-    releasedAt: Option[Instant]
+    releasedAt: Option[Instant],
+    deviations: DeviationReport = DeviationReport(Nil)
 ):
   def label: String = Versioning.label(number, status, workingState)
+
+  /** True if the content deviates, with deviation requests, from the standard text of locked template
+    * sections: the workflow then adds the additional review step of the document class (business concept 6).
+    * See [[DeviationReport.requiresExtraReview]]. A submitted version never has unauthorized deviations.
+    */
+  def requiresExtraReview: Boolean = DeviationReport.requiresExtraReview(deviations)
 
   /** The field values without their origin. */
   def metadata: Map[String, MetadataValue] = values.map((k, e) => k -> e.value)
