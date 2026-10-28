@@ -19,6 +19,11 @@ trait RoleAssignments:
   def grant(user: UserId, assignment: RoleAssignment, grantedBy: UserId): IO[DbError, UUID]
   def revoke(id: UUID, at: Instant): IO[DbError, Boolean]
 
+  /** Every assignment of `role` in the tenant with its holder, including expired ones (callers check
+    * [[RoleAssignment.isActiveAt]] and the scope).
+    */
+  def holders(role: Role): IO[DbError, List[(UserId, RoleAssignment)]]
+
 object RoleAssignments:
   object Postgres extends RoleAssignments:
     private type Row = (String, Option[String], Option[String], OffsetDateTime, Option[OffsetDateTime])
@@ -46,6 +51,17 @@ object RoleAssignments:
         sql"""update dms.role_assignment set valid_until = ${toOffset(at)}
               where id = $id and (valid_until is null or valid_until > ${toOffset(at)})""".update.run() > 0
       )
+
+    def holders(role: Role): IO[DbError, List[(UserId, RoleAssignment)]] =
+      Db.sql(
+        sql"""select user_id, organizational_unit, document_class, valid_from, valid_until
+              from dms.role_assignment where role = ${role.toString} order by user_id"""
+          .query[(String, Option[String], Option[String], OffsetDateTime, Option[OffsetDateTime])]
+          .run()
+          .toList
+      ).map(_.map { case (user, ou, cls, from, until) =>
+        UserId(user) -> RoleAssignment(role, ou, cls, from.toInstant, until.map(_.toInstant))
+      })
 
     private def toOffset(i: Instant): OffsetDateTime = OffsetDateTime.ofInstant(i, java.time.ZoneOffset.UTC)
 

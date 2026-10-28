@@ -51,7 +51,7 @@ lazy val templatesCore     = templatesCoreModule.dependsOn(templatesApi, documen
 lazy val documentsApi      = apiModule("documents").dependsOn(templatesApi)
 lazy val documentsCore     = documentsCoreModule.dependsOn(documentsApi, templatesApi, auditApi)
 lazy val workflowApi       = apiModule("workflow")
-lazy val workflowCore      = coreModule("workflow").dependsOn(workflowApi, documentsApi)
+lazy val workflowCore      = workflowCoreModule.dependsOn(workflowApi, documentsApi, auditApi)
 lazy val renderingApi      = apiModule("rendering")
 lazy val renderingCore     = coreModule("rendering").dependsOn(renderingApi, documentsApi)
 lazy val archiveApi        = apiModule("archive")
@@ -66,6 +66,12 @@ lazy val notificationsCore = coreModule("notifications").dependsOn(notifications
 /** Document classes and metadata profiles (ADR 0019): JSON columns; integration tests against PostgreSQL. */
 def documentsCoreModule: Project = coreModule("documents").settings(
   libraryDependencies ++= Dependencies.json ++ Dependencies.integrationTest ++
+    Dependencies.logging.map(_ % Test)
+)
+
+/** Approval workflows (ADR 0006, 0024): embedded Flowable; integration tests against PostgreSQL. */
+def workflowCoreModule: Project = coreModule("workflow").settings(
+  libraryDependencies ++= Dependencies.flowable ++ Dependencies.json ++ Dependencies.integrationTest ++
     Dependencies.logging.map(_ % Test)
 )
 

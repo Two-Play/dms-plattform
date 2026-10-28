@@ -9,6 +9,8 @@ import dms.documents.metadata.{FieldIssue, MetadataProfile, MetadataValue}
 import dms.identity.{Authenticator, Principal}
 import dms.kernel.{DocumentId, TemplateId, UserId}
 import dms.templates.{DeviationChange, Inline, PathStep, SectionId, TemplateContent}
+import dms.workflow.CaseDetails
+import dms.workflow.core.{ApprovalWorkflow, WorkflowError}
 import dms.templates.core.ContentJson.given
 import dms.templates.core.DeviationJson.given
 import sttp.model.StatusCode
@@ -172,10 +174,12 @@ final case class DocumentView(
   * Creating requires `CreateFromTemplate` in the scope of the template's document class; reading requires
   * `ReadDocument` on a version (by status: drafts for authors and owners, published versions for readers);
   * changing and submitting a draft and requesting or withdrawing deviations require `EditDraft`; the
-  * deviation report of a version requires `ReadDocument` on it.
+  * deviation report of a version requires `ReadDocument` on it. Submitting starts the review and approval
+  * workflow of the document's class (module `workflow`); the participants of a version's workflow may read
+  * it.
   */
 object DocumentApi:
-  type Env = Authenticator & Db & Authorizer & DocumentService
+  type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow
 
   private val documents  = "api" / "v1" / "documents"
   private val documentId = path[UUID]("id").description("Document id")
@@ -269,7 +273,8 @@ object DocumentApi:
       .in(documents / documentId / "submit")
       .out(jsonBody[DocumentVersionView])
       .description(
-        "Submits the draft for review. Blocked while fields required in review are missing (422 with issues)."
+        "Submits the draft for review and starts the workflow of the document class (or the next round after " +
+          "a return). Blocked while fields required in review are missing (422 with issues)."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -280,6 +285,7 @@ object DocumentApi:
               open      <- openVersion(details)
               _         <- ctx.check(Action.EditDraft, resource(p, details, open))
               submitted <- ctx.service.submit(DocumentId(id), p.userId)
+              _         <- ctx.workflow.start(DocumentId(id), submitted.id, p.userId)
             yield versionView(submitted)
           }
       )
@@ -358,7 +364,7 @@ object DocumentApi:
               version <- ZIO
                 .fromOption(details.versions.find(_.id == versionId))
                 .orElseFail(DocumentError.NotFound(s"document $id has no version $versionId"))
-              _        <- ctx.check(Action.ReadDocument, resource(p, details, version))
+              _        <- ctx.checkRead(details, version)
               requests <- ctx.service.deviationRequests(versionId)
             yield deviationsView(version, requests)
           }
@@ -368,38 +374,66 @@ object DocumentApi:
     List(create, get, versions, updateDraft, submit, requestDeviation, withdrawDeviation, deviations)
 
   /** What a request may use inside its transaction. */
-  private final class Context(val service: DocumentService, authz: Authorizer, subject: Subject):
+  private final class Context(
+      val service: DocumentService,
+      val workflow: ApprovalWorkflow,
+      authz: Authorizer,
+      subject: Subject
+  ):
     def check(action: Action, resource: Resource): IO[AccessDenied, Unit] =
       authz.check(subject, action, resource).unit
 
     /** The versions the caller may read; denied (and logged) if there is none. */
-    def readable(details: DocumentDetails): IO[AccessDenied, List[DocumentVersion]] =
+    def readable(details: DocumentDetails): IO[AccessDenied | WorkflowError, List[DocumentVersion]] =
       for
+        cases <- workflow.cases(details.document.id)
+        participants = participantsOf(cases)
         now <- Clock.instant
         visible = details.versions.filter(v =>
-          Policy.decide(subject, Action.ReadDocument, resource(subject, details, v), now).isPermitted
+          Policy
+            .decide(subject, Action.ReadDocument, resource(subject, details, v, participants), now)
+            .isPermitted
         )
         _ <- ZIO.when(visible.isEmpty)(
           details.versions.lastOption.fold(ZIO.unit)(v =>
-            check(Action.ReadDocument, resource(subject, details, v))
+            check(Action.ReadDocument, resource(subject, details, v, participants))
           )
         )
       yield visible
 
-    private def resource(s: Subject, details: DocumentDetails, v: DocumentVersion): Resource =
-      DocumentApi.resource(s.tenantId, details, v)
+    /** `ReadDocument` on one version; the participants of its workflow (e.g. the extra review step) may read
+      * it.
+      */
+    def checkRead(details: DocumentDetails, v: DocumentVersion): IO[AccessDenied | WorkflowError, Unit] =
+      workflow
+        .cases(details.document.id)
+        .flatMap(cases => check(Action.ReadDocument, resource(subject, details, v, participantsOf(cases))))
+
+    private def resource(
+        s: Subject,
+        details: DocumentDetails,
+        v: DocumentVersion,
+        participants: Map[UUID, Set[UserId]]
+    ): Resource =
+      DocumentApi.resource(s.tenantId, details, v, participants)
 
   private def inTransaction[A](principal: Principal)(
-      f: Context => ZIO[Any, DocumentError | AccessDenied, A]
-  ): ZIO[Db & Authorizer & DocumentService, (StatusCode, ApiError), A] =
+      f: Context => ZIO[Any, DocumentError | AccessDenied | WorkflowError, A]
+  ): ZIO[Db & Authorizer & DocumentService & ApprovalWorkflow, (StatusCode, ApiError), A] =
     (for
-      db      <- ZIO.service[Db]
-      authz   <- ZIO.service[Authorizer]
-      service <- ZIO.service[DocumentService]
-      result  <- db.transact(principal.tenantId)(
-        authz.subject(principal).flatMap(subject => f(Context(service, authz, subject)))
+      db       <- ZIO.service[Db]
+      authz    <- ZIO.service[Authorizer]
+      service  <- ZIO.service[DocumentService]
+      workflow <- ZIO.service[ApprovalWorkflow]
+      result   <- db.transact(principal.tenantId)(
+        authz.subject(principal).flatMap(subject => f(Context(service, workflow, authz, subject)))
       )
-    yield result).mapError(toResponse)
+    yield result).mapError {
+      case e: WorkflowError => WorkflowApi.toResponse(e)
+      case e: AccessDenied  => toResponse(e)
+      case e: DbError       => toResponse(e)
+      case e: DocumentError => toResponse(e)
+    }
 
   private def openVersion(details: DocumentDetails): IO[DocumentError, DocumentVersion] =
     ZIO
@@ -443,10 +477,15 @@ object DocumentApi:
   private def resource(p: Principal, details: DocumentDetails, v: DocumentVersion): Resource =
     resource(p.tenantId, details, v)
 
+  /** Everyone the workflow of a version assigned to one of its tasks, by version id. */
+  private[app] def participantsOf(cases: List[CaseDetails]): Map[UUID, Set[UserId]] =
+    cases.map(c => c.workflowCase.versionId -> c.tasks.flatMap(_.candidates).toSet).toMap
+
   private[app] def resource(
       tenant: dms.kernel.TenantId,
       details: DocumentDetails,
-      v: DocumentVersion
+      v: DocumentVersion,
+      participants: Map[UUID, Set[UserId]] = Map.empty
   ): Resource =
     val values = v.metadata
     Resource(
@@ -457,6 +496,7 @@ object DocumentApi:
       status = Some(v.status),
       authorId = Some(v.createdBy),
       ownerId = details.document.ownerId,
+      assignedParticipants = participants.getOrElse(v.id, Set.empty),
       approvedBy = v.releasedBy.toSet
     )
 

@@ -70,6 +70,16 @@ Constraints that follow from it:
 - Encapsulation exclusively in the `workflow-core` module; no Flowable types in `workflow-api`.
 - Ruled out: modelling the document status in BPMN; a separate workflow cluster.
 
+## Addendum (DMS-40, 2026-10-28): implementation deviations
+
+Implemented as described in ADR 0024. Small deviations from the spike, all within this decision:
+
+- Flowable's SQL is qualified with the table prefix `flowable.` (`tablePrefixIsSchema=true`) instead of a pool whose search path is `flowable`, so the engine joins the application's `Db.transact` connection (role `dms_app_user`) without changing its search path. Only schema creation uses connections with search path `flowable`.
+- Flowable's DDL is not copied into Flyway: `dms.app.Migrate` runs `FlowableEngine.migrateSchema` as schema owner after Flyway (`databaseSchemaUpdate=true` only there, `false` at runtime). Migration V11 creates the schema and default privileges for `dms_app`. Upgrades of Flowable therefore go through `Migrate` as well.
+- The shared transaction is joined per engine call (`SharedTransaction.joined`) because `Db.transact` owns commit and rollback; Flowable's transaction listeners fire at the end of each engine call. The async executor stays off until timers are needed; then listener firing must move to a commit hook in `Db`.
+- An engine exception is returned as a typed `WorkflowError` instead of marking the whole transaction rollback-only (`Db` has no such flag); a failed Flowable command flushes nothing.
+- Row-level security next to schema `flowable`: confirmed working, `flowable.*` has no policies (tested).
+
 ## Reversibility
 
 **medium**: Thanks to the encapsulation in `workflow-core` and the separate lifecycle state machine, a replacement remains limited to one module. Running process instances and tenant-specific BPMN models would, however, have to be migrated or remodelled.

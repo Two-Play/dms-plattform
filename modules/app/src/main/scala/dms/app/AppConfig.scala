@@ -28,6 +28,13 @@ final case class AuditConfig(
   */
 final case class WorkerSettings(name: Option[String])
 
+/** Review and approval workflows (ADR 0024).
+  *
+  * @param reauthenticationSeconds
+  *   step-up window for approval votes: the token's `auth_time` must not be older (DMS-41)
+  */
+final case class WorkflowSettings(reauthenticationSeconds: Int)
+
 final case class AppConfig(
     http: HttpConfig,
     auth: AuthConfig,
@@ -35,7 +42,8 @@ final case class AppConfig(
     migration: MigrationConfig,
     storage: StorageConfig,
     audit: AuditConfig,
-    worker: WorkerSettings
+    worker: WorkerSettings,
+    workflow: WorkflowSettings
 )
 
 object AppConfig:

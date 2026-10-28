@@ -70,7 +70,7 @@ The ZITADEL console is at `http://localhost:8085/ui/console` (local default admi
 docker compose down && docker volume rm dms-plattform_zitadel-db && rm -rf .local/zitadel
 ```
 
-Migrate the database (runs as the schema owner `dms`; the API connects as `dms_app_user`, which is subject to row-level security):
+Migrate the database (runs as the schema owner `dms`: Flyway migrations, then the tables of the workflow engine in schema `flowable`; the API connects as `dms_app_user`, which is subject to row-level security):
 
 ```bash
 sbt "app/runMain dms.app.Migrate"
