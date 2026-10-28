@@ -51,7 +51,8 @@ export function PartnerPicker({ reference, selected, onSelect }: PartnerPickerPr
       <div className="space-y-1.5 rounded-lg border p-3" data-reference={reference.key}>
         <p className="text-sm font-medium">{reference.label}</p>
         <p className="text-sm">
-          {selected.name} <span className="text-muted-foreground">({selected.id})</span>
+          {selected.name}{' '}
+          {selected.id && <span className="text-muted-foreground">({selected.id})</span>}
         </p>
         <p className="text-xs text-muted-foreground">{selected.address}</p>
         <div className="flex gap-2 pt-1">

@@ -62,13 +62,14 @@ The app calls the API on its own origin with the backend's paths unchanged (`/he
 
 TanStack Router with **file-based routing**: the Vite plugin generates `src/routeTree.gen.ts` from `src/routes/` (committed so `tsc` works before the first build; do not edit by hand). File-based routing gives automatic code splitting per route and fully typed links without maintaining a route tree manually.
 
-| Route                                               | File                            | Access                                                             |
-| --------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------ |
-| `/sign-in`                                          | `routes/sign-in.tsx`            | public landing and sign-in page                                    |
-| `/callback`                                         | `routes/callback.tsx`           | OIDC redirect target                                               |
-| `/`, `/documents`, `/templates`, `/tasks`, `/admin` | `routes/_app/*`                 | signed in; `_app.tsx` is the pathless protected layout (app shell) |
-| `/documents/new`                                    | `routes/_app/documents/new.tsx` | signed in; "New document" with live preview (DMS-39)               |
-| anything else                                       | `components/not-found-page.tsx` | 404 page                                                           |
+| Route                                               | File                                    | Access                                                                      |
+| --------------------------------------------------- | --------------------------------------- | --------------------------------------------------------------------------- |
+| `/sign-in`                                          | `routes/sign-in.tsx`                    | public landing and sign-in page                                             |
+| `/callback`                                         | `routes/callback.tsx`                   | OIDC redirect target                                                        |
+| `/`, `/documents`, `/templates`, `/tasks`, `/admin` | `routes/_app/*`                         | signed in; `_app.tsx` is the pathless protected layout (app shell)          |
+| `/documents/new`                                    | `routes/_app/documents/new.tsx`         | signed in; "New document" with live preview (DMS-39)                        |
+| `/documents/$documentId`                            | `routes/_app/documents/$documentId.tsx` | signed in; a document: continue and submit a draft, workflow state (DMS-90) |
+| anything else                                       | `components/not-found-page.tsx`         | 404 page                                                                    |
 
 The protected layout checks `context.auth.isAuthenticated` in `beforeLoad` and redirects to `/sign-in?redirect=<path>`. After sign-in the original path is carried through the OIDC `state` and restored on `/callback` (only same-origin paths are accepted).
 
@@ -76,9 +77,10 @@ The protected layout checks `context.auth.isAuthenticated` in `beforeLoad` and r
 
 ```
 src/
-  api/           generated schema, typed client, query definitions (templates.ts: catalog, fields, preview)
+  api/           generated schema, typed client, query definitions (templates.ts: catalog, fields, preview;
+                 documents.ts: list, document, workflow, save and submit; errors.ts: ApiError with field issues)
   auth/          oidc-client-ts UserManager, scopes, return-path check
-  components/    app shell, pages and cards; ui/ holds shadcn/ui components; documents/ the "New document" page
+  components/    app shell, pages and cards; ui/ holds shadcn/ui components; documents/ the document pages
   lib/           utilities, theme switch
   routes/        file-based routes (files starting with "-" are ignored by the router)
   test/          Vitest setup
@@ -114,6 +116,13 @@ For templates with reference fields (`references` in the fields response), the p
 - The fields the reference fills are read-only, marked "From partner master – taken over from the system, not editable", and show the picked partner's values; the preview uses them.
 - On save, these values are not sent as entered values; after the draft is saved, the picked partner is taken over on the server (`PUT /api/v1/documents/{id}/references/{key}`, `DELETE` when removed) as system values.
 - If the partner master is unreachable (503/502), the backend's message is shown as an alert ("… You can save the draft without it and pick the partner later."); saving still works, and a failed take-over after saving is shown as a warning next to "Draft saved".
+
+## Document list and drafts (DMS-90)
+
+- `/documents` (`document-list-page.tsx`) lists the most recently changed documents the user may read (`GET /api/v1/documents`): "My drafts" (`mine` and status Draft) and "Other documents", each with status and version, linking to the document page.
+- `/documents/$documentId` (`document-page.tsx`) loads the document (`GET /api/v1/documents/{id}`). A draft opens in the same workspace as "New document" (`document-workspace.tsx`: generated form, partner pickers, debounced preview, save); `draft-values.ts` turns the saved entered values back into form input and rebuilds the taken-over partner from the values it filled. Platform, computed and partner master values are not sent again; an unchanged partner is not taken over again. Other statuses show the version's metadata read-only.
+- "Submit for review" (both pages) saves the draft, then `POST /api/v1/documents/{id}/submit` starts the workflow; "New document" then opens the document page. The "Review and approval" card shows the cases from `GET /api/v1/documents/{id}/workflow` (status, round, current step, tasks with their assignees, votes).
+- Errors: issues of a 422 (`invalid_values`, `not_editable`, `incomplete`) are shown at their fields while the field keeps the rejected value; `incomplete` at submission also lists the missing values (click focuses the field); a 409 tells the user to reload; `invalid` at submission (e.g. a changed locked section without an authorized deviation request) is shown with a generic hint.
 
 ## Notes
 

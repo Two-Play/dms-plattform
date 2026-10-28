@@ -355,7 +355,8 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    get?: never
+    /** @description The most recently changed documents the caller may read, each with its open version if readable (e.g. the caller's own drafts) or its latest readable version. Documents without a readable version are left out, so the list can be shorter than `limit`. */
+    get: operations['getApiV1Documents']
     put?: never
     /** @description Creates a document from a released template version: version 1.0 as a draft with the template content. Values are validated against the class profile (422 with issues); computed fields are evaluated. */
     post: operations['postApiV1Documents']
@@ -425,7 +426,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Submits the draft for review. Blocked while fields required in review are missing (422 with issues). */
+    /** @description Submits the draft for review and starts the workflow of the document class (or the next round after a return). Blocked while fields required in review are missing (422 with issues). */
     post: operations['postApiV1DocumentsIdSubmit']
     delete?: never
     options?: never
@@ -478,6 +479,92 @@ export interface paths {
     get: operations['getApiV1DocumentsIdVersionsVersionidDeviations']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/workflow/tasks': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The open review and approval tasks of the caller, oldest first */
+    get: operations['getApiV1WorkflowTasks']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/workflow/tasks/{taskId}/votes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Casts a vote on a task. A reason is required except for Approve (422). Approval votes need a recent sign-in (401 reauthentication_required: sign in again with OIDC max_age or prompt=login). RequestChanges and Reject return the version to its author. */
+    post: operations['postApiV1WorkflowTasksTaskidVotes']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/workflow/tasks/{taskId}/participants': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Resolves the participants of an open or waiting task again, e.g. after the missing role was assigned. Tenant administrators only. */
+    post: operations['postApiV1WorkflowTasksTaskidParticipants']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/workflow': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The review and approval cases of the versions of a document the caller may read */
+    get: operations['getApiV1DocumentsIdWorkflow']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/workflows/{classKey}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description All versions of the workflow of a document class, oldest first */
+    get: operations['getApiV1AdminWorkflowsClasskey']
+    put?: never
+    /** @description Stores the next version of the workflow of a document class. Running cases keep their version. Lanes name a business role; approval steps use the Approver role. Disabling the four-eyes rule needs a reason and is recorded in the audit trail. */
+    post: operations['postApiV1AdminWorkflowsClasskey']
     delete?: never
     options?: never
     head?: never
@@ -554,6 +641,18 @@ export interface components {
     ApplyReference: {
       entryId: string
     }
+    /** ApprovalView */
+    ApprovalView: {
+      /** Format: uuid */
+      versionId: string
+      version: string
+      contentSha256: string
+      approvedBy: string
+      /** Format: date-time */
+      authenticatedAt: string
+      /** Format: date-time */
+      approvedAt: string
+    }
     /** Block */
     Block:
       | components['schemas']['BulletList']
@@ -624,6 +723,11 @@ export interface components {
        * @enum {string}
        */
       type: 'BulletList'
+    }
+    /** CastVote */
+    CastVote: {
+      decision: string
+      reason?: string
     }
     /** CatalogEntry */
     CatalogEntry: {
@@ -807,6 +911,12 @@ export interface components {
        */
       type: 'Date'
     }
+    /** DefineWorkflow */
+    DefineWorkflow: {
+      definition: components['schemas']['WorkflowDefinitionView']
+      fourEyes?: boolean
+      reason?: string
+    }
     /** DeviationChange */
     DeviationChange:
       | components['schemas']['BlocksDeleted']
@@ -912,6 +1022,26 @@ export interface components {
       | 'ReviewDue'
       | 'Superseded'
       | 'Withdrawn'
+    /** DocumentSummaryView */
+    DocumentSummaryView: {
+      /** Format: uuid */
+      id: string
+      title: string
+      classPath?: string[]
+      /** Format: uuid */
+      templateId: string
+      /** Format: int32 */
+      templateVersion: number
+      authorId: string
+      ownerId?: string
+      /** Format: uuid */
+      versionId: string
+      version: string
+      status: string
+      /** Format: date-time */
+      updatedAt: string
+      mine: boolean
+    }
     /** DocumentVersionView */
     DocumentVersionView: {
       /** Format: uuid */
@@ -1085,6 +1215,11 @@ export interface components {
        * @enum {string}
        */
       type: 'Item'
+    }
+    /** LaneView */
+    LaneView: {
+      key: string
+      role: string
     }
     /** LineBreak */
     LineBreak: {
@@ -1514,6 +1649,26 @@ export interface components {
        */
       type: 'Selection'
     }
+    /** StepView */
+    StepView: {
+      key: string
+      name: string
+      kind: string
+      lanes?: components['schemas']['LaneView'][]
+      when?: string
+    }
+    /** StoredWorkflowView */
+    StoredWorkflowView: {
+      classKey: string
+      /** Format: int32 */
+      version: number
+      definition: components['schemas']['WorkflowDefinitionView']
+      fourEyes: boolean
+      reason?: string
+      /** Format: date-time */
+      createdAt: string
+      createdBy: string
+    }
     /** Table */
     Table: {
       rows?: components['schemas']['Block'][][][]
@@ -1535,6 +1690,30 @@ export interface components {
        * @enum {string}
        */
       type: 'Table'
+    }
+    /** TaskView */
+    TaskView: {
+      id: string
+      /** Format: uuid */
+      caseId: string
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      /** Format: int32 */
+      round: number
+      step: string
+      stepName: string
+      kind: string
+      lane: string
+      role: string
+      candidates?: string[]
+      status: string
+      /** Format: date-time */
+      createdAt: string
+      /** Format: date-time */
+      completedAt?: string
+      completedBy?: string
     }
     /** TemplateContent */
     TemplateContent: {
@@ -1730,6 +1909,53 @@ export interface components {
        * @enum {string}
        */
       type: 'Value'
+    }
+    /** VoteView */
+    VoteView: {
+      /** Format: uuid */
+      id: string
+      taskId: string
+      /** Format: int32 */
+      round: number
+      step: string
+      lane: string
+      voter: string
+      decision: string
+      reason?: string
+      contentSha256: string
+      /** Format: date-time */
+      authenticatedAt?: string
+      /** Format: date-time */
+      votedAt: string
+      /** Format: date-time */
+      invalidatedAt?: string
+    }
+    /** WorkflowCaseView */
+    WorkflowCaseView: {
+      /** Format: uuid */
+      id: string
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      classKey: string
+      /** Format: int32 */
+      definitionVersion?: number
+      fourEyes: boolean
+      /** Format: int32 */
+      round: number
+      status: string
+      currentStep?: string
+      returnedStep?: string
+      contentSha256: string
+      tasks?: components['schemas']['TaskView'][]
+      votes?: components['schemas']['VoteView'][]
+      approval?: components['schemas']['ApprovalView']
+    }
+    /** WorkflowDefinitionView */
+    WorkflowDefinitionView: {
+      steps?: components['schemas']['StepView'][]
+      resetTo?: string
     }
     /** YesNo */
     YesNo: {
@@ -2655,6 +2881,45 @@ export interface operations {
       }
     }
   }
+  getApiV1Documents: {
+    parameters: {
+      query?: {
+        /** @description Most recently changed documents to look at, 1 to 200; default 50 */
+        limit?: number
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentSummaryView'][]
+        }
+      }
+      /** @description Invalid value for: query parameter limit */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   postApiV1Documents: {
     parameters: {
       query?: never
@@ -2962,6 +3227,218 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1WorkflowTasks: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TaskView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1WorkflowTasksTaskidVotes: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Task id */
+        taskId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CastVote']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowCaseView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1WorkflowTasksTaskidParticipants: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Task id */
+        taskId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TaskView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdWorkflow: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowCaseView'][]
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1AdminWorkflowsClasskey: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Key of the document class */
+        classKey: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StoredWorkflowView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1AdminWorkflowsClasskey: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Key of the document class */
+        classKey: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DefineWorkflow']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StoredWorkflowView']
+        }
+      }
+      /** @description Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown
