@@ -181,6 +181,17 @@ object Policy:
             (has(TenantAdmin) && !resource.isDocument)
         grantIf(unrestricted || restricted, "the history is not visible to this caller")
 
+      case MonitorCompliance =>
+        grantIf(has(ComplianceOfficer), "the compliance cockpit requires the compliance officer role")
+
+      case ViewAcknowledgementPersons =>
+        requireStatus(Published, ReviewDue)(
+          grantIf(
+            has(ComplianceOfficer) || (has(Owner) && resource.ownerId.contains(subject.userId)),
+            "who has not acknowledged a version is visible to compliance officers and the document's owner only"
+          )
+        )
+
       case Configure =>
         resource.configurationArea match
           case None       => Decision.Deny("not a configuration resource")

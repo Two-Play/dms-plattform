@@ -211,3 +211,20 @@ HTTP (module `app`, `ReviewApi`; only the document's owner decides, deputies do 
 | POST | `/api/v1/reviews/{taskId}/withdraw` | `{reason}` (required): the version goes out of force | owner of the document and `Withdraw` |
 
 Class settings: `review: {intervalMonths?, leadDays?}` in `POST /api/v1/admin/document-classes` and `…/{id}/versions` (omitted on a new version: kept), shown in `DocumentClassView.review`.
+
+## Compliance cockpit (DMS-59, ADR 0036)
+
+Business concept 12, US-15.1. Compliance officers (role `ComplianceOfficer`) see overdue reviews per organizational unit and owner and the acknowledgement rate per version and unit of the valid versions in their scope; names of readers who have not acknowledged only with a stated purpose, audited.
+
+- `core`: `DocumentService.currentlyValid` (every valid version with document, class path, review date and acknowledgement requirement, one query); `AcknowledgementService.acknowledgersOfValid` (acknowledgers per valid version that requires acknowledgement) and `acknowledgersOf(versionId)`.
+- `authz`: `Audience` decides `ReadPublished` for all users of the tenant at once (users with equal assignments and groups are decided once per version; author and owner individually); `RoleAssignments.activeAt`, `Groups.currentMemberships`.
+- No table; the role is allowed by migration V20.
+
+HTTP (module `app`, `ComplianceApi`):
+
+| Method | Path | Purpose | Authorization |
+|---|---|---|---|
+| GET | `/api/v1/compliance/overview` | `{today, overdueReviews, overdueByUnit:[{unit, count}], overdueByOwner:[{owner, count}], acknowledgements:{versions, audience, acknowledged, open, rate}, acknowledgementsByUnit:[{unit, rate:{…}}]}` | active `ComplianceOfficer` assignment; versions filtered by `MonitorCompliance` |
+| GET | `/api/v1/compliance/overdue-reviews?unit=&owner=` | `[{documentId, versionId, title, versionLabel, classPath, unit, owner, status, dueOn, daysOverdue}]`, the longest overdue first; empty filter value: without unit/owner | as above |
+| GET | `/api/v1/compliance/acknowledgements?unit=&document=` | `[{documentId, versionId, title, versionLabel, classPath, unit, owner, publishedAt, audience, acknowledged, open, rate}]`, the most open first; no names | as above |
+| GET | `/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open?purpose=escalation\|reminder&reason=` | `{documentId, versionId, title, versionLabel, purpose, audience, acknowledged, open:[userId]}`; 403 `purpose_required` without purpose or reason, 422 if the version does not require acknowledgement; audit `compliance.acknowledgement-persons-viewed` with purpose and reason | `ViewAcknowledgementPersons` (compliance officer in scope, or owner of the document) |

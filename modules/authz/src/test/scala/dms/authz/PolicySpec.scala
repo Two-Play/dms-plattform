@@ -41,20 +41,23 @@ object PolicySpec extends ZIOSpecDefault:
     case Destroy             => document(Archived)
     case ViewHistory         => document(Published)
     case Configure           => Resource(tenant, configurationArea = Some(ConfigurationArea.DocumentClasses))
+    case MonitorCompliance   => document(ReviewDue)
+    case ViewAcknowledgementPersons => document(Published)
 
   /** The condition that turns a ◐ cell of the matrix into a permission. */
   private def favorable(action: Action, role: Role): Resource =
     val r = base(action)
     (action, role) match
-      case (EditDraft, Reviewer)      => r.copy(status = Some(InReview), assignedParticipants = Set(user))
-      case (Review, _)                => r.copy(assignedParticipants = Set(user))
-      case (Approve, Owner)           => r.copy(ownerMayApprove = true)
-      case (Recertify, _)             => r.copy(ownerId = Some(user))
-      case (Publish, Approver)        => r.copy(approvedBy = Set(user))
-      case (ViewHistory, Author)      => r.copy(authorId = Some(user))
-      case (ViewHistory, Reviewer)    => r.copy(assignedParticipants = Set(user))
-      case (ViewHistory, Approver)    => r.copy(assignedParticipants = Set(user))
-      case (ViewHistory, TenantAdmin) =>
+      case (EditDraft, Reviewer) => r.copy(status = Some(InReview), assignedParticipants = Set(user))
+      case (Review, _)           => r.copy(assignedParticipants = Set(user))
+      case (Approve, Owner)      => r.copy(ownerMayApprove = true)
+      case (Recertify, _)        => r.copy(ownerId = Some(user))
+      case (ViewAcknowledgementPersons, _) => r.copy(ownerId = Some(user))
+      case (Publish, Approver)             => r.copy(approvedBy = Set(user))
+      case (ViewHistory, Author)           => r.copy(authorId = Some(user))
+      case (ViewHistory, Reviewer)         => r.copy(assignedParticipants = Set(user))
+      case (ViewHistory, Approver)         => r.copy(assignedParticipants = Set(user))
+      case (ViewHistory, TenantAdmin)      =>
         Resource(tenant, configurationArea = Some(ConfigurationArea.Workflows))
       case (Configure, RecordsManager) => r.copy(configurationArea = Some(ConfigurationArea.Retention))
       case _                           => r
@@ -65,25 +68,29 @@ object PolicySpec extends ZIOSpecDefault:
   import Mark.*
 
   /** Permission matrix of business concept 2.3, columns in the order of [[Role]] (Destroy is checked
-    * separately).
+    * separately). The compliance officer ("Compliance-Beauftragter", business concept 2.2) has no column in
+    * the matrix of the business concept; its rights follow ADR 0036: reading published documents like every
+    * business role, the compliance cockpit and, for escalation, who has not acknowledged a version.
     */
   private val matrix: List[(Action, List[Mark])] = List(
-    //                     Reader  Author   Owner    Reviewer Approver Designer Records  Auditor  Admin
-    ReadPublished       -> List(Full, Full, Full, Full, Full, Full, Full, Full, Partial),
-    CreateFromTemplate  -> List(Never, Full, Full, Never, Never, Never, Never, Never, Never),
-    EditDraft           -> List(Never, Full, Full, Partial, Never, Never, Never, Never, Never),
-    CommentInReview     -> List(Never, Full, Full, Full, Full, Never, Never, Never, Never),
-    Review              -> List(Never, Partial, Partial, Partial, Partial, Never, Never, Never, Never),
-    Approve             -> List(Never, Never, Partial, Never, Full, Never, Never, Never, Never),
-    Publish             -> List(Never, Never, Full, Never, Partial, Never, Never, Never, Never),
-    Withdraw            -> List(Never, Never, Full, Never, Full, Never, Never, Never, Never),
-    Recertify           -> List(Never, Never, Partial, Never, Never, Never, Never, Never, Never),
-    EditTemplates       -> List(Never, Never, Never, Never, Never, Full, Never, Never, Never),
-    ReleaseTemplate     -> List(Never, Never, Never, Never, Never, Full, Never, Never, Never),
-    ReadTemplateCatalog -> List(Full, Full, Full, Full, Full, Full, Full, Full, Never),
-    ManageRetention     -> List(Never, Never, Never, Never, Never, Never, Full, Never, Never),
-    ViewHistory         -> List(Never, Partial, Full, Partial, Partial, Never, Full, Full, Partial),
-    Configure           -> List(Never, Never, Never, Never, Never, Never, Partial, Never, Full)
+    //                     Reader  Author   Owner    Reviewer Approver Designer Records  Auditor  Admin  Compliance
+    ReadPublished       -> List(Full, Full, Full, Full, Full, Full, Full, Full, Partial, Full),
+    CreateFromTemplate  -> List(Never, Full, Full, Never, Never, Never, Never, Never, Never, Never),
+    EditDraft           -> List(Never, Full, Full, Partial, Never, Never, Never, Never, Never, Never),
+    CommentInReview     -> List(Never, Full, Full, Full, Full, Never, Never, Never, Never, Never),
+    Review              -> List(Never, Partial, Partial, Partial, Partial, Never, Never, Never, Never, Never),
+    Approve             -> List(Never, Never, Partial, Never, Full, Never, Never, Never, Never, Never),
+    Publish             -> List(Never, Never, Full, Never, Partial, Never, Never, Never, Never, Never),
+    Withdraw            -> List(Never, Never, Full, Never, Full, Never, Never, Never, Never, Never),
+    Recertify           -> List(Never, Never, Partial, Never, Never, Never, Never, Never, Never, Never),
+    EditTemplates       -> List(Never, Never, Never, Never, Never, Full, Never, Never, Never, Never),
+    ReleaseTemplate     -> List(Never, Never, Never, Never, Never, Full, Never, Never, Never, Never),
+    ReadTemplateCatalog -> List(Full, Full, Full, Full, Full, Full, Full, Full, Never, Full),
+    ManageRetention     -> List(Never, Never, Never, Never, Never, Never, Full, Never, Never, Never),
+    ViewHistory         -> List(Never, Partial, Full, Partial, Partial, Never, Full, Full, Partial, Never),
+    Configure           -> List(Never, Never, Never, Never, Never, Never, Partial, Never, Full, Never),
+    MonitorCompliance   -> List(Never, Never, Never, Never, Never, Never, Never, Never, Never, Full),
+    ViewAcknowledgementPersons -> List(Never, Never, Partial, Never, Never, Never, Never, Never, Never, Full)
   )
 
   private def permitted(roles: Seq[Role], action: Action, resource: Resource): Boolean =
@@ -215,6 +222,25 @@ object PolicySpec extends ZIOSpecDefault:
         reads(Archived, RecordsManager)(),
         reads(Withdrawn, Owner)(),
         !reads(Destroyed, RecordsManager)()
+      )
+    },
+    test("the compliance cockpit follows the scope and the confidentiality of the version (ADR 0036)") {
+      val hrOfficer =
+        Subject(user, tenant, Set(RoleAssignment(ComplianceOfficer, organizationalUnit = Some("hr"))))
+      val hr     = document(Published).copy(organizationalUnit = Some("hr"))
+      val secret = hr.copy(confidentiality = Confidentiality.Confidential, allowedGroups = Set("board"))
+      assertTrue(
+        Policy.decide(hrOfficer, MonitorCompliance, hr, now).isPermitted,
+        !Policy
+          .decide(hrOfficer, MonitorCompliance, hr.copy(organizationalUnit = Some("finance")), now)
+          .isPermitted,
+        !Policy.decide(hrOfficer, MonitorCompliance, secret, now).isPermitted,
+        Policy.decide(hrOfficer.copy(groups = Set("board")), MonitorCompliance, secret, now).isPermitted,
+        Policy.decide(hrOfficer, ViewAcknowledgementPersons, hr, now).isPermitted,
+        // names only for versions that ask for acknowledgement now
+        !Policy
+          .decide(hrOfficer, ViewAcknowledgementPersons, hr.copy(status = Some(Superseded)), now)
+          .isPermitted
       )
     },
     test("every denial carries a reason") {

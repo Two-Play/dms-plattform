@@ -81,6 +81,40 @@ object AuthorizerSpec extends ZIOSpecDefault:
         after.forall(a => !a.isActiveAt(Instant.now().plusSeconds(1)))
       )
     },
+    test(
+      "compliance officers can be assigned; all active assignments and memberships load at once (DMS-59)"
+    ) {
+      val bob   = UserId("bob")
+      val carol = UserId("carol")
+      val now   = Instant.now()
+      for
+        dbs <- ZIO.service[Databases]
+        t   <- newTenant(dbs.owner)
+        _   <- dbs.app.transact(t)(
+          RoleAssignments.Postgres.grant(alice, RoleAssignment(Role.ComplianceOfficer, Some("hr")), admin) *>
+            RoleAssignments.Postgres.grant(alice, RoleAssignment(Role.Reader), admin) *>
+            RoleAssignments.Postgres.grant(bob, RoleAssignment(Role.Owner), admin) *>
+            RoleAssignments.Postgres.grant(
+              carol,
+              RoleAssignment(
+                Role.Reader,
+                validFrom = now.minusSeconds(60),
+                validUntil = Some(now.minusSeconds(1))
+              ),
+              admin
+            ) *>
+            Groups.Postgres.create("board", "Board", admin) *>
+            Groups.Postgres.addMember("board", bob, admin)
+        )
+        active      <- dbs.app.transact(t)(RoleAssignments.Postgres.activeAt(now))
+        memberships <- dbs.app.transact(t)(Groups.Postgres.currentMemberships)
+      yield assertTrue(
+        active.keySet == Set(alice, bob),
+        active(alice).map(a => (a.role, a.organizationalUnit)) ==
+          Set((Role.ComplianceOfficer, Some("hr")), (Role.Reader, None)),
+        memberships == Map(bob -> Set("board"))
+      )
+    },
     test("assignments of another tenant are invisible") {
       for
         dbs <- ZIO.service[Databases]

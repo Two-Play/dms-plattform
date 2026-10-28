@@ -180,6 +180,32 @@ final case class ValidVersion(
 
   def metadata: Map[String, MetadataValue] = values.map((k, e) => k -> e.value)
 
+/** A version valid now (Published or ReviewDue), with what the compliance cockpit (US-15.1, DMS-59) reports
+  * on and what authorization needs.
+  *
+  * @param reviewDueOn
+  *   the review date (ADR 0030); `None` if the version has no periodic review
+  * @param requiresAcknowledgement
+  *   whether its readers are asked to acknowledge it (ADR 0027)
+  */
+final case class CurrentVersion(
+    document: Document,
+    classPath: List[String],
+    versionId: UUID,
+    number: VersionNo,
+    status: DocumentStatus,
+    values: Map[String, FieldEntry],
+    createdBy: UserId,
+    releasedBy: Option[UserId],
+    validFrom: Option[java.time.LocalDate],
+    publishedAt: Option[Instant],
+    reviewDueOn: Option[java.time.LocalDate],
+    requiresAcknowledgement: Boolean
+):
+  def label: String = Versioning.label(number, status, 1)
+
+  def metadata: Map[String, MetadataValue] = values.map((k, e) => k -> e.value)
+
 /** An approved version waiting for its publication at `dueAt` (00:00 of its valid-from date in the tenant's
   * time zone).
   */
@@ -354,6 +380,48 @@ final class DocumentService(
         )
       )
     }
+
+  /** Every version valid now (Published or ReviewDue), by title, with its class path, review date and whether
+    * it asks for acknowledgement (compliance cockpit, DMS-59). The caller decides which of them may be seen.
+    */
+  def currentlyValid: IO[DocumentError, List[CurrentVersion]] =
+    for
+      rows  <- sql(DocumentStore.currentlyValid)
+      paths <- ZIO.foreach(rows.map(r => (r.classId, r.classVersion)).distinct)((id, version) =>
+        profile(DocumentClassId(id), version).map(p => (id, version) -> p.classPath.map(_.value))
+      )
+      byClass = paths.toMap
+    yield rows.map(r =>
+      CurrentVersion(
+        Document(
+          DocumentId(r.documentId),
+          DocumentClassId(r.classId),
+          r.classVersion,
+          r.title,
+          r.ownerId.map(UserId(_)),
+          UserId(r.authorId),
+          TemplateId(r.templateId),
+          r.templateVersion,
+          r.documentCreatedAt.toInstant
+        ),
+        byClass((r.classId, r.classVersion)),
+        r.versionId,
+        VersionNo(r.major, r.minor),
+        DocumentStatus.valueOf(r.status),
+        r.fieldValues.value
+          .fromJson[Map[String, FieldEntry]]
+          .fold(
+            e => throw IllegalStateException(s"cannot read the field values of version ${r.versionId}: $e"),
+            identity
+          ),
+        UserId(r.createdBy),
+        r.releasedBy.map(UserId(_)),
+        r.validFrom,
+        r.publishedAt.map(_.toInstant),
+        r.reviewDueOn,
+        r.requiresAcknowledgement
+      )
+    )
 
   /** Ids of the documents changed at or after `since` (the document or one of its versions), without `since`
     * of every document with a released version: what the search index (DMS-51) has to (re)index.

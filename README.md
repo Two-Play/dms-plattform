@@ -105,6 +105,7 @@ All users belong to the local ZITADEL organization. Passwords are generated on t
 | `approver` | Approver |
 | `reader` | Reader |
 | `records` | RecordsManager, Auditor |
+| `compliance` | ComplianceOfficer |
 
 The ZITADEL default admin `zitadel-admin@zitadel.localhost` (password `Password1!`, change on first login; console at `http://localhost:8085/ui/console`) gets TenantAdmin.
 
@@ -134,6 +135,7 @@ The partner master is the built-in demo directory (`dms.partners.directory = dem
 7. Search as `reader` (DMS-51, DMS-52, ADR 0029): `GET /api/v1/search?q=Nordlicht` finds the published version a few seconds after publication (outbox and job queue; changes without an event within `dms.search.syncIntervalSeconds`). Hits, hit count, facets and snippets only cover versions the caller may read; role assignment changes apply to the next search. Filters: `class`, `status` (default: valid versions; `Superseded` for the history), `lang`; paging with `page` and `size`.
 8. Acknowledge as `reader` (DMS-47, ADR 0027): every major version (and minor versions configured to) asks everyone who may read it for an acknowledgement. Open the published document; the page records the opening and the "Acknowledgement" card enables "Acknowledge". After clicking it the card shows the acknowledgement with version and time. Open and done acknowledgements: `GET /api/v1/acknowledgements?status=open|done`. Acknowledging without opening first is rejected (`409 not_opened`), a second time too (`409 already_acknowledged`); when a new version supersedes the published one, the open acknowledgement moves to the new version if it requires acknowledgement.
 9. Legal hold as `records` (records manager for the whole tenant; DMS-56, ADR 0031; the web UI has no legal hold section yet): `POST /api/v1/legal-holds` with `{"name":"Litigation Nordlicht","reason":"Claim received","matterReference":"LIT-1","documentIds":["<document id>"]}`, or with `"searchFilter":{"q":"Nordlicht","expectedCount":<total of the search>}` to hold the documents of a search result. The document then shows `legalHold: true` and cannot be destroyed; `POST /api/v1/legal-holds/{id}/release` with `{"reason":"..."}` releases it. The renditions get the S3 object legal hold through the job `archive.legal-hold-sync`.
+10. Compliance cockpit as `compliance` (DMS-59, ADR 0036): "Compliance" in the navigation shows the overdue reviews per organizational unit and owner and the acknowledgement rates per version and unit; every figure links to its list. "Who has not acknowledged" asks for a purpose (escalation or reminder) and a reason, recorded in the audit trail. API: `GET /api/v1/compliance/overview`, `…/overdue-reviews?unit=&owner=`, `…/acknowledgements?unit=&document=`, `…/acknowledgements/{documentId}/{versionId}/open?purpose=escalation&reason=…`.
 
 ### Manual steps
 
