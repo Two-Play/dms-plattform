@@ -34,3 +34,14 @@ HTTP (module `app`, `DocumentClassApi`), all requiring `Configure` on `DocumentC
 | GET | `/api/v1/admin/document-classes/{id}/profile?version=` | Effective profile |
 
 JSON sum types carry a `type` discriminator, e.g. `{"type":"Selection","options":[{"code":"3m","label":"Three months","active":true}]}`.
+
+## Status-dependent required fields (DMS-33)
+
+Each `FieldBinding` names the statuses in which the field is required (`Requiredness.from(InReview)` = from submission on). Core fields carry built-in requiredness (e.g. title always, owner and confidentiality from review, rendition checksum from approval).
+
+- `Validation.validate(profile, values, targetStatus)` reports missing required fields (`missing_required`) and invalid values with stable field key and label, in profile order.
+- `Validation.checkTransition(profile, values, from, event)` applies a lifecycle event only when the metadata is complete for the target status; a submission (`Submit`) is blocked while fields required in `InReview` are missing.
+- Changing requiredness is a new class profile version (`POST /api/v1/admin/document-classes/{id}/versions`); documents keep the version they use.
+- `POST /api/v1/document-classes/{id}/validate` with `{"values": {...}, "targetStatus": "InReview", "version": 1}` returns `{complete, issues:[{field,label,code,message}]}` for editors. System fields are skipped unless `includeSystemFields` is `true`. Open to every signed-in user of the tenant.
+
+Metadata values in JSON: `{"type":"Text","value":"ACME"}`, `{"type":"Amount","value":1200.5,"currency":"EUR"}`, `{"type":"Selection","code":"3m"}`, `{"type":"Many","values":[...]}`.

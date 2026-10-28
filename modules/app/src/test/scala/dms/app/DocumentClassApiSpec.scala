@@ -141,6 +141,15 @@ object DocumentClassApiSpec extends ZIOSpecDefault:
     """{"key":"contract","label":"Contract","fields":[]}"""
 
   def spec = suite("DocumentClassApi")(
+    test("API documentation can be generated, including the recursive metadata value schema") {
+      val docs = sttp.tapir.docs.openapi
+        .OpenAPIDocsInterpreter()
+        .toOpenAPI(DocumentClassApi.endpoints.map(_.endpoint), "DMS Platform", "test")
+      assertTrue(
+        docs.paths.pathItems.contains("/api/v1/document-classes/{id}/validate"),
+        docs.components.exists(_.schemas.contains("MetadataValue"))
+      )
+    },
     test("a user without the tenant administrator role gets 403") {
       for
         create <- call(author, "POST", "/api/v1/admin/document-classes", Some(contractClass))
@@ -190,6 +199,45 @@ object DocumentClassApiSpec extends ZIOSpecDefault:
               p.fields.exists(_.key == "renditionChecksum")
           ),
         invalid._1 == Status.UnprocessableEntity
+      )
+    },
+    test("validation names the missing required fields for a target status") {
+      for
+        _ <- call(
+          admin,
+          "POST",
+          "/api/v1/admin/field-definitions",
+          Some("""{"key":"noticePeriod","label":"Notice period","fieldType":{"type":"Text"}}""")
+        )
+        cls <- call(
+          admin,
+          "POST",
+          "/api/v1/admin/document-classes",
+          Some(
+            """{"key":"nda","label":"NDA",
+              |"fields":[{"key":"noticePeriod","version":1,"requiredIn":["InReview"]}]}""".stripMargin
+          )
+        )
+        id   = cls._2.fromJson[DocumentClassView].toOption.map(_.id).get
+        body = """{"values":{"title":{"type":"Text","value":"NDA ACME"}},"targetStatus":"%s"}"""
+        draft  <- call(author, "POST", s"/api/v1/document-classes/$id/validate", Some(body.format("Draft")))
+        review <- call(
+          author,
+          "POST",
+          s"/api/v1/document-classes/$id/validate",
+          Some(body.format("InReview"))
+        )
+        result = review._2.fromJson[ValidationResult].toOption
+      yield assertTrue(
+        draft._1 == Status.Ok,
+        draft._2.fromJson[ValidationResult].toOption.exists(_.complete),
+        review._1 == Status.Ok,
+        result.exists(!_.complete),
+        result.exists(
+          _.issues.exists(i =>
+            i.field == "noticePeriod" && i.label == "Notice period" && i.code == "missing_required"
+          )
+        )
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

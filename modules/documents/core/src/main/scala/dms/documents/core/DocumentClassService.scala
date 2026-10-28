@@ -3,6 +3,7 @@ package dms.documents.core
 import com.augustnagro.magnum.DbTx
 import dms.audit.*
 import dms.db.{Db, DbError, Jsonb}
+import dms.documents.DocumentStatus
 import dms.documents.metadata.*
 import dms.documents.core.MetadataJson.given
 import dms.kernel.UserId
@@ -162,6 +163,18 @@ final class DocumentClassService(audit: AuditTrail):
         .toRight(classNotFound(id))
         .flatMap(resolve)
     )
+
+  /** Validates metadata values for `targetStatus` against a class profile version (default: latest): required
+    * fields of that status and the field rules. Returns the profile used and the issues found.
+    */
+  def validate(
+      id: DocumentClassId,
+      version: Option[Int],
+      values: Map[String, MetadataValue],
+      targetStatus: DocumentStatus,
+      includeSystemFields: Boolean
+  ): IO[MetadataError, (MetadataProfile, List[FieldIssue])] =
+    profile(id, version).map(p => (p, Validation.validate(p, values, targetStatus, includeSystemFields)))
 
   private def recordField(action: String, definition: FieldDefinition, actor: UserId) =
     record(

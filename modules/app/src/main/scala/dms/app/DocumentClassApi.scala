@@ -8,7 +8,7 @@ import dms.documents.core.MetadataJson.given
 import dms.documents.metadata.*
 import dms.identity.{Authenticator, Principal}
 import sttp.model.StatusCode
-import sttp.tapir.Schema
+import sttp.tapir.{Schema, SchemaType}
 import sttp.tapir.generic.Configuration
 import sttp.tapir.json.zio.jsonBody
 import sttp.tapir.ztapir.*
@@ -23,7 +23,19 @@ object MetadataSchemas:
   given Schema[DocumentStatus] = Schema.derivedEnumeration[DocumentStatus].defaultStringBased
   given Schema[SelectOption]   = Schema.derived
   given Schema[FieldType]      = Schema.derived
-  given Schema[MetadataValue]  = Schema.derived
+  given Schema[MetadataValue]  = RecursiveSchemas.metadataValue
+
+/** `MetadataValue.Many` contains `MetadataValue`s. Deriving the schema into a lazy given that the derivation
+  * itself picks up deadlocks on initialization, so the list element refers to the derived schema by name.
+  */
+private object RecursiveSchemas:
+  private given Configuration = Configuration.default.withDiscriminator("type")
+
+  private given Schema[List[MetadataValue]] =
+    val element = Schema[MetadataValue](SchemaType.SRef(Schema.SName("dms.documents.metadata.MetadataValue")))
+    Schema(SchemaType.SArray[List[MetadataValue], MetadataValue](element)(identity))
+
+  val metadataValue: Schema[MetadataValue] = Schema.derived[MetadataValue]
 
 import MetadataSchemas.given
 
@@ -117,8 +129,35 @@ final case class ProfileView(
 ) derives JsonCodec,
       Schema
 
-/** Administration of document classes and field definitions (business concept 3.1, 3.2). Every endpoint
-  * requires `Configure` on [[ConfigurationArea.DocumentClasses]] (tenant administrator).
+final case class ValidateMetadata(
+    values: Map[String, MetadataValue],
+    targetStatus: DocumentStatus,
+    /** Profile version the document uses; default: latest. */
+    version: Option[Int],
+    /** Also check fields set by the platform (document id, status, checksum, ...); default: false. */
+    includeSystemFields: Option[Boolean]
+) derives JsonCodec,
+      Schema
+
+/** A field problem; `field` is the stable field key, `code` a stable issue code such as `missing_required`.
+  */
+final case class IssueView(field: String, label: String, code: String, message: String)
+    derives JsonCodec,
+      Schema
+
+final case class ValidationResult(
+    classId: UUID,
+    profileVersion: Int,
+    targetStatus: DocumentStatus,
+    /** No issues: the document may move to `targetStatus` as far as its metadata is concerned. */
+    complete: Boolean,
+    issues: List[IssueView]
+) derives JsonCodec,
+      Schema
+
+/** Administration of document classes and field definitions (business concept 3.1, 3.2). The admin endpoints
+  * require `Configure` on [[ConfigurationArea.DocumentClasses]] (tenant administrator); the validation
+  * endpoint is open to every signed-in user of the tenant.
   */
 object DocumentClassApi:
   type Env = Authenticator & Db & Authorizer & DocumentClassService
@@ -258,6 +297,40 @@ object DocumentClassApi:
         (id, version) => configure(p)(_.profile(DocumentClassId(id), version)).map(profileView)
       )
 
+  /** For editors: which fields are missing or invalid for a target status (business concept 3.2). Open to
+    * every signed-in user of the tenant; profiles are tenant configuration, not document content.
+    */
+  val validate: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.post
+      .in("api" / "v1" / "document-classes" / classId / "validate")
+      .in(jsonBody[ValidateMetadata])
+      .out(jsonBody[ValidationResult])
+      .description(
+        "Validates metadata values against the class profile for a target status: required fields of that " +
+          "status, types and rules. Missing fields are reported with their stable key and label."
+      )
+      .tag("Documents")
+      .serverLogic(p =>
+        (id, req) =>
+          inTenant(p)(
+            _.validate(
+              DocumentClassId(id),
+              req.version,
+              req.values,
+              req.targetStatus,
+              req.includeSystemFields.getOrElse(false)
+            )
+          ).map((profile, issues) =>
+            ValidationResult(
+              profile.classId.value,
+              profile.version,
+              req.targetStatus,
+              issues.isEmpty,
+              issues.map(i => IssueView(i.field, i.label, i.kind.code, i.kind.message))
+            )
+          )
+      )
+
   val endpoints: List[ZServerEndpoint[Env, Any]] = List(
     listFields,
     getField,
@@ -267,7 +340,8 @@ object DocumentClassApi:
     getClass,
     createClass,
     newClassVersion,
-    getProfile
+    getProfile,
+    validate
   )
 
   /** Runs `f` in a transaction of the caller's tenant after checking `Configure` on document classes. */
@@ -282,6 +356,16 @@ object DocumentClassApi:
       result  <- db.transact(principal.tenantId)(
         authz.subject(principal).flatMap(authz.check(_, Action.Configure, resource)) *> f(service)
       )
+    yield result).mapError(toResponse)
+
+  /** Runs `f` in a transaction of the caller's tenant without further authorization. */
+  private def inTenant[A](principal: Principal)(
+      f: DocumentClassService => IO[MetadataError, A]
+  ): ZIO[Db & DocumentClassService, (StatusCode, ApiError), A] =
+    (for
+      db      <- ZIO.service[Db]
+      service <- ZIO.service[DocumentClassService]
+      result  <- db.transact(principal.tenantId)(f(service))
     yield result).mapError(toResponse)
 
   def toResponse(error: AccessDenied | DbError | MetadataError): (StatusCode, ApiError) = error match

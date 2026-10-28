@@ -272,6 +272,42 @@ object DocumentClassServiceSpec extends ZIOSpecDefault:
         ownerDelete.left.exists(_.isInstanceOf[DbError.AppendOnlyViolation])
       )
     },
+    test("changing requiredness creates a new profile version; the old version keeps its rules") {
+      for
+        t   <- ZIO.serviceWithZIO[Env](e => newTenant(e.owner))
+        _   <- as(t)(_.createField("contractPartner", partnerDraft, admin))
+        cls <- as(t)(
+          _.createClass(
+            "contract",
+            None,
+            ClassDraft("Contract", None, List(binding("contractPartner"))),
+            admin
+          )
+        )
+        v2 <- as(t)(
+          _.newClassVersion(
+            cls.classId,
+            ClassDraft(
+              "Contract",
+              None,
+              List(binding("contractPartner", requiredIn = Requiredness.from(InReview)))
+            ),
+            admin
+          )
+        )
+        values = Map("title" -> MetadataValue.Text("Framework agreement"))
+        onOld <- as(t)(_.validate(cls.classId, Some(1), values, InReview, includeSystemFields = false))
+        onNew <- as(t)(_.validate(cls.classId, None, values, InReview, includeSystemFields = false))
+        draft <- as(t)(_.validate(cls.classId, None, values, Draft, includeSystemFields = false))
+      yield assertTrue(
+        v2.version == 2,
+        onOld._1.version == 1,
+        !onOld._2.exists(_.field == "contractPartner"),
+        onNew._1.version == 2,
+        onNew._2.exists(i => i.field == "contractPartner" && i.kind == IssueKind.MissingRequired(InReview)),
+        draft._2.isEmpty
+      )
+    },
     test("configuration changes are recorded in the audit trail") {
       for
         e      <- ZIO.service[Env]

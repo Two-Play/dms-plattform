@@ -1,7 +1,11 @@
 package dms.documents.metadata
 
+import dms.documents.{DocumentStatus, Lifecycle, LifecycleError, LifecycleEvent}
+
 /** What is wrong with a field. `code` is stable for clients; `message` is for display. */
 enum IssueKind:
+  /** The field has no value but is required in the target status. */
+  case MissingRequired(status: DocumentStatus)
   case UnknownField
   case WrongType(expected: String, actual: String)
   case OutOfRange(detail: String)
@@ -13,6 +17,7 @@ enum IssueKind:
   case UnknownCurrency(currency: String)
 
   def code: String = this match
+    case MissingRequired(_) => "missing_required"
     case UnknownField       => "unknown_field"
     case WrongType(_, _)    => "wrong_type"
     case OutOfRange(_)      => "out_of_range"
@@ -22,6 +27,7 @@ enum IssueKind:
     case UnknownCurrency(_) => "unknown_currency"
 
   def message: String = this match
+    case MissingRequired(status)     => s"The field is required in status $status."
     case UnknownField                => "The field is not part of the profile."
     case WrongType(expected, actual) => s"Expected a value of type $expected, got $actual."
     case OutOfRange(detail)          => detail
@@ -33,12 +39,58 @@ enum IssueKind:
 /** A problem with one field, addressable by its stable key. */
 final case class FieldIssue(field: String, label: String, kind: IssueKind)
 
+/** Why a document cannot move to the next status. */
+enum TransitionBlocked:
+  case NotAllowed(error: LifecycleError)
+
+  /** Required fields of `target` are missing or values are invalid. */
+  case Incomplete(target: DocumentStatus, issues: List[FieldIssue])
+
 /** Pure validation of metadata values against an effective profile. */
 object Validation:
 
   private val CurrencyCode = "[A-Z]{3}".r
 
   def isCurrencyCode(code: String): Boolean = CurrencyCode.matches(code)
+
+  /** Validates `values` for a document that is to be in `targetStatus`: every field required in that status
+    * must have a value, and every value must satisfy its definition. Issues follow the profile's field order,
+    * unknown fields come last.
+    *
+    * @param includeSystemFields
+    *   `false` skips fields set by the platform (document id, status, checksum, ...), e.g. for checking an
+    *   author's input before the platform adds its values
+    */
+  def validate(
+      profile: MetadataProfile,
+      values: Map[String, MetadataValue],
+      targetStatus: DocumentStatus,
+      includeSystemFields: Boolean = true
+  ): List[FieldIssue] =
+    val fields = profile.fields.filter(f => includeSystemFields || f.definition.editable)
+    val known  = fields.flatMap { field =>
+      val value = values.get(field.key.value)
+      val kinds =
+        if isEmpty(value) then
+          Option.when(field.isRequiredIn(targetStatus))(IssueKind.MissingRequired(targetStatus)).toList
+        else value.toList.flatMap(checkField(field.definition, _))
+      kinds.map(FieldIssue(field.key.value, field.definition.label, _))
+    }
+    known ++ unknownFields(profile, values)
+
+  /** Applies a lifecycle event only if the metadata is complete and valid for the target status, e.g. a
+    * submission (`Submit`) is blocked while fields required in `InReview` are missing.
+    */
+  def checkTransition(
+      profile: MetadataProfile,
+      values: Map[String, MetadataValue],
+      from: DocumentStatus,
+      event: LifecycleEvent
+  ): Either[TransitionBlocked, DocumentStatus] =
+    Lifecycle.transition(from, event).left.map(TransitionBlocked.NotAllowed(_)).flatMap { target =>
+      val issues = validate(profile, values, target)
+      Either.cond(issues.isEmpty, target, TransitionBlocked.Incomplete(target, issues))
+    }
 
   /** Checks the given values against their field definitions: type, rules, options and unknown fields. Fields
     * without a value are not reported here.
@@ -49,12 +101,14 @@ object Validation:
         checkField(field.definition, value).map(FieldIssue(field.key.value, field.definition.label, _))
       }
     }
-    val unknown = values.keySet
+    known ++ unknownFields(profile, values)
+
+  private def unknownFields(profile: MetadataProfile, values: Map[String, MetadataValue]): List[FieldIssue] =
+    values.keySet
       .filterNot(key => profile.field(key).isDefined)
       .toList
       .sorted
       .map(key => FieldIssue(key, key, IssueKind.UnknownField))
-    known ++ unknown
 
   /** Whether `value` counts as not filled in (absent, blank text or an empty list). */
   def isEmpty(value: Option[MetadataValue]): Boolean = value match
