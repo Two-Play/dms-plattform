@@ -126,6 +126,7 @@ export function DocumentPage({ documentId }: { documentId: string }) {
           )}
           <WorkflowPanel
             documentId={document.data.id}
+            title={document.data.title}
             versions={{ [document.data.current.id]: document.data.current.version }}
           />
         </>
