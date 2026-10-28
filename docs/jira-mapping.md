@@ -107,3 +107,14 @@ Epic names below are translated; the issues, epics and sprints in Jira itself ar
 Total MVP: 177 SP · Total R2: 60 SP.
 
 Note: Jira limits sprint names to fewer than 30 characters; the names therefore carry a shortened goal, and the full goal is in the sprint goal.
+
+## Follow-up issues (added 2026-10-28)
+
+Open points from DMS-29 and DMS-30, created after review of sprint 2.
+
+| Planning ID | Jira key | Type | Sprint | SP | Origin |
+|---|---|---|---|---|---|
+| T-12.1 | DMS-73 | Task | Sprint 2 | 2 | DMS-29: TSA certificate checked against trust anchors |
+| T-12.2 | DMS-74 | Task | Sprint 2 | 3 | DMS-29: chain head checkpoints in write-once storage |
+| T-12.3 | DMS-75 | Task | Sprint 3 | 2 | DMS-29: schedule daily anchoring and checkpoints (with DMS-31) |
+| T-08.1 | DMS-76 | Task | Backlog (R2) | 3 | DMS-30: multipart upload above 5 GB |
