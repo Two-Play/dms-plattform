@@ -29,14 +29,34 @@ object TenantDirectory:
   */
 final class Authenticator(verifier: TokenVerifier, tenants: TenantDirectory):
 
-  def authenticate(token: String): IO[AuthError, Principal] =
+  def authenticate(token: String): IO[AuthError, Principal] = authenticate(token, None)
+
+  /** Like [[authenticate]], additionally checking the OIDC ID token sent for step-up (DMS-86). An invalid ID
+    * token does not fail the request; it only provides no sign-in time ([[IdTokenCheck.Rejected]]).
+    */
+  def authenticate(token: String, idToken: Option[String]): IO[AuthError, Principal] =
     for
       verified <- verifier.verify(token)
       tenant   <- tenants
         .tenantFor(verified.organizationId)
         .orDieWith(e => RuntimeException(s"tenant lookup failed: $e"))
         .someOrFail(AuthError.UnknownOrganization(verified.organizationId))
-    yield Principal(verified.userId, tenant, verified.roles, verified.authenticatedAt)
+      check <- idToken.filter(_.nonEmpty) match
+        case None     => ZIO.succeed(IdTokenCheck.NotSent)
+        case Some(id) =>
+          verifier
+            .verifyIdToken(id, token, verified.userId)
+            .map(IdTokenCheck.Accepted(_))
+            .catchAll {
+              case AuthError.InvalidToken(reason) =>
+                ZIO.logWarning(s"ID token rejected: $reason").as(IdTokenCheck.Rejected(reason))
+              case other => ZIO.succeed(IdTokenCheck.Rejected(other.toString))
+            }
+      fromIdToken = check match
+        case IdTokenCheck.Accepted(at) => Some(at)
+        case _                         => None
+      authenticatedAt = (verified.authenticatedAt.toList ++ fromIdToken).maxOption
+    yield Principal(verified.userId, tenant, verified.roles, authenticatedAt, check)
 
 object Authenticator:
   val layer: ZLayer[TokenVerifier & TenantDirectory, Nothing, Authenticator] =

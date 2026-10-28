@@ -28,7 +28,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description The signed-in user and their tenant */
+    /** @description The signed-in user, their tenant and their currently active business role assignments (roles and restrictions from the tenant's role administration) */
     get: operations['getApiV1Me']
     put?: never
     post?: never
@@ -393,7 +393,8 @@ export interface paths {
     /** @description The versions of a document the caller may read, oldest first */
     get: operations['getApiV1DocumentsIdVersions']
     put?: never
-    post?: never
+    /** @description Starts the next version from the valid version as a draft: Major for a change of content (full workflow of the class), Minor for an editorial correction (reason required, 422; on submission the owner confirms it in a shortened workflow, and an automatic comparison warns in `editorialCheck` if more text changed than the configured threshold). 409 while a version is open or an approved version waits for its valid-from date. */
+    post: operations['postApiV1DocumentsIdVersions']
     delete?: never
     options?: never
     head?: never
@@ -485,6 +486,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/versions/{versionId}/rendition': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The archive rendition (PDF/A) of a version, produced on approval. 404 if the version has none; the SHA-256 is sent as Repr-Digest and ETag. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidRendition']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/workflow/tasks': {
     parameters: {
       query?: never
@@ -511,7 +529,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Casts a vote on a task. A reason is required except for Approve (422). Approval votes need a recent sign-in (401 reauthentication_required: sign in again with OIDC max_age or prompt=login). RequestChanges and Reject return the version to its author. */
+    /** @description Casts a vote on a task. A reason is required except for Approve (422). Approval votes need a recent sign-in, proven by the OIDC ID token in header X-DMS-Id-Token (401 reauthentication_required: sign in again with OIDC max_age=0 or prompt=login and repeat the vote with the new ID token). RequestChanges and Reject return the version to its author. */
     post: operations['postApiV1WorkflowTasksTaskidVotes']
     delete?: never
     options?: never
@@ -1073,6 +1091,13 @@ export interface components {
       /** Format: date-time */
       releasedAt?: string
       requiresExtraReview: boolean
+      /** Format: date */
+      validFrom?: string
+      /** Format: date-time */
+      publicationDue?: string
+      successor?: components['schemas']['SuccessorView']
+      requiresAcknowledgement: boolean
+      editorialCheck?: components['schemas']['EditorialCheckView']
     }
     /** DocumentView */
     DocumentView: {
@@ -1093,6 +1118,15 @@ export interface components {
       /** Format: date-time */
       createdAt: string
       current: components['schemas']['DocumentVersionView']
+    }
+    /** EditorialCheckView */
+    EditorialCheckView: {
+      basedOn: string
+      /** Format: double */
+      changedRatio: number
+      /** Format: double */
+      threshold: number
+      exceedsThreshold: boolean
     }
     /** FieldBindingView */
     FieldBindingView: {
@@ -1266,6 +1300,8 @@ export interface components {
       userId: string
       tenantId: string
       roles?: string[]
+      assignments?: components['schemas']['RoleAssignmentView'][]
+      projectRoles?: string[]
     }
     /** MetadataValue */
     MetadataValue:
@@ -1293,6 +1329,12 @@ export interface components {
     MissingValueView: {
       field: string
       label: string
+    }
+    /** NewVersion */
+    NewVersion: {
+      changeKind: string
+      reason?: string
+      requiresAcknowledgement?: boolean
     }
     /** Number */
     Number: {
@@ -1574,6 +1616,16 @@ export interface components {
       locked: boolean
       blocks?: components['schemas']['ResolvedBlock'][]
     }
+    /** RoleAssignmentView */
+    RoleAssignmentView: {
+      role: string
+      organizationalUnit?: string
+      documentClass?: string
+      /** Format: date-time */
+      validFrom: string
+      /** Format: date-time */
+      validUntil?: string
+    }
     /** Row */
     Row: {
       /** Format: int32 */
@@ -1668,6 +1720,17 @@ export interface components {
       /** Format: date-time */
       createdAt: string
       createdBy: string
+    }
+    /** SuccessorView */
+    SuccessorView: {
+      /** Format: uuid */
+      versionId: string
+      version: string
+      status: string
+      /** Format: date */
+      validFrom?: string
+      /** Format: date-time */
+      publicationDue?: string
     }
     /** Table */
     Table: {
@@ -3038,6 +3101,49 @@ export interface operations {
       }
     }
   }
+  postApiV1DocumentsIdVersions: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NewVersion']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   putApiV1DocumentsIdDraft: {
     parameters: {
       query?: never
@@ -3245,6 +3351,52 @@ export interface operations {
       }
     }
   }
+  getApiV1DocumentsIdVersionsVersionidRendition: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          ETag: string
+          /** @description SHA-256 of the PDF (RFC 9530) */
+          'Repr-Digest': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/pdf': string
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   getApiV1WorkflowTasks: {
     parameters: {
       query?: never
@@ -3275,7 +3427,10 @@ export interface operations {
   postApiV1WorkflowTasksTaskidVotes: {
     parameters: {
       query?: never
-      header?: never
+      header?: {
+        /** @description OIDC ID token of the current session. Required for actions that need a recent sign-in (step-up): its auth_time must be within dms.workflow.reauthenticationSeconds. */
+        'X-DMS-Id-Token'?: string
+      }
       path: {
         /** @description Task id */
         taskId: string

@@ -24,6 +24,7 @@ import dms.rendering.core.RenditionSource
 import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
+import sttp.tapir.ztapir.RichZServerEndpoint
 import zio.*
 import zio.http.{Body, Header, Headers, MediaType, Request, Status, URL}
 import zio.json.*
@@ -40,6 +41,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
 
   private val issuer    = "http://localhost:8085"
   private val audience  = "project-1"
+  private val clientId  = "web-client-1"
   private val orgId     = "org-1"
   private val tenantId  = TenantId.random()
   private val admin     = UserId("admin-1")
@@ -147,7 +149,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
 
   private val authenticator: ULayer[Authenticator] = ZLayer.succeed {
     val verifier = TokenVerifier(
-      AuthConfig(issuer, audience),
+      AuthConfig(issuer, audience, Some(clientId)),
       ImmutableJWKSet[SecurityContext](JWKSet(signingKey.toPublicJWK))
     )
     val tenants = new TenantDirectory:
@@ -156,7 +158,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
     Authenticator(verifier, tenants)
   }
 
-  private type Env = DocumentApi.Env & WorkflowApi.Env & RenditionSource & AuditTrail
+  private type Env = DocumentApi.Env & WorkflowApi.Env & RoleAssignments & RenditionSource & AuditTrail
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -181,7 +183,9 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       DocumentRenditions.layer
     )
 
-  /** `signedInSecondsAgo` sets `auth_time`; by default the sign-in is one hour old. */
+  /** `signedInSecondsAgo` sets `auth_time`; by default the sign-in is one hour old. A negative value leaves
+    * `auth_time` out, like ZITADEL's access tokens do (DMS-86).
+    */
   private def token(user: UserId, signedInSecondsAgo: Long): String =
     val now    = Instant.now()
     val claims = JWTClaimsSet
@@ -192,8 +196,36 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       .issueTime(Date.from(now.minusSeconds(10)))
       .expirationTime(Date.from(now.plusSeconds(300)))
       .claim(TokenVerifier.OrganizationClaim, orgId)
-      .claim("auth_time", now.minusSeconds(signedInSecondsAgo).getEpochSecond)
+      .claim(
+        "auth_time",
+        if signedInSecondsAgo < 0 then null else now.minusSeconds(signedInSecondsAgo).getEpochSecond
+      )
       .build()
+    sign(claims)
+
+  /** An OIDC ID token of the web client as ZITADEL issues it, bound to `accessToken` by `at_hash`. */
+  private def idToken(
+      user: UserId,
+      accessToken: String,
+      signedInSecondsAgo: Long,
+      aud: String = clientId
+  ): String =
+    val now = Instant.now()
+    sign(
+      JWTClaimsSet
+        .Builder()
+        .issuer(issuer)
+        .audience(java.util.List.of(aud, audience))
+        .subject(user.value)
+        .issueTime(Date.from(now.minusSeconds(10)))
+        .expirationTime(Date.from(now.plusSeconds(300)))
+        .claim("auth_time", now.minusSeconds(signedInSecondsAgo).getEpochSecond)
+        .claim("azp", aud)
+        .claim("at_hash", TokenVerifier.accessTokenHash(accessToken))
+        .build()
+    )
+
+  private def sign(claims: JWTClaimsSet): String =
     val jwt = SignedJWT(
       JWSHeader.Builder(JWSAlgorithm.RS256).keyID(signingKey.getKeyID).`type`(JOSEObjectType.JWT).build(),
       claims
@@ -201,20 +233,26 @@ object WorkflowApiSpec extends ZIOSpecDefault:
     jwt.sign(RSASSASigner(signingKey))
     jwt.serialize()
 
-  private val routes = ZioHttpInterpreter().toHttp(DocumentApi.endpoints ++ WorkflowApi.endpoints)
+  private val routes =
+    ZioHttpInterpreter().toHttp(
+      DocumentApi.endpoints.map(_.widen[Env]) ++ WorkflowApi.endpoints.map(_.widen[Env]) :+ MeApi.me
+        .widen[Env]
+    )
 
   private def call(
       user: UserId,
       method: String,
       path: String,
       body: Option[String] = None,
-      signedInSecondsAgo: Long = 3600
+      signedInSecondsAgo: Long = 3600,
+      idTokenFor: Option[String => String] = None
   ) =
     val url     = URL.decode(path).toOption.get
+    val access  = token(user, signedInSecondsAgo)
     val headers = Headers(
-      Header.Authorization.Bearer(token(user, signedInSecondsAgo)),
+      Header.Authorization.Bearer(access),
       Header.ContentType(MediaType.application.json)
-    )
+    ) ++ Headers(idTokenFor.map(f => Header.Custom(SecuredApi.IdTokenHeader, f(access))).toList)
     val request = method match
       case "POST" => Request.post(url, Body.fromString(body.getOrElse("{}"))).addHeaders(headers)
       case "PUT"  => Request.put(url, Body.fromString(body.getOrElse("{}"))).addHeaders(headers)
@@ -592,6 +630,64 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         specialNext.currentStep.contains("legal"),
         openTask(specialNext, "legal").candidates == List(reviewer1.value, reviewer2.value),
         report._1 == Status.Ok
+      )
+    },
+    test("step-up with access tokens without auth_time: the ID token's auth_time counts (DMS-86)") {
+      def approve(task: TaskView, idTokenFor: Option[String => String]) =
+        call(
+          approver,
+          "POST",
+          s"/api/v1/workflow/tasks/${task.id}/votes",
+          Some(CastVote("Approve", None).toJson),
+          signedInSecondsAgo = -1,
+          idTokenFor = idTokenFor
+        )
+      for
+        doc    <- draftDocument("Tyrell")
+        _      <- submit(doc.id)
+        review <- cases(doc.id).map(_.head)
+        inAppr <- vote(reviewer1, openTask(review, "department"), "Approve").map(as[WorkflowCaseView])
+        task = openTask(inAppr, "approver")
+        missing   <- approve(task, None)
+        stale     <- approve(task, Some(idToken(approver, _, signedInSecondsAgo = 3600)))
+        wrongAud  <- approve(task, Some(idToken(approver, _, signedInSecondsAgo = 10, aud = "other-client")))
+        otherUser <- approve(task, Some(idToken(reviewer1, _, signedInSecondsAgo = 10)))
+        fresh <- approve(task, Some(idToken(approver, _, signedInSecondsAgo = 10))).map(as[WorkflowCaseView])
+        rejected = List(missing, stale, wrongAud, otherUser)
+      yield assertTrue(
+        inAppr.currentStep.contains("approval"),
+        rejected.forall(_._1 == Status.Unauthorized),
+        rejected.forall(r => error(r._2).exists(_.code == "reauthentication_required")),
+        error(missing._2).exists(_.message.contains(SecuredApi.IdTokenHeader)),
+        error(stale._2).exists(_.message.contains("too long ago")),
+        error(wrongAud._2).exists(_.message.contains("not accepted")),
+        error(otherUser._2).exists(_.message.contains("another user")),
+        fresh.status == "Rendering",
+        fresh.votes.last.authenticatedAt.exists(_.isAfter(Instant.now().minusSeconds(30)))
+      )
+    },
+    test("me returns the caller's active role assignments from the tenant's role administration (DMS-96)") {
+      for
+        s <- setup.await
+        // an expired assignment is not effective
+        _ <- s.app
+          .transact(tenantId)(
+            RoleAssignments.Postgres.grant(
+              reader,
+              RoleAssignment(Role.Author, validUntil = Some(Instant.now().minusSeconds(60))),
+              admin
+            )
+          )
+          .orDieWith(e => RuntimeException(e.toString))
+        me <- call(reader, "GET", "/api/v1/me").map(as[Me])
+      yield assertTrue(
+        me.userId == reader.value,
+        me.tenantId == tenantId.value.toString,
+        me.roles == List("Approver", "Reader"),
+        me.assignments.map(a => (a.role, a.documentClass, a.organizationalUnit)) ==
+          List(("Approver", Some("policy"), None), ("Reader", None, None)),
+        me.assignments.forall(_.validUntil.isEmpty),
+        me.projectRoles.isEmpty
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-10-28, implemented in DMS-40, DMS-41, DMS-42) |
+| Status | Accepted (2026-10-28, implemented in DMS-40, DMS-41, DMS-42; addenda DMS-44, DMS-86) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -58,7 +58,7 @@ ADR 0006 chose Flowable 8 as embedded engine and validated a shared transaction 
 
 - Must be done: deadlines, reminders and escalation (enable the async executor; move listener firing to a commit hook in `Db`).
 - Must be done: notifications module consumes `workflow.participant-missing`, `workflow.returned`, `workflow.approved` from the outbox.
-- Must be done: verify that ZITADEL JWT access tokens carry `auth_time` after `prompt=login`; otherwise pass the ID token for step-up.
+- Done (DMS-86, see addendum): ZITADEL JWT access tokens carry no `auth_time`; the ID token is passed for step-up.
 - Must be done: rendering fills the rendition before the last approval vote (the DB requires it for `Approved`, ADR 0021).
 - Later: majority / one-of lanes, conditional steps on metadata (amount thresholds), owner of the parent document as participant, delegation, confidentiality checks when resolving candidates, a configuration UI.
 - Ruled out: storing votes or approvals only as Flowable variables.
@@ -70,3 +70,26 @@ The follow-up "rendering fills the rendition before the last approval vote" is i
 ## Reversibility
 
 **medium**: Flowable is confined to `FlowableEngine`, `SharedTransaction`, `Bpmn` and a few calls in `ApprovalWorkflow`; the business truth is in our tables. Replacing the engine means re-implementing routing and migrating running cases (open tasks of the current round).
+
+## Addendum (DMS-86, 2026-10-28): step-up proof from the ID token
+
+**Context.** The follow-up "verify that ZITADEL JWT access tokens carry `auth_time`" failed: on the local ZITADEL v4.19.5 the JWT access tokens contain no `auth_time`, also right after a sign-in with `prompt=login`, so every approval vote was rejected with `reauthentication_required` (decision 5 fails closed). The OIDC ID token of the same sign-in does contain `auth_time` (verified locally; it also carries `azp`, `at_hash` and `sid`).
+
+**Decision.** For step-up-protected requests (approval votes; the client sends it with every vote) the client sends the OIDC ID token of its current session in header `X-DMS-Id-Token` in addition to the bearer access token. The backend (`identity`: `TokenVerifier.verifyIdToken`, `Authenticator.authenticate(token, idToken)`) verifies it against the same JWKS and issuer, with audience = the web client id (`dms.auth.clientId` = `DMS_ZITADEL_CLIENT_ID`), `azp` (if present) = the client id, not expired, `sub` = the access token's subject and `at_hash` (if present) = the hash of the accompanying access token, and takes `auth_time` from it. The sign-in time of the principal is the later of the access token's and the ID token's `auth_time`, so an access token with `auth_time` still works. An invalid ID token does not fail the request (review votes do not need it); the principal records why it was not accepted (`IdTokenCheck`), and a failed step-up answers 401 `reauthentication_required` with a message that says whether the ID token was missing, not accepted (with the reason) or too old. Without a configured client id every ID token is rejected (fail closed). The web UI attaches the header to vote requests and, on `reauthentication_required`, signs in again with `prompt=login` and `max_age=0`, returning to the current page; the vote is not replayed automatically and must be cast again. Decision 5 stays otherwise unchanged (window, storage of `auth_time` with vote and approval).
+
+**Alternatives considered.**
+
+| Criterion | Chosen: ID token in a request header | Token introspection (`/oauth/v2/introspect`) | ZITADEL Actions v2 adding `auth_time` to the access token | Opaque step-up via ZITADEL session API |
+|---|---|---|---|---|
+| Source of `auth_time` | Standard OIDC claim of the ID token (OIDC Core 2) | Introspection response; whether ZITADEL includes `auth_time` there was not verified | Custom claim set by an action on token creation | Session `factors.password.verifiedAt` |
+| Extra network calls per vote | None (JWKS cached) | One call to ZITADEL per vote, needs API client credentials for the backend | None | One call per vote with a session token the SPA would have to manage |
+| IdP configuration | None beyond the existing OIDC app | API application with secret or key | Action/target per instance, execution on `preaccesstoken`; must be kept in sync in every environment | Login client permissions |
+| Client change | Send one header on step-up requests | None | None | Large (session handling in the SPA) |
+| Portability to another IdP | High (standard ID token claims) | Medium | Low (ZITADEL-specific) | Low |
+| Binding to the access token | `sub` and `at_hash` | Implicit | Implicit | Session id |
+
+**Consequences.** Positive: approvals work with the stock ZITADEL setup and any standard OIDC provider; no extra round trip; clear error messages; `auth_time` stays an IdP-asserted, signed value. Negative: the ID token, a bearer artefact meant for the client, now travels to the API (only on vote requests, over the same channel as the access token, and bound to it by `sub`/`at_hash`); the backend needs the web client id as additional configuration (`DMS_ZITADEL_CLIENT_ID`); API clients other than the web UI (scripts, integrations) must also obtain and send an ID token to approve, which machine users with client credentials cannot do (intended: approvals are personal). A silent token refresh without a new ID token would fail the `at_hash` check; within the 300 s window after a fresh sign-in no refresh happens (access tokens live 12 h locally); whether ZITADEL returns a new ID token on refresh is to be checked with DMS-91.
+
+**Follow-ups.** Must be done: the vote UI (DMS-91) uses `castVote` and `reauthenticate` (`frontend/src/api/workflow.ts`, `frontend/src/auth/step-up.ts`) and tells the user to repeat the vote after the sign-in. Later: drop the access-token path once no supported IdP issues `auth_time` there; consider ZITADEL Actions v2 if a pure access-token model becomes necessary (e.g. for non-browser clients).
+
+**Reversibility: high.** The ID token check is confined to `TokenVerifier.verifyIdToken`, `Authenticator.authenticate` and `SecuredApi.stepUp`; switching to another source of `auth_time` only changes how `Principal.authenticatedAt` is filled.

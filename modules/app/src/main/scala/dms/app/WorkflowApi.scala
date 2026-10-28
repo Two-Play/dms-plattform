@@ -134,9 +134,9 @@ final case class CastVote(
   *
   * Task inbox and votes for participants (authorization: `Review` for review steps, `Approve` for approval
   * steps, both only for the task's participants; approval votes additionally need a sign-in within
-  * `dms.workflow.reauthenticationSeconds`, read from the token's `auth_time`); the workflow cases of a
-  * document for everyone who may read it; workflow definitions per document class for tenant administrators
-  * (`Configure` on `Workflows`).
+  * `dms.workflow.reauthenticationSeconds`, read from the `auth_time` of the ID token in header
+  * `X-DMS-Id-Token` or of the access token, DMS-86); the workflow cases of a document for everyone who may
+  * read it; workflow definitions per document class for tenant administrators (`Configure` on `Workflows`).
   */
 object WorkflowApi:
   type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow
@@ -153,13 +153,15 @@ object WorkflowApi:
       .serverLogic(p => _ => inTransaction(p)(ctx => ctx.workflow.myTasks(p.userId).map(_.map(taskView))))
 
   val vote: ZServerEndpoint[Env, Any] =
-    SecuredApi.base.post
+    SecuredApi.stepUp.post
       .in(tasks / taskId / "votes")
       .in(jsonBody[CastVote])
       .out(jsonBody[WorkflowCaseView])
       .description(
         "Casts a vote on a task. A reason is required except for Approve (422). Approval votes need a recent " +
-          "sign-in (401 reauthentication_required: sign in again with OIDC max_age or prompt=login). " +
+          s"sign-in, proven by the OIDC ID token in header ${SecuredApi.IdTokenHeader} (401 " +
+          "reauthentication_required: sign in again with OIDC max_age=0 or prompt=login and repeat the vote " +
+          "with the new ID token). " +
           "RequestChanges and Reject return the version to its author."
       )
       .tag("Workflow")
@@ -188,7 +190,7 @@ object WorkflowApi:
               )
               result <- ctx.workflow.vote(id, decision, req.reason, p.userId, p.authenticatedAt)
             yield caseView(result)
-          }
+          }.mapError(SecuredApi.explainReauthentication(p))
       )
 
   val resolveParticipants: ZServerEndpoint[Env, Any] =

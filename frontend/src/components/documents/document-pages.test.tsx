@@ -96,6 +96,7 @@ function draftDocument(values: Record<string, FieldValue>, status = 'Draft'): Do
       workingState: 2,
       status,
       changeKind: 'Major',
+      requiresAcknowledgement: true,
       scope: '',
       classVersion: 1,
       templateId,

@@ -45,3 +45,9 @@ export async function getAccessToken(): Promise<string | undefined> {
   const user = await userManager.getUser()
   return user && !user.expired ? user.access_token : undefined
 }
+
+/** ID token of the current session, sent for step-up-protected requests (DMS-86). */
+export async function getIdToken(): Promise<string | undefined> {
+  const user = await userManager.getUser()
+  return user && !user.expired ? user.id_token : undefined
+}
