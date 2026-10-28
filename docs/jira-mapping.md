@@ -124,3 +124,11 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | US-03.2 | DMS-80 | Task | Sprint 6 | – | DMS-39: system fields not marked missing; visual check of the preview |
 | T-02.2 | DMS-81 | Task | Backlog (MVP) | – | DMS-38: minor version confirmation, language and scope in the validity key, retention from class |
 | T-02.2 | DMS-82 | Task | Backlog (MVP) | – | DMS-38: compact working states, privileged destruction path |
+| – | DMS-83 | Bug | Sprint 6 | – | DMS-80: computed fields showed 0 for missing inputs |
+| US-01.1 | DMS-84 | Task | Backlog (MVP) | – | DMS-79: UI for deviation requests and the deviation report |
+| T-01.1 | DMS-85 | Task | Backlog (MVP) | – | DMS-83: test mode hints for computed fields and conditions with missing inputs |
+| US-04.1 | DMS-86 | Task | Backlog (MVP) | – | DMS-41: verify ZITADEL auth_time for step-up |
+| S-04.a | DMS-87 | Task | Backlog (MVP) | – | DMS-40: deadlines, escalation, commit hook, notifications |
+| S-04.a | DMS-88 | Task | Backlog (MVP) | – | DMS-40/42: review modes, conditional steps, delegation, UI |
+| US-03.1 | DMS-89 | Task | Backlog (MVP) | – | DMS-43: real partner system, per-tenant config, health |
+| S-03.a | DMS-90 | Task | Backlog (MVP) | – | DMS-43: reopen saved drafts in the UI |
