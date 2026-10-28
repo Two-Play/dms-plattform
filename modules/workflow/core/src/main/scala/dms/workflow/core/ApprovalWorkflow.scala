@@ -227,24 +227,73 @@ final class ApprovalWorkflow(
         ZIO.fail(WorkflowError.Conflict(s"task $taskId is ${task.status}"))
       )
       subject <- documents.subject(DocumentId(row.documentId), row.versionId)
-      holders <- holdersOf(task.role, subject)
-      eligible = Rules.eligible(holders, subject.author, row.fourEyes)
-      status   = if eligible.isEmpty then TaskStatus.Waiting else TaskStatus.Open
-      _ <- sql(WorkflowStore.updateCandidates(task.id, eligible, status))
-      _ <- record(
-        actor,
-        "workflow.participants-resolved",
-        target(subject),
-        Json.Obj(
-          "taskId"     -> Json.Str(task.id),
-          "candidates" -> Json.Arr(eligible.map(u => Json.Str(u.value))*)
-        ),
-        None
-      )
-      _       <- ZIO.when(eligible.isEmpty)(notifyMissing(row, subject, task, holders))
+      _       <- resolve(row, subject, task, actor, onlyIfChanged = false)
       updated <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
       views   <- views(row, List(updated))
     yield views.head
+
+  /** Re-resolves the participants of the open and waiting tasks of confidential versions that name the access
+    * group `group`, after a member joined or left it (DMS-105): a new member who holds the lane's role takes
+    * part from now on, a former member no longer. Tasks whose participants stay the same are left as they
+    * are; changed ones are recorded like [[resolveParticipants]]. Returns the changed tasks.
+    */
+  def resolveParticipantsOfGroup(group: String, actor: UserId): IO[WorkflowError, List[WorkflowTask]] =
+    for
+      unfinished <- sql(WorkflowStore.unfinishedTasks)
+      caseIds = unfinished.map(_.caseId).distinct
+      changed <- ZIO.foreach(caseIds) { caseId =>
+        for
+          row     <- sql(WorkflowStore.lockCase(caseId)).someOrFail(caseNotFound(caseId))
+          subject <- documents.subject(DocumentId(row.documentId), row.versionId)
+          updated <-
+            if !subject.accessGroups.exists(_.contains(group)) then ZIO.succeed(Nil)
+            else
+              for
+                // re-read under the case lock: a concurrent vote may have completed a task meanwhile
+                tasks <- sql(WorkflowStore.tasksOfCase(caseId))
+                  .map(_.filter(t => t.status == "Open" || t.status == "Waiting"))
+                resolved <- ZIO.foreach(tasks)(t => resolve(row, subject, t, actor, onlyIfChanged = true))
+                ids = resolved.flatten.toSet
+                after <- sql(WorkflowStore.tasksOfCase(caseId)).map(_.filter(t => ids.contains(t.id)))
+                views <- views(row, after)
+              yield views
+        yield updated
+      }
+    yield changed.flatten
+
+  /** Resolves the participants of a task again; with `onlyIfChanged` nothing is written or recorded when they
+    * stay the same. Returns the task id if it was updated.
+    */
+  private def resolve(
+      row: CaseRow,
+      subject: ReviewSubject,
+      task: TaskRow,
+      actor: UserId,
+      onlyIfChanged: Boolean
+  ): IO[WorkflowError, Option[String]] =
+    for
+      holders <- holdersOf(task.role, subject)
+      eligible  = Rules.eligible(holders, subject.author, row.fourEyes)
+      status    = if eligible.isEmpty then TaskStatus.Waiting else TaskStatus.Open
+      unchanged = eligible == task.candidateList && status.toString == task.status
+      updated <-
+        if onlyIfChanged && unchanged then ZIO.none
+        else
+          for
+            _ <- sql(WorkflowStore.updateCandidates(task.id, eligible, status))
+            _ <- record(
+              actor,
+              "workflow.participants-resolved",
+              target(subject),
+              Json.Obj(
+                "taskId"     -> Json.Str(task.id),
+                "candidates" -> Json.Arr(eligible.map(u => Json.Str(u.value))*)
+              ),
+              None
+            )
+            _ <- ZIO.when(eligible.isEmpty)(notifyMissing(row, subject, task, holders))
+          yield Some(task.id)
+    yield updated
 
   /** Open tasks the user may complete, oldest first: their own and, during an active deputyship, those of
     * their principals (DMS-49) with `actingFor` set to the principal.
@@ -811,6 +860,8 @@ object ApprovalWorkflow:
   private def sql[A](f: DbTx ?=> A): IO[WorkflowError, A] = Db.sql(f).mapError(WorkflowError.Database(_))
 
   private def taskNotFound(id: String) = WorkflowError.NotFound(s"task $id does not exist")
+
+  private def caseNotFound(id: UUID) = WorkflowError.NotFound(s"workflow case $id does not exist")
 
   private def optional(user: Option[UserId]): Json = user.fold(Json.Null)(u => Json.Str(u.value))
 

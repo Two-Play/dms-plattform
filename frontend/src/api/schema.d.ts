@@ -967,6 +967,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/groups/{key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Changes the display name of an access group (tenant administrators); the key stays, since versions name it. 404 for an unknown group, 422 for a blank name. */
+    put: operations['putApiV1GroupsKey']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/groups/{key}/members': {
     parameters: {
       query?: never
@@ -992,10 +1009,10 @@ export interface paths {
       cookie?: never
     }
     get?: never
-    /** @description Adds a user to an access group (tenant administrators); idempotent. The user sees the confidential documents of the group from the next request on and takes part in their workflows from the next assignment of a task. Returns the members. */
+    /** @description Adds a user to an access group (tenant administrators); idempotent. The user sees the confidential documents of the group from the next request on; open and waiting review and approval tasks of confidential versions naming the group get their participants resolved again in the same transaction (DMS-105). Returns the members. */
     put: operations['putApiV1GroupsKeyMembersUserid']
     post?: never
-    /** @description Ends the membership of a user in an access group (tenant administrators); the row is kept for the history. 404 if the user is no current member. Returns the members. */
+    /** @description Ends the membership of a user in an access group (tenant administrators); the row is kept for the history. Open and waiting review and approval tasks of confidential versions naming the group get their participants resolved again in the same transaction (DMS-105). 404 if the user is no current member. Returns the members. */
     delete: operations['deleteApiV1GroupsKeyMembersUserid']
     options?: never
     head?: never
@@ -2549,6 +2566,10 @@ export interface components {
     /** ReleaseLegalHold */
     ReleaseLegalHold: {
       reason?: string
+    }
+    /** RenameGroup */
+    RenameGroup: {
+      name: string
     }
     /** RenditionView */
     RenditionView: {
@@ -5975,6 +5996,49 @@ export interface operations {
     }
     responses: {
       201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['GroupView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1GroupsKey: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Group key */
+        key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RenameGroup']
+      }
+    }
+    responses: {
+      200: {
         headers: {
           [name: string]: unknown
         }

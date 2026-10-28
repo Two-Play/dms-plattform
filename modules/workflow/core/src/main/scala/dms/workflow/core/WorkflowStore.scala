@@ -213,6 +213,16 @@ private[core] object WorkflowStore:
       .run()
       .toList
 
+  /** Open and waiting tasks of the tenant, oldest first. */
+  def unfinishedTasks(using DbTx): List[TaskRow] =
+    sql"""select id, case_id, round, step_key, step_kind, lane_key, role, candidates, status, created_at,
+                 completed_at, completed_by
+          from dms.workflow_task where status in ('Open', 'Waiting')
+          order by created_at, id"""
+      .query[TaskRow]
+      .run()
+      .toList
+
   def insertTask(t: TaskRow)(using DbTx): Unit =
     val _ = sql"""insert into dms.workflow_task
                     (id, tenant_id, case_id, round, step_key, step_kind, lane_key, role, candidates, status)

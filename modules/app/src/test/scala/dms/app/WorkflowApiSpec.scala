@@ -379,6 +379,15 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         case None    => ZIO.succeed(first)
     yield (doc.id, openTask(review, "approver"))
 
+  /** Runs `effect` with a clock `offset` ahead of the real one, e.g. to act inside a deputyship period that
+    * has not begun yet without rewriting guarded rows. Tokens are still checked against the real time.
+    */
+  private final class Ahead(offset: Duration):
+    def apply[R, E, A](effect: ZIO[R, E, A]): ZIO[R, E, A] =
+      ZIO.withClock(Clock.ClockJava(java.time.Clock.offset(java.time.Clock.systemUTC(), offset)))(effect)
+
+  private def ahead(offset: Duration): Ahead = Ahead(offset)
+
   private def deputyships(user: UserId, query: String = "") =
     call(user, "GET", s"/api/v1/deputyships$query")
 
@@ -783,42 +792,47 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       )
     },
     test("during the period the deputy approves on behalf of the approver; afterwards the task returns") {
+      // The period starts in a minute; the requests "in the period" run under a clock two minutes ahead, so no
+      // database guard is bypassed (DMS-99).
+      val now      = Instant.now()
+      val inPeriod = ahead(120.seconds)
       for
-        s    <- setup.await
         pair <- awaitingApproval("Umbrella")
         (doc, task) = pair
-        scheduled <- deputyships(deputy).map(as[List[DeputyshipView]]).map(_.head)
+        scheduled <- call(
+          approver,
+          "POST",
+          "/api/v1/deputyships",
+          Some(
+            s"""{"deputy":"${deputy.value}","validFrom":"${now.plusSeconds(60)}",
+               |"validUntil":"${now.plusSeconds(3600)}","roles":["Approver"]}""".stripMargin
+          )
+        ).map(as[DeputyshipView])
         before    <- call(deputy, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
         early     <- vote(deputy, task, "Approve", signedInSecondsAgo = 10)
-        // the period starts (the history guard is bypassed only to move the test into the period)
-        _ <- s.owner
-          .transactSystem(Db.sql {
-            val _ = sql"set local session_replication_role = replica".update.run()
-            sql"""update dms.deputyship set valid_from = now() - interval '1 minute'
-                  where id = ${scheduled.id}""".update.run()
-          })
-          .orDieWith(e => RuntimeException(e.toString))
-        inbox     <- call(deputy, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
-        ownInbox  <- call(approver, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
-        running   <- cases(doc).map(_.head)
-        read      <- call(deputy, "GET", s"/api/v1/documents/$doc")
-        stale     <- vote(deputy, task, "Approve", signedInSecondsAgo = 3600)
-        rendering <- vote(deputy, task, "Approve", signedInSecondsAgo = 30).map(as[WorkflowCaseView])
-        _         <- renderPending
-        approved  <- cases(doc).map(_.head)
-        version   <- call(author, "GET", s"/api/v1/documents/$doc").map(as[DocumentView])
-        voted     <- lastAudit("workflow.voted")
-        approval  <- lastAudit("workflow.approved")
-        events    <- outbox("workflow.approved")
+        inbox     <- inPeriod(call(deputy, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]]))
+        ownInbox  <- inPeriod(call(approver, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]]))
+        running   <- inPeriod(cases(doc).map(_.head))
+        read      <- inPeriod(call(deputy, "GET", s"/api/v1/documents/$doc"))
+        stale     <- inPeriod(vote(deputy, task, "Approve", signedInSecondsAgo = 3600))
+        rendering <- inPeriod(
+          vote(deputy, task, "Approve", signedInSecondsAgo = 30).map(as[WorkflowCaseView])
+        )
+        _        <- renderPending
+        approved <- cases(doc).map(_.head)
+        version  <- call(author, "GET", s"/api/v1/documents/$doc").map(as[DocumentView])
+        voted    <- lastAudit("workflow.voted")
+        approval <- lastAudit("workflow.approved")
+        events   <- outbox("workflow.approved")
         // a second document; the approver ends the deputyship before the deputy acts
         pair2 <- awaitingApproval("Soylent")
         (doc2, task2) = pair2
-        during   <- call(deputy, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
-        ended    <- call(approver, "DELETE", s"/api/v1/deputyships/${scheduled.id}")
-        again    <- call(approver, "DELETE", s"/api/v1/deputyships/${scheduled.id}")
-        after    <- call(deputy, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
-        late     <- vote(deputy, task2, "Approve", signedInSecondsAgo = 10)
-        back     <- call(approver, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
+        during   <- inPeriod(call(deputy, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]]))
+        ended    <- inPeriod(call(approver, "DELETE", s"/api/v1/deputyships/${scheduled.id}"))
+        again    <- inPeriod(call(approver, "DELETE", s"/api/v1/deputyships/${scheduled.id}"))
+        after    <- inPeriod(call(deputy, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]]))
+        late     <- inPeriod(vote(deputy, task2, "Approve", signedInSecondsAgo = 10))
+        back     <- inPeriod(call(approver, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]]))
         endAudit <- lastAudit("deputyship.ended")
       yield assertTrue(
         !before.exists(_.id == task.id),
@@ -903,18 +917,19 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         byOutsider  <- vote(reviewer2, department, "Approve")
         afterReview <- vote(reviewer1, department, "Approve").map(as[WorkflowCaseView])
         waiting = openTask(afterReview, "approver")
-        missing  <- outbox("workflow.participant-missing")
-        _        <- call(admin, "PUT", s"$group/legal-board/members/${approver.value}")
-        resolved <- call(admin, "POST", s"/api/v1/workflow/tasks/${waiting.id}/participants")
-          .map(as[TaskView])
-        voted     <- vote(approver, resolved, "Approve", signedInSecondsAgo = 30)
-        _         <- renderPending
-        approved  <- cases(draft.id).map(_.head)
-        members   <- call(admin, "GET", s"$group/legal-board/members").map(as[List[GroupMemberView]])
-        left      <- call(admin, "DELETE", s"$group/legal-board/members/${reviewer1.value}")
-        again     <- call(admin, "DELETE", s"$group/legal-board/members/${reviewer1.value}")
-        afterLeft <- call(reviewer1, "GET", s"/api/v1/documents/${draft.id}")
-        audit     <- auditActions("group.")
+        missing <- outbox("workflow.participant-missing")
+        // joining the group resolves the waiting task again in the same request (DMS-105)
+        _          <- call(admin, "PUT", s"$group/legal-board/members/${approver.value}")
+        resolved   <- cases(draft.id).map(c => openTask(c.head, "approver"))
+        reresolved <- lastAudit("workflow.participants-resolved")
+        voted      <- vote(approver, resolved, "Approve", signedInSecondsAgo = 30)
+        _          <- renderPending
+        approved   <- cases(draft.id).map(_.head)
+        members    <- call(admin, "GET", s"$group/legal-board/members").map(as[List[GroupMemberView]])
+        left       <- call(admin, "DELETE", s"$group/legal-board/members/${reviewer1.value}")
+        again      <- call(admin, "DELETE", s"$group/legal-board/members/${reviewer1.value}")
+        afterLeft  <- call(reviewer1, "GET", s"/api/v1/documents/${draft.id}")
+        audit      <- auditActions("group.")
       yield assertTrue(
         byAuthor._1 == Status.Forbidden,
         badKey._1 == Status.UnprocessableEntity,
@@ -944,8 +959,10 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         missing
           .map(_.replace(" ", ""))
           .exists(p => p.contains(waiting.id) && p.contains(""""confidential":true""")),
+        resolved.id == waiting.id,
         resolved.status == "Open",
         resolved.candidates == List(approver.value),
+        reresolved.exists(_._1 == admin.value),
         voted._1 == Status.Ok,
         approved.status == "Approved",
         members.map(m => (m.userId, m.removedAt.isEmpty)).toSet ==
@@ -955,6 +972,96 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         afterLeft._1 == Status.Forbidden,
         audit.map(_._1) ==
           List("group.created", "group.member-added", "group.member-added", "group.member-removed")
+      )
+    },
+    test("membership changes re-resolve open tasks; deputies take part only as group members (DMS-105)") {
+      // Continues the previous test: legal-board has the approver as its only current member.
+      val group        = "/api/v1/groups"
+      val now          = Instant.now()
+      val inPeriod     = ahead(7260.seconds)
+      def confidential =
+        values("Hooli").replace("\"Internal\"", "\"Confidential\"") +
+          ""","allowedGroups":{"type":"Many","values":[{"type":"Text","value":"legal-board"}]}"""
+      def inboxOf(user: UserId) =
+        inPeriod(call(user, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]]))
+      def resolutions = auditActions("workflow.participants-resolved").map(_.size)
+      for
+        s        <- setup.await
+        byAuthor <- call(author, "PUT", s"$group/legal-board", Some("""{"name":"Board"}"""))
+        blank    <- call(admin, "PUT", s"$group/legal-board", Some("""{"name":"  "}"""))
+        unknownG <- call(admin, "PUT", s"$group/nope", Some("""{"name":"Nope"}"""))
+        renamed  <- call(admin, "PUT", s"$group/legal-board", Some("""{"name":"Legal and board"}"""))
+        listed   <- call(reader, "GET", group).map(as[List[GroupView]])
+        draft    <- call(
+          author,
+          "POST",
+          "/api/v1/documents",
+          Some(
+            s"""{"templateId":"${s.released.value}","templateVersion":1,"title":"Contract Hooli",
+               |"values":{$confidential}}""".stripMargin
+          )
+        ).map(as[DocumentView])
+        _       <- submit(draft.id)
+        started <- cases(draft.id).map(_.head)
+        // no reviewer is a member: the review waits until one joins
+        rejoined  <- call(admin, "PUT", s"$group/legal-board/members/${reviewer1.value}")
+        reviewing <- cases(draft.id).map(_.head)
+        reviewed  <- ZIO.foldLeft(reviewing.tasks.filter(t => t.status == "Open" && t.kind == "Review"))(
+          reviewing
+        )((_, t) => vote(reviewer1, t, "Approve").map(as[WorkflowCaseView]))
+        approval = openTask(reviewed, "approver")
+        // the approver's deputy (Approver for another class only) stands in from two hours on
+        _ <- call(
+          approver,
+          "POST",
+          "/api/v1/deputyships",
+          Some(
+            s"""{"deputy":"${deputy.value}","validFrom":"${now.plusSeconds(7200)}",
+               |"validUntil":"${now.plusSeconds(10800)}","roles":["Approver"]}""".stripMargin
+          )
+        ).map(r => assertTrue(r._1 == Status.Created))
+        outsider  <- inboxOf(deputy)
+        noDeputy  <- inPeriod(cases(draft.id).map(c => openTask(c.head, "approver")))
+        counted   <- resolutions
+        _         <- call(admin, "PUT", s"$group/legal-board/members/${deputy.value}")
+        unchanged <- resolutions
+        member    <- inboxOf(deputy)
+        withDep   <- inPeriod(cases(draft.id).map(c => openTask(c.head, "approver")))
+        _         <- call(admin, "DELETE", s"$group/legal-board/members/${deputy.value}")
+        leftDep   <- inboxOf(deputy)
+        // the approver leaves: the approval task waits and the administrators are notified
+        missingBefore <- outbox("workflow.participant-missing").map(_.size)
+        _             <- call(admin, "DELETE", s"$group/legal-board/members/${approver.value}")
+        waiting       <- cases(draft.id).map(c => openTask(c.head, "approver"))
+        missingAfter  <- outbox("workflow.participant-missing").map(_.size)
+        approverInbox <- call(approver, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
+        audit         <- auditActions("group.renamed")
+      yield assertTrue(
+        byAuthor._1 == Status.Forbidden,
+        blank._1 == Status.UnprocessableEntity,
+        unknownG._1 == Status.NotFound,
+        renamed._1 == Status.Ok,
+        as[GroupView](renamed) == GroupView("legal-board", "Legal and board"),
+        listed.contains(GroupView("legal-board", "Legal and board")),
+        audit.size == 1,
+        openTask(started, "department").status == "Waiting",
+        rejoined._1 == Status.Ok,
+        openTask(reviewing, "department").status == "Open",
+        openTask(reviewing, "department").candidates == List(reviewer1.value),
+        approval.status == "Open",
+        approval.candidates == List(approver.value),
+        !outsider.exists(_.id == approval.id),
+        noDeputy.deputies.isEmpty,
+        // the deputy holds no Approver role for contracts: the candidates stay, nothing is recorded
+        unchanged == counted,
+        member.find(_.id == approval.id).exists(_.actingFor.contains(approver.value)),
+        withDep.deputies == List(TaskDeputyView(deputy.value, approver.value)),
+        !leftDep.exists(_.id == approval.id),
+        waiting.id == approval.id,
+        waiting.status == "Waiting",
+        waiting.candidates.isEmpty,
+        missingAfter == missingBefore + 1,
+        !approverInbox.exists(_.id == approval.id)
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock
