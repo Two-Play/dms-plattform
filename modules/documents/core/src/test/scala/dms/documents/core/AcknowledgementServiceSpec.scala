@@ -19,7 +19,7 @@ import java.time.{Instant, LocalDate}
 import java.util.UUID
 import javax.sql.DataSource
 
-/** Acknowledgement of valid versions (DMS-47, migration V14) in the documents service and in the database:
+/** Acknowledgement of valid versions (DMS-47, migration V15) in the documents service and in the database:
   * opening before acknowledging, once per reader and version, superseded versions, row-level security and
   * immutability. Against a Testcontainers database; time comes from the test clock.
   */

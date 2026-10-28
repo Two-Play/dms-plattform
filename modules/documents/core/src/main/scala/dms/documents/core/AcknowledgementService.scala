@@ -42,7 +42,7 @@ final case class AcknowledgementStatus(
 /** Acknowledgement of valid versions by their readers (business concept 6.3, US-06.2, ADR 0027).
   *
   * A reader first opens the version ([[markOpened]], recorded once), then acknowledges it ([[acknowledge]],
-  * once). Both are insert-only (migration V14). Only valid versions that require acknowledgement ask for it
+  * once). Both are insert-only (migration V15). Only valid versions that require acknowledgement ask for it
   * ([[Acknowledgements.requested]]); when a version is superseded, its open acknowledgements end and its
   * successor asks on its own if it requires acknowledgement.
   *

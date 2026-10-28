@@ -836,7 +836,7 @@ final class DocumentService(
         releasedAt = if snapshot.isDefined then Some(now) else current.releasedAt,
         validFrom = validFrom.orElse(current.validFrom),
         supersededBy = supersededBy.orElse(current.supersededBy),
-        // The database records the same moment on Approved -> Published (migration V14).
+        // The database records the same moment on Approved -> Published (migration V15).
         publishedAt =
           if current.status == DocumentStatus.Approved && target == DocumentStatus.Published then Some(now)
           else current.publishedAt
