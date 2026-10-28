@@ -79,6 +79,7 @@ HTTP (module `app`, `DocumentApi`):
 | Method | Path | Purpose | Authorization |
 |---|---|---|---|
 | POST | `/api/v1/documents` | Create from a released template version (`{"templateId","templateVersion","title","values":{...}}`) | `CreateFromTemplate` in the class scope |
+| GET | `/api/v1/documents?limit=` | Most recently changed documents (default 50, at most 200 looked at) with the version the caller sees (open if readable, else latest readable), `mine` for the caller's own; documents without a readable version are left out | `ReadDocument` per version |
 | GET | `/api/v1/documents/{id}` | Document with its open (or latest readable) version | `ReadDocument` on a version |
 | GET | `/api/v1/documents/{id}/versions` | Versions the caller may read | `ReadDocument` per version |
 | PUT | `/api/v1/documents/{id}/draft` | Change values, title and content of the draft | `EditDraft` |

@@ -326,6 +326,28 @@ object DocumentApiSpec extends ZIOSpecDefault:
         missing._1 == Status.NotFound
       )
     },
+    test("the document list shows the caller's own drafts, not other users' drafts") {
+      for
+        doc      <- createDocument()
+        byAuthor <- call(author, "GET", "/api/v1/documents")
+        byReader <- call(reader, "GET", "/api/v1/documents")
+        limited  <- call(author, "GET", "/api/v1/documents?limit=1")
+        tooLarge <- call(author, "GET", s"/api/v1/documents?limit=${DocumentApi.MaxListSize + 1}")
+        list = byAuthor._2.fromJson[List[DocumentSummaryView]].toOption.getOrElse(Nil)
+        mine = list.find(_.id == doc.id)
+      yield assertTrue(
+        byAuthor._1 == Status.Ok,
+        mine.exists(d => d.status == "Draft" && d.mine && d.version == "1.0-draft.1"),
+        mine.exists(d => d.title == "Service contract ACME" && d.classPath == List("contract")),
+        mine.exists(_.versionId == doc.current.id),
+        // The most recently changed document comes first.
+        list.headOption.map(_.id).contains(doc.id),
+        byReader._1 == Status.Ok,
+        byReader._2.fromJson[List[DocumentSummaryView]].toOption.exists(_.forall(_.id != doc.id)),
+        limited._2.fromJson[List[DocumentSummaryView]].toOption.map(_.map(_.id)).contains(List(doc.id)),
+        tooLarge._1 == Status.UnprocessableEntity
+      )
+    },
     test("authors change drafts; locked sections stay as in the template") {
       for
         doc      <- createDocument()
