@@ -5,6 +5,7 @@ import dms.documents.core.DocumentSettings
 import dms.identity.AuthConfig
 import dms.integration.partners.PartnerDirectoryConfig
 import dms.rendering.core.RendererConfig
+import dms.search.core.{OpenSearchConfig, SearchSettings}
 import dms.storage.StorageConfig
 import zio.Config
 import zio.config.magnolia.deriveConfig
@@ -56,6 +57,25 @@ final case class DocumentsConfig(
   def settings: DocumentSettings =
     DocumentSettings(editorialChangeThresholdPercent / 100.0, minorVersionsRequireAcknowledgement)
 
+/** Search index in OpenSearch (DMS-51, ADR 0029).
+  *
+  * @param syncIntervalSeconds
+  *   how often every tenant's index is synchronized with the documents changed since the previous run
+  */
+final case class SearchConfig(
+    url: String,
+    indexPrefix: String,
+    replicas: Int,
+    timeoutSeconds: Int,
+    syncIntervalSeconds: Int,
+    username: Option[String],
+    password: Option[String]
+):
+  def openSearch: OpenSearchConfig =
+    OpenSearchConfig(url, indexPrefix, replicas, timeoutSeconds, username, password)
+  def settings: SearchSettings =
+    SearchSettings(syncInterval = zio.Duration.fromSeconds(syncIntervalSeconds.toLong))
+
 final case class AppConfig(
     http: HttpConfig,
     auth: AuthConfig,
@@ -67,11 +87,18 @@ final case class AppConfig(
     workflow: WorkflowSettings,
     documents: DocumentsConfig,
     partners: PartnerDirectoryConfig,
-    rendering: RendererConfig
+    rendering: RendererConfig,
+    search: SearchConfig
 )
 
 object AppConfig:
   val config: Config[AppConfig] = deriveConfig[AppConfig].nested("dms")
+
+/** The subset [[SearchRebuild]] needs. */
+final case class SearchRebuildConfig(database: DbConfig, search: SearchConfig)
+
+object SearchRebuildConfig:
+  val config: Config[SearchRebuildConfig] = deriveConfig[SearchRebuildConfig].nested("dms")
 
 /** The subset [[Migrate]] needs, so migrations run without auth or HTTP settings. */
 final case class MigrateConfig(database: DbConfig, migration: MigrationConfig)

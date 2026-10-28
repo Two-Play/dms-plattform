@@ -1,6 +1,6 @@
 package dms.app
 
-import dms.authz.{AccessDenied, Action, Authorizer, Confidentiality, Policy, Resource, Subject}
+import dms.authz.{AccessDenied, Action, Authorizer, DocumentResource, Policy, Resource, Subject}
 import dms.db.{Db, DbError}
 import dms.documents.*
 import dms.documents.core.*
@@ -23,7 +23,6 @@ import zio.json.JsonCodec
 
 import java.time.{Instant, LocalDate}
 import java.util.UUID
-import scala.util.Try
 
 import DeviationSchemas.given
 import MetadataSchemas.given
@@ -650,17 +649,6 @@ object DocumentApi:
         case _                          => false
     )
 
-  private def text(values: Map[String, MetadataValue], key: String): Option[String] =
-    values.get(key).collect {
-      case MetadataValue.Text(t)      => t
-      case MetadataValue.Selection(c) => c
-    }
-
-  private def confidentiality(values: Map[String, MetadataValue]): Confidentiality =
-    text(values, "confidentiality")
-      .flatMap(c => Try(Confidentiality.valueOf(c)).toOption)
-      .getOrElse(Confidentiality.Internal)
-
   private def owner(values: Map[String, MetadataValue]): Option[UserId] =
     values.get("owner").collect { case MetadataValue.PersonRef(u) => UserId(u) }
 
@@ -668,12 +656,13 @@ object DocumentApi:
   private def creationResource(p: Principal, profile: MetadataProfile, values: Map[String, MetadataValue]) =
     Resource(
       p.tenantId,
-      organizationalUnit = text(values, "organizationalUnit"),
+      organizationalUnit = DocumentResource.organizationalUnit(values),
       documentClassPath = profile.classPath.map(_.value),
-      confidentiality = confidentiality(values),
+      confidentiality = DocumentResource.confidentiality(values),
       status = Some(DocumentStatus.Draft),
       authorId = Some(p.userId),
-      ownerId = owner(values)
+      ownerId = owner(values),
+      allowedGroups = DocumentResource.allowedGroups(values)
     )
 
   private def resource(p: Principal, details: DocumentDetails, v: DocumentVersion): Resource =
@@ -693,15 +682,13 @@ object DocumentApi:
       v: DocumentVersion,
       participants: Map[UUID, Set[UserId]] = Map.empty
   ): Resource =
-    versionResource(
+    DocumentResource(
       tenant,
+      details.document,
       details.profile.classPath.map(_.value),
-      details.document.ownerId,
-      v.status,
-      v.createdBy,
-      v.metadata,
-      v.releasedBy
-    ).copy(assignedParticipants = participants.getOrElse(v.id, Set.empty))
+      v,
+      participants.getOrElse(v.id, Set.empty)
+    )
 
   /** The resource of a document version from its parts, e.g. for versions read without their content. */
   private[app] def versionResource(
@@ -715,13 +702,14 @@ object DocumentApi:
   ): Resource =
     Resource(
       tenant,
-      organizationalUnit = text(values, "organizationalUnit"),
+      organizationalUnit = DocumentResource.organizationalUnit(values),
       documentClassPath = classPath,
-      confidentiality = confidentiality(values),
+      confidentiality = DocumentResource.confidentiality(values),
       status = Some(status),
       authorId = Some(createdBy),
       ownerId = ownerId,
-      approvedBy = releasedBy.toSet
+      approvedBy = releasedBy.toSet,
+      allowedGroups = DocumentResource.allowedGroups(values)
     )
 
   private def documentView(

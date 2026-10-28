@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (addendum DMS-49) |
+| Status | Accepted (addenda DMS-49, DMS-51) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -52,3 +52,7 @@ Authorization is a pure Scala function `Policy.decide(subject, action, resource,
 ## Addendum (DMS-49, 2026-10-28): acting on behalf of a principal
 
 A deputy (ADR 0028) acts within the principal's scope on the principal's workflow tasks. `Policy` stays unchanged; `Authorizer.onBehalfOf(subject, principal, roles)` returns the deputy's subject extended by the principal's assignments of the task's role. The application uses it only for the document of a task the workflow lists the caller as deputy of (`WorkflowTask.deputies`, during an active deputyship): for the vote and for reading that document. Validity, scope and confidentiality of every assignment are still decided by `Policy`.
+
+## Addendum (DMS-51/52, 2026-10-28): search filter and allowed groups
+
+The search (ADR 0029) applies the read rules of `Policy` as a filter inside the OpenSearch query (`dms.search.core.AccessFilter`), built from the caller's role assignments at query time; the mapping is documented in ADR 0029 and tested against `Policy` for generated cases. `dms.authz.DocumentResource` builds the `Resource` of a document version for the document API and the search indexer alike. It now fills `allowedGroups` from the optional field `allowedGroups` of the version (before, it was always empty, so confidential versions were visible to author and owner only). New configuration area `Search` (rebuilding the index): `Configure` for tenant administrators.

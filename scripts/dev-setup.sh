@@ -79,7 +79,7 @@ fi
 if ! $SEED_ONLY; then
   if $COMPOSE; then
     step "Starting services (docker compose up -d --build --wait)"
-    (cd "$ROOT" && docker compose up -d --build --wait db zitadel-db objectstore rendering)
+    (cd "$ROOT" && docker compose up -d --build --wait db zitadel-db objectstore rendering opensearch)
     # zitadel has no health check; objectstore-init runs once and exits.
     (cd "$ROOT" && docker compose up -d zitadel objectstore-init)
   fi
@@ -146,6 +146,10 @@ fi
 step "Demo content"
 "${HELPER[@]}" seed --api "http://localhost:$PORT"
 
+# The search index is derived from the database (ADR 0029); rebuilding it is idempotent.
+step "Search index (rebuild from the database)"
+"${HELPER[@]}" search-rebuild --api "http://localhost:$PORT"
+
 step "Frontend configuration (frontend/.env.local)"
 # shellcheck disable=SC1091
 . "$LOCAL/zitadel/dms.env"
@@ -191,3 +195,4 @@ fi
 echo "  Demo users: admin, designer, designer2, author, reviewer, approver, reader, records"
 echo "  Passwords:  $LOCAL/dev-users.env"
 echo "  Partner master: built-in demo partners (dms.partners.directory = demo)"
+echo "  Search index:   OpenSearch on http://localhost:9200 (rebuild: scripts/dev_setup.py search-rebuild --api URL)"

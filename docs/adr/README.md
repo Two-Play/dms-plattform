@@ -42,3 +42,4 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0026](0026-scheduled-publication-and-editorial-versions.md) | Scheduled publication by a job at tenant midnight; editorial versions through an owner-confirmation path | Accepted (addendum DMS-53) | medium |
 | [0027](0027-acknowledgements.md) | Acknowledgements: readers of a valid version acknowledge it after an explicit opening, insert-only | Accepted | medium |
 | [0028](0028-deputies-for-workflow-participants.md) | Deputies for workflow participants: time-limited deputyships resolved when tasks are read | Accepted | medium |
+| [0029](0029-search-index.md) | Search index: one OpenSearch index per tenant, permission filter in the query, outbox plus periodic synchronization | Accepted | low |

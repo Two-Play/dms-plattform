@@ -353,6 +353,12 @@ final class DocumentService(
       )
     }
 
+  /** Ids of the documents changed at or after `since` (the document or one of its versions), without `since`
+    * of every document with a released version: what the search index (DMS-51) has to (re)index.
+    */
+  def changedDocuments(since: Option[Instant]): IO[DocumentError, List[DocumentId]] =
+    sql(DocumentStore.changedDocumentIds(since))
+
   /** How documents use the versions of `template` before `version` (US-01.2): document versions per template
     * version and status, and the open versions with title and author only. The caller decides who may see it;
     * the rows are limited to the current tenant by row-level security.

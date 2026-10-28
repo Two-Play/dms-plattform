@@ -91,6 +91,27 @@ private[core] object DocumentStore:
                    desc, d.id
           limit $limit""".query[DocumentRow].run().map(toDocument).toList
 
+  /** Ids of the documents changed at or after `since`: the document row or one of its versions (DMS-51, for
+    * the search index); without `since` every document that has a released version.
+    */
+  def changedDocumentIds(since: Option[Instant])(using DbTx): List[DocumentId] =
+    since
+      .fold(
+        sql"""select d.id from dms.document d
+              where exists (select 1 from dms.document_version v
+                            where v.document_id = d.id and v.released_at is not null)
+              order by d.id""".query[UUID].run()
+      ) { at =>
+        val time = OffsetDateTime.ofInstant(at, ZoneOffset.UTC)
+        sql"""select d.id from dms.document d
+              where d.updated_at >= $time
+                 or exists (select 1 from dms.document_version v
+                            where v.document_id = d.id and v.updated_at >= $time)
+              order by d.id""".query[UUID].run()
+      }
+      .map(DocumentId(_))
+      .toList
+
   /** Document versions on the versions of `template` before `before`, per template version and status and per
     * status alone (template version `None`): the number of versions and of distinct documents.
     */
