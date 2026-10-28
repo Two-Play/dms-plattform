@@ -70,7 +70,8 @@ lazy val auditCoreSettings = Seq(
 )
 
 lazy val integration = module("integration", "modules/integration")
-  .dependsOn(kernel, documentsApi)
+  .dependsOn(kernel, db, documentsApi)
+  .settings(libraryDependencies ++= Dependencies.integrationTest ++ Dependencies.logging.map(_ % Test))
 
 lazy val app = module("app", "modules/app")
   .enablePlugins(JavaAppPackaging, DockerPlugin)
