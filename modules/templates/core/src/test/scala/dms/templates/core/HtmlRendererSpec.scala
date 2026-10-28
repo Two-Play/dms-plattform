@@ -83,6 +83,22 @@ object HtmlRendererSpec extends ZIOSpecDefault:
         )
       )
     },
+    test("shows system fields without a value neutrally with a hint in the document language") {
+      val values = Fixtures.values - "clientName" - "endDate"
+      val en     = html(values, HtmlOptions.draft(Language.En, labels, Set("clientName")))
+      val de     = html(values, HtmlOptions.draft(Language.De, labels, Set("clientName")))
+      assertTrue(
+        en.contains(
+          "<span class=\"dms-system\" data-field=\"clientName\">Client name " +
+            "<span class=\"dms-system-hint\">(assigned on save)</span></span>"
+        ),
+        !en.contains("data-field=\"clientName\" data-required"),
+        en.contains(
+          "<span class=\"dms-missing\" data-field=\"endDate\" data-required=\"false\">End date</span>"
+        ),
+        de.contains("<span class=\"dms-system-hint\">(wird beim Speichern vergeben)</span>")
+      )
+    },
     test("labels of nested paths name the field and the part; unknown paths show the path") {
       assertTrue(
         HtmlRenderer.label("monthlyFee.currency", labels) == "Monthly fee (currency)",

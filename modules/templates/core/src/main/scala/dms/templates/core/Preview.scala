@@ -65,6 +65,9 @@ final case class PreviewTemplate(
 
   lazy val labels: Map[String, String] = profile.fields.map(f => f.key.value -> f.definition.label).toMap
 
+  /** Keys of the fields the platform sets (not editable). */
+  lazy val systemFields: Set[String] = profile.fields.filterNot(_.definition.editable).map(_.key.value).toSet
+
 /** Live preview while an author fills in a document (US-03.2): resolves the template with the values entered
   * so far and renders it as HTML marked "Draft – not valid". Pure apart from the resolver's time limit.
   *
@@ -76,7 +79,7 @@ object Preview:
   def run(template: PreviewTemplate, values: Map[String, MetadataValue], language: Language): PreviewResult =
     val profile      = template.profile
     val valueIssues  = Validation.checkValues(profile, values)
-    val systemKeys   = profile.fields.filterNot(_.definition.editable).map(_.key.value).toSet
+    val systemKeys   = template.systemFields
     val systemIssues = values.keySet.intersect(systemKeys).toList.sorted.map { key =>
       PreviewIssue(Some(key), template.labels.get(key), "system_field", "The platform sets this field.")
     }
@@ -91,7 +94,8 @@ object Preview:
         val missing = resolution.missingRequired.filterNot(systemKeys.contains).map { key =>
           MissingValue(key, template.labels.getOrElse(key, key))
         }
-        val html = HtmlRenderer.render(resolution.content, HtmlOptions.draft(language, template.labels))
+        val html =
+          HtmlRenderer.render(resolution.content, HtmlOptions.draft(language, template.labels, systemKeys))
         PreviewResult(html, missing, issues)
       case Left(error) =>
         val code = error match

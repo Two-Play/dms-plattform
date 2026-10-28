@@ -57,6 +57,23 @@ object PreviewSpec extends ZIOSpecDefault:
         r.html.contains("data-field=\"monthlyFee\" data-required=\"true\">Monthly fee</span>")
       )
     },
+    test("shows fields the platform sets neutrally with a hint, not as missing values") {
+      val en = run().html
+      val de = run(language = Language.De).html
+      assertTrue(
+        en.contains(
+          "Contract number: <span class=\"dms-system\" data-field=\"documentId\">Document ID " +
+            "<span class=\"dms-system-hint\">(assigned on save)</span></span>, version " +
+            "<span class=\"dms-system\" data-field=\"version\">Version " +
+            "<span class=\"dms-system-hint\">(assigned on save)</span></span>."
+        ),
+        !en.contains("data-field=\"documentId\" data-required"),
+        de.contains(
+          "<span class=\"dms-system\" data-field=\"documentId\">Document ID " +
+            "<span class=\"dms-system-hint\">(wird beim Speichern vergeben)</span></span>"
+        )
+      )
+    },
     test("blank values count as missing") {
       val r = run(PreviewFixtures.values + ("clientName" -> MetadataValue.Text("  ")))
       assertTrue(r.missingRequired.map(_.field).contains("clientName"), r.issues.isEmpty)
