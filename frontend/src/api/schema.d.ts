@@ -348,6 +348,177 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Creates a document from a released template version: version 1.0 as a draft with the template content. Values are validated against the class profile (422 with issues); computed fields are evaluated. */
+    post: operations['postApiV1Documents']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description A document with its open version, or its latest version the caller may read */
+    get: operations['getApiV1DocumentsId']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The versions of a document the caller may read, oldest first */
+    get: operations['getApiV1DocumentsIdVersions']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Changes the draft and saves it as the next working state. Locked sections and computed fields of the template cannot be changed (422); versions in review or later cannot be changed (409). Values taken over from a business system (origin System, e.g. the partner master) keep their origin; a different value for them is rejected (422 `not_editable`). */
+    put: operations['putApiV1DocumentsIdDraft']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/submit': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Submits the draft for review. Blocked while fields required in review are missing (422 with issues). */
+    post: operations['postApiV1DocumentsIdSubmit']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/deviation-requests': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Records a deviation request for a locked section of the draft's template: with a reason, the section's standard text may be changed; the change then needs the additional review step. One active request per section (409); unknown or editable sections and empty reasons are rejected (422). Returns the draft's deviation report. */
+    post: operations['postApiV1DocumentsIdDeviation-requests']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/deviation-requests/{requestId}/withdraw': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Withdraws a deviation request while the version is a draft. A section that still deviates then blocks submission until its standard text is restored or the deviation is requested again. Returns the draft's deviation report. */
+    post: operations['postApiV1DocumentsIdDeviation-requestsRequestidWithdraw']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/deviations': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The deviation report of a version (changes of locked template sections with location, change and the author's reasons) and its deviation requests, e.g. for the additional review step */
+    get: operations['getApiV1DocumentsIdVersionsVersionidDeviations']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/partners': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Searches the partner master by name and identifier. Requires access to the template catalog (every role that creates documents). 503 when the partner master is not reachable. */
+    get: operations['getApiV1Partners']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/references/{key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Takes the picked entry over into the draft: the mapped attributes become field values with origin System (`partner-master`), replacing those of a previously picked entry; saved as the next working state. 404 for an unknown reference field, 422 `unknown_entry` if the partner master does not know the entry, 503 when it is not reachable (the draft stays as it is). */
+    put: operations['putApiV1DocumentsIdReferencesKey']
+    post?: never
+    /** @description Removes the values taken over for the reference field from the draft (the partner master is not called). */
+    delete: operations['deleteApiV1DocumentsIdReferencesKey']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -377,6 +548,11 @@ export interface components {
     ApiError: {
       code: string
       message: string
+      issues?: components['schemas']['IssueView'][]
+    }
+    /** ApplyReference */
+    ApplyReference: {
+      entryId: string
     }
     /** Block */
     Block:
@@ -389,6 +565,42 @@ export interface components {
       | components['schemas']['Paragraph']
       | components['schemas']['Repeat']
       | components['schemas']['Table']
+    /** Block */
+    Block1: {
+      /** Format: int32 */
+      index: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Block'
+    }
+    /** BlocksDeleted */
+    BlocksDeleted: {
+      blocks?: components['schemas']['Block'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'BlocksDeleted'
+    }
+    /** BlocksInserted */
+    BlocksInserted: {
+      blocks?: components['schemas']['Block'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'BlocksInserted'
+    }
+    /** Body */
+    Body: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Body'
+    }
     /** BranchView */
     BranchView: {
       location: components['schemas']['LocationView']
@@ -428,6 +640,18 @@ export interface components {
       /** Format: date-time */
       releasedAt?: string
     }
+    /** Cell */
+    Cell: {
+      /** Format: int32 */
+      row: number
+      /** Format: int32 */
+      column: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Cell'
+    }
     /** ChangeDocumentClass */
     ChangeDocumentClass: {
       label: string
@@ -460,6 +684,20 @@ export interface components {
       documentClassVersion: number
       content: components['schemas']['TemplateContent']
     }
+    /** ClauseChanged */
+    ClauseChanged: {
+      fromKey: string
+      /** Format: int32 */
+      fromVersion: number
+      toKey: string
+      /** Format: int32 */
+      toVersion: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'ClauseChanged'
+    }
     /** ClauseRef */
     ClauseRef: {
       clauseKey: string
@@ -482,10 +720,26 @@ export interface components {
        */
       type: 'ClauseRef'
     }
+    /** ClauseView */
+    ClauseView: {
+      clauseKey: string
+      /** Format: int32 */
+      version: number
+    }
     /** ComputedField */
     ComputedField: {
       key: string
       expression: string
+    }
+    /** ConditionChanged */
+    ConditionChanged: {
+      from: string
+      to: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'ConditionChanged'
     }
     /** Conditional */
     Conditional: {
@@ -502,6 +756,15 @@ export interface components {
     ContentIssueView: {
       location: components['schemas']['LocationView']
       message: string
+    }
+    /** CreateDocument */
+    CreateDocument: {
+      /** Format: uuid */
+      templateId: string
+      /** Format: int32 */
+      templateVersion: number
+      title: string
+      values: components['schemas']['Map_MetadataValue']
     }
     /** CreateDocumentClass */
     CreateDocumentClass: {
@@ -543,6 +806,63 @@ export interface components {
        * @enum {string}
        */
       type: 'Date'
+    }
+    /** DeviationChange */
+    DeviationChange:
+      | components['schemas']['BlocksDeleted']
+      | components['schemas']['BlocksInserted']
+      | components['schemas']['ClauseChanged']
+      | components['schemas']['ConditionChanged']
+      | components['schemas']['FormattingChanged']
+      | components['schemas']['HeaderRowsChanged']
+      | components['schemas']['HeadingLevelChanged']
+      | components['schemas']['PlaceholderChanged']
+      | components['schemas']['PlaceholderInserted']
+      | components['schemas']['PlaceholderRemoved']
+      | components['schemas']['RepeatChanged']
+      | components['schemas']['SectionMoved']
+      | components['schemas']['SectionRemoved']
+      | components['schemas']['SectionRenamed']
+      | components['schemas']['SectionUnlocked']
+      | components['schemas']['TextDeleted']
+      | components['schemas']['TextInserted']
+      | components['schemas']['TextReplaced']
+    /** DeviationRequestView */
+    DeviationRequestView: {
+      /** Format: uuid */
+      id: string
+      sectionId: string
+      reason: string
+      requestedBy: string
+      /** Format: date-time */
+      requestedAt: string
+      /** Format: uuid */
+      basedOn?: string
+      active: boolean
+      withdrawnBy?: string
+      /** Format: date-time */
+      withdrawnAt?: string
+    }
+    /** DeviationView */
+    DeviationView: {
+      section: string
+      path?: components['schemas']['PathStep'][]
+      /** Format: int32 */
+      token?: number
+      location: string
+      change: components['schemas']['DeviationChange']
+      authorized: boolean
+      reasons?: string[]
+    }
+    /** DeviationsView */
+    DeviationsView: {
+      /** Format: uuid */
+      versionId: string
+      version: string
+      status: string
+      requiresExtraReview: boolean
+      requests?: components['schemas']['DeviationRequestView'][]
+      deviations?: components['schemas']['DeviationView'][]
     }
     /** DocumentClassView */
     DocumentClassView: {
@@ -592,6 +912,58 @@ export interface components {
       | 'ReviewDue'
       | 'Superseded'
       | 'Withdrawn'
+    /** DocumentVersionView */
+    DocumentVersionView: {
+      /** Format: uuid */
+      id: string
+      version: string
+      /** Format: int32 */
+      workingState: number
+      status: string
+      changeKind: string
+      changeReason?: string
+      scope: string
+      /** Format: int32 */
+      classVersion: number
+      /** Format: uuid */
+      templateId: string
+      /** Format: int32 */
+      templateVersion: number
+      content: components['schemas']['TemplateContent']
+      values: components['schemas']['Map_FieldValueView']
+      clauses?: components['schemas']['ClauseView'][]
+      rendition?: components['schemas']['RenditionView']
+      metadataSnapshot?: components['schemas']['Map_MetadataValue']
+      createdBy: string
+      /** Format: date-time */
+      createdAt: string
+      /** Format: date-time */
+      updatedAt: string
+      releasedBy?: string
+      /** Format: date-time */
+      releasedAt?: string
+      requiresExtraReview: boolean
+    }
+    /** DocumentView */
+    DocumentView: {
+      /** Format: uuid */
+      id: string
+      /** Format: uuid */
+      classId: string
+      /** Format: int32 */
+      classVersion: number
+      classPath?: string[]
+      title: string
+      ownerId?: string
+      authorId: string
+      /** Format: uuid */
+      templateId: string
+      /** Format: int32 */
+      templateVersion: number
+      /** Format: date-time */
+      createdAt: string
+      current: components['schemas']['DocumentVersionView']
+    }
     /** FieldBindingView */
     FieldBindingView: {
       key: string
@@ -611,6 +983,11 @@ export interface components {
       origin: string
       editable: boolean
     }
+    /** FieldReferenceView */
+    FieldReferenceView: {
+      reference: string
+      attribute: string
+    }
     /** FieldType */
     FieldType:
       | components['schemas']['Amount']
@@ -621,6 +998,33 @@ export interface components {
       | components['schemas']['Selection']
       | components['schemas']['Text']
       | components['schemas']['YesNo']
+    /** FieldValueView */
+    FieldValueView: {
+      value: components['schemas']['MetadataValue']
+      origin: string
+      source?: string
+    }
+    /** FormattingChanged */
+    FormattingChanged: {
+      text: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'FormattingChanged'
+    }
+    /** HeaderRowsChanged */
+    HeaderRowsChanged: {
+      /** Format: int32 */
+      from: number
+      /** Format: int32 */
+      to: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'HeaderRowsChanged'
+    }
     /** Heading */
     Heading: {
       /** Format: int32 */
@@ -643,6 +1047,18 @@ export interface components {
        */
       type: 'Heading'
     }
+    /** HeadingLevelChanged */
+    HeadingLevelChanged: {
+      /** Format: int32 */
+      from: number
+      /** Format: int32 */
+      to: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'HeadingLevelChanged'
+    }
     /** Health */
     Health: {
       status: string
@@ -659,6 +1075,16 @@ export interface components {
       label: string
       code: string
       message: string
+    }
+    /** Item */
+    Item: {
+      /** Format: int32 */
+      index: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Item'
     }
     /** LineBreak */
     LineBreak: {
@@ -686,6 +1112,10 @@ export interface components {
        * @enum {string}
        */
       type: 'Many'
+    }
+    /** Map_FieldValueView */
+    Map_FieldValueView: {
+      [key: string]: components['schemas']['FieldValueView']
     }
     /** Map_MetadataValue */
     Map_MetadataValue: {
@@ -768,6 +1198,14 @@ export interface components {
        */
       type: 'OrderedList'
     }
+    /** Otherwise */
+    Otherwise: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Otherwise'
+    }
     /** PageBreak */
     PageBreak: {
       /**
@@ -794,6 +1232,26 @@ export interface components {
        */
       type: 'Paragraph'
     }
+    /** PartnerView */
+    PartnerView: {
+      id: string
+      name: string
+      street?: string
+      postalCode?: string
+      city?: string
+      country?: string
+      address: string
+      vatId?: string
+    }
+    /** PathStep */
+    PathStep:
+      | components['schemas']['Block1']
+      | components['schemas']['Body']
+      | components['schemas']['Cell']
+      | components['schemas']['Item']
+      | components['schemas']['Otherwise']
+      | components['schemas']['Row']
+      | components['schemas']['Then']
     /** PersonRef */
     PersonRef: {
       /**
@@ -820,6 +1278,39 @@ export interface components {
        * @enum {string}
        */
       type: 'Placeholder'
+    }
+    /** Placeholder */
+    Placeholder1: {
+      path: string
+      format?: string
+    }
+    /** PlaceholderChanged */
+    PlaceholderChanged: {
+      from: components['schemas']['Placeholder1']
+      to: components['schemas']['Placeholder1']
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'PlaceholderChanged'
+    }
+    /** PlaceholderInserted */
+    PlaceholderInserted: {
+      placeholder: components['schemas']['Placeholder1']
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'PlaceholderInserted'
+    }
+    /** PlaceholderRemoved */
+    PlaceholderRemoved: {
+      placeholder: components['schemas']['Placeholder1']
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'PlaceholderRemoved'
     }
     /** PreviewIssueView */
     PreviewIssueView: {
@@ -863,6 +1354,37 @@ export interface components {
       classPath?: string[]
       fields?: components['schemas']['ProfileFieldView'][]
     }
+    /** ReferenceField */
+    ReferenceField: {
+      key: string
+      label: string
+      /** @description Master data source, e.g. `partner-master` */
+      source: string
+      fields?: components['schemas']['ReferenceMapping'][]
+    }
+    /** ReferenceFieldView */
+    ReferenceFieldView: {
+      key: string
+      label: string
+      source: string
+      fields?: components['schemas']['ReferenceMappingView'][]
+    }
+    /** ReferenceMapping */
+    ReferenceMapping: {
+      attribute: string
+      field: string
+    }
+    /** ReferenceMappingView */
+    ReferenceMappingView: {
+      attribute: string
+      field: string
+    }
+    /** RenditionView */
+    RenditionView: {
+      objectKey: string
+      objectVersion?: string
+      sha256: string
+    }
     /** Repeat */
     Repeat: {
       collection: string
@@ -873,6 +1395,23 @@ export interface components {
        * @enum {string}
        */
       type: 'Repeat'
+    }
+    /** RepeatChanged */
+    RepeatChanged: {
+      fromCollection: string
+      fromItem: string
+      toCollection: string
+      toItem: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'RepeatChanged'
+    }
+    /** RequestDeviation */
+    RequestDeviation: {
+      sectionId: string
+      reason: string
     }
     /** ResolvedBlock */
     ResolvedBlock:
@@ -900,12 +1439,56 @@ export interface components {
       locked: boolean
       blocks?: components['schemas']['ResolvedBlock'][]
     }
+    /** Row */
+    Row: {
+      /** Format: int32 */
+      index: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Row'
+    }
     /** Section */
     Section: {
       id: string
       title?: string
       locked: boolean
       blocks?: components['schemas']['Block'][]
+    }
+    /** SectionMoved */
+    SectionMoved: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'SectionMoved'
+    }
+    /** SectionRemoved */
+    SectionRemoved: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'SectionRemoved'
+    }
+    /** SectionRenamed */
+    SectionRenamed: {
+      from?: string
+      to?: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'SectionRenamed'
+    }
+    /** SectionUnlocked */
+    SectionUnlocked: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'SectionUnlocked'
     }
     /** SelectOption */
     SelectOption: {
@@ -957,6 +1540,7 @@ export interface components {
     TemplateContent: {
       sections?: components['schemas']['Section'][]
       computed?: components['schemas']['ComputedField'][]
+      references?: components['schemas']['ReferenceField'][]
     }
     /** TemplateFieldView */
     TemplateFieldView: {
@@ -967,6 +1551,7 @@ export interface components {
       multiple: boolean
       required: boolean
       usedInTemplate: boolean
+      reference?: components['schemas']['FieldReferenceView']
     }
     /** TemplateFieldsView */
     TemplateFieldsView: {
@@ -981,6 +1566,7 @@ export interface components {
       /** Format: int32 */
       documentClassVersion: number
       fields?: components['schemas']['TemplateFieldView'][]
+      references?: components['schemas']['ReferenceFieldView'][]
     }
     /** TemplateRequest */
     TemplateRequest: {
@@ -1074,6 +1660,48 @@ export interface components {
        * @enum {string}
        */
       type: 'Text'
+    }
+    /** TextDeleted */
+    TextDeleted: {
+      text: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'TextDeleted'
+    }
+    /** TextInserted */
+    TextInserted: {
+      text: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'TextInserted'
+    }
+    /** TextReplaced */
+    TextReplaced: {
+      from: string
+      to: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'TextReplaced'
+    }
+    /** Then */
+    Then: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Then'
+    }
+    /** UpdateDraft */
+    UpdateDraft: {
+      title?: string
+      values: components['schemas']['Map_MetadataValue']
+      content?: components['schemas']['TemplateContent']
     }
     /** ValidateMetadata */
     ValidateMetadata: {
@@ -2009,6 +2637,458 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter version, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1Documents: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateDocument']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsId: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentView']
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdVersions: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentVersionView'][]
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1DocumentsIdDraft: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateDraft']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1DocumentsIdSubmit: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1DocumentsIdDeviation-requests': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RequestDeviation']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeviationsView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1DocumentsIdDeviation-requestsRequestidWithdraw': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Deviation request id */
+        requestId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeviationsView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter requestId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdVersionsVersionidDeviations: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeviationsView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1Partners: {
+    parameters: {
+      query: {
+        /** @description Part of the name or identifier, at least 2 characters */
+        q: string
+        /** @description At most this many hits (1 to 50, default 20) */
+        limit?: number
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PartnerView'][]
+        }
+      }
+      /** @description Invalid value for: query parameter q, Invalid value for: query parameter limit */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1DocumentsIdReferencesKey: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Key of the template's reference field, e.g. `contractPartner` */
+        key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ApplyReference']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  deleteApiV1DocumentsIdReferencesKey: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Key of the template's reference field, e.g. `contractPartner` */
+        key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id */
       400: {
         headers: {
           [name: string]: unknown

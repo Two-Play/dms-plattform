@@ -5,6 +5,7 @@ import dms.authz.{Authorizer, RoleAssignments}
 import dms.db.Db
 import dms.documents.core.{DocumentClassService, DocumentService}
 import dms.identity.{Authenticator, TenantDirectory, TokenVerifier}
+import dms.integration.partners.PartnerDirectories
 import dms.storage.ObjectStore
 import dms.templates.core.TemplateService
 import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
@@ -23,7 +24,8 @@ object Main extends ZIOAppDefault:
     Runtime.removeDefaultLoggers >>> SLF4J.slf4j >+>
       Runtime.setConfigProvider(TypesafeConfigProvider.fromResourcePath())
 
-  private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env
+  private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
+    PartnerApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -32,7 +34,8 @@ object Main extends ZIOAppDefault:
       TemplateLifecycleApi.endpoints.map(_.widen[Env]) ++
       TemplatePreviewApi.endpoints.map(_.widen[Env]) ++
       DocumentApi.endpoints.map(_.widen[Env]) ++
-      WorkflowApi.endpoints.map(_.widen[Env])
+      WorkflowApi.endpoints.map(_.widen[Env]) ++
+      PartnerApi.endpoints.map(_.widen[Env])
 
   private val docs =
     SwaggerInterpreter()
@@ -74,6 +77,7 @@ object Main extends ZIOAppDefault:
           ZLayer.succeed(
             WorkflowConfig(java.time.Duration.ofSeconds(cfg.workflow.reauthenticationSeconds.toLong))
           ),
-          ApprovalWorkflow.layer
+          ApprovalWorkflow.layer,
+          PartnerDirectories.layer(cfg.partners)
         )
     yield ()

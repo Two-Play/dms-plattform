@@ -42,8 +42,8 @@ final case class CreateDocument(
 final case class UpdateDraft(
     /** Default: the current title. */
     title: Option[String],
-    /** Replaces the entered values of the draft. Values from business systems are kept, computed values
-      * recomputed.
+    /** Replaces the entered values of the draft. Values from business systems are kept and cannot be changed
+      * here (see `/references`); computed values are recomputed.
       */
     values: Map[String, MetadataValue],
     /** Default: the current content. Locked sections must keep the template's text. */
@@ -248,7 +248,9 @@ object DocumentApi:
       .out(jsonBody[DocumentVersionView])
       .description(
         "Changes the draft and saves it as the next working state. Locked sections and computed fields of the " +
-          "template cannot be changed (422); versions in review or later cannot be changed (409)."
+          "template cannot be changed (422); versions in review or later cannot be changed (409). Values taken " +
+          "over from a business system (origin System, e.g. the partner master) keep their origin; a different " +
+          "value for them is rejected (422 `not_editable`)."
       )
       .tag("Documents")
       .serverLogic(p =>

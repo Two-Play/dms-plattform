@@ -27,7 +27,9 @@ object DocumentServiceSpec extends ZIOSpecDefault:
 
   final case class Env(app: Db, owner: Db, service: DocumentService, audit: Ref[List[AuditEvent]])
 
-  /** A tenant with the contract class, a released template version (1) and a template draft (2). */
+  /** A tenant with the contract class, a released template version (1), a template draft (2) and a released
+    * version (3) that takes the contract partner from the partner master.
+    */
   final case class Fixture(tenant: TenantId, classId: DocumentClassId, templateId: TemplateId)
 
   private val appUserSql =
@@ -56,7 +58,14 @@ object DocumentServiceSpec extends ZIOSpecDefault:
     given JsonCodec[Block]           = DeriveJsonCodec.gen
     given JsonCodec[Section]         = DeriveJsonCodec.gen
     given JsonCodec[ComputedField]   = DeriveJsonCodec.gen
-    given JsonCodec[TemplateContent] = DeriveJsonCodec.gen
+    given JsonCodec[ReferenceSource] =
+      JsonCodec.string.transform(
+        k => ReferenceSource.parse(k).getOrElse(ReferenceSource.PartnerMaster),
+        _.key
+      )
+    given JsonCodec[ReferenceMapping] = DeriveJsonCodec.gen
+    given JsonCodec[ReferenceField]   = DeriveJsonCodec.gen
+    given JsonCodec[TemplateContent]  = DeriveJsonCodec.gen
 
     given JsonCodec[UserId]             = JsonCodec.string.transform(UserId(_), _.value)
     given JsonCodec[Inline.Placeholder] = DeriveJsonCodec.gen
@@ -184,6 +193,20 @@ object DocumentServiceSpec extends ZIOSpecDefault:
     )
   )
 
+  private val PartnerMaster = ValueOrigin.System("partner-master")
+
+  /** Version 3: the contract partner is a reference field (name and identifier from the partner master). */
+  private val partnerContent = content.copy(references =
+    List(
+      ReferenceField(
+        "contractPartner",
+        "Contract partner",
+        ReferenceSource.PartnerMaster,
+        List(ReferenceMapping("id", "partnerId"), ReferenceMapping("name", "contractPartner"))
+      )
+    )
+  )
+
   private def fixture: ZIO[Env, Any, Fixture] =
     val tenant     = TenantId.random()
     val templateId = TemplateId.random()
@@ -201,6 +224,7 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         ) *>
           classes.createField("monthlyFee", FieldDraft("Monthly fee", None, FieldType.Amount()), admin) *>
           classes.createField("termMonths", FieldDraft("Term in months", None, FieldType.Number()), admin) *>
+          classes.createField("partnerId", FieldDraft("Partner number", None, FieldType.Text()), admin) *>
           classes.createClass(
             "contract",
             None,
@@ -210,13 +234,15 @@ object DocumentServiceSpec extends ZIOSpecDefault:
               List(
                 FieldBinding(FieldKey.unsafe("contractPartner"), 1, Requiredness.from(InReview)),
                 FieldBinding(FieldKey.unsafe("monthlyFee"), 1),
-                FieldBinding(FieldKey.unsafe("termMonths"), 1)
+                FieldBinding(FieldKey.unsafe("termMonths"), 1),
+                FieldBinding(FieldKey.unsafe("partnerId"), 1)
               )
             ),
             admin
           )
       )
-      stored = Jsonb(Templates.encode(content))
+      stored        = Jsonb(Templates.encode(content))
+      storedPartner = Jsonb(Templates.encode(partnerContent))
       _ <- e.owner.transactSystem(Db.sql {
         val _ = sql"""insert into dms.template (id, tenant_id, created_by)
                       values (${templateId.value}, ${tenant.value}, ${"designer"})""".update.run()
@@ -228,29 +254,39 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         val _ =
           sql"""update dms.template_version set status = 'Released', released_by = ${"designer-2"}, released_at = now()
                       where template_id = ${templateId.value}""".update.run()
+        // One open version per template: version 3 is tested and released after version 1.
+        val _ = sql"""insert into dms.template_version
+                        (tenant_id, template_id, version, name, document_class_id, document_class_version, status,
+                         content, created_by, status_changed_by)
+                      values (${tenant.value}, ${templateId.value}, 3, ${"Contract"}, ${cls.classId.value}, 1,
+                              ${"Testing"}, $storedPartner, ${"designer"}, ${"designer"})""".update.run()
+        val _ =
+          sql"""update dms.template_version set status = 'Released', released_by = ${"designer-2"}, released_at = now()
+                      where template_id = ${templateId.value} and version = 3""".update.run()
         sql"""insert into dms.template_version
                 (tenant_id, template_id, version, name, document_class_id, document_class_version, status, content,
                  created_by, status_changed_by)
               values (${tenant.value}, ${templateId.value}, 2, ${"Contract"}, ${cls.classId.value}, 1, ${"Draft"},
                       $stored, ${"designer"}, ${"designer"})""".update.run()
       })
-      _ = List(1 -> TemplateStatus.Released, 2 -> TemplateStatus.Draft).foreach { (v, status) =>
-        Templates.versions.put(
-          (templateId, v),
-          TemplateVersion(
-            templateId,
-            v,
-            "Contract",
-            None,
-            cls.classId.value,
-            1,
-            status,
-            content,
-            UserId("designer"),
-            Instant.EPOCH
+      _ = List(1 -> TemplateStatus.Released, 2 -> TemplateStatus.Draft, 3 -> TemplateStatus.Released)
+        .foreach { (v, status) =>
+          Templates.versions.put(
+            (templateId, v),
+            TemplateVersion(
+              templateId,
+              v,
+              "Contract",
+              None,
+              cls.classId.value,
+              1,
+              status,
+              if v == 3 then partnerContent else content,
+              UserId("designer"),
+              Instant.EPOCH
+            )
           )
-        )
-      }
+        }
     yield Fixture(tenant, cls.classId, templateId)
 
   private def as[A](tenant: TenantId)(f: DocumentService => IO[DocumentError, A]) =
@@ -737,6 +773,116 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         v3.changeReason.contains("Typo in section 2"),
         details.versions.map(v => (v.label, v.status)) ==
           List(("1.0", Superseded), ("2.0", Published), ("2.1-draft.1", Draft))
+      )
+    },
+    test(
+      "values taken over from a business system cannot be entered or overwritten by hand; the draft saves without them"
+    ) {
+      val taken = Map(
+        "contractPartner" -> FieldEntry(MetadataValue.Text("Nordlicht Logistik GmbH"), PartnerMaster),
+        "partnerId"       -> FieldEntry(MetadataValue.Text("P-10001"), PartnerMaster)
+      )
+      val others                                           = initialValues - "contractPartner"
+      def code(result: Either[DbError | DocumentError, ?]) =
+        result.left.toOption.collect { case DocumentError.InvalidValues(issues) =>
+          issues.map(i => i.field -> i.kind.code)
+        }
+      for
+        f     <- fixture
+        typed <- as(f.tenant)(
+          _.create(NewDocument(f.templateId, 3, "Contract", initialValues), author)
+        ).either
+        wrong <- as(f.tenant)(
+          _.create(
+            NewDocument(
+              f.templateId,
+              3,
+              "Contract",
+              others + ("partnerId" -> FieldEntry(MetadataValue.Text("P-1"), ValueOrigin.System("crm")))
+            ),
+            author
+          )
+        ).either
+        // Partner master down: the author saves the draft without the partner ...
+        without <- as(f.tenant)(_.create(NewDocument(f.templateId, 3, "Contract", others), author))
+        (doc, first) = without
+        // ... and picks it later.
+        picked <- as(f.tenant)(_.updateDraft(doc.id, DraftChange(None, others ++ taken, None), author))
+        echoed <- as(f.tenant)(
+          _.updateDraft(
+            doc.id,
+            DraftChange(
+              None,
+              others ++ taken ++ manual("contractPartner" -> MetadataValue.Text("Nordlicht Logistik GmbH")),
+              None
+            ),
+            author
+          )
+        )
+        overwritten <- as(f.tenant)(
+          _.updateDraft(
+            doc.id,
+            DraftChange(
+              None,
+              others ++ taken ++ manual("contractPartner" -> MetadataValue.Text("Someone else")),
+              None
+            ),
+            author
+          )
+        ).either
+        references <- as(f.tenant)(
+          _.updateDraft(
+            doc.id,
+            DraftChange(None, others ++ taken, Some(partnerContent.copy(references = Nil))),
+            author
+          )
+        ).either
+        removed <- as(f.tenant)(_.updateDraft(doc.id, DraftChange(None, others, None), author))
+        // Outside reference fields, too: a value from a business system is not overwritten by hand.
+        crm <- as(f.tenant)(
+          _.create(
+            NewDocument(
+              f.templateId,
+              1,
+              "Contract",
+              others + ("contractPartner" -> FieldEntry(
+                MetadataValue.Text("ACME AG"),
+                ValueOrigin.System("crm")
+              ))
+            ),
+            author
+          )
+        )
+        crmOverwritten <- as(f.tenant)(
+          _.updateDraft(
+            crm._1.id,
+            DraftChange(
+              None,
+              initialValues + ("contractPartner" -> FieldEntry(
+                MetadataValue.Text("Other"),
+                ValueOrigin.Manual
+              )),
+              None
+            ),
+            author
+          )
+        ).either
+      yield assertTrue(
+        code(typed) == Some(List("contractPartner" -> "not_editable")),
+        code(wrong) == Some(List("partnerId" -> "not_editable")),
+        first.values.get("contractPartner").isEmpty,
+        picked.values("contractPartner") == taken("contractPartner"),
+        picked.values("partnerId") == taken("partnerId"),
+        echoed.values("contractPartner").origin == PartnerMaster,
+        code(overwritten) == Some(List("contractPartner" -> "not_editable")),
+        references.left.exists {
+          case DocumentError.Invalid(p) =>
+            p.exists(_.contains("reference fields are defined by the template"))
+          case _ => false
+        },
+        removed.values.get("contractPartner").isEmpty,
+        removed.values.get("partnerId").isEmpty,
+        code(crmOverwritten) == Some(List("contractPartner" -> "not_editable"))
       )
     },
     test("tenants only see their own documents") {

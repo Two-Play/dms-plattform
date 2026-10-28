@@ -60,10 +60,10 @@ object Language:
 /** Where an expression or placeholder sits in the content, for error messages in the editor.
   *
   * @param sectionId
-  *   the section, or `None` for a computed field
+  *   the section, or `None` for a computed field or a reference field
   * @param blockPath
   *   JSON-pointer-like path within the section, e.g. `/blocks/1/otherwise/0`, or `/computed/0` for a computed
-  *   field
+  *   field, `/references/0` for a reference field
   * @param part
   *   which part of the block, e.g. `condition`, `collection`, `itemName`, `expression` or `content/2` for a
   *   placeholder
@@ -80,7 +80,9 @@ final case class Location(
     column: Int = 0
 ):
   def show: String =
-    val section  = sectionId.fold("computed fields")(id => s"section ${id.value}")
+    val section = sectionId.fold(
+      if blockPath.startsWith("/references") then "reference fields" else "computed fields"
+    )(id => s"section ${id.value}")
     val position = if line > 0 then s", line $line, column $column" else ""
     s"$section, $blockPath ($part$position)"
 

@@ -35,9 +35,13 @@ object TemplateSchemas:
   given Schema[ResolvedBlock]   = RecursiveTemplateSchemas.resolvedBlock
   given Schema[Section]         = Schema.derived
   given Schema[ComputedField]   = Schema.derived
-  given Schema[TemplateContent] = Schema.derived
-  given Schema[ResolvedSection] = Schema.derived
-  given Schema[ResolvedContent] = Schema.derived
+  given Schema[ReferenceSource] =
+    Schema.string[ReferenceSource].description("Master data source, e.g. `partner-master`")
+  given Schema[ReferenceMapping] = Schema.derived
+  given Schema[ReferenceField]   = Schema.derived
+  given Schema[TemplateContent]  = Schema.derived
+  given Schema[ResolvedSection]  = Schema.derived
+  given Schema[ResolvedContent]  = Schema.derived
 
 private object RecursiveTemplateSchemas:
   private given Configuration  = Configuration.default.withDiscriminator("type")

@@ -17,6 +17,7 @@ interface FieldProps {
 function FieldControl({ field, input, error, onChange }: FieldProps) {
   const id = fieldControlId(field.key)
   const describedBy = [
+    field.reference ? `${id}-origin` : undefined,
     field.description ? `${id}-description` : undefined,
     error ? `${id}-error` : undefined,
   ]
@@ -30,6 +31,19 @@ function FieldControl({ field, input, error, onChange }: FieldProps) {
   }
   const fieldType = field.fieldType
   const text = typeof input === 'string' ? input : ''
+
+  if (field.reference) {
+    return (
+      <Input
+        {...common}
+        readOnly
+        aria-readonly="true"
+        className="bg-muted/50"
+        placeholder="Pick a partner above"
+        value={text}
+      />
+    )
+  }
 
   if (field.multiple && fieldType.type === 'Selection') {
     const selected = Array.isArray(input) ? input : []
@@ -205,6 +219,11 @@ function FieldRow({ field, input, error, onChange }: FieldProps) {
           </span>
         )}
       </Label>
+      {field.reference && (
+        <p id={`${id}-origin`} className="text-xs text-muted-foreground">
+          From partner master – taken over from the system, not editable
+        </p>
+      )}
       <FieldControl field={field} input={input} error={error} onChange={onChange} />
       {field.description && (
         <p id={`${id}-description`} className="text-xs text-muted-foreground">

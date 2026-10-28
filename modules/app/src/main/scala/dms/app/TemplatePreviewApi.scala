@@ -30,7 +30,26 @@ final case class TemplateFieldView(
     /** Needed before the document can be approved. */
     required: Boolean,
     /** The template refers to the field; other fields are document metadata only. */
-    usedInTemplate: Boolean
+    usedInTemplate: Boolean,
+    /** Set when the field is filled by a reference field: the author picks an entry instead of typing. */
+    reference: Option[FieldReferenceView]
+) derives JsonCodec,
+      Schema
+
+/** The field takes over `attribute` of the entry picked for reference field `reference`. */
+final case class FieldReferenceView(reference: String, attribute: String) derives JsonCodec, Schema
+
+final case class ReferenceMappingView(attribute: String, field: String) derives JsonCodec, Schema
+
+/** A reference field of the template (ADR 0023): pick an entry of `source`, e.g. a partner via
+  * `GET /api/v1/partners`, and its attributes are taken over into `fields`.
+  */
+final case class ReferenceFieldView(
+    key: String,
+    label: String,
+    /** Master data source, e.g. `partner-master`. */
+    source: String,
+    fields: List[ReferenceMappingView]
 ) derives JsonCodec,
       Schema
 
@@ -42,7 +61,9 @@ final case class TemplateFieldsView(
     documentClassId: UUID,
     documentClassVersion: Int,
     /** Fields the template uses first, then the other editable fields of the class profile. */
-    fields: List[TemplateFieldView]
+    fields: List[TemplateFieldView],
+    /** Reference fields; the fields they fill are taken over, not entered. */
+    references: List[ReferenceFieldView]
 ) derives JsonCodec,
       Schema
 
@@ -116,7 +137,16 @@ object TemplatePreviewApi:
                   f.fieldType,
                   f.multiple,
                   f.required,
-                  f.usedInTemplate
+                  f.usedInTemplate,
+                  f.reference.map(r => FieldReferenceView(r.reference, r.attribute))
+                )
+              ),
+              t.version.content.references.map(r =>
+                ReferenceFieldView(
+                  r.key,
+                  r.label,
+                  r.source.key,
+                  r.fields.map(m => ReferenceMappingView(m.attribute, m.field))
                 )
               )
             )

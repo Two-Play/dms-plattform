@@ -224,7 +224,8 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       content = change.content.getOrElse(current.content)
       _ <- ZIO.when(change.content.exists(_ != current.content))(checkContent(template, content, requests))
       title = change.title.getOrElse(titleOf(current).getOrElse(document.title))
-      values <- prepare(profile, template, content, change.values, title, id, current.number)
+      entered <- protectSystemValues(profile, current, change.values)
+      values  <- prepare(profile, template, content, entered, title, id, current.number)
       next = current.copy(
         workingState = current.workingState + 1,
         content = content,
@@ -539,8 +540,13 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
   ): IO[DocumentError, Map[String, FieldEntry]] =
     val input  = entered + (TitleField -> FieldEntry(MetadataValue.Text(title.trim), ValueOrigin.Manual))
     val system = systemValues(id, profile, number, template)
+    // A field filled by a reference field only takes values from its source (ADR 0023).
+    def fromReference(key: String, origin: ValueOrigin) =
+      TemplateContent.referenceOf(content, key).exists((r, _) => origin != ValueOrigin.System(r.source.key))
     val notEnterable = input.toList.sortBy(_._1).collect {
-      case (key, entry) if entry.origin == ValueOrigin.Computed || PlatformFields.contains(key) =>
+      case (key, entry)
+          if entry.origin == ValueOrigin.Computed || PlatformFields.contains(key) ||
+            fromReference(key, entry.origin) =>
         FieldIssue(key, profile.field(key).fold(key)(_.definition.label), IssueKind.NotEditable)
     }
     val base   = input ++ system
@@ -554,9 +560,31 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       computed <- templates.computed(template, content, metadataOf(base))
     yield base ++ computed.map((k, v) => k -> FieldEntry(v, ValueOrigin.Computed))
 
+  /** Values a business system set (origin `System`, other than the platform) cannot be replaced by manual
+    * values (US-03.1): a manual value equal to the system value keeps the system value and its origin, a
+    * different one is rejected as not editable. Removing a value or replacing it with a value of a system is
+    * the job of that system's integration.
+    */
+  private def protectSystemValues(
+      profile: MetadataProfile,
+      current: DocumentVersion,
+      entered: Map[String, FieldEntry]
+  ): IO[DocumentError, Map[String, FieldEntry]] =
+    val fromSystem  = current.values.filter((_, e) => isExternal(e.origin))
+    val overwritten = entered.toList.sortBy(_._1).collect {
+      case (key, FieldEntry(value, ValueOrigin.Manual)) if fromSystem.get(key).exists(_.value != value) =>
+        FieldIssue(key, profile.field(key).fold(key)(_.definition.label), IssueKind.NotEditable)
+    }
+    if overwritten.nonEmpty then ZIO.fail(DocumentError.InvalidValues(overwritten))
+    else
+      ZIO.succeed(entered.map {
+        case (key, FieldEntry(_, ValueOrigin.Manual)) if fromSystem.contains(key) => key -> fromSystem(key)
+        case other                                                                => other
+      })
+
   /** Edit rules for a changed content: locked sections keep the template's text unless a deviation request
-    * for the section is recorded, computed fields stay those of the template, and the content must fit the
-    * profile.
+    * for the section is recorded, computed and reference fields stay those of the template, and the content
+    * must fit the profile.
     */
   private def checkContent(
       template: TemplateVersion,
@@ -566,6 +594,10 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
     val computed = Option
       .when(content.computed != template.content.computed)(
         "computed fields are defined by the template and cannot be changed in a document"
+      )
+      .toList ++ Option
+      .when(content.references != template.content.references)(
+        "reference fields are defined by the template and cannot be changed in a document"
       )
       .toList
     val violations = EditRules.check(template.content, content, requests).map(_.reason)
@@ -757,6 +789,11 @@ object DocumentService:
       "template"        -> template.templateId.value.toString,
       "templateVersion" -> template.version.toString
     ).map((k, v) => k -> FieldEntry(MetadataValue.Text(v), ValueOrigin.Platform))
+
+  /** A value set by a business system rather than by the platform. */
+  private def isExternal(origin: ValueOrigin): Boolean = origin match
+    case ValueOrigin.System(_) => origin != ValueOrigin.Platform
+    case _                     => false
 
   private def metadataOf(values: Map[String, FieldEntry]): Map[String, MetadataValue] =
     values.map((k, e) => k -> e.value)

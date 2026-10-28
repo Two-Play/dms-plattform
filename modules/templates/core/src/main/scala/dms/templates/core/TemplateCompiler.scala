@@ -87,6 +87,7 @@ object TemplateCompiler:
       scope.add(v.name, Binding(Some(v.valueType), Cel.typeOf(v.valueType)))
     }
     val (scope, computed) = compileComputed(content.computed, base, schema, state)
+    checkReferences(content.references, schema, state)
     content.sections.groupBy(_.id).collect { case (id, ss) if ss.size > 1 => id }.foreach { id =>
       state.issue(Location(Some(id), "", "id"), s"section id ${id.value} is used more than once")
     }
@@ -107,6 +108,58 @@ object TemplateCompiler:
           state.conditionals.reverse
         )
       )
+
+  /** Reference fields (ADR 0023): valid, unique keys; known attributes including the identifier; each mapped
+    * to a single-valued text field of the profile that no other reference fills.
+    */
+  private def checkReferences(references: List[ReferenceField], schema: TemplateSchema, state: State): Unit =
+    references.groupBy(_.key).collect { case (key, rs) if rs.size > 1 => key }.toList.sorted.foreach { key =>
+      state.issue(Location(None, "/references", "key"), s"reference field '$key' is defined more than once")
+    }
+    references.zipWithIndex.foreach { (reference, i) =>
+      val location = Location(None, s"/references/$i", "key")
+      if !Identifier.matches(reference.key) then
+        state.issue(location, s"'${reference.key}' is not a valid name (lower camel case)")
+      if reference.label.trim.isEmpty then state.issue(location.copy(part = "label"), "the label is empty")
+      if !reference.fields.exists(_.attribute == ReferenceSource.IdAttribute) then
+        state.issue(
+          location.copy(part = "fields"),
+          s"the identifier ('${ReferenceSource.IdAttribute}') must be taken over into a field as source reference"
+        )
+      reference.fields
+        .groupBy(_.attribute)
+        .collect { case (a, ms) if ms.size > 1 => a }
+        .toList
+        .sorted
+        .foreach { a =>
+          state.issue(location.copy(part = "fields"), s"attribute '$a' is taken over more than once")
+        }
+      reference.fields.zipWithIndex.foreach { (mapping, j) =>
+        val at = location.copy(part = s"fields/$j")
+        if !reference.source.attributes.contains(mapping.attribute) then
+          state.issue(
+            at,
+            s"'${mapping.attribute}' is not an attribute of ${reference.source.key}; known: " +
+              reference.source.attributes.mkString(", ")
+          )
+        schema.variable(mapping.field).map(_.valueType) match
+          case Some(ValueType.Text) => ()
+          case Some(_) => state.issue(at, s"field '${mapping.field}' must be a single text field")
+          case None    => state.issue(at, s"unknown field '${mapping.field}'")
+      }
+    }
+    references
+      .flatMap(_.fieldKeys)
+      .groupBy(identity)
+      .collect { case (field, uses) if uses.size > 1 => field }
+      .toList
+      .sorted
+      .foreach { field =>
+        state.issue(
+          Location(None, "/references", "fields"),
+          s"field '$field' is filled by more than one reference"
+        )
+      }
 
   private def compileComputed(
       fields: List[ComputedField],

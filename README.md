@@ -23,7 +23,8 @@ modules/
   identity/  authz/       sign-in via ZITADEL, authorization
   <module>/api  <module>/core   templates, documents, workflow, rendering,
                                 archive, search, audit, notifications
-  integration/            outbox, webhooks, business system adapters
+  integration/            outbox, job runner, business system adapters (partner master);
+  integration/api         ports to business systems (PartnerDirectory)
   app/                    wiring, HTTP endpoints, migrations
 workers/                  Python workers (rendering, OCR)
 frontend/                 web UI

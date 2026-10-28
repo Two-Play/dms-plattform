@@ -104,7 +104,16 @@ npx shadcn@latest add <component>
 - `field-values.ts` converts form input into `MetadataValue`s and validates it like the backend's field rules (type, min/max, decimal places, length, pattern, options, currencies). Inputs by type: text, number, amount with currency, date, selection, yes/no; multiple values as one per line, multiple selections as checkboxes. Required fields (needed for approval) carry a `*` and `aria-required`; messages appear inline and invalid values are not sent.
 - The preview (`POST /api/v1/templates/{id}/versions/{version}/preview`) is a TanStack query keyed by the values, requested 300 ms after the last change (`useDebouncedValue`) and keeping the previous result while the next one loads. It shows the backend's HTML with the "Draft – not valid" banner and watermark, lists missing required values and focuses the field when a missing value (in the document or in the list) is clicked. Backend issues for a field are shown at the field while it still has the value that was sent.
 - The HTML is produced by the backend renderer, which escapes all text, and inserted as is. It is styled by the **document stylesheet shared with the PDF rendering**: `modules/templates/core/src/main/resources/dms/templates/document.css`, imported through the alias `@dms-document` (`vite.config.ts`, `tsconfig*.json`; the dev server is allowed to read that directory). Do not copy it; see `modules/templates/README.md` for the class names.
-- "Save draft" is disabled until documents can be stored (DMS-37, `POST /api/v1/documents`).
+- "Save draft" creates the document on the first save (`POST /api/v1/documents`) and saves further working states with `PUT /api/v1/documents/{id}/draft`. A title is required.
+
+## Partner master (DMS-43)
+
+For templates with reference fields (`references` in the fields response), the page shows a "From the partner master" group with one `PartnerPicker` per reference field (`components/documents/partner-picker.tsx`, `api/partners.ts`):
+
+- Search by name or partner number (`GET /api/v1/partners`, 300 ms after the last keystroke, from 2 characters); a hit is taken over, can be changed or removed.
+- The fields the reference fills are read-only, marked "From partner master – taken over from the system, not editable", and show the picked partner's values; the preview uses them.
+- On save, these values are not sent as entered values; after the draft is saved, the picked partner is taken over on the server (`PUT /api/v1/documents/{id}/references/{key}`, `DELETE` when removed) as system values.
+- If the partner master is unreachable (503/502), the backend's message is shown as an alert ("… You can save the draft without it and pick the partner later."); saving still works, and a failed take-over after saving is shown as a warning next to "Draft saved".
 
 ## Notes
 

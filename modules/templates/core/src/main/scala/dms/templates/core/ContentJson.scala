@@ -9,9 +9,10 @@ import scala.util.Try
 /** JSON codecs for the template content model, used for the `jsonb` column and by the HTTP API.
   *
   * Sum types carry their case name in a `type` field, e.g. `{"type":"Paragraph","content":[...]}`. Stored
-  * content is wrapped with its format version, `{"format":1,"sections":[...],"computed":[...]}`; a later
-  * change of the model adds a format version and a migration from the older ones in
-  * [[ContentJson.decodeStored]].
+  * content is wrapped with its format version,
+  * `{"format":1,"sections":[...],"computed":[...],"references":[...]}` (`computed` and `references` may be
+  * missing in older content and default to empty); a later change of the model adds a format version and a
+  * migration from the older ones in [[ContentJson.decodeStored]].
   */
 object ContentJson:
   /** The current storage format of [[TemplateContent]]. */
@@ -35,7 +36,13 @@ object ContentJson:
   given JsonCodec[Block]           = DeriveJsonCodec.gen
   given JsonCodec[Section]         = DeriveJsonCodec.gen
   given JsonCodec[ComputedField]   = DeriveJsonCodec.gen
-  given JsonCodec[TemplateContent] = DeriveJsonCodec.gen
+  given JsonCodec[ReferenceSource] = JsonCodec.string.transformOrFail(
+    s => ReferenceSource.parse(s).toRight(s"unknown reference source '$s'"),
+    _.key
+  )
+  given JsonCodec[ReferenceMapping] = DeriveJsonCodec.gen
+  given JsonCodec[ReferenceField]   = DeriveJsonCodec.gen
+  given JsonCodec[TemplateContent]  = DeriveJsonCodec.gen
 
   given JsonCodec[ResolvedInline]  = DeriveJsonCodec.gen
   given JsonCodec[ResolvedBlock]   = DeriveJsonCodec.gen

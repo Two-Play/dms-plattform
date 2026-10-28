@@ -16,7 +16,7 @@ enum IssueKind:
   case RetiredOption(option: String)
   case UnknownCurrency(currency: String)
 
-  /** The field is set by the platform and cannot be entered. */
+  /** The field is set by the platform or taken over from a business system and cannot be entered. */
   case NotEditable
 
   def code: String = this match
@@ -39,7 +39,8 @@ enum IssueKind:
     case UnknownOption(option)       => s"'$option' is not an option of this field."
     case RetiredOption(option)       => s"The option '$option' is no longer available."
     case UnknownCurrency(currency)   => s"'$currency' is not an allowed currency."
-    case NotEditable                 => "The field is set by the platform and cannot be entered."
+    case NotEditable                 =>
+      "The field is set by the platform or taken over from a business system and cannot be entered."
 
 /** A problem with one field, addressable by its stable key. */
 final case class FieldIssue(field: String, label: String, kind: IssueKind)

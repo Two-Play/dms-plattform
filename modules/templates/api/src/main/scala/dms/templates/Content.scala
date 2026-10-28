@@ -6,11 +6,61 @@ package dms.templates
   * @param computed
   *   computed fields (business concept 4.2), derived from field values with CEL and usable in placeholders
   *   and expressions like a field; evaluated in order, so a computed field may use the ones before it
+  * @param references
+  *   reference fields (business concept 4.2): profile fields whose values are taken over from a master data
+  *   source after the author picks an entry, e.g. name and address of the contract partner (ADR 0023)
   */
-final case class TemplateContent(sections: List[Section], computed: List[ComputedField] = Nil)
+final case class TemplateContent(
+    sections: List[Section],
+    computed: List[ComputedField] = Nil,
+    references: List[ReferenceField] = Nil
+)
 
 /** A field derived from other fields, e.g. `totalValue = monthlyFee * termMonths` (CEL, ADR 0020). */
 final case class ComputedField(key: String, expression: String)
+
+/** A master data source reference fields can take values from (ADR 0023).
+  *
+  * @param key
+  *   stable name, also the `source` of the stored value origin (`System("partner-master")`)
+  * @param attributes
+  *   the attributes of an entry that can be taken over; `id` is the entry's identifier in the source
+  */
+enum ReferenceSource(val key: String, val attributes: List[String]):
+  /** The partner master (customers, suppliers, contract partners) of a connected business system. */
+  case PartnerMaster
+      extends ReferenceSource(
+        "partner-master",
+        List("id", "name", "street", "postalCode", "city", "country", "address", "vatId")
+      )
+
+object ReferenceSource:
+  def parse(key: String): Option[ReferenceSource] = values.find(_.key == key)
+
+  /** The attribute holding the identifier of the picked entry; every reference field stores it. */
+  val IdAttribute = "id"
+
+/** Takes over `attribute` of the picked entry into the profile field `field`. */
+final case class ReferenceMapping(attribute: String, field: String)
+
+/** A reference field of a template (business concept 4.2, US-03.1): the author picks an entry of `source`,
+  * and the mapped attributes are taken over into profile fields as system values. Taken-over values are a
+  * snapshot: they keep the state of the entry at the time it was picked, and the author cannot edit them,
+  * only pick another entry or remove the reference.
+  *
+  * @param key
+  *   name of the reference within the template, e.g. `contractPartner`
+  * @param fields
+  *   attribute to field mappings; one of them takes over the identifier (`id`) as the source reference
+  */
+final case class ReferenceField(
+    key: String,
+    label: String,
+    source: ReferenceSource,
+    fields: List[ReferenceMapping]
+):
+  /** The profile fields this reference fills. */
+  def fieldKeys: List[String] = fields.map(_.field)
 
 opaque type SectionId = String
 object SectionId:
@@ -81,3 +131,7 @@ object TemplateContent:
         case _                         => Nil
       }
       .collect { case Inline.Placeholder(path, _) => path }
+
+  /** The reference field that fills `field`, with the attribute it takes over, if any. */
+  def referenceOf(content: TemplateContent, field: String): Option[(ReferenceField, ReferenceMapping)] =
+    content.references.view.flatMap(r => r.fields.find(_.field == field).map(r -> _)).headOption

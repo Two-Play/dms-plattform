@@ -36,4 +36,5 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0020](0020-template-expressions-cel.md) | Template expressions in CEL (Common Expression Language) | Accepted | medium |
 | [0021](0021-document-versions.md) | Document versions as full version packages, frozen by database guards | Accepted | medium |
 | [0022](0022-deviation-requests.md) | Deviation requests as rows per version, deviation report stored with the version | Accepted | high |
+| [0023](0023-partner-master-integration.md) | Partner master: live lookup through a port, snapshot into field values | Accepted | high |
 | [0024](0024-approval-workflow-integration.md) | Approval workflows: Flowable routes the steps, our tables hold the business truth | Accepted | medium |
