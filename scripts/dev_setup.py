@@ -162,8 +162,13 @@ class Zitadel:
                  {"newPassword": {"password": password, "changeRequired": False}})
 
     def token(self, username: str, password: str) -> str:
+        """An access token of a fresh sign-in, see `tokens`."""
+        return self.tokens(username, password)["access_token"]
+
+    def tokens(self, username: str, password: str) -> dict:
         """Signs a user in without a browser: a session checked with the password finalizes an OIDC auth request
-        (authorization code flow with PKCE) that the setup machine user created as login client."""
+        (authorization code flow with PKCE) that the setup machine user created as login client. Returns the token
+        response with `access_token` and `id_token`; the ID token carries the sign-in time (`auth_time`)."""
         session = self.api("POST", "/v2/sessions", {
             "checks": {"user": {"loginName": username}, "password": {"password": password}}})
         try:
@@ -198,7 +203,7 @@ class Zitadel:
                 "grant_type": "authorization_code", "code": code, "client_id": self.client_id,
                 "redirect_uri": redirect_uri, "code_verifier": verifier,
             })
-            return tokens["access_token"]
+            return tokens
         finally:
             try:
                 self.api("DELETE", f"/v2/sessions/{session['sessionId']}", {})
@@ -321,11 +326,15 @@ def cmd_users() -> None:
     print(f"Role assignments ensured; passwords are in {USERS_ENV}")
 
 
-def user_token(z: Zitadel, username: str) -> str:
+def user_password(username: str) -> str:
     password = read_env(USERS_ENV).get(password_key(username))
     if not password:
         fail(f"no password for {username} in {USERS_ENV}; run scripts/dev-setup.sh --seed-only")
-    return z.token(username, password)
+    return password
+
+
+def user_token(z: Zitadel, username: str) -> str:
+    return z.token(username, user_password(username))
 
 
 def cmd_token(username: str) -> None:
@@ -483,13 +492,19 @@ POLICY = {
 }
 
 
+# Header with the OIDC ID token for step-up-protected requests (approval votes, DMS-86).
+ID_TOKEN_HEADER = "X-DMS-Id-Token"
+
+
 class Api:
-    def __init__(self, base: str, token: str):
+    def __init__(self, base: str, token: str, id_token: str | None = None):
         self.base = base.rstrip("/")
         self.token = token
+        self.id_token = id_token
 
     def __call__(self, method: str, path: str, body=None):
-        return http(method, self.base + path, body, token=self.token)
+        headers = {ID_TOKEN_HEADER: self.id_token} if self.id_token else None
+        return http(method, self.base + path, body, token=self.token, headers=headers)
 
 
 def ensure_fields(admin: Api) -> dict[str, int]:
@@ -597,9 +612,10 @@ def cmd_seed(api_base: str) -> None:
 
 def cmd_approve_tasks(username: str, api_base: str) -> None:
     """Approves every open task of a demo user with a fresh sign-in. Stands in for voting in the web UI until it
-    exists (DMS-91). Approval votes additionally need the token's auth_time (step-up), which ZITADEL access tokens
-    do not carry yet; they are rejected with 401 reauthentication_required."""
-    api = Api(api_base, user_token(Zitadel(), username))
+    exists (DMS-91). Approval votes need a sign-in within dms.workflow.reauthenticationSeconds (step-up); the API
+    reads it from the auth_time of the ID token sent in X-DMS-Id-Token, because ZITADEL access tokens have none."""
+    tokens = Zitadel().tokens(username, user_password(username))
+    api = Api(api_base, tokens["access_token"], tokens.get("id_token"))
     tasks = [task for task in api("GET", "/api/v1/workflow/tasks") if task["status"] == "Open"]
     if not tasks:
         print(f"No open tasks for {username}")

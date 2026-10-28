@@ -19,6 +19,7 @@ import scala.jdk.CollectionConverters.*
 object AuthenticatorSpec extends ZIOSpecDefault:
   private val issuer   = "http://localhost:8085"
   private val audience = "project-1"
+  private val clientId = "client-1"
   private val orgId    = "org-1"
   private val tenantId = TenantId.random()
 
@@ -27,7 +28,7 @@ object AuthenticatorSpec extends ZIOSpecDefault:
 
   private val verifier =
     TokenVerifier(
-      AuthConfig(issuer, audience),
+      AuthConfig(issuer, audience, Some(clientId)),
       ImmutableJWKSet[SecurityContext](JWKSet(signingKey.toPublicJWK))
     )
 
@@ -42,20 +43,49 @@ object AuthenticatorSpec extends ZIOSpecDefault:
       iss: String = issuer,
       aud: String = audience,
       org: String = orgId,
-      expiresIn: JDuration = JDuration.ofMinutes(5)
+      expiresIn: JDuration = JDuration.ofMinutes(5),
+      signedInSecondsAgo: Option[Long] = Some(60)
   ): String =
     val now    = Instant.now()
     val claims = JWTClaimsSet
       .Builder()
       .issuer(iss)
-      .audience(List(aud, "client-1").asJava)
+      .audience(List(aud, clientId).asJava)
       .subject("user-1")
       .issueTime(Date.from(now.minusSeconds(10)))
       .expirationTime(Date.from(now.plus(expiresIn)))
-      .claim("auth_time", now.minusSeconds(60).getEpochSecond)
+      .claim("auth_time", signedInSecondsAgo.map(now.minusSeconds(_).getEpochSecond).orNull)
       .claim(TokenVerifier.OrganizationClaim, org)
       .claim(TokenVerifier.RolesClaim, Map("approver" -> Map(org -> "example.com").asJava).asJava)
       .build()
+    sign(key, claims)
+
+  /** An OIDC ID token as ZITADEL issues it: audience client and project, `azp`, `at_hash`, `auth_time`. */
+  private def idToken(
+      accessToken: String,
+      signedInSecondsAgo: Long = 30,
+      aud: String = clientId,
+      azp: String = clientId,
+      sub: String = "user-1",
+      expiresIn: JDuration = JDuration.ofMinutes(5),
+      atHash: Option[String] = None
+  ): String =
+    val now    = Instant.now()
+    val claims = JWTClaimsSet
+      .Builder()
+      .issuer(issuer)
+      .audience(List(aud, audience).asJava)
+      .subject(sub)
+      .issueTime(Date.from(now.minusSeconds(10)))
+      .expirationTime(Date.from(now.plus(expiresIn)))
+      .claim("auth_time", now.minusSeconds(signedInSecondsAgo).getEpochSecond)
+      .claim("azp", azp)
+      .claim("at_hash", atHash.getOrElse(TokenVerifier.accessTokenHash(accessToken)))
+      .claim(TokenVerifier.OrganizationClaim, orgId)
+      .build()
+    sign(signingKey, claims)
+
+  private def sign(key: RSAKey, claims: JWTClaimsSet): String =
     val jwt = SignedJWT(
       JWSHeader.Builder(JWSAlgorithm.RS256).keyID(key.getKeyID).`type`(JOSEObjectType.JWT).build(),
       claims
@@ -100,6 +130,61 @@ object AuthenticatorSpec extends ZIOSpecDefault:
         .authenticate(token(org = "org-unknown"))
         .either
         .map(r => assertTrue(r == Left(AuthError.UnknownOrganization("org-unknown"))))
+    },
+    test("an access token without auth_time yields no sign-in time") {
+      for principal <- authenticator.authenticate(token(signedInSecondsAgo = None))
+      yield assertTrue(principal.authenticatedAt.isEmpty, principal.idToken == IdTokenCheck.NotSent)
+    },
+    test("a valid ID token of the same sign-in provides auth_time for step-up (DMS-86)") {
+      val access = token(signedInSecondsAgo = None)
+      for principal <- authenticator.authenticate(access, Some(idToken(access, signedInSecondsAgo = 30)))
+      yield assertTrue(
+        principal.idToken.isInstanceOf[IdTokenCheck.Accepted],
+        principal.authenticatedAt.exists(_.isAfter(Instant.now().minusSeconds(40))),
+        Authenticator.requireRecentSignIn(principal, JDuration.ofMinutes(5), Instant.now()) == Right(())
+      )
+    },
+    test("the later auth_time of access and ID token counts") {
+      val access = token(signedInSecondsAgo = Some(3600))
+      for principal <- authenticator.authenticate(access, Some(idToken(access, signedInSecondsAgo = 30)))
+      yield assertTrue(principal.authenticatedAt.exists(_.isAfter(Instant.now().minusSeconds(40))))
+    },
+    test("ID tokens for another client or user, expired or from another sign-in are rejected") {
+      val access                               = token(signedInSecondsAgo = None)
+      def check(id: String)                    = authenticator.authenticate(access, Some(id))
+      def rejected(p: Principal, text: String) = p.idToken match
+        case IdTokenCheck.Rejected(reason) => p.authenticatedAt.isEmpty && reason.contains(text)
+        case _                             => false
+      for
+        otherAud <- check(idToken(access, aud = "other-client", azp = "other-client"))
+        otherAzp <- check(idToken(access, azp = "other-client"))
+        otherSub <- check(idToken(access, sub = "user-2"))
+        expired  <- check(idToken(access, expiresIn = JDuration.ofMinutes(-10)))
+        otherAt  <- check(idToken(access, atHash = Some(TokenVerifier.accessTokenHash("another-token"))))
+        garbage  <- check("not-a-jwt")
+      yield assertTrue(
+        rejected(otherAud, "aud"),
+        rejected(otherAzp, "another client"),
+        rejected(otherSub, "another user"),
+        rejected(expired, "xpired"),
+        rejected(otherAt, "access token"),
+        rejected(garbage, "")
+      )
+    },
+    test("without a configured client id every ID token is rejected") {
+      val noClient = Authenticator(
+        TokenVerifier(
+          AuthConfig(issuer, audience),
+          ImmutableJWKSet[SecurityContext](JWKSet(signingKey.toPublicJWK))
+        ),
+        tenants
+      )
+      val access = token(signedInSecondsAgo = None)
+      for principal <- noClient.authenticate(access, Some(idToken(access)))
+      yield assertTrue(
+        principal.idToken == IdTokenCheck.Rejected("no OIDC client id is configured"),
+        principal.authenticatedAt.isEmpty
+      )
     },
     test("step-up requires a recent sign-in") {
       for principal <- authenticator.authenticate(token())

@@ -52,7 +52,7 @@ npm run api:generate
 DMS_OPENAPI_URL=http://localhost:8091/docs/docs.yaml npm run api:generate
 ```
 
-`src/api/client.ts` wraps it with `openapi-fetch` and adds `Authorization: Bearer <access token>` to every request. Components get the client from `useApiClient()`, which makes it easy to replace in tests.
+`src/api/client.ts` wraps it with `openapi-fetch` and adds `Authorization: Bearer <access token>` to every request. Vote requests (`POST /api/v1/workflow/tasks/{taskId}/votes`) additionally carry the OIDC ID token in `X-DMS-Id-Token`: approval votes need a recent sign-in (step-up), and ZITADEL puts `auth_time` only into the ID token (ADR 0024, addendum DMS-86). When a vote fails with `401 reauthentication_required` (`isReauthenticationRequired` in `src/auth/step-up.ts`), `reauthenticate(auth.signinRedirect)` signs in again with `prompt=login` and `max_age=0` and returns to the current page; the user then casts the vote again, it is not replayed. `castVote` in `src/api/workflow.ts` is the client helper for the vote UI (DMS-91). Components get the client from `useApiClient()`, which makes it easy to replace in tests.
 
 ## Dev proxy
 
