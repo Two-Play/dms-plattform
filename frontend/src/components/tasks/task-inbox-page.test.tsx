@@ -42,6 +42,7 @@ function makeDocument(id: string, title: string, versionId: string, version: str
     templateId: 'tpl',
     templateVersion: 1,
     createdAt: '2026-10-01T10:00:00Z',
+    legalHold: false,
     current: {
       id: versionId,
       version,

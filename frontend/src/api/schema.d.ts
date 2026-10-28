@@ -934,6 +934,75 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/legal-holds': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The legal holds of the tenant, the latest first. Requires the records manager role. */
+    get: operations['getApiV1Legal-holds']
+    put?: never
+    /** @description Sets a legal hold for a matter: name and reason are required (422). Documents can be named (`documentIds`) and/or taken from a search (`searchFilter`: the parameters of the search plus `expectedCount`, the hit count the caller confirmed; 409 result_changed if the search finds a different number now, 422 too_many_documents above 1000 hits). Documents can also be added later. Requires the records manager role for the whole tenant and for every document. */
+    post: operations['postApiV1Legal-holds']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/legal-holds/{id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description A legal hold with its documents: who added them how and why. Titles are shown for documents the caller may manage. Requires the records manager role. */
+    get: operations['getApiV1Legal-holdsId']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/legal-holds/{id}/documents': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Puts further documents under an active hold, named or from a confirmed search (as on creation); a reason is required (422). Documents the hold covers already are skipped; `addedDocumentIds` lists the new ones. 409 released if the hold was released. */
+    post: operations['postApiV1Legal-holdsIdDocuments']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/legal-holds/{id}/release': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Releases an active hold; a reason is required (422). Its documents stay listed; those no other active hold covers are no longer under legal hold. 409 released if it was released before. */
+    post: operations['postApiV1Legal-holdsIdRelease']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -981,6 +1050,12 @@ export interface components {
       openedAt: string
       /** Format: date-time */
       acknowledgedAt: string
+    }
+    /** AddLegalHoldDocuments */
+    AddLegalHoldDocuments: {
+      reason?: string
+      documentIds?: string[]
+      searchFilter?: components['schemas']['HoldSearchFilter']
     }
     /** Amount */
     Amount: {
@@ -1316,6 +1391,14 @@ export interface components {
       key: string
       name: string
     }
+    /** CreateLegalHold */
+    CreateLegalHold: {
+      name?: string
+      reason?: string
+      matterReference?: string
+      documentIds?: string[]
+      searchFilter?: components['schemas']['HoldSearchFilter']
+    }
     /** Date */
     Date: {
       /** Format: date */
@@ -1551,6 +1634,8 @@ export interface components {
       /** Format: date-time */
       createdAt: string
       current: components['schemas']['DocumentVersionView']
+      legalHold: boolean
+      legalHolds?: components['schemas']['LegalHoldRefView'][]
     }
     /** EditorialCheckView */
     EditorialCheckView: {
@@ -1682,6 +1767,26 @@ export interface components {
       status: string
       version: string
     }
+    /** HeldDocumentView */
+    HeldDocumentView: {
+      /** Format: uuid */
+      documentId: string
+      title?: string
+      addedVia: string
+      reason: string
+      addedBy: string
+      /** Format: date-time */
+      addedAt: string
+    }
+    /** HoldSearchFilter */
+    HoldSearchFilter: {
+      q?: string
+      class?: string[]
+      status?: string[]
+      lang?: string[]
+      /** Format: int64 */
+      expectedCount?: number
+    }
     /** Inline */
     Inline:
       | components['schemas']['LineBreak']
@@ -1708,6 +1813,35 @@ export interface components {
     LaneView: {
       key: string
       role: string
+    }
+    /** LegalHoldRefView */
+    LegalHoldRefView: {
+      /** Format: uuid */
+      id: string
+      name: string
+      matterReference?: string
+      /** Format: date-time */
+      createdAt: string
+    }
+    /** LegalHoldView */
+    LegalHoldView: {
+      /** Format: uuid */
+      id: string
+      name: string
+      matterReference?: string
+      reason: string
+      createdBy: string
+      /** Format: date-time */
+      createdAt: string
+      status: string
+      /** Format: date-time */
+      releasedAt?: string
+      releasedBy?: string
+      releaseReason?: string
+      /** Format: int32 */
+      documentCount: number
+      documents?: components['schemas']['HeldDocumentView'][]
+      addedDocumentIds?: string[]
     }
     /** LineBreak */
     LineBreak: {
@@ -2031,6 +2165,10 @@ export interface components {
     ReferenceMappingView: {
       attribute: string
       field: string
+    }
+    /** ReleaseLegalHold */
+    ReleaseLegalHold: {
+      reason?: string
     }
     /** RenditionView */
     RenditionView: {
@@ -5266,6 +5404,201 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['GroupMemberView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1Legal-holds': {
+    parameters: {
+      query?: {
+        /** @description active (default), released or all */
+        status?: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LegalHoldView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1Legal-holds': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateLegalHold']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LegalHoldView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1Legal-holdsId': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Legal hold id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LegalHoldView']
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1Legal-holdsIdDocuments': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Legal hold id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AddLegalHoldDocuments']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LegalHoldView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1Legal-holdsIdRelease': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Legal hold id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReleaseLegalHold']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LegalHoldView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
         }
       }
       default: {

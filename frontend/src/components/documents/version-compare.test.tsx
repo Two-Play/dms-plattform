@@ -70,6 +70,7 @@ const document: DocumentView = {
   templateId,
   templateVersion: 1,
   createdAt: '2026-10-20T10:00:00Z',
+  legalHold: false,
   current: published,
 }
 
