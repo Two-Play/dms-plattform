@@ -1,7 +1,7 @@
 package dms.authz
 
 import dms.documents.metadata.{CoreFields, MetadataValue}
-import dms.documents.{Document, DocumentVersion}
+import dms.documents.{Document, DocumentStatus, DocumentVersion}
 import dms.kernel.{TenantId, UserId}
 
 import scala.util.Try
@@ -35,17 +35,44 @@ object DocumentResource:
       version: DocumentVersion,
       participants: Set[UserId] = Set.empty
   ): Resource =
-    val values = version.metadata
+    of(
+      tenant,
+      document.ownerId,
+      classPath,
+      version.status,
+      version.createdBy,
+      version.releasedBy,
+      version.metadata
+    )
+      .copy(assignedParticipants = participants)
+
+  /** The resource of a version given by its attributes, e.g. from a bulk query (compliance cockpit, DMS-59).
+    *
+    * @param createdBy
+    *   the version's author
+    * @param releasedBy
+    *   who approved the version
+    * @param values
+    *   the version's field values
+    */
+  def of(
+      tenant: TenantId,
+      ownerId: Option[UserId],
+      classPath: List[String],
+      status: DocumentStatus,
+      createdBy: UserId,
+      releasedBy: Option[UserId],
+      values: Map[String, MetadataValue]
+  ): Resource =
     Resource(
       tenant,
       organizationalUnit = organizationalUnit(values),
       documentClassPath = classPath,
       confidentiality = confidentiality(values),
-      status = Some(version.status),
-      authorId = Some(version.createdBy),
-      ownerId = document.ownerId,
-      assignedParticipants = participants,
-      approvedBy = version.releasedBy.toSet,
+      status = Some(status),
+      authorId = Some(createdBy),
+      ownerId = ownerId,
+      approvedBy = releasedBy.toSet,
       allowedGroups = allowedGroups(values)
     )
 

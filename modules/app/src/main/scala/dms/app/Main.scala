@@ -29,7 +29,7 @@ object Main extends ZIOAppDefault:
 
   private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
     PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env &
-    SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env
+    SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -50,7 +50,8 @@ object Main extends ZIOAppDefault:
       PartnerApi.endpoints.map(_.widen[Env]) ++
       SearchApi.endpoints.map(_.widen[Env]) ++
       GroupApi.endpoints.map(_.widen[Env]) ++
-      LegalHoldApi.endpoints.map(_.widen[Env])
+      LegalHoldApi.endpoints.map(_.widen[Env]) ++
+      ComplianceApi.endpoints.map(_.widen[Env])
 
   private val docs =
     SwaggerInterpreter()

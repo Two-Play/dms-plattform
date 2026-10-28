@@ -391,6 +391,45 @@ private[core] object DocumentStore:
       .run()
       .toList
 
+  /** A version valid now (Published or ReviewDue) with its document, review date and whether it asks for
+    * acknowledgement (compliance cockpit, DMS-59).
+    */
+  final case class CurrentRow(
+      documentId: UUID,
+      classId: UUID,
+      classVersion: Int,
+      title: String,
+      ownerId: Option[String],
+      authorId: String,
+      templateId: UUID,
+      templateVersion: Int,
+      documentCreatedAt: OffsetDateTime,
+      versionId: UUID,
+      major: Int,
+      minor: Int,
+      status: String,
+      fieldValues: Jsonb,
+      createdBy: String,
+      releasedBy: Option[String],
+      validFrom: Option[LocalDate],
+      publishedAt: Option[OffsetDateTime],
+      reviewDueOn: Option[LocalDate],
+      requiresAcknowledgement: Boolean
+  ) derives DbCodec
+
+  /** Every version of the tenant valid now, by title. */
+  def currentlyValid(using DbTx): List[CurrentRow] =
+    sql"""select d.id, d.class_id, d.class_version, d.title, d.owner_id, d.author_id, d.template_id,
+                 d.template_version, d.created_at, v.id, v.major, v.minor, v.status, v.field_values, v.created_by,
+                 v.released_by, v.valid_from, v.published_at, v.review_due_on, v.requires_acknowledgement
+          from dms.document_version v
+          join dms.document d on d.id = v.document_id
+          where v.status in ('Published', 'ReviewDue')
+          order by d.title, d.id, v.major, v.minor"""
+      .query[CurrentRow]
+      .run()
+      .toList
+
   def attachRendition(id: UUID, r: Rendition)(using DbTx): Boolean =
     sql"""update dms.document_version
           set rendition_key = ${r.objectKey}, rendition_version = ${r.objectVersion},

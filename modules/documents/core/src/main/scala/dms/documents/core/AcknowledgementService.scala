@@ -183,6 +183,35 @@ final class AcknowledgementService(audit: AuditTrail):
         .toMap
     )
 
+  /** Who acknowledged each valid version that requires acknowledgement (compliance cockpit, DMS-59); versions
+    * nobody acknowledged are missing. Acknowledgements of superseded versions do not count for their
+    * successor.
+    */
+  def acknowledgersOfValid: IO[AcknowledgementError, Map[UUID, Set[UserId]]] =
+    sql(
+      sql"""select a.version_id, a.user_id
+            from dms.document_acknowledgement a
+            join dms.document_version v on v.id = a.version_id
+            where v.status in ('Published', 'ReviewDue') and v.requires_acknowledgement"""
+        .query[(UUID, String)]
+        .run()
+        .toList
+        .groupMap(_._1)(r => UserId(r._2))
+        .view
+        .mapValues(_.toSet)
+        .toMap
+    )
+
+  /** Who acknowledged the version. */
+  def acknowledgersOf(versionId: UUID): IO[AcknowledgementError, Set[UserId]] =
+    sql(
+      sql"select user_id from dms.document_acknowledgement where version_id = $versionId"
+        .query[String]
+        .run()
+        .map(UserId(_))
+        .toSet
+    )
+
   /** The acknowledgements of `reader`, the latest first. */
   def acknowledgementsOf(reader: UserId): IO[AcknowledgementError, List[Acknowledgement]] =
     sql(

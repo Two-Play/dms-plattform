@@ -5,9 +5,12 @@ import dms.kernel.{TenantId, UserId}
 
 import java.time.Instant
 
-/** Business roles (business concept 2.2). */
+/** Business roles (business concept 2.2). `ComplianceOfficer` ("Compliance-Beauftragter") monitors
+  * acknowledgements and review deadlines in the compliance cockpit (US-15.1, ADR 0036).
+  */
 enum Role:
-  case Reader, Author, Owner, Reviewer, Approver, TemplateDesigner, RecordsManager, Auditor, TenantAdmin
+  case Reader, Author, Owner, Reviewer, Approver, TemplateDesigner, RecordsManager, Auditor, TenantAdmin,
+    ComplianceOfficer
 
 /** Functions of the permission matrix (business concept 2.3).
   *
@@ -24,12 +27,20 @@ enum Role:
   *
   * `Recertify` is confirming a valid version without a change in the periodic review (business concept 6.2,
   * US-07.1): only the document's owner, who holds the owner role.
+  *
+  * `MonitorCompliance` is seeing a document version in the compliance cockpit (US-15.1, ADR 0036): its review
+  * deadline and its acknowledgement rate, aggregated, without names of readers. Only compliance officers.
+  *
+  * `ViewAcknowledgementPersons` is seeing who has not acknowledged a version yet (purpose limitation,
+  * business concept 10.2; ADR 0036): compliance officers for escalation and the document's owner for their
+  * own documents. Callers additionally have to state the purpose, which is recorded in the audit trail.
   */
 enum Action:
   case ReadPublished, ReadDocument, CreateFromTemplate, EditDraft, CommentInReview, Review, Approve, Publish,
     Withdraw, Recertify,
     EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
-    ManageRetention, Destroy, ViewHistory, Configure
+    ManageRetention, Destroy, ViewHistory, Configure,
+    MonitorCompliance, ViewAcknowledgementPersons
 
 /** Areas of tenant configuration (matrix row "Configuration"). `Search` is the operation of the tenant's
   * search index, e.g. rebuilding it (DMS-51, ADR 0029). `Groups` is the administration of access groups and

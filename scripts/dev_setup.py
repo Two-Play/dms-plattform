@@ -53,6 +53,7 @@ USERS: dict[str, tuple[str, str, list[str]]] = {
     "approver": ("Paul", "Approver", ["Approver"]),
     "reader": ("Rudi", "Reader", ["Reader"]),
     "records": ("Rosa", "Records", ["RecordsManager", "Auditor"]),
+    "compliance": ("Carla", "Compliance", ["ComplianceOfficer"]),
 }
 
 # Demo access groups for confidential documents (DMS-101): key -> (name, member usernames).

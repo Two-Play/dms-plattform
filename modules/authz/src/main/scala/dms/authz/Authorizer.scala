@@ -24,6 +24,9 @@ trait RoleAssignments:
     */
   def holders(role: Role): IO[DbError, List[(UserId, RoleAssignment)]]
 
+  /** The assignments of every user of the tenant that are active at `at` (compliance cockpit, ADR 0036). */
+  def activeAt(at: Instant): IO[DbError, Map[UserId, Set[RoleAssignment]]]
+
 object RoleAssignments:
   object Postgres extends RoleAssignments:
     private type Row = (String, Option[String], Option[String], OffsetDateTime, Option[OffsetDateTime])
@@ -62,6 +65,22 @@ object RoleAssignments:
       ).map(_.map { case (user, ou, cls, from, until) =>
         UserId(user) -> RoleAssignment(role, ou, cls, from.toInstant, until.map(_.toInstant))
       })
+
+    def activeAt(at: Instant): IO[DbError, Map[UserId, Set[RoleAssignment]]] =
+      Db.sql(
+        sql"""select user_id, role, organizational_unit, document_class, valid_from, valid_until
+              from dms.role_assignment
+              where valid_from <= ${toOffset(at)} and (valid_until is null or valid_until > ${toOffset(
+            at
+          )})"""
+          .query[(String, String, Option[String], Option[String], OffsetDateTime, Option[OffsetDateTime])]
+          .run()
+          .toList
+      ).map(
+        _.groupMap((user, _, _, _, _, _) => UserId(user)) { (_, role, ou, cls, from, until) =>
+          RoleAssignment(Role.valueOf(role), ou, cls, from.toInstant, until.map(_.toInstant))
+        }.view.mapValues(_.toSet).toMap
+      )
 
     private def toOffset(i: Instant): OffsetDateTime = OffsetDateTime.ofInstant(i, java.time.ZoneOffset.UTC)
 

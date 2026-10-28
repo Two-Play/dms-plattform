@@ -52,6 +52,9 @@ trait Groups:
   /** Current members of any of `keys`. */
   def membersOfAny(keys: Set[String]): IO[DbError, Set[UserId]]
 
+  /** The current group keys of every user who belongs to a group (compliance cockpit, ADR 0036). */
+  def currentMemberships: IO[DbError, Map[UserId, Set[String]]]
+
   /** Adds `user` to the group; `false` if they are a member already. */
   def addMember(key: String, user: UserId, by: UserId): IO[DbError, Boolean]
 
@@ -138,6 +141,14 @@ object Groups:
               keys
             )})) and removed_at is null""".query[String].run().map(UserId(_)).toSet
         )
+
+    def currentMemberships: IO[DbError, Map[UserId, Set[String]]] =
+      Db.sql(
+        sql"select user_id, group_key from dms.access_group_member where removed_at is null"
+          .query[(String, String)]
+          .run()
+          .toList
+      ).map(_.groupMap((user, _) => UserId(user))(_._2).view.mapValues(_.toSet).toMap)
 
     def addMember(key: String, user: UserId, by: UserId): IO[DbError, Boolean] =
       Db.sql(
