@@ -33,3 +33,4 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0017](0017-audit-hash-chain.md) | Audit trail as hash chain per tenant with RFC 3161 anchoring | Accepted | medium |
 | [0018](0018-authorization-policy.md) | Authorization as an in-app policy (RBAC + ABAC) | Accepted | medium |
 | [0019](0019-metadata-model.md) | Metadata as JSONB values validated against versioned profiles | Accepted | medium |
+| [0020](0020-template-expressions-cel.md) | Template expressions in CEL (Common Expression Language) | Accepted | medium |

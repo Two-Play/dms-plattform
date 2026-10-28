@@ -17,6 +17,7 @@ object Versions {
   val bouncyCastle  = "1.86"
   val awsSdk        = "2.57.5"
   val zioJson       = "1.1.1" // same as tapir-json-zio
+  val cel           = "0.15.0"
 }
 
 object Dependencies {
@@ -60,6 +61,9 @@ object Dependencies {
   val json = Seq("dev.zio" %% "zio-json" % Versions.zioJson)
 
   val magnum = Seq("com.augustnagro" %% "magnum" % Versions.magnum)
+
+  /** Common Expression Language for template conditions and computed fields (ADR 0020). */
+  val cel = Seq("dev.cel" % "cel" % Versions.cel)
 
   val jwt = Seq("com.nimbusds" % "nimbus-jose-jwt" % Versions.nimbusJose)
 

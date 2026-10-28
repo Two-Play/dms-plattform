@@ -2,8 +2,15 @@ package dms.templates
 
 /** Structured template content (ADR 0007): the primary format from which documents and renditions are
   * produced. Plain data, free of effects; the content of a released template version never changes.
+  *
+  * @param computed
+  *   computed fields (business concept 4.2), derived from field values with CEL and usable in placeholders
+  *   and expressions like a field; evaluated in order, so a computed field may use the ones before it
   */
-final case class TemplateContent(sections: List[Section])
+final case class TemplateContent(sections: List[Section], computed: List[ComputedField] = Nil)
+
+/** A field derived from other fields, e.g. `totalValue = monthlyFee * termMonths` (CEL, ADR 0020). */
+final case class ComputedField(key: String, expression: String)
 
 opaque type SectionId = String
 object SectionId:
