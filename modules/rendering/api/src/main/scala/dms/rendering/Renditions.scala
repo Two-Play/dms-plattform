@@ -30,6 +30,8 @@ object ArchiveStandard:
   *   the approver's sign-in at the vote (`auth_time`), stored with the approval
   * @param recipients
   *   who is notified if the rendering fails: the document owner, otherwise the author
+  * @param onBehalfOf
+  *   the approver the deputy `approver` stood in for (DMS-49), shown in the approval note
   */
 final case class RenditionRequest(
     documentId: DocumentId,
@@ -38,7 +40,8 @@ final case class RenditionRequest(
     approver: UserId,
     approvedAt: Instant,
     authenticatedAt: Instant,
-    recipients: List[UserId]
+    recipients: List[UserId],
+    onBehalfOf: Option[UserId] = None
 )
 
 object RenditionRequest:

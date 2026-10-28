@@ -16,7 +16,7 @@ Layout: `api` holds public types, `core` the implementation. Other modules may o
 - `Rules`: pure rules: participants with the four-eyes rule, resume vs. reset after a return (content checksum), vote checks (reason, step-up window), return events.
 - `Bpmn`: generates the BPMN model of a definition (resume gateway, conditional steps, parallel lanes).
 - `FlowableEngine`: the embedded Flowable 8 engine (schema `flowable`, table prefix, async executor off) and `migrateSchema` for `dms.app.Migrate`. `SharedTransaction`: the only code using Flowable `impl` packages; joins the `Db.transact` connection. `SharedTransactionSpec` must pass on every Flowable upgrade.
-- Ports implemented by `app`: `DocumentGateway` (version under review with content SHA-256, lifecycle events), `ParticipantDirectory` (role holders in scope, tenant administrators), `ExtraReviewCheck` (`DocumentVersion.requiresExtraReview`). `WorkflowConfig.reauthenticationWindow` is the step-up window.
+- Ports implemented by `app`: `DocumentGateway` (version under review with content SHA-256, lifecycle events), `ParticipantDirectory` (role holders in scope, tenant administrators, a person's role assignments for deputies), `ExtraReviewCheck` (`DocumentVersion.requiresExtraReview`). `WorkflowConfig.reauthenticationWindow` is the step-up window.
 
 ## Behaviour
 
@@ -42,8 +42,28 @@ Layout: `api` holds public types, `core` the implementation. Other modules may o
 | GET | `/api/v1/admin/workflows/{classKey}` | Versions of a class's workflow | `Configure` Workflows |
 | POST | `/api/v1/admin/workflows/{classKey}` | Define the next version `{definition, fourEyes, reason}` | `Configure` Workflows |
 
-Tests: `RulesSpec` (pure), `SharedTransactionSpec` (engine, Testcontainers), `app/WorkflowApiSpec` (end to end over HTTP).
+Tests: `RulesSpec` (pure), `SharedTransactionSpec` (engine, Testcontainers), `app/WorkflowApiSpec` (end to end over HTTP); deputies see below.
 
 ## Editorial path of minor versions (DMS-46, ADR 0026)
 
 A submitted minor version (`ReviewSubject.changeKind == Minor`) does not run the class's workflow but `WorkflowDefinition.editorial` (process key `approval.editorial`): one approval step `editorial-confirmation` with a lane of the pseudo role `WorkflowDefinition.DocumentOwner`. `ApprovalWorkflow` resolves that lane to the document owner (`Rules.ownerConfirmation`); if the owner is the author or there is none, the holders of `Approver` in scope confirm instead (the approver must differ from the author). The vote needs step-up like any approval; `WorkflowApi` authorizes it with `ownerMayApprove` for owner lanes. The class's four-eyes setting applies; the editorial definition is pinned in the case like any other.
+
+## Deputies (DMS-49, ADR 0028)
+
+An approver (or reviewer) sets a deputy for an absence: `Deputyships` (`create`, `end`, `get`, `involving`, `ofPrincipal`, `all`) stores time-limited deputyships in `dms.deputyship` (migration V14; RLS, grants, history guard: only the early end may be set, once). Same authority means the same role: the deputy must hold each covered lane role (`Author`, `Owner`, `Reviewer`, `Approver`; default: those the principal holds) themselves, in any scope (`Rules.checkDeputyship`, 422 otherwise); the period ends at most 366 days after it starts; an optional document class restricts it to that class and its subclasses. Created and ended deputyships are audited (`deputyship.created`, `deputyship.ended`) and published to the outbox (`workflow.deputyship-created`, `workflow.deputyship-ended`).
+
+- Forwarding at read time (`ApprovalWorkflow.views`, `Rules.taskDeputies`): every open task lists in `deputies` the deputies of its candidates whose deputyship is active and covers the lane's role and the document's class and who still hold the role. Principal and deputy both see the task; whoever votes first completes it. Tasks become available when the period starts and are the candidates' alone again when it ends or is ended early; no job, nothing stored on the task. `myTasks` returns the deputy's forwarded tasks with `actingFor` = principal.
+- Four-eyes: a deputy never acts on a version they authored, and nobody stands in for the author, whatever the four-eyes setting. No chains (deputies of deputies).
+- Recording: votes (`acting_for`) and the approval (`acting_for`, from the last approving vote) name the principal; audit entries of the deputy's vote, return, rendition request and approval have `on_behalf_of` = principal; `workflow.returned` / `workflow.approved` carry `actingFor`; the PDF approval note says "by deputy on behalf of principal" ("von … i. V. für …").
+- Authorization (module `app`): for the document of a forwarded task the deputy's subject is extended by the principal's assignments of the task's role (`Authorizer.onBehalfOf`), so the deputy reads and votes within the principal's scope; step-up applies as usual.
+- Not forwarded: owner confirmations of the editorial path (`DocumentOwner` lanes; owner deputies are DMS-88).
+
+| Method | Path | Purpose | Authorization |
+|---|---|---|---|
+| POST | `/api/v1/deputyships` | Create `{principal?, deputy, validFrom?, validUntil, roles?, documentClass?, reason?}`; 422 invalid, 409 overlapping | own; others: `Configure` Workflows |
+| GET | `/api/v1/deputyships` | The caller's deputyships (principal or deputy); `?principal=` / `?all=true` | own; others: `Configure` Workflows |
+| DELETE | `/api/v1/deputyships/{id}` | End now (kept for the history); 409 if already ended | principal, deputy or `Configure` Workflows |
+
+Task views (`GET /api/v1/workflow/tasks`, cases of a document) carry `deputies` and, in the inbox, `actingFor`; vote and approval views carry `actingFor`.
+
+Tests: `DeputyRulesSpec` (pure), `DeputyshipsSpec` (Testcontainers: RLS, guard, periods, service), `app/WorkflowApiSpec` (create, invalid deputy, deputy votes with step-up on behalf of the approver, return after the end).

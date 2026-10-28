@@ -48,6 +48,15 @@ object RenditionLayoutSpec extends ZIOSpecDefault:
         ) == "Gültig ab 01.01.2027"
       )
     },
+    test("a deputy's approval note names the approver they stood in for (DMS-49)") {
+      val deputy = facts.copy(approvedBy = "deputy-1", onBehalfOf = Some("approver-1"))
+      assertTrue(
+        RenditionLayout.approvalNote(deputy) ==
+          "Approved on 2026-10-28 09:15 UTC by deputy-1 on behalf of approver-1",
+        RenditionLayout.approvalNote(deputy.copy(language = "de")) ==
+          "Freigegeben am 28.10.2026 09:15 UTC von deputy-1 i. V. für approver-1"
+      )
+    },
     test("every date of the PDF comes from the approval, at second precision") {
       val meta = RenditionLayout.meta(facts)
       assertTrue(

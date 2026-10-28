@@ -117,6 +117,18 @@ final class RoleDirectory(assignments: RoleAssignments) extends ParticipantDirec
       now <- Clock.instant
     yield all.collect { case (user, a) if a.isActiveAt(now) => user }.distinct.sortBy(_.value)
 
+  def heldRoles(user: UserId): IO[WorkflowError, List[HeldRole]] =
+    assignments
+      .forUser(user)
+      .mapBoth(
+        WorkflowError.Database(_),
+        _.toList
+          .map(a =>
+            HeldRole(a.role.toString, a.organizationalUnit, a.documentClass, a.validFrom, a.validUntil)
+          )
+          .sortBy(r => (r.role, r.organizationalUnit, r.documentClass, r.validFrom))
+      )
+
 object RoleDirectory:
   private val AnyTenant = TenantId(UUID(0L, 0L))
 

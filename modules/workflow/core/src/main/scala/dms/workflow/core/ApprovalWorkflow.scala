@@ -152,11 +152,11 @@ final class ApprovalWorkflow(
       authenticatedAt: Option[Instant]
   ): IO[WorkflowError, CaseDetails] =
     for
-      found <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
-      row   <- sql(WorkflowStore.lockCase(found.caseId)).someOrFail(taskNotFound(taskId))
-      task  <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
-      _     <- checkParticipant(row, task, actor)
-      now   <- Clock.instant
+      found     <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
+      row       <- sql(WorkflowStore.lockCase(found.caseId)).someOrFail(taskNotFound(taskId))
+      task      <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
+      actingFor <- participation(row, task, actor)
+      now       <- Clock.instant
       kind = StepKind.valueOf(task.stepKind)
       _ <- ZIO.fromEither(
         Rules.checkVote(kind, decision, reason, authenticatedAt, now, config.reauthenticationWindow)
@@ -183,7 +183,8 @@ final class ApprovalWorkflow(
         row.contentSha256,
         authenticatedAt,
         now,
-        None
+        None,
+        actingFor
       )
       _ <- sql(WorkflowStore.insertVote(vote))
       _ <- record(
@@ -197,18 +198,20 @@ final class ApprovalWorkflow(
           "lane"          -> Json.Str(task.laneKey),
           "decision"      -> Json.Str(decision.toString),
           "contentSha256" -> Json.Str(row.contentSha256),
-          "authTime"      -> authenticatedAt.fold(Json.Null)(t => Json.Str(t.toString))
+          "authTime"      -> authenticatedAt.fold(Json.Null)(t => Json.Str(t.toString)),
+          "actingFor"     -> optional(actingFor)
         ),
-        vote.reason
+        vote.reason,
+        onBehalfOf = actingFor
       )
       _ <-
         if decision.approves then
           for
             _ <- sql(WorkflowStore.completeTask(task.id, TaskStatus.Completed, Some(actor)))
             _ <- flowable.run(_.getTaskService.complete(task.id))
-            _ <- advance(row, subject, actor, authenticatedAt)
+            _ <- advance(row, subject, actor, authenticatedAt, actingFor)
           yield ()
-        else sendBack(row, subject, task, decision, actor)
+        else sendBack(row, subject, task, decision, actor, actingFor)
       details <- details(row.id)
     yield details
 
@@ -240,21 +243,40 @@ final class ApprovalWorkflow(
       )
       _       <- ZIO.when(eligible.isEmpty)(notifyMissing(row, subject, task, holders))
       updated <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
-    yield view(row, updated)
+      views   <- views(row, List(updated))
+    yield views.head
 
-  /** Open tasks the user may complete, oldest first. */
+  /** Open tasks the user may complete, oldest first: their own and, during an active deputyship, those of
+    * their principals (DMS-49) with `actingFor` set to the principal.
+    */
   def myTasks(user: UserId): IO[WorkflowError, List[WorkflowTask]] =
     for
-      tasks <- sql(WorkflowStore.openTasksOf(user))
-      cases <- ZIO.foreach(tasks.map(_.caseId).distinct)(id => caseRow(id).map(id -> _))
-      byId = cases.toMap
-    yield tasks.map(t => view(byId(t.caseId), t))
+      now       <- Clock.instant
+      direct    <- sql(WorkflowStore.openTasksOf(user))
+      standing  <- sql(DeputyStore.activeForDeputy(user, now))
+      forwarded <-
+        if standing.isEmpty then ZIO.succeed(Nil)
+        else
+          sql(WorkflowStore.openTasksOfAny(standing.map(_.principal)))
+            .map(_.filterNot(t => direct.exists(_.id == t.id)))
+      all = direct ++ forwarded
+      perCase <- ZIO.foreach(all.map(_.caseId).distinct)(id =>
+        caseRow(id).flatMap(row => views(row, all.filter(_.caseId == id)))
+      )
+    yield perCase.flatten
+      .flatMap(t =>
+        if t.candidates.contains(user) then Some(t)
+        else t.deputies.find(_.deputy == user).map(d => t.copy(actingFor = Some(d.principal)))
+      )
+      .sortBy(t => (t.createdAt, t.id))
 
+  /** A task with the deputies who may currently complete it besides its candidates (DMS-49). */
   def task(taskId: String): IO[WorkflowError, WorkflowTask] =
     for
-      task <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
-      row  <- caseRow(task.caseId)
-    yield view(row, task)
+      task  <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
+      row   <- caseRow(task.caseId)
+      views <- views(row, List(task))
+    yield views.head
 
   /** The cases of all versions of a document, oldest first. */
   def cases(documentId: DocumentId): IO[WorkflowError, List[CaseDetails]] =
@@ -411,7 +433,8 @@ final class ApprovalWorkflow(
       row: CaseRow,
       subject: ReviewSubject,
       actor: UserId,
-      authenticatedAt: Option[Instant]
+      authenticatedAt: Option[Instant],
+      actingFor: Option[UserId] = None
   ): IO[WorkflowError, Unit] =
     val definition = WorkflowStore.parse(row.definition)
     for
@@ -430,7 +453,7 @@ final class ApprovalWorkflow(
         createTask(row, definition, subject, id, key)
       )
       _ <- active.headOption match
-        case None           => approve(row, subject, actor, authenticatedAt)
+        case None           => approve(row, subject, actor, authenticatedAt, actingFor)
         case Some((_, key)) =>
           for
             step <- stepOf(definition, key)
@@ -514,7 +537,8 @@ final class ApprovalWorkflow(
       subject: ReviewSubject,
       task: TaskRow,
       decision: VoteDecision,
-      actor: UserId
+      actor: UserId,
+      actingFor: Option[UserId]
   ): IO[WorkflowError, Unit] =
     for
       event    <- ZIO.fromEither(Rules.returnEvent(subject.status))
@@ -545,6 +569,8 @@ final class ApprovalWorkflow(
         "version"    -> Json.Str(subject.versionLabel),
         "step"       -> Json.Str(task.stepKey),
         "decision"   -> Json.Str(decision.toString),
+        "returnedBy" -> Json.Str(actor.value),
+        "actingFor"  -> optional(actingFor),
         "recipients" -> Json.Arr(
           (subject.author :: subject.owner.toList).distinct.map(u => Json.Str(u.value))*
         )
@@ -552,7 +578,7 @@ final class ApprovalWorkflow(
       _ <- Outbox
         .publish("workflow", row.id, "workflow.returned", Jsonb(payload.toJson))
         .mapError(WorkflowError.Database(_))
-      _ <- record(actor, "workflow.returned", target(subject), payload, None)
+      _ <- record(actor, "workflow.returned", target(subject), payload, None, onBehalfOf = actingFor)
     yield ()
 
   /** The last step is done: the archive rendition is requested (DMS-44, ADR 0025). The version stays in
@@ -562,7 +588,8 @@ final class ApprovalWorkflow(
       row: CaseRow,
       subject: ReviewSubject,
       actor: UserId,
-      authenticatedAt: Option[Instant]
+      authenticatedAt: Option[Instant],
+      actingFor: Option[UserId]
   ): IO[WorkflowError, Unit] =
     for
       authTime <- ZIO.fromOption(authenticatedAt).orElseFail(WorkflowError.ReauthenticationRequired)
@@ -571,7 +598,7 @@ final class ApprovalWorkflow(
         ZIO.fail(WorkflowError.Conflict("the content changed during the review"))
       )
       now <- Clock.instant
-      _   <- rendition.request(row.id, current, actor, now, authTime)
+      _   <- rendition.request(row.id, current, actor, now, authTime, actingFor)
       _   <- sql(
         WorkflowStore.updateCase(
           row.copy(status = CaseStatus.Rendering.toString, processInstanceId = None, currentStep = None)
@@ -582,9 +609,17 @@ final class ApprovalWorkflow(
         "documentId"    -> Json.Str(subject.documentId.value.toString),
         "versionId"     -> Json.Str(row.versionId.toString),
         "contentSha256" -> Json.Str(row.contentSha256),
-        "authTime"      -> Json.Str(authTime.toString)
+        "authTime"      -> Json.Str(authTime.toString),
+        "actingFor"     -> optional(actingFor)
       )
-      _ <- record(actor, "workflow.rendition-requested", target(current), payload, None)
+      _ <- record(
+        actor,
+        "workflow.rendition-requested",
+        target(current),
+        payload,
+        None,
+        onBehalfOf = actingFor
+      )
     yield ()
 
   /** Completes the approval of a case in `Rendering` once its archive rendition is attached (called by the
@@ -614,13 +649,14 @@ final class ApprovalWorkflow(
   private def finishApproval(row: CaseRow, approver: UserId, authTime: Instant): IO[WorkflowError, Unit] =
     for
       votes <- sql(WorkflowStore.votesOfCase(row.id))
-      _     <- ZIO.unless(
-        votes.exists(v =>
-          v.voter == approver && v.round == row.round && v.decision.approves && v.invalidatedAt.isEmpty
-        )
-      )(
+      approving = votes.filter(v =>
+        v.voter == approver && v.round == row.round && v.decision.approves && v.invalidatedAt.isEmpty
+      )
+      _ <- ZIO.when(approving.isEmpty)(
         ZIO.fail(WorkflowError.Conflict(s"${approver.value} did not approve round ${row.round} of this case"))
       )
+      // The last approving vote completed the case; a deputy approves on behalf of its principal (DMS-49).
+      actingFor = approving.lastOption.flatMap(_.actingFor)
       subject <- documents.subject(DocumentId(row.documentId), row.versionId)
       _       <- ZIO.unless(subject.contentSha256 == row.contentSha256)(
         ZIO.fail(WorkflowError.Conflict("the content changed during the review"))
@@ -640,7 +676,8 @@ final class ApprovalWorkflow(
         row.contentSha256,
         approver,
         authTime,
-        now
+        now,
+        actingFor
       )
       _ <- sql {
         WorkflowStore.insertApproval(approval, subject.author)
@@ -652,31 +689,77 @@ final class ApprovalWorkflow(
         "versionId"     -> Json.Str(row.versionId.toString),
         "version"       -> Json.Str(approved.versionLabel),
         "contentSha256" -> Json.Str(row.contentSha256),
-        "authTime"      -> Json.Str(authTime.toString)
+        "authTime"      -> Json.Str(authTime.toString),
+        "approvedBy"    -> Json.Str(approver.value),
+        "actingFor"     -> optional(actingFor)
       )
       _ <- Outbox
         .publish("workflow", row.id, "workflow.approved", Jsonb(payload.toJson))
         .mapError(WorkflowError.Database(_))
-      _ <- record(approver, "workflow.approved", target(approved), payload, None)
+      _ <- record(approver, "workflow.approved", target(approved), payload, None, onBehalfOf = actingFor)
     yield ()
 
-  private def checkParticipant(row: CaseRow, task: TaskRow, actor: UserId): IO[WorkflowError, Unit] =
+  /** Whether `actor` may vote on the task: as a candidate (`None`) or as the deputy of a candidate (the
+    * candidate they act for, DMS-49).
+    */
+  private def participation(row: CaseRow, task: TaskRow, actor: UserId): IO[WorkflowError, Option[UserId]] =
     if task.status != "Open" then ZIO.fail(WorkflowError.Conflict(s"task ${task.id} is ${task.status}"))
     else if row.fourEyes && UserId(row.authorId) == actor then
       ZIO.fail(
         WorkflowError.Forbidden("four-eyes rule: the author cannot review or approve their own version")
       )
-    else if !task.candidateList.contains(actor) then
-      ZIO.fail(WorkflowError.Forbidden("you are not a participant of this task"))
-    else ZIO.unit
+    else if task.candidateList.contains(actor) then ZIO.none
+    else
+      views(row, List(task)).flatMap(
+        _.flatMap(_.deputies).find(_.deputy == actor) match
+          case Some(d) => ZIO.some(d.principal)
+          case None    => ZIO.fail(WorkflowError.Forbidden("you are not a participant of this task"))
+      )
+
+  /** Views of tasks of one case, open tasks with the deputies who may complete them now (DMS-49): deputies of
+    * candidates with an active deputyship for the lane's role and the document's class who still hold the
+    * role themselves, see [[Rules.taskDeputies]]. Evaluated at read time, so tasks become available to
+    * deputies when the period starts and are the candidates' alone again when it ends.
+    */
+  private def views(row: CaseRow, tasks: List[TaskRow]): IO[WorkflowError, List[WorkflowTask]] =
+    val open       = tasks.filter(t => t.status == TaskStatus.Open.toString)
+    val principals = open.flatMap(_.candidateList).distinct
+    for
+      now         <- Clock.instant
+      deputyships <-
+        if principals.isEmpty then ZIO.succeed(Nil)
+        else sql(DeputyStore.activeForPrincipals(principals, now))
+      deputies <-
+        if deputyships.isEmpty then ZIO.succeed(Map.empty[String, List[TaskDeputy]])
+        else
+          for
+            subject     <- documents.subject(DocumentId(row.documentId), row.versionId)
+            deputyRoles <- ZIO
+              .foreach(deputyships.map(_.deputy).distinct)(d =>
+                directory.heldRoles(d).map(held => d -> held.filter(_.isActiveAt(now)).map(_.role).toSet)
+              )
+              .map(_.toMap)
+          yield open.map { t =>
+            t.id -> Rules.taskDeputies(
+              t.role,
+              t.candidateList,
+              subject.author,
+              subject.classPath,
+              deputyships,
+              deputyRoles,
+              now
+            )
+          }.toMap
+    yield tasks.map(t => view(row, t).copy(deputies = deputies.getOrElse(t.id, Nil)))
 
   private def details(caseId: UUID): IO[WorkflowError, CaseDetails] =
     for
       row      <- caseRow(caseId)
       tasks    <- sql(WorkflowStore.tasksOfCase(caseId))
+      views    <- views(row, tasks)
       votes    <- sql(WorkflowStore.votesOfCase(caseId))
       approval <- sql(WorkflowStore.approvalOfCase(caseId))
-    yield CaseDetails(row.toCase, tasks.map(view(row, _)), votes, approval)
+    yield CaseDetails(row.toCase, views, votes, approval)
 
   private def caseRow(id: UUID): IO[WorkflowError, CaseRow] =
     sql(WorkflowStore.caseById(id)).someOrFail(WorkflowError.NotFound(s"workflow case $id does not exist"))
@@ -687,12 +770,17 @@ final class ApprovalWorkflow(
       target: AuditObject,
       details: Json.Obj,
       reason: Option[String],
-      technical: Boolean = false
+      technical: Boolean = false,
+      onBehalfOf: Option[UserId] = None
   ): IO[WorkflowError, Unit] =
     audit
       .record(
         AuditEvent(
-          Actor(actor.value, if technical then ActorKind.Technical else ActorKind.Person),
+          Actor(
+            actor.value,
+            if technical then ActorKind.Technical else ActorKind.Person,
+            onBehalfOf.map(_.value)
+          ),
           action,
           target,
           if technical then Channel.Automation else Channel.Api,
@@ -713,6 +801,8 @@ object ApprovalWorkflow:
   private def sql[A](f: DbTx ?=> A): IO[WorkflowError, A] = Db.sql(f).mapError(WorkflowError.Database(_))
 
   private def taskNotFound(id: String) = WorkflowError.NotFound(s"task $id does not exist")
+
+  private def optional(user: Option[UserId]): Json = user.fold(Json.Null)(u => Json.Str(u.value))
 
   private def target(s: ReviewSubject): AuditObject =
     AuditObject("document", Some(s.documentId.value), Some(s.versionLabel))

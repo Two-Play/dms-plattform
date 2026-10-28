@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted |
+| Status | Accepted (addendum DMS-49) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -48,3 +48,7 @@ Authorization is a pure Scala function `Policy.decide(subject, action, resource,
 ## Reversibility
 
 **medium**: Callers only use `Authorizer.check(subject, action, resource)`. Replacing the decision engine changes one module; the assignment table could be synced to an external engine.
+
+## Addendum (DMS-49, 2026-10-28): acting on behalf of a principal
+
+A deputy (ADR 0028) acts within the principal's scope on the principal's workflow tasks. `Policy` stays unchanged; `Authorizer.onBehalfOf(subject, principal, roles)` returns the deputy's subject extended by the principal's assignments of the task's role. The application uses it only for the document of a task the workflow lists the caller as deputy of (`WorkflowTask.deputies`, during an active deputyship): for the vote and for reading that document. Validity, scope and confidentiality of every assignment are still decided by `Policy`.

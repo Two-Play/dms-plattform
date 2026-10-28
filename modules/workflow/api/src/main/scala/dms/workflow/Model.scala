@@ -78,7 +78,18 @@ enum TaskStatus:
   /** Another lane of the step returned the version. */
   case Cancelled
 
-/** A task of a step lane. `candidates` are the people who may complete it. */
+/** A deputy who may complete a task in place of `principal`, one of its candidates, during an active
+  * deputyship (DMS-49, ADR 0028). Resolved when the task is read, never stored with the task.
+  */
+final case class TaskDeputy(deputy: UserId, principal: UserId)
+
+/** A task of a step lane. `candidates` are the people who may complete it.
+  *
+  * @param deputies
+  *   deputies of candidates who may complete the open task now (DMS-49); empty for tasks that are not open
+  * @param actingFor
+  *   in the task inbox of a deputy: the candidate the caller acts for; empty if the caller is a candidate
+  */
 final case class WorkflowTask(
     id: String,
     caseId: UUID,
@@ -94,7 +105,9 @@ final case class WorkflowTask(
     status: TaskStatus,
     createdAt: Instant,
     completedAt: Option[Instant],
-    completedBy: Option[UserId]
+    completedBy: Option[UserId],
+    deputies: List[TaskDeputy] = Nil,
+    actingFor: Option[UserId] = None
 )
 
 /** A cast vote, bound to the version and the SHA-256 of its content. It becomes invalid when the content
@@ -102,6 +115,8 @@ final case class WorkflowTask(
   *
   * @param authenticatedAt
   *   the voter's sign-in time from the token (`auth_time`); checked for approval steps
+  * @param actingFor
+  *   the candidate the voter stood in for as deputy (DMS-49): "voter on behalf of actingFor"
   */
 final case class Vote(
     id: UUID,
@@ -117,10 +132,13 @@ final case class Vote(
     contentSha256: String,
     authenticatedAt: Option[Instant],
     votedAt: Instant,
-    invalidatedAt: Option[Instant]
+    invalidatedAt: Option[Instant],
+    actingFor: Option[UserId] = None
 )
 
-/** The approval of a version: who approved which exact version and content, after which sign-in. */
+/** The approval of a version: who approved which exact version and content, after which sign-in; `actingFor`
+  * names the approver the deputy `approvedBy` stood in for (DMS-49).
+  */
 final case class Approval(
     id: UUID,
     caseId: UUID,
@@ -129,7 +147,8 @@ final case class Approval(
     contentSha256: String,
     approvedBy: UserId,
     authenticatedAt: Instant,
-    approvedAt: Instant
+    approvedAt: Instant,
+    actingFor: Option[UserId] = None
 )
 
 /** A case with its tasks, votes and approval. */

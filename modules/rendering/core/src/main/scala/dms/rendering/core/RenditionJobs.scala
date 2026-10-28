@@ -194,7 +194,8 @@ object RenditionJobs:
       approver: String,
       approvedAt: Instant,
       authenticatedAt: Instant,
-      recipients: List[String]
+      recipients: List[String],
+      onBehalfOf: Option[String]
   ) derives JsonCodec:
     def toRequest: RenditionRequest =
       RenditionRequest(
@@ -204,7 +205,8 @@ object RenditionJobs:
         UserId(approver),
         approvedAt,
         authenticatedAt,
-        recipients.map(UserId(_))
+        recipients.map(UserId(_)),
+        onBehalfOf.map(UserId(_))
       )
 
   private object Payload:
@@ -216,5 +218,6 @@ object RenditionJobs:
         r.approver.value,
         r.approvedAt,
         r.authenticatedAt,
-        r.recipients.map(_.value)
+        r.recipients.map(_.value),
+        r.onBehalfOf.map(_.value)
       )

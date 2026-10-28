@@ -26,7 +26,8 @@ object WorkflowRendition extends ApprovalRendition:
       subject: ReviewSubject,
       approver: UserId,
       approvedAt: Instant,
-      authenticatedAt: Instant
+      authenticatedAt: Instant,
+      onBehalfOf: Option[UserId]
   ): IO[WorkflowError, Unit] =
     RenditionJobs
       .enqueue(
@@ -37,7 +38,8 @@ object WorkflowRendition extends ApprovalRendition:
           approver,
           approvedAt,
           authenticatedAt,
-          List(subject.owner.getOrElse(subject.author))
+          List(subject.owner.getOrElse(subject.author)),
+          onBehalfOf
         )
       )
       .mapError(WorkflowError.Database(_))
@@ -117,7 +119,8 @@ final class DocumentRenditions(
         validFrom = values.get("validFrom").collect { case MetadataValue.Date(d) => d },
         approvedAt = request.approvedAt,
         approvedBy = request.approver.value,
-        language = lang.code
+        language = lang.code,
+        onBehalfOf = request.onBehalfOf.map(_.value)
       )
     )
 
