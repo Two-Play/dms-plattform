@@ -36,7 +36,8 @@ done
 step() { printf '\n==> %s\n' "$*"; }
 need() { command -v "$1" > /dev/null || { echo "Missing required command: $1" >&2; exit 1; }; }
 healthy() { curl -fsS --max-time 2 "http://localhost:$1/health" 2> /dev/null | grep -q '"status":"ok"'; }
-port_in_use() { (exec 3<> "/dev/tcp/127.0.0.1/$1") 2> /dev/null; }
+# Dev servers may listen on IPv4 or only on IPv6 localhost ([::1]), so try both.
+port_in_use() { (exec 3<> "/dev/tcp/127.0.0.1/$1") 2> /dev/null || (exec 3<> "/dev/tcp/::1/$1") 2> /dev/null; }
 
 java21() {
   if command -v cs > /dev/null; then
@@ -176,8 +177,11 @@ else
       setsid nohup npm run dev -- --port "$FRONTEND_PORT" --strictPort > "$LOGS/frontend.log" 2>&1 < /dev/null &
       echo $! > "$LOGS/frontend.pid"
     )
-    wait_for "the frontend on port $FRONTEND_PORT" 60 port_in_use "$FRONTEND_PORT" \
-      || { tail -n 30 "$LOGS/frontend.log" >&2; exit 1; }
+    # The backend keeps running if the frontend does not come up; only show the frontend log.
+    if ! wait_for "the frontend on port $FRONTEND_PORT" 60 port_in_use "$FRONTEND_PORT"; then
+      tail -n 30 "$LOGS/frontend.log" >&2
+      echo "The frontend did not start; the backend is still running. See $LOGS/frontend.log." >&2
+    fi
   fi
   step "Done"
   echo "  Web UI:   http://localhost:$FRONTEND_PORT"
