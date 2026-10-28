@@ -110,6 +110,16 @@ object Policy:
       case EditTemplates =>
         grantIf(has(TemplateDesigner), "editing templates requires the template designer role")
 
+      case ReleaseTemplate =>
+        if isAuthor || resource.contributors.contains(subject.userId) then
+          Decision.Deny(
+            "segregation of duties: a template designer cannot release a version they created or changed"
+          )
+        else grantIf(has(TemplateDesigner), "releasing templates requires the template designer role")
+
+      case ReadTemplateCatalog =>
+        grantIf(roles.exists(_ != TenantAdmin), "the template catalog requires a business role")
+
       case ManageRetention =>
         grantIf(has(RecordsManager), "retention and legal holds require the records manager role")
 

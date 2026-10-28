@@ -47,7 +47,7 @@ lazy val authz = module("authz", "modules/authz")
   .settings(libraryDependencies ++= Dependencies.integrationTest ++ Dependencies.logging.map(_ % Test))
 
 lazy val templatesApi      = apiModule("templates")
-lazy val templatesCore     = coreModule("templates").dependsOn(templatesApi)
+lazy val templatesCore     = templatesCoreModule.dependsOn(templatesApi, documentsApi, auditApi)
 lazy val documentsApi      = apiModule("documents")
 lazy val documentsCore     = documentsCoreModule.dependsOn(documentsApi, templatesApi, auditApi)
 lazy val workflowApi       = apiModule("workflow")
@@ -66,6 +66,13 @@ lazy val notificationsCore = coreModule("notifications").dependsOn(notifications
 /** Document classes and metadata profiles (ADR 0019): JSON columns; integration tests against PostgreSQL. */
 def documentsCoreModule: Project = coreModule("documents").settings(
   libraryDependencies ++= Dependencies.json ++ Dependencies.integrationTest ++
+    Dependencies.logging.map(_ % Test)
+)
+
+/** Templates (ADR 0007, 0020): CEL expressions, JSON content in jsonb; integration tests against PostgreSQL.
+  */
+def templatesCoreModule: Project = coreModule("templates").settings(
+  libraryDependencies ++= Dependencies.cel ++ Dependencies.json ++ Dependencies.integrationTest ++
     Dependencies.logging.map(_ % Test)
 )
 
