@@ -234,6 +234,10 @@ function InboxRow({
             {kindLabels[item.kind]}
           </Badge>
           {overdue && <Badge variant="destructive">Overdue</Badge>}
+          {(item.kind === 'Review' || item.kind === 'Approval') && item.task.actingFor && (
+            // Forwarded by an active deputyship (DMS-49, DMS-99); user id until display names exist.
+            <Badge variant="outline">On behalf of {item.task.actingFor}</Badge>
+          )}
           <Link
             to="/documents/$documentId"
             params={{ documentId: item.documentId }}
