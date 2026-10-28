@@ -8,7 +8,12 @@ import sttp.tapir.ztapir.*
 import zio.ZIO
 import zio.json.JsonCodec
 
-final case class ApiError(code: String, message: String) derives JsonCodec, Schema
+/** Error body of every endpoint. `issues` lists field problems for validation errors, e.g. the required
+  * fields that block a submission.
+  */
+final case class ApiError(code: String, message: String, issues: Option[List[IssueView]] = None)
+    derives JsonCodec,
+      Schema
 
 final case class Me(userId: String, tenantId: String, roles: List[String]) derives JsonCodec, Schema
 

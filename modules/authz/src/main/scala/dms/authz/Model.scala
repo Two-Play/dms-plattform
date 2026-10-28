@@ -14,9 +14,14 @@ enum Role:
   * `ReleaseTemplate` and `ReadTemplateCatalog` refine the matrix row "Edit templates" (business concept 4.1):
   * releasing a template version needs a second template designer, and every business role may see the catalog
   * of released templates.
+  *
+  * `ReadDocument` covers reading a document version in any status, following the visibility column of the
+  * status model (business concept 5.1): drafts for authors and owners, review and approval additionally for
+  * the assigned participants, published versions like `ReadPublished`.
   */
 enum Action:
-  case ReadPublished, CreateFromTemplate, EditDraft, CommentInReview, Approve, Publish, Withdraw,
+  case ReadPublished, ReadDocument, CreateFromTemplate, EditDraft, CommentInReview, Approve, Publish,
+    Withdraw,
     EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
     ManageRetention, Destroy, ViewHistory, Configure
 

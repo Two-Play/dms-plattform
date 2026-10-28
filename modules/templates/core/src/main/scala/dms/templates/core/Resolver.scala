@@ -41,11 +41,28 @@ object Resolver:
       values: Map[String, FieldValue],
       language: Language = Language.default
   ): Either[ResolveError, Resolution] =
+    running(template, values, language)(_.resolution())
+
+  /** Evaluates only the computed fields, e.g. to store their values with a document (business concept 4.3).
+    * Returns the value of every computed field by key.
+    */
+  def computedValues(
+      template: CompiledTemplate,
+      values: Map[String, FieldValue]
+  ): Either[ResolveError, Map[String, FieldValue]] =
+    running(template, values, Language.default) { run =>
+      val scope = run.scope()
+      template.computed.flatMap((field, _) => scope.get(field.key).flatMap(_.value).map(field.key -> _)).toMap
+    }
+
+  private def running[A](template: CompiledTemplate, values: Map[String, FieldValue], language: Language)(
+      f: Run => A
+  ): Either[ResolveError, A] =
     val problems = checkValues(template.schema, values)
     if problems.nonEmpty then Left(ResolveError.InvalidValues(problems))
     else
       val run = Run(template, values, language)
-      try Right(run.resolution())
+      try Right(f(run))
       catch
         case Failure(error)        => Left(error)
         case e: Cel.BudgetExceeded => Left(ResolveError.LimitExceeded(run.currentLocation, e.message))
@@ -70,7 +87,8 @@ object Resolver:
     private val branches                  = mutable.LinkedHashMap.empty[Location, (String, Set[Boolean])]
     var currentLocation: Option[Location] = None
 
-    def resolution(): Resolution =
+    /** The field values and, evaluated in order, the computed fields. */
+    def scope(): Map[String, Entry] =
       val fields = template.schema.variables.map { v =>
         val value = values.get(v.name)
         v.name -> Entry(value, value.fold(Cel.zero(v.valueType))(Cel.toCel), Some(v.valueType), v.required)
@@ -81,7 +99,7 @@ object Resolver:
         None,
         required = false
       )
-      val scope = template.computed.foldLeft(fields + present) { case (scope, (field, expression)) =>
+      template.computed.foldLeft(fields + present) { case (scope, (field, expression)) =>
         val result = evaluate(expression, scope)
         val value  = Cel.fromCel(result).fold(m => fail(expression.location, m), identity)
         scope + (field.key -> Entry(
@@ -91,6 +109,9 @@ object Resolver:
           false
         ))
       }
+
+    def resolution(): Resolution =
+      val scope    = this.scope()
       val sections = template.content.sections.map { s =>
         ResolvedSection(s.id, s.title, s.locked, blocks(s.blocks, Some(s.id), "/blocks", scope))
       }

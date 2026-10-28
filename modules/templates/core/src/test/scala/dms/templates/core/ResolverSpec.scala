@@ -71,6 +71,20 @@ object ResolverSpec extends ZIOSpecDefault:
         text(r).contains("(long service name)")
       )
     },
+    test("computed values can be evaluated on their own, e.g. to store them with a document") {
+      val computed = Resolver.computedValues(Fixtures.compiled(), Fixtures.values)
+      val failing  = Resolver.computedValues(
+        Fixtures.compiled(
+          content.copy(computed = content.computed :+ ComputedField("ratio", "1 / int(termMonths)"))
+        ),
+        Fixtures.values + ("termMonths" -> FieldValue.Number(0))
+      )
+      assertTrue(
+        computed == Right(Map("totalValue" -> FieldValue.Number(BigDecimal("29628.0")))),
+        failing.left.exists(_.isInstanceOf[ResolveError.Evaluation]),
+        Resolver.computedValues(Fixtures.compiled(), Map("clientName" -> FieldValue.Number(1))).isLeft
+      )
+    },
     test("formats follow the document language") {
       val r = resolve(language = Language.De)
       assertTrue(

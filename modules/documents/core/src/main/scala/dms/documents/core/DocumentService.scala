@@ -1,0 +1,602 @@
+package dms.documents.core
+
+import com.augustnagro.magnum.DbTx
+import dms.audit.*
+import dms.db.queue.Outbox
+import dms.db.{Db, DbError, Jsonb}
+import dms.documents.*
+import dms.documents.core.MetadataJson.given
+import dms.documents.metadata.*
+import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
+import dms.templates.{EditRules, TemplateContent, TemplateStatus, TemplateVersion}
+import zio.*
+import zio.json.*
+import zio.json.ast.Json
+
+import java.util.UUID
+
+enum DocumentError:
+  case NotFound(message: String)
+
+  /** The request is invalid, e.g. a content change that breaks the edit rules of the template. */
+  case Invalid(problems: List[String])
+
+  /** Field values do not fit the class profile. */
+  case InvalidValues(issues: List[FieldIssue])
+
+  /** A status change is blocked because required fields of `target` are missing or values are invalid. */
+  case Incomplete(target: DocumentStatus, issues: List[FieldIssue])
+
+  case Lifecycle(error: LifecycleError)
+
+  /** A concurrent change got there first, or the version is not in a status that allows the change. */
+  case Conflict(message: String)
+
+  case Database(error: DbError)
+
+  def describe: String = this match
+    case NotFound(m)                => m
+    case Invalid(p)                 => p.mkString("; ")
+    case InvalidValues(i)           => i.map(i => s"${i.field}: ${i.kind.message}").mkString("; ")
+    case Incomplete(target, issues) =>
+      s"the document cannot move to $target: " + issues
+        .map(i => s"${i.field}: ${i.kind.message}")
+        .mkString("; ")
+    case Lifecycle(LifecycleError.TransitionNotAllowed(from, event)) =>
+      s"$event is not possible in status $from"
+    case Lifecycle(LifecycleError.LegalHoldActive)                => "a legal hold is active"
+    case Lifecycle(LifecycleError.SegregationOfDutiesViolated(_)) =>
+      "segregation of duties: the author of a version cannot approve it"
+    case Conflict(m) => m
+    case Database(e) => s"database error: $e"
+
+/** Access to templates (module `templates`) for documents: the catalog of released versions, the content
+  * check, computed fields and the stored content format. Implemented by the application, which wires the
+  * modules together.
+  */
+trait TemplateSource extends ContentCodec:
+  /** A template version; fails with `NotFound` if it does not exist. */
+  def version(id: TemplateId, version: Int): IO[DocumentError, TemplateVersion]
+
+  /** Problems of `content` against the class profile the template was designed against, for display. */
+  def check(template: TemplateVersion, content: TemplateContent): IO[DocumentError, List[String]]
+
+  /** The values of the computed fields of `content` for the given field values. */
+  def computed(
+      template: TemplateVersion,
+      content: TemplateContent,
+      values: Map[String, MetadataValue]
+  ): IO[DocumentError, Map[String, MetadataValue]]
+
+/** Request to create a document. `values` are the entered field values with their origin (normally `Manual`;
+  * a business system filling master data uses `System(source)`).
+  */
+final case class NewDocument(
+    templateId: TemplateId,
+    templateVersion: Int,
+    title: String,
+    values: Map[String, FieldEntry]
+)
+
+/** Change of a draft: the entered values replace the previous ones; content, if given, replaces the content.
+  * The title defaults to the current title.
+  */
+final case class DraftChange(
+    title: Option[String],
+    values: Map[String, FieldEntry],
+    content: Option[TemplateContent]
+)
+
+/** A document with all its versions and the effective profile of its class version. */
+final case class DocumentDetails(
+    document: Document,
+    versions: List[DocumentVersion],
+    profile: MetadataProfile
+):
+  def open: Option[DocumentVersion] = versions.find(v => Versioning.isOpen(v.status))
+
+/** Creates documents from released templates and manages their versions (business concept 4.3, 5.1, 5.2).
+  *
+  * Every method must run inside `Db.transact(tenant)`. Field values are validated against the class profile
+  * version, computed fields are evaluated with the template, and the origin of every value is stored. Only
+  * drafts change; status changes follow [[Lifecycle]] and are blocked while required fields of the target
+  * status are missing. Every change is recorded in the audit trail, and creation and status changes are
+  * published to the outbox, both in the same transaction. Authorization is the caller's job.
+  */
+final class DocumentService(audit: AuditTrail, classes: DocumentClassService, templates: TemplateSource):
+  import DocumentService.*
+
+  /** The released template version and the profile of its class version, e.g. to authorize a creation. */
+  def templateContext(id: TemplateId, version: Int): IO[DocumentError, (TemplateVersion, MetadataProfile)] =
+    for
+      template <- released(id, version)
+      profile  <- profile(DocumentClassId(template.documentClassId), template.documentClassVersion)
+    yield (template, profile)
+
+  /** Creates a document with version 1.0 as a draft (working state 1) from a released template version. The
+    * content is the template content; the document is bound to the template version and, through the content,
+    * to the clause versions.
+    */
+  def create(request: NewDocument, actor: UserId): IO[DocumentError, (Document, DocumentVersion)] =
+    for
+      (template, profile) <- templateContext(request.templateId, request.templateVersion)
+      id     = DocumentId.random()
+      number = Versioning.first
+      values <- prepare(profile, template, template.content, request.values, request.title, id, number)
+      now    <- Clock.instant
+      document = Document(
+        id,
+        profile.classId,
+        profile.version,
+        request.title.trim,
+        ownerOf(values),
+        actor,
+        template.templateId,
+        template.version,
+        now
+      )
+      version = DocumentVersion(
+        UUID.randomUUID(),
+        id,
+        number,
+        1,
+        DocumentStatus.Draft,
+        ChangeKind.Major,
+        None,
+        Versioning.scopeKey(metadataOf(values)),
+        profile.version,
+        template.templateId,
+        template.version,
+        template.content,
+        values,
+        None,
+        None,
+        actor,
+        now,
+        now,
+        None,
+        None
+      )
+      _ <- sql {
+        DocumentStore.insertDocument(document)
+        DocumentStore.insertVersion(version, templates)
+        DocumentStore.insertWorkingState(version, actor, templates)
+      }
+      _ <- record(
+        actor,
+        "document.created",
+        version,
+        Json.Obj(
+          "title"           -> Json.Str(document.title),
+          "templateId"      -> Json.Str(template.templateId.value.toString),
+          "templateVersion" -> Json.Num(template.version),
+          "classId"         -> Json.Str(profile.classId.value.toString),
+          "classVersion"    -> Json.Num(profile.version),
+          "origins"         -> origins(values)
+        )
+      )
+      _ <- publish("document.created", document, version)
+    yield (document, version)
+
+  /** A document with all versions, oldest first. */
+  def get(id: DocumentId): IO[DocumentError, DocumentDetails] =
+    for
+      document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
+      versions <- sql(DocumentStore.versions(id, templates))
+      profile  <- profile(document.classId, document.classVersion)
+    yield DocumentDetails(document, versions, profile)
+
+  /** Saves a changed draft as its next working state. Locked sections can only keep the template's text (edit
+    * rules of the template); the computed fields are those of the template.
+    */
+  def updateDraft(id: DocumentId, change: DraftChange, actor: UserId): IO[DocumentError, DocumentVersion] =
+    for
+      document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
+      current  <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
+      _        <- ZIO.unless(Versioning.isEditable(current.status))(
+        ZIO.fail(
+          DocumentError.Conflict(s"version ${current.label} is ${current.status}; only drafts can be changed")
+        )
+      )
+      template <- templates.version(current.templateId, current.templateVersion)
+      profile  <- profile(document.classId, current.classVersion)
+      content = change.content.getOrElse(current.content)
+      _ <- ZIO.when(change.content.exists(_ != current.content))(checkContent(template, content))
+      title = change.title.getOrElse(titleOf(current).getOrElse(document.title))
+      values <- prepare(profile, template, content, change.values, title, id, current.number)
+      next = current.copy(
+        workingState = current.workingState + 1,
+        content = content,
+        values = values,
+        scope = Versioning.scopeKey(metadataOf(values)),
+        rendition = None
+      )
+      _ <- sql(DocumentStore.updateDraft(next, templates)).filterOrFail(identity)(changedConcurrently(next))
+      _ <- sql {
+        DocumentStore.insertWorkingState(next, actor, templates)
+        DocumentStore.updateDocument(id, title.trim, ownerOf(values))
+      }
+      _ <- record(
+        actor,
+        "document.draft-changed",
+        next,
+        Json.Obj(
+          "fields"         -> fieldChanges(current.values, values),
+          "contentChanged" -> Json.Bool(content != current.content)
+        )
+      )
+    yield next
+
+  /** Submits the open draft for review. Blocked while fields required in review are missing. */
+  def submit(id: DocumentId, actor: UserId): IO[DocumentError, DocumentVersion] =
+    for
+      document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
+      current  <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
+      updated  <- transition(document, current, LifecycleEvent.Submit, actor)
+    yield updated
+
+  /** Applies a lifecycle event to a version (review, approval, publication, ...). Approval needs a person
+    * other than the author and freezes the version with a metadata snapshot; publication supersedes the valid
+    * version of the same scope.
+    */
+  def changeStatus(
+      versionId: UUID,
+      event: LifecycleEvent,
+      actor: UserId
+  ): IO[DocumentError, DocumentVersion] =
+    for
+      current  <- sql(DocumentStore.lockVersion(versionId, templates)).someOrFail(versionNotFound(versionId))
+      document <- sql(DocumentStore.document(current.documentId))
+        .someOrFail(documentNotFound(current.documentId))
+      updated <- transition(document, current, event, actor)
+    yield updated
+
+  /** Records the rendition of an open version (rendering, ADR 0008). It is frozen with the version on
+    * approval.
+    */
+  def attachRendition(
+      versionId: UUID,
+      rendition: Rendition,
+      actor: UserId
+  ): IO[DocumentError, DocumentVersion] =
+    for
+      _ <- ZIO.unless(Sha256.matches(rendition.sha256) && rendition.objectKey.trim.nonEmpty)(
+        ZIO.fail(DocumentError.Invalid(List("a rendition needs an object key and a lowercase hex SHA-256")))
+      )
+      current <- sql(DocumentStore.lockVersion(versionId, templates)).someOrFail(versionNotFound(versionId))
+      _       <- sql(DocumentStore.attachRendition(versionId, rendition)).filterOrFail(identity)(
+        DocumentError.Conflict(s"version ${current.label} is ${current.status}; its rendition is frozen")
+      )
+      updated = current.copy(rendition = Some(rendition))
+      _ <- record(
+        actor,
+        "document.rendition-attached",
+        updated,
+        Json.Obj("objectKey" -> Json.Str(rendition.objectKey), "sha256" -> Json.Str(rendition.sha256))
+      )
+    yield updated
+
+  /** Starts the next version of a document from its valid version: a major version for a change of content, a
+    * minor version (with a reason) for an editorial change. A document has at most one open version.
+    */
+  def newVersion(
+      id: DocumentId,
+      kind: ChangeKind,
+      reason: Option[String],
+      actor: UserId
+  ): IO[DocumentError, DocumentVersion] =
+    for
+      document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
+      versions <- sql(DocumentStore.versions(id, templates))
+      _        <- ZIO.foreachDiscard(versions.find(v => Versioning.isOpen(v.status)).toList)(open =>
+        ZIO.fail(DocumentError.Conflict(s"version ${open.label} is still ${open.status}; finish it first"))
+      )
+      base <- ZIO
+        .fromOption(versions.filter(v => Versioning.isValid(v.status)).maxByOption(_.number))
+        .orElseFail(DocumentError.Conflict("only a document with a valid version can get a new version"))
+      changeReason = reason.map(_.trim).filter(_.nonEmpty)
+      _ <- ZIO.when(kind == ChangeKind.Minor && changeReason.isEmpty)(
+        ZIO.fail(DocumentError.Invalid(List("an editorial (minor) version needs a reason")))
+      )
+      number = Versioning.next(versions.filter(_.releasedAt.isDefined).map(_.number).maxOption, kind)
+      workingState <- sql(DocumentStore.workingStates(id, number)).map(Versioning.nextWorkingState)
+      template     <- templates.version(base.templateId, base.templateVersion)
+      profile      <- profile(document.classId, base.classVersion)
+      now          <- Clock.instant
+      version = base.copy(
+        id = UUID.randomUUID(),
+        number = number,
+        workingState = workingState,
+        status = DocumentStatus.Draft,
+        changeKind = kind,
+        changeReason = changeReason,
+        values = base.values ++ systemValues(id, profile, number, template),
+        metadataSnapshot = None,
+        rendition = None,
+        createdBy = actor,
+        createdAt = now,
+        updatedAt = now,
+        releasedBy = None,
+        releasedAt = None
+      )
+      _ <- sql {
+        DocumentStore.insertVersion(version, templates)
+        DocumentStore.insertWorkingState(version, actor, templates)
+      }.mapError(conflict(s"document ${id.value} was changed concurrently"))
+      _ <- record(
+        actor,
+        "document.version-created",
+        version,
+        Json.Obj(
+          "basedOn"    -> Json.Str(base.label),
+          "changeKind" -> Json.Str(kind.toString),
+          "reason"     -> changeReason.fold(Json.Null)(Json.Str(_))
+        )
+      )
+      _ <- publish("document.version-created", document, version)
+    yield version
+
+  private def released(id: TemplateId, version: Int): IO[DocumentError, TemplateVersion] =
+    templates
+      .version(id, version)
+      .filterOrFail(_.status == TemplateStatus.Released)(
+        DocumentError.Conflict(
+          s"template ${id.value} version $version is not released; documents are created from the template catalog"
+        )
+      )
+
+  private def profile(classId: DocumentClassId, version: Int): IO[DocumentError, MetadataProfile] =
+    classes.profile(classId, Some(version)).mapError {
+      case MetadataError.NotFound(m) => DocumentError.NotFound(m)
+      case MetadataError.Invalid(p)  => DocumentError.Invalid(p)
+      case MetadataError.Conflict(m) => DocumentError.Conflict(m)
+      case MetadataError.Database(e) => DocumentError.Database(e)
+    }
+
+  /** Validates the entered values for a draft and adds the system and computed values. */
+  private def prepare(
+      profile: MetadataProfile,
+      template: TemplateVersion,
+      content: TemplateContent,
+      entered: Map[String, FieldEntry],
+      title: String,
+      id: DocumentId,
+      number: VersionNo
+  ): IO[DocumentError, Map[String, FieldEntry]] =
+    val input  = entered + (TitleField -> FieldEntry(MetadataValue.Text(title.trim), ValueOrigin.Manual))
+    val system = systemValues(id, profile, number, template)
+    val notEnterable = input.toList.sortBy(_._1).collect {
+      case (key, entry) if entry.origin == ValueOrigin.Computed || PlatformFields.contains(key) =>
+        FieldIssue(key, profile.field(key).fold(key)(_.definition.label), IssueKind.NotEditable)
+    }
+    val base   = input ++ system
+    val issues = notEnterable ++ Validation.validate(
+      profile,
+      metadataOf(base) + (StatusField -> MetadataValue.Selection(DocumentStatus.Draft.toString)),
+      DocumentStatus.Draft
+    )
+    for
+      _        <- ZIO.unless(issues.isEmpty)(ZIO.fail(DocumentError.InvalidValues(issues)))
+      computed <- templates.computed(template, content, metadataOf(base))
+    yield base ++ computed.map((k, v) => k -> FieldEntry(v, ValueOrigin.Computed))
+
+  /** Edit rules for a changed content: locked sections keep the template's text (deviation requests are not
+    * stored yet), computed fields stay those of the template, and the content must fit the profile.
+    */
+  private def checkContent(template: TemplateVersion, content: TemplateContent): IO[DocumentError, Unit] =
+    val computed = Option
+      .when(content.computed != template.content.computed)(
+        "computed fields are defined by the template and cannot be changed in a document"
+      )
+      .toList
+    val violations = EditRules.check(template.content, content, requests = Nil).map(_.reason)
+    for
+      _ <- ZIO.unless(computed.isEmpty && violations.isEmpty)(
+        ZIO.fail(DocumentError.Invalid(computed ++ violations))
+      )
+      issues <- templates.check(template, content)
+      _      <- ZIO.unless(issues.isEmpty)(ZIO.fail(DocumentError.Invalid(issues)))
+    yield ()
+
+  private def transition(
+      document: Document,
+      current: DocumentVersion,
+      event: LifecycleEvent,
+      actor: UserId
+  ): IO[DocumentError, DocumentVersion] =
+    for
+      profile <- profile(document.classId, current.classVersion)
+      values = statusMetadata(current)
+      target <- ZIO
+        .fromEither(event match
+          case LifecycleEvent.Approve =>
+            Lifecycle
+              .approve(current.status, current.createdBy, actor)
+              .left
+              .map(TransitionBlocked.NotAllowed(_))
+              .flatMap { target =>
+                val issues = Validation.validate(profile, values, target)
+                Either.cond(issues.isEmpty, target, TransitionBlocked.Incomplete(target, issues))
+              }
+          case other => Validation.checkTransition(profile, values, current.status, other))
+        .mapError {
+          case TransitionBlocked.NotAllowed(e)             => DocumentError.Lifecycle(e)
+          case TransitionBlocked.Incomplete(target, issue) => DocumentError.Incomplete(target, issue)
+        }
+      now <- Clock.instant
+      snapshot = Option.when(target == DocumentStatus.Approved)(
+        MetadataSnapshot(
+          metadataOf(current.values) ++ values + (StatusField -> MetadataValue.Selection(target.toString)),
+          now
+        )
+      )
+      _ <- ZIO.when(target == DocumentStatus.Published)(supersedeValid(document, current, actor))
+      _ <- sql(DocumentStore.changeStatus(current.id, current.status, target, actor, now, snapshot))
+        .filterOrFail(identity)(changedConcurrently(current))
+        .mapError(conflict(s"document ${document.id.value} already has a valid version in this scope"))
+      updated = current.copy(
+        status = target,
+        updatedAt = now,
+        metadataSnapshot = snapshot.orElse(current.metadataSnapshot),
+        releasedBy = if snapshot.isDefined then Some(actor) else current.releasedBy,
+        releasedAt = if snapshot.isDefined then Some(now) else current.releasedAt
+      )
+      details = Json.Obj(
+        "event" -> Json.Str(event.toString),
+        "from"  -> Json.Str(current.status.toString),
+        "to"    -> Json.Str(target.toString)
+      )
+      _ <- record(actor, statusAction(event), updated, details)
+      _ <- publish(
+        if event == LifecycleEvent.Submit then "document.submitted" else "document.status-changed",
+        document,
+        updated
+      )
+    yield updated
+
+  /** Publication replaces the valid version of the same scope (business concept 5.2). */
+  private def supersedeValid(
+      document: Document,
+      publishing: DocumentVersion,
+      actor: UserId
+  ): IO[DocumentError, Unit] =
+    for
+      versions <- sql(DocumentStore.versions(document.id, templates))
+      _        <- ZIO.foreachDiscard(
+        versions.filter(v =>
+          v.id != publishing.id && Versioning.isValid(v.status) && v.scope == publishing.scope
+        )
+      )(valid =>
+        sql(DocumentStore.lockVersion(valid.id, templates)) *> transition(
+          document,
+          valid,
+          LifecycleEvent.Supersede,
+          actor
+        )
+      )
+    yield ()
+
+  private def record(actor: UserId, action: String, v: DocumentVersion, details: Json.Obj) =
+    audit
+      .record(
+        AuditEvent(
+          Actor(actor.value, ActorKind.Person),
+          action,
+          AuditObject("document", Some(v.documentId.value), Some(v.label)),
+          Channel.Api,
+          Jsonb(details.merge(Json.Obj("versionId" -> Json.Str(v.id.toString))).toJson)
+        )
+      )
+      .mapError(DocumentError.Database(_))
+      .unit
+
+  private def publish(eventType: String, document: Document, v: DocumentVersion) =
+    val payload = Json.Obj(
+      "documentId"      -> Json.Str(document.id.value.toString),
+      "versionId"       -> Json.Str(v.id.toString),
+      "version"         -> Json.Str(v.label),
+      "status"          -> Json.Str(v.status.toString),
+      "classId"         -> Json.Str(document.classId.value.toString),
+      "classVersion"    -> Json.Num(v.classVersion),
+      "templateId"      -> Json.Str(v.templateId.value.toString),
+      "templateVersion" -> Json.Num(v.templateVersion)
+    )
+    Outbox
+      .publish("document", document.id.value, eventType, Jsonb(payload.toJson))
+      .mapError(DocumentError.Database(_))
+      .unit
+
+object DocumentService:
+  val layer: URLayer[AuditTrail & DocumentClassService & TemplateSource, DocumentService] =
+    ZLayer.fromFunction(DocumentService(_, _, _))
+
+  private val TitleField  = "title"
+  private val StatusField = "status"
+  private val OwnerField  = "owner"
+  private val Sha256      = "[0-9a-f]{64}".r
+
+  /** Fields only the platform sets. Other system fields of the core profile (the retention rule) can be
+    * entered until they are derived from the class configuration.
+    */
+  private val PlatformFields: Set[String] =
+    Set(
+      "documentId",
+      "documentClass",
+      "version",
+      "template",
+      "templateVersion",
+      StatusField,
+      "renditionChecksum"
+    )
+
+  private def sql[A](f: DbTx ?=> A): IO[DocumentError, A] = Db.sql(f).mapError(DocumentError.Database(_))
+
+  /** Values the platform sets: identifiers, class, version number and template. */
+  private def systemValues(
+      id: DocumentId,
+      profile: MetadataProfile,
+      number: VersionNo,
+      template: TemplateVersion
+  ): Map[String, FieldEntry] =
+    Map(
+      "documentId"      -> id.value.toString,
+      "documentClass"   -> profile.classKey.value,
+      "version"         -> number.show,
+      "template"        -> template.templateId.value.toString,
+      "templateVersion" -> template.version.toString
+    ).map((k, v) => k -> FieldEntry(MetadataValue.Text(v), ValueOrigin.Platform))
+
+  private def metadataOf(values: Map[String, FieldEntry]): Map[String, MetadataValue] =
+    values.map((k, e) => k -> e.value)
+
+  /** The profile values of a version (without computed values) plus status and rendition checksum, as the
+    * validation of a status change needs them.
+    */
+  private def statusMetadata(v: DocumentVersion): Map[String, MetadataValue] =
+    v.values.collect { case (k, e) if e.origin != ValueOrigin.Computed => k -> e.value } +
+      (StatusField -> MetadataValue.Selection(v.status.toString)) ++
+      v.rendition.map(r => "renditionChecksum" -> MetadataValue.Text(r.sha256))
+
+  private def ownerOf(values: Map[String, FieldEntry]): Option[UserId] =
+    values.get(OwnerField).collect { case FieldEntry(MetadataValue.PersonRef(user), _) => UserId(user) }
+
+  private def titleOf(v: DocumentVersion): Option[String] =
+    v.values.get(TitleField).collect { case FieldEntry(MetadataValue.Text(t), _) => t }
+
+  private def origins(values: Map[String, FieldEntry]): Json =
+    Json.Obj(values.toList.sortBy(_._1).map((k, e) => k -> Json.Str(originName(e.origin)))*)
+
+  private def originName(origin: ValueOrigin): String = origin match
+    case ValueOrigin.Manual         => "manual"
+    case ValueOrigin.System(source) => s"system:$source"
+    case ValueOrigin.Computed       => "computed"
+
+  /** Changed fields with before and after values (business concept 7.3). */
+  private def fieldChanges(before: Map[String, FieldEntry], after: Map[String, FieldEntry]): Json =
+    def json(e: Option[FieldEntry]) = e.flatMap(_.value.toJsonAST.toOption).getOrElse(Json.Null)
+    Json.Obj(
+      (before.keySet ++ after.keySet).toList.sorted
+        .filter(k => before.get(k) != after.get(k))
+        .map(k => k -> Json.Obj("before" -> json(before.get(k)), "after" -> json(after.get(k))))*
+    )
+
+  private def statusAction(event: LifecycleEvent): String = event match
+    case LifecycleEvent.Submit  => "document.submitted"
+    case LifecycleEvent.Approve => "document.approved"
+    case LifecycleEvent.Publish => "document.published"
+    case _                      => "document.status-changed"
+
+  private def documentNotFound(id: DocumentId) =
+    DocumentError.NotFound(s"document ${id.value} does not exist")
+
+  private def versionNotFound(id: UUID) = DocumentError.NotFound(s"document version $id does not exist")
+
+  private def noOpenVersion(id: DocumentId) =
+    DocumentError.Conflict(s"document ${id.value} has no open version")
+
+  private def changedConcurrently(v: DocumentVersion) =
+    DocumentError.Conflict(s"version ${v.label} of document ${v.documentId.value} was changed concurrently")
+
+  private def conflict(message: String)(error: DocumentError): DocumentError = error match
+    case DocumentError.Database(DbError.UniqueViolation(_, _)) => DocumentError.Conflict(message)
+    case other                                                 => other
