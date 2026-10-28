@@ -6,6 +6,7 @@ import {
   LayoutTemplate,
   LogOut,
   Moon,
+  Search,
   Settings,
   Sun,
 } from 'lucide-react'
@@ -26,13 +27,14 @@ import { currentTheme, setTheme, type Theme } from '@/lib/theme'
 
 /** Navigation entries; those with `role` are shown only to holders of that business role. */
 const navItems: readonly {
-  to: '/' | '/documents' | '/tasks' | '/templates' | '/admin'
+  to: '/' | '/documents' | '/search' | '/tasks' | '/templates' | '/admin'
   label: string
   icon: typeof LayoutDashboard
   role?: BusinessRole
 }[] = [
   { to: '/', label: 'Home', icon: LayoutDashboard },
   { to: '/documents', label: 'Documents', icon: FileText },
+  { to: '/search', label: 'Search', icon: Search },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
   { to: '/templates', label: 'Templates', icon: LayoutTemplate, role: 'TemplateDesigner' },
   { to: '/admin', label: 'Admin', icon: Settings, role: 'TenantAdmin' },

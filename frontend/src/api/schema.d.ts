@@ -365,6 +365,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/valid-at': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description For each document and validity scope the version that was in force on a date (or at a moment): from 00:00 of its valid-from date in the tenant's time zone (or its publication, if later) until its successor became valid. Only versions the caller may read; 422 unless exactly one of date and at is given. */
+    get: operations['getApiV1DocumentsValid-at']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/valid-at/export.csv': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The list of `GET /api/v1/documents/valid-at` as CSV for spreadsheets: UTF-8 with byte order mark, semicolon-separated, CRLF line ends, times in the tenant's time zone. Columns: document id, title, class, scope, version, status, valid from, valid until, approver, on behalf of, approved at. */
+    get: operations['getApiV1DocumentsValid-atExport.csv']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents': {
     parameters: {
       query?: never
@@ -2182,6 +2216,38 @@ export interface components {
       values: components['schemas']['Map_MetadataValue']
       content?: components['schemas']['TemplateContent']
     }
+    /** ValidAtView */
+    ValidAtView: {
+      /** Format: date-time */
+      at: string
+      /** Format: date */
+      date?: string
+      timeZone: string
+      documentClass?: string
+      items?: components['schemas']['ValidVersionView'][]
+    }
+    /** ValidVersionView */
+    ValidVersionView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title: string
+      classPath?: string[]
+      versionLabel: string
+      status: string
+      scope: string
+      /** Format: date */
+      validFrom?: string
+      /** Format: date-time */
+      validSince: string
+      /** Format: date-time */
+      validUntil?: string
+      approvedBy?: string
+      actingFor?: string
+      /** Format: date-time */
+      approvedAt?: string
+    }
     /** ValidateMetadata */
     ValidateMetadata: {
       values: components['schemas']['Map_MetadataValue']
@@ -3205,6 +3271,94 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter version */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsValid-at': {
+    parameters: {
+      query?: {
+        /** @description Valid on this date (YYYY-MM-DD), read in the tenant's time zone: the version in force at the end of the day. Either date or at is required. */
+        date?: string
+        /** @description Valid at this exact moment (ISO 8601 instant) */
+        at?: string
+        /** @description Only documents of this class key and its subclasses */
+        class?: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ValidAtView']
+        }
+      }
+      /** @description Invalid value for: query parameter date, Invalid value for: query parameter at */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsValid-atExport.csv': {
+    parameters: {
+      query?: {
+        /** @description Valid on this date (YYYY-MM-DD), read in the tenant's time zone: the version in force at the end of the day. Either date or at is required. */
+        date?: string
+        /** @description Valid at this exact moment (ISO 8601 instant) */
+        at?: string
+        /** @description Only documents of this class key and its subclasses */
+        class?: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          [name: string]: unknown
+        }
+        content: {
+          'text/csv; charset=UTF-8': string
+        }
+      }
+      /** @description Invalid value for: query parameter date, Invalid value for: query parameter at */
       400: {
         headers: {
           [name: string]: unknown
