@@ -75,11 +75,23 @@ Migrate the database (runs as the schema owner `dms`; the API connects as `dms_a
 sbt "app/runMain dms.app.Migrate"
 ```
 
-Start the API:
+Start the API (reads the ZITADEL issuer and project id from `.local/zitadel/dms.env`):
 
 ```bash
-sbt app/run
+set -a && . .local/zitadel/dms.env && set +a && sbt app/run
 ```
+
+For API tests with a real token, register the local ZITADEL organization as a tenant once and fetch a token for the machine user `dms-api-tester` (created on first run):
+
+```bash
+scripts/zitadel-test-token.sh
+```
+
+```bash
+curl -H "Authorization: Bearer $(scripts/zitadel-test-token.sh)" localhost:8080/api/v1/me
+```
+
+The tenant row needs the organization id from the token claim `urn:zitadel:iam:user:resourceowner:id` in `dms.tenant.zitadel_org_id`; an unknown organization gets `403 unknown_organization`.
 
 Then open `http://localhost:8080/health` and the API documentation at `http://localhost:8080/docs`. PostgreSQL listens on port 5433, ZITADEL on `http://localhost:8085`.
 
