@@ -63,6 +63,10 @@ ADR 0006 chose Flowable 8 as embedded engine and validated a shared transaction 
 - Later: majority / one-of lanes, conditional steps on metadata (amount thresholds), owner of the parent document as participant, delegation, confidentiality checks when resolving candidates, a configuration UI.
 - Ruled out: storing votes or approvals only as Flowable variables.
 
+## Addendum (DMS-44, 2026-10-28): rendition before approval
+
+The follow-up "rendering fills the rendition before the last approval vote" is implemented differently, see [ADR 0025](0025-archive-renditions.md): the last approving vote no longer approves the version directly. It enqueues the rendering job through the new port `ApprovalRendition` and moves the case to the new status `Rendering` (migration V13); the version stays `InApproval`. The rendering job attaches the rendition and calls `ApprovalWorkflow.completeApproval`, which checks that the approver cast an approving vote in the current round and that the content checksum is unchanged, approves the version as that approver and records the approval and `workflow.approved` as before. If rendering fails, the case stays in `Rendering`.
+
 ## Reversibility
 
 **medium**: Flowable is confined to `FlowableEngine`, `SharedTransaction`, `Bpmn` and a few calls in `ApprovalWorkflow`; the business truth is in our tables. Replacing the engine means re-implementing routing and migrating running cases (open tasks of the current round).

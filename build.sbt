@@ -53,7 +53,7 @@ lazy val documentsCore     = documentsCoreModule.dependsOn(documentsApi, templat
 lazy val workflowApi       = apiModule("workflow")
 lazy val workflowCore      = workflowCoreModule.dependsOn(workflowApi, documentsApi, auditApi)
 lazy val renderingApi      = apiModule("rendering")
-lazy val renderingCore     = coreModule("rendering").dependsOn(renderingApi, documentsApi)
+lazy val renderingCore     = renderingCoreModule.dependsOn(renderingApi, documentsApi, auditApi)
 lazy val archiveApi        = apiModule("archive")
 lazy val archiveCore       = coreModule("archive").dependsOn(archiveApi, documentsApi)
 lazy val searchApi         = apiModule("search")
@@ -74,6 +74,24 @@ def documentsCoreModule: Project = coreModule("documents").settings(
 def workflowCoreModule: Project = coreModule("workflow").settings(
   libraryDependencies ++= Dependencies.flowable ++ Dependencies.json ++ Dependencies.integrationTest ++
     Dependencies.logging.map(_ % Test)
+)
+
+/** Archive renditions (ADR 0008, 0025): HTML → PDF/A through the rendering worker, validation with veraPDF.
+  * Tests start the worker image from `workers/rendering` and SeaweedFS with Testcontainers.
+  */
+def renderingCoreModule: Project = coreModule("rendering").settings(
+  libraryDependencies ++= Dependencies.json ++ Dependencies.pdfValidation ++ Dependencies.integrationTest ++
+    Dependencies.objectStorageTest ++ Dependencies.pdfText ++ Dependencies.logging.map(_ % Test),
+  Test / javaOptions ++= Seq(
+    renderingWorkerDirectory.value,
+    // Not logback-test.xml: the app tests depend on these test classes and have their own logback-test.xml.
+    "-Dlogback.configurationFile=logback-rendering-test.xml"
+  )
+)
+
+/** Where tests find the Dockerfile of the rendering worker (ADR 0025). */
+lazy val renderingWorkerDirectory = Def.setting(
+  s"-Ddms.rendering.workerDirectory=${((ThisBuild / baseDirectory).value / "workers" / "rendering").getAbsolutePath}"
 )
 
 /** Templates (ADR 0007, 0020): CEL expressions, JSON content in jsonb; integration tests against PostgreSQL.
@@ -110,7 +128,8 @@ lazy val app = module("app", "modules/app")
     templatesCore,
     documentsCore,
     workflowCore,
-    renderingCore,
+    // test->test: the rendering worker container and PDF helpers of the rendering tests
+    renderingCore % "compile->compile;test->test",
     archiveCore,
     searchCore,
     auditCore,
@@ -118,7 +137,8 @@ lazy val app = module("app", "modules/app")
   )
   .settings(
     libraryDependencies ++= Dependencies.http ++ Dependencies.config ++ Dependencies.logging ++
-      Dependencies.integrationTest,
+      Dependencies.integrationTest ++ Dependencies.objectStorageTest ++ Dependencies.pdfText,
+    Test / javaOptions += renderingWorkerDirectory.value,
     Compile / mainClass := Some("dms.app.Main"),
     Compile / sourceGenerators += Def.task {
       val file = (Compile / sourceManaged).value / "dms" / "app" / "AppBuildInfo.scala"

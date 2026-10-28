@@ -29,6 +29,11 @@ function CaseDetails({ workflowCase, version }: { workflowCase: WorkflowCase; ve
             · returned to the author; change the draft and submit it again
           </span>
         )}
+        {workflowCase.status === 'Rendering' && (
+          <span className="text-muted-foreground">
+            · all steps approved; the archive PDF is being produced, then the version is approved
+          </span>
+        )}
         {workflowCase.approval && (
           <span className="text-muted-foreground">
             · approved by {workflowCase.approval.approvedBy} on{' '}

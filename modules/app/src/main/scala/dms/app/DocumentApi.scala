@@ -549,7 +549,7 @@ object DocumentApi:
     )
 
   /** What a request may use inside its transaction. */
-  private final class Context(
+  private[app] final class Context(
       val service: DocumentService,
       val workflow: ApprovalWorkflow,
       authz: Authorizer,
@@ -606,7 +606,7 @@ object DocumentApi:
     ): Resource =
       DocumentApi.resource(s.tenantId, details, v, participants)
 
-  private def inTransaction[A](principal: Principal)(
+  private[app] def inTransaction[A](principal: Principal)(
       f: Context => ZIO[Any, DocumentError | AccessDenied | WorkflowError, A]
   ): ZIO[Db & Authorizer & DocumentService & ApprovalWorkflow, (StatusCode, ApiError), A] =
     (for

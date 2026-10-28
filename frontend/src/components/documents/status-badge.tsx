@@ -7,6 +7,7 @@ const variants: Record<string, 'default' | 'secondary' | 'outline' | 'destructiv
   InApproval: 'secondary',
   Running: 'secondary',
   Returned: 'destructive',
+  Rendering: 'secondary',
   Approved: 'default',
   Published: 'default',
 }

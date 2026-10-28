@@ -84,6 +84,7 @@ HTTP (module `app`, `DocumentApi`):
 | GET | `/api/v1/documents/{id}/versions` | Versions the caller may read | `ReadDocument` per version |
 | PUT | `/api/v1/documents/{id}/draft` | Change values, title and content of the draft | `EditDraft` |
 | POST | `/api/v1/documents/{id}/submit` | Submit for review | `EditDraft` |
+| GET | `/api/v1/documents/{id}/versions/{versionId}/rendition` | Archive rendition (PDF/A-2b) of an approved version with `ETag`/`Repr-Digest` = SHA-256; 404 without rendition (DMS-44, module `rendering`) | `ReadDocument` on that version |
 
 Validation errors return 422 with `issues` (`[{field,label,code,message}]`): `invalid_values` for entered values, `incomplete` for a blocked submission. Values in responses carry their origin: `{"value":{...},"origin":"System","source":"dms"}`.
 

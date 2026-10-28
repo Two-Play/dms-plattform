@@ -4,6 +4,7 @@ import dms.db.DbConfig
 import dms.documents.core.DocumentSettings
 import dms.identity.AuthConfig
 import dms.integration.partners.PartnerDirectoryConfig
+import dms.rendering.core.RendererConfig
 import dms.storage.StorageConfig
 import zio.Config
 import zio.config.magnolia.deriveConfig
@@ -65,7 +66,8 @@ final case class AppConfig(
     worker: WorkerSettings,
     workflow: WorkflowSettings,
     documents: DocumentsConfig,
-    partners: PartnerDirectoryConfig
+    partners: PartnerDirectoryConfig,
+    rendering: RendererConfig
 )
 
 object AppConfig:

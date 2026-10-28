@@ -1,6 +1,6 @@
 # Local development environment. Development only: all credentials are test values.
 # Sprint 0 state: PostgreSQL is verified; ZITADEL is set up and verified with T-00.3 (DMS-19);
-# object storage (SeaweedFS with Object Lock) with DMS-30.
+# object storage (SeaweedFS with Object Lock) with DMS-30; rendering worker (WeasyPrint) with DMS-44.
 
 services:
   db:
@@ -98,6 +98,23 @@ services:
         aws --endpoint-url http://objectstore:8333 s3api head-bucket --bucket dms 2>/dev/null ||
         aws --endpoint-url http://objectstore:8333 s3api create-bucket --bucket dms --object-lock-enabled-for-bucket
     restart: "no"
+
+  # Rendering worker (ADR 0008, 0025): HTML -> PDF/A with WeasyPrint over HTTP (POST /render, GET /health).
+  # Built from workers/rendering; stateless, no credentials, read-only file system. The application calls it at
+  # dms.rendering.url (default http://localhost:9180).
+  rendering:
+    build: ./workers/rendering
+    image: dms-rendering-worker:local
+    ports:
+      - "9180:8080"  # 9180 to avoid clashing with other local services on 8080
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 10s
+      retries: 5
 
 volumes:
   dms-db:

@@ -12,7 +12,6 @@ import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
 import dms.audit.core.{AuditTrailLive, TsaTrust}
 import dms.authz.{Authorizer, Role, RoleAssignment, RoleAssignments}
 import dms.db.{Db, DbConfig, DbError, Migrations}
-import dms.documents.Rendition
 import dms.documents.core.*
 import dms.documents.metadata.*
 import dms.identity.*
@@ -20,6 +19,8 @@ import dms.kernel.{TemplateId, TenantId, UserId}
 import dms.templates.*
 import dms.templates.core.ContentJson.given
 import dms.templates.core.{TemplateDraft, TemplateService}
+import dms.audit.AuditTrail
+import dms.rendering.core.RenditionSource
 import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
@@ -155,7 +156,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
     Authenticator(verifier, tenants)
   }
 
-  private type Env = DocumentApi.Env & WorkflowApi.Env
+  private type Env = DocumentApi.Env & WorkflowApi.Env & RenditionSource & AuditTrail
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -175,7 +176,9 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       RoleDirectory.layer,
       WorkflowExtraReview.layer,
       ZLayer.succeed(WorkflowConfig.default),
-      ApprovalWorkflow.layer
+      WorkflowRendition.layer,
+      ApprovalWorkflow.layer,
+      DocumentRenditions.layer
     )
 
   /** `signedInSecondsAgo` sets `auth_time`; by default the sign-in is one hour old. */
@@ -240,7 +243,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       |  {"key":"approval","name":"Approval","kind":"Approval","lanes":[{"key":"approver","role":"Approver"}]}
       |],"resetTo":"review"}}""".stripMargin
 
-  /** A draft with all review fields and a rendition (required for approval until rendering exists). */
+  /** A draft with all review fields. */
   private def draftDocument(partner: String = "ACME GmbH"): ZIO[Env, Nothing, DocumentView] =
     for
       s       <- setup.await
@@ -253,17 +256,10 @@ object WorkflowApiSpec extends ZIOSpecDefault:
              |"values":{${values(partner)}}}""".stripMargin
         )
       ).map(as[DocumentView])
-      _ <- attachRendition(created.current.id)
     yield created
 
-  private def attachRendition(versionId: UUID): ZIO[Env, Nothing, Unit] =
-    for
-      s       <- setup.await
-      service <- ZIO.service[DocumentService]
-      _       <- s.app
-        .transact(tenantId)(service.attachRendition(versionId, Rendition("r/key", None, "c" * 64), author))
-        .orDieWith(e => RuntimeException(e.toString))
-    yield ()
+  private def renderPending: ZIO[Env, DbError, Int] =
+    setup.await.flatMap(s => StubRendering.runPending(s.app))
 
   private def submit(doc: UUID) = call(author, "POST", s"/api/v1/documents/$doc/submit")
 
@@ -393,7 +389,10 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         approval = openTask(afterRev, "approver")
         inApproval <- call(author, "GET", s"/api/v1/documents/${doc.id}").map(as[DocumentView])
         stale      <- vote(approver, approval, "Approve", signedInSecondsAgo = 3600)
-        approved   <- vote(approver, approval, "Approve", signedInSecondsAgo = 30).map(as[WorkflowCaseView])
+        rendering  <- vote(approver, approval, "Approve", signedInSecondsAgo = 30).map(as[WorkflowCaseView])
+        pending    <- call(author, "GET", s"/api/v1/documents/${doc.id}").map(as[DocumentView])
+        rendered   <- renderPending
+        approved   <- cases(doc.id).map(_.head)
         version    <- call(author, "GET", s"/api/v1/documents/${doc.id}").map(as[DocumentView])
         events     <- outbox("workflow.approved")
       yield assertTrue(
@@ -415,6 +414,11 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         inApproval.current.status == "InApproval",
         stale._1 == Status.Unauthorized,
         error(stale._2).exists(_.code == "reauthentication_required"),
+        // the last vote requests the archive rendition; the version stays in approval until it is attached
+        rendering.status == "Rendering",
+        rendering.approval.isEmpty,
+        pending.current.status == "InApproval",
+        rendered == 1,
         approved.status == "Approved",
         approved.approval.exists(a =>
           a.approvedBy == approver.value && a.version == "1.0" && a.contentSha256 == started.contentSha256
@@ -424,6 +428,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         approved.votes.last.authenticatedAt.isDefined,
         version.current.status == "Approved",
         version.current.releasedBy.contains(approver.value),
+        version.current.rendition.exists(_.sha256.matches("[0-9a-f]{64}")),
         events.exists(_.contains(doc.id.toString))
       )
     },
@@ -572,7 +577,6 @@ object WorkflowApiSpec extends ZIOSpecDefault:
           s"$path/draft",
           Some(s"""{"values":{${values("Wayne")}},"content":${deviating.toJson}}""")
         ).map(as[DocumentVersionView])
-        _           <- attachRendition(changed.id)
         _           <- submit(plain.id) *> submit(special.id)
         plainCase   <- cases(plain.id).map(_.head)
         specialCase <- cases(special.id).map(_.head)
