@@ -33,7 +33,9 @@ lazy val identity = module("identity", "modules/identity")
   .dependsOn(kernel, db)
   .settings(libraryDependencies ++= Dependencies.jwt)
 
-lazy val authz = module("authz", "modules/authz").dependsOn(kernel, identity)
+lazy val authz = module("authz", "modules/authz")
+  .dependsOn(kernel, db, identity, documentsApi)
+  .settings(libraryDependencies ++= Dependencies.integrationTest ++ Dependencies.logging.map(_ % Test))
 
 lazy val templatesApi      = apiModule("templates")
 lazy val templatesCore     = coreModule("templates").dependsOn(templatesApi)
