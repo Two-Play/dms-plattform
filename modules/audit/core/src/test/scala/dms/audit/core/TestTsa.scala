@@ -4,7 +4,14 @@ import com.sun.net.httpserver.HttpServer
 import org.bouncycastle.asn1.ASN1ObjectIdentifier
 import org.bouncycastle.asn1.nist.NISTObjectIdentifiers
 import org.bouncycastle.asn1.x500.X500Name
-import org.bouncycastle.asn1.x509.{AlgorithmIdentifier, ExtendedKeyUsage, Extension, KeyPurposeId}
+import org.bouncycastle.asn1.x509.{
+  AlgorithmIdentifier,
+  BasicConstraints,
+  ExtendedKeyUsage,
+  Extension,
+  KeyPurposeId,
+  KeyUsage
+}
 import org.bouncycastle.cert.jcajce.{JcaCertStore, JcaX509CertificateConverter, JcaX509v3CertificateBuilder}
 import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder
 import org.bouncycastle.operator.jcajce.{JcaContentSignerBuilder, JcaDigestCalculatorProviderBuilder}
@@ -20,42 +27,64 @@ import java.math.BigInteger
 import java.net.InetSocketAddress
 import java.net.http.HttpClient
 import java.security.KeyPairGenerator
+import java.security.cert.X509Certificate
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.Date
 import java.util.concurrent.atomic.AtomicLong
 
-/** An RFC 3161 timestamp authority on localhost with a self-signed test certificate, so that tests exercise
-  * the real HTTP client without calling the internet.
+/** An RFC 3161 timestamp authority on localhost whose signing certificate is issued by a test CA, so that
+  * tests exercise the real HTTP client and certificate path validation without calling the internet.
   */
 object TestTsa:
 
-  val layer: ZLayer[Any, Throwable, TimestampAuthority] = ZLayer.scoped(
-    ZIO
-      .acquireRelease(ZIO.attemptBlocking(start()))(server => ZIO.succeed(server.stop(0)))
-      .map { server =>
-        val url = s"http://127.0.0.1:${server.getAddress.getPort}/tsr"
-        HttpTimestampAuthority(TsaConfig(url, 10.seconds), HttpClient.newHttpClient())
-      }
-  )
+  /** A running test TSA and the CA certificate that issued its signing certificate. */
+  final case class Instance(authority: TimestampAuthority, ca: X509Certificate):
+    def trust: TsaTrust = TsaTrust(List(ca))
 
-  private def start(): HttpServer =
+  /** A test TSA whose signing certificate is issued by a CA named `caName`. */
+  def make(caName: String): ZIO[Scope, Throwable, Instance] =
+    ZIO
+      .acquireRelease(ZIO.attemptBlocking(start(caName)))((server, _) => ZIO.succeed(server.stop(0)))
+      .map { (server, ca) =>
+        val url = s"http://127.0.0.1:${server.getAddress.getPort}/tsr"
+        Instance(HttpTimestampAuthority(TsaConfig(url, 10.seconds), HttpClient.newHttpClient()), ca)
+      }
+
+  val layer: ZLayer[Any, Throwable, TimestampAuthority & TsaTrust] =
+    ZLayer
+      .scoped(make("DMS test CA"))
+      .flatMap(env => ZLayer.succeed(env.get.authority) ++ ZLayer.succeed(env.get.trust))
+
+  private def rsaKeys() =
     val generator = KeyPairGenerator.getInstance("RSA")
     generator.initialize(2048)
-    val keys = generator.generateKeyPair()
-    val now  = Instant.now()
-    val name = X500Name("CN=DMS test TSA")
+    generator.generateKeyPair()
+
+  private def start(caName: String): (HttpServer, X509Certificate) =
+    val now       = Instant.now()
+    val notBefore = Date.from(now.minus(1, ChronoUnit.DAYS))
+    val notAfter  = Date.from(now.plus(1, ChronoUnit.DAYS))
+    val caKeys    = rsaKeys()
+    val caSubject = X500Name(s"CN=$caName")
+    val ca        = JcaX509CertificateConverter().getCertificate(
+      JcaX509v3CertificateBuilder(caSubject, BigInteger.ONE, notBefore, notAfter, caSubject, caKeys.getPublic)
+        .addExtension(Extension.basicConstraints, true, BasicConstraints(true))
+        .addExtension(Extension.keyUsage, true, KeyUsage(KeyUsage.keyCertSign | KeyUsage.cRLSign))
+        .build(JcaContentSignerBuilder("SHA256withRSA").build(caKeys.getPrivate))
+    )
+    val keys    = rsaKeys()
+    val builder = JcaX509v3CertificateBuilder(
+      caSubject,
+      BigInteger.TWO,
+      notBefore,
+      notAfter,
+      X500Name("CN=DMS test TSA"),
+      keys.getPublic
+    ).addExtension(Extension.keyUsage, true, KeyUsage(KeyUsage.digitalSignature))
+      .addExtension(Extension.extendedKeyUsage, true, ExtendedKeyUsage(KeyPurposeId.id_kp_timeStamping))
     val cert = JcaX509CertificateConverter().getCertificate(
-      JcaX509v3CertificateBuilder(
-        name,
-        BigInteger.ONE,
-        Date.from(now.minus(1, ChronoUnit.DAYS)),
-        Date.from(now.plus(1, ChronoUnit.DAYS)),
-        name,
-        keys.getPublic
-      )
-        .addExtension(Extension.extendedKeyUsage, true, ExtendedKeyUsage(KeyPurposeId.id_kp_timeStamping))
-        .build(JcaContentSignerBuilder("SHA256withRSA").build(keys.getPrivate))
+      builder.build(JcaContentSignerBuilder("SHA256withRSA").build(caKeys.getPrivate))
     )
     val digests    = JcaDigestCalculatorProviderBuilder().build()
     val signerInfo =
@@ -88,4 +117,4 @@ object TestTsa:
         finally exchange.close()
     ): Unit
     server.start()
-    server
+    (server, ca)
