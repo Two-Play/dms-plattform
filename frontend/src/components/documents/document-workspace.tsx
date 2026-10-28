@@ -24,6 +24,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { useDebouncedValue } from '@/lib/use-debounced-value'
+import { CONFIDENTIALITY_FIELD, isRestrictedInput, withoutHiddenGroups } from './access-groups'
 import { DocumentForm } from './document-form'
 import { DocumentPreview } from './document-preview'
 import { inputsFromDraft, partnerFromDraft } from './draft-values'
@@ -166,7 +167,15 @@ export function DocumentWorkspace({
     }
     return result
   }, [inputs, picked, references])
-  const { values, errors } = useMemo(() => collectValues(fields, formInputs), [fields, formInputs])
+  const { values, errors } = useMemo(() => {
+    // Groups of a document that is no longer confidential are hidden and not sent (DMS-101).
+    const restricted = isRestrictedInput(formInputs[CONFIDENTIALITY_FIELD])
+    const collected = collectValues(fields, formInputs)
+    return {
+      values: withoutHiddenGroups(collected.values, restricted),
+      errors: withoutHiddenGroups(collected.errors, restricted),
+    }
+  }, [fields, formInputs])
   const sent = useDebouncedValue(values, PREVIEW_DEBOUNCE_MS)
   const preview = useQuery({
     ...previewQuery(client, templateId, version, sent, language),

@@ -2,7 +2,9 @@ import type { TemplateField } from '@/api/templates'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { ALLOWED_GROUPS_FIELD, groupKeys, groupsInput, visibleFields } from './access-groups'
 import { fieldControlId, type FieldInput, type FormInputs } from './field-values'
+import { GroupPicker } from './group-picker'
 
 const selectClass =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30'
@@ -41,6 +43,20 @@ function FieldControl({ field, input, error, onChange }: FieldProps) {
         className="bg-muted/50"
         placeholder="Pick a partner above"
         value={text}
+      />
+    )
+  }
+
+  if (field.key === ALLOWED_GROUPS_FIELD) {
+    return (
+      <GroupPicker
+        id={id}
+        value={groupKeys(input)}
+        invalid={Boolean(error)}
+        describedBy={describedBy || undefined}
+        onChange={(keys) => {
+          onChange(groupsInput(keys))
+        }}
       />
     )
   }
@@ -241,8 +257,9 @@ function FieldRow({ field, input, error, onChange }: FieldProps) {
 
 /** Form generated from the fields of a template version: inputs by type, required markers, inline errors. */
 export function DocumentForm({ fields, inputs, errors, onChange }: DocumentFormProps) {
-  const used = fields.filter((f) => f.usedInTemplate)
-  const other = fields.filter((f) => !f.usedInTemplate)
+  const shown = visibleFields(fields, inputs)
+  const used = shown.filter((f) => f.usedInTemplate)
+  const other = shown.filter((f) => !f.usedInTemplate)
   const rows = (group: TemplateField[]) =>
     group.map((field) => (
       <FieldRow
