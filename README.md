@@ -19,6 +19,7 @@ Scala 3.9 LTS · ZIO 2 · Tapir on ZIO HTTP · sbt 1.12 · Java 21 (Temurin) · 
 modules/
   kernel/                 shared types (identifiers, version number)
   db/                     transactions, tenant context, migrations (ADR 0012, 0014)
+  storage/                object storage with Object Lock on the S3 API (ADR 0009, 0016)
   identity/  authz/       sign-in via ZITADEL, authorization
   <module>/api  <module>/core   templates, documents, workflow, rendering,
                                 archive, search, audit, notifications
@@ -29,7 +30,7 @@ frontend/                 web UI
 spikes/                   time-boxed technical experiments, not production code
 ```
 
-Rule: modules depend only on `kernel`, `db` (core modules only) and on `*-api`, never on another module's `*-core`. Only `app` knows the core modules. The build enforces this.
+Rule: modules depend only on `kernel`, `db` and `storage` (core modules only) and on `*-api`, never on another module's `*-core`. Only `app` knows the core modules. The build enforces this.
 
 ## Development
 
@@ -39,7 +40,7 @@ Provide Java 21 (once per shell):
 eval "$(cs java --jvm temurin:21 --env)"
 ```
 
-Build and test (the `db` module's integration tests start PostgreSQL with Testcontainers and need Docker):
+Build and test (the integration tests of `db` and `storage` start PostgreSQL and SeaweedFS with Testcontainers and need Docker):
 
 ```bash
 sbt test
@@ -93,7 +94,7 @@ curl -H "Authorization: Bearer $(scripts/zitadel-test-token.sh)" localhost:8080/
 
 The tenant row needs the organization id from the token claim `urn:zitadel:iam:user:resourceowner:id` in `dms.tenant.zitadel_org_id`; an unknown organization gets `403 unknown_organization`.
 
-Then open `http://localhost:8080/health` and the API documentation at `http://localhost:8080/docs`. PostgreSQL listens on port 5433, ZITADEL on `http://localhost:8085`.
+Then open `http://localhost:8080/health` and the API documentation at `http://localhost:8080/docs`. PostgreSQL listens on port 5433, ZITADEL on `http://localhost:8085`, the S3 API of the object storage (SeaweedFS, bucket `dms` with Object Lock, created by `objectstore-init`) on `http://localhost:9100`.
 
 Start the web UI (Node 24; details in [frontend/README.md](frontend/README.md)):
 

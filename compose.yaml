@@ -1,5 +1,6 @@
 # Local development environment. Development only: all credentials are test values.
-# Sprint 0 state: PostgreSQL is verified; ZITADEL is set up and verified with T-00.3 (DMS-19).
+# Sprint 0 state: PostgreSQL is verified; ZITADEL is set up and verified with T-00.3 (DMS-19);
+# object storage (SeaweedFS with Object Lock) with DMS-30.
 
 services:
   db:
@@ -63,6 +64,42 @@ services:
       zitadel-db:
         condition: service_healthy
 
+  # S3-compatible object storage with Object Lock (ADR 0016). `weed mini` runs master, volume, filer and S3 in
+  # one process; the access key below becomes the admin identity.
+  objectstore:
+    image: chrislusf/seaweedfs:4.51@sha256:f7a49e3f3972ebed5be2ed4befa4a0c68eb7bdddba6e692d42729ceb545134b8
+    command: ["mini", "-dir=/data"]
+    environment:
+      AWS_ACCESS_KEY_ID: dms-local
+      AWS_SECRET_ACCESS_KEY: dms-local-secret
+    ports:
+      - "9100:8333"  # S3 API; 9100 to avoid clashing with other local S3 servers on 9000
+    volumes:
+      - dms-objectstore:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8333/healthz"]
+      interval: 5s
+      retries: 20
+
+  # Creates the bucket `dms` with Object Lock (and therefore versioning) once. Object Lock can only be enabled
+  # at bucket creation, so the bucket must not be created by any other means.
+  objectstore-init:
+    image: amazon/aws-cli:2.39.0@sha256:6014c77975a4ae237395924cc821333f20bf87c91964a45dd4ed5f3b13b424f5
+    depends_on:
+      objectstore:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: dms-local
+      AWS_SECRET_ACCESS_KEY: dms-local-secret
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        aws --endpoint-url http://objectstore:8333 s3api head-bucket --bucket dms 2>/dev/null ||
+        aws --endpoint-url http://objectstore:8333 s3api create-bucket --bucket dms --object-lock-enabled-for-bucket
+    restart: "no"
+
 volumes:
   dms-db:
   zitadel-db:
+  dms-objectstore:
