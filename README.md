@@ -18,6 +18,7 @@ Scala 3.9 LTS · ZIO 2 · Tapir on ZIO HTTP · sbt 1.12 · Java 21 (Temurin) · 
 ```
 modules/
   kernel/                 shared types (identifiers, version number)
+  db/                     transactions, tenant context, migrations (ADR 0012, 0014)
   identity/  authz/       sign-in via ZITADEL, authorization
   <module>/api  <module>/core   templates, documents, workflow, rendering,
                                 archive, search, audit, notifications
@@ -28,7 +29,7 @@ frontend/                 web UI
 spikes/                   time-boxed technical experiments, not production code
 ```
 
-Rule: modules depend only on `kernel` and on `*-api`, never on another module's `*-core`. Only `app` knows the core modules. The build enforces this.
+Rule: modules depend only on `kernel`, `db` (core modules only) and on `*-api`, never on another module's `*-core`. Only `app` knows the core modules. The build enforces this.
 
 ## Development
 
@@ -38,10 +39,16 @@ Provide Java 21 (once per shell):
 eval "$(cs java --jvm temurin:21 --env)"
 ```
 
-Build and test:
+Build and test (the `db` module's integration tests start PostgreSQL with Testcontainers and need Docker):
 
 ```bash
 sbt test
+```
+
+With Docker Desktop on Linux, Testcontainers needs the socket location:
+
+```bash
+export DOCKER_HOST=unix://$HOME/.docker/desktop/docker.sock TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 ```
 
 Start local services:
@@ -62,7 +69,7 @@ The ZITADEL console is at `http://localhost:8085/ui/console` (local default admi
 docker compose down && docker volume rm dms-plattform_zitadel-db && rm -rf .local/zitadel
 ```
 
-Migrate the database:
+Migrate the database (runs as the schema owner `dms`; the API connects as `dms_app_user`, which is subject to row-level security):
 
 ```bash
 sbt "app/runMain dms.app.Migrate"
