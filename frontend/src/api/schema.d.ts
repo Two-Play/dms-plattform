@@ -348,6 +348,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/templates/{id}/versions/{version}/impact': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Impact analysis before releasing a template version: document versions per status bound to earlier versions of the template (in total and per template version) and the open drafts with title and author only. Requires EditTemplates (template designer). Works for a version in any status. */
+    get: operations['getApiV1TemplatesIdVersionsVersionImpact']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents': {
     parameters: {
       query?: never
@@ -562,7 +579,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description The open review and approval tasks of the caller, oldest first */
+    /** @description The open review and approval tasks of the caller, oldest first, including the tasks of people the caller currently stands in for as deputy (actingFor names them) */
     get: operations['getApiV1WorkflowTasks']
     put?: never
     post?: never
@@ -636,6 +653,41 @@ export interface paths {
     /** @description Stores the next version of the workflow of a document class. Running cases keep their version. Lanes name a business role; approval steps use the Approver role. Disabling the four-eyes rule needs a reason and is recorded in the audit trail. */
     post: operations['postApiV1AdminWorkflowsClasskey']
     delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/deputyships': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The caller's deputyships as principal or deputy, latest period first; tenant administrators may list those of a principal or all of them */
+    get: operations['getApiV1Deputyships']
+    put?: never
+    /** @description Sets a deputy for a limited period (e.g. a vacation): during the period the deputy may complete the principal's open review and approval tasks, recorded as "deputy on behalf of principal". The deputy must hold the principal's roles with a scope covering the principal's (422 otherwise); the same pair with an overlapping period is a conflict (409). */
+    post: operations['postApiV1Deputyships']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/deputyships/{id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    /** @description Ends a deputyship now (kept for the history). Unfinished tasks are the principal's alone again. For the principal, the deputy and tenant administrators; an ended deputyship is a conflict (409). */
+    delete: operations['deleteApiV1DeputyshipsId']
     options?: never
     head?: never
     patch?: never
@@ -766,6 +818,7 @@ export interface components {
       authenticatedAt: string
       /** Format: date-time */
       approvedAt: string
+      actingFor?: string
     }
     /** Block */
     Block:
@@ -975,6 +1028,18 @@ export interface components {
       location: components['schemas']['LocationView']
       message: string
     }
+    /** CreateDeputyship */
+    CreateDeputyship: {
+      principal?: string
+      deputy: string
+      /** Format: date-time */
+      validFrom?: string
+      /** Format: date-time */
+      validUntil: string
+      roles?: string[]
+      documentClass?: string
+      reason?: string
+    }
     /** CreateDocument */
     CreateDocument: {
       /** Format: uuid */
@@ -1030,6 +1095,27 @@ export interface components {
       definition: components['schemas']['WorkflowDefinitionView']
       fourEyes?: boolean
       reason?: string
+    }
+    /** DeputyshipView */
+    DeputyshipView: {
+      /** Format: uuid */
+      id: string
+      principal: string
+      deputy: string
+      /** Format: date-time */
+      validFrom: string
+      /** Format: date-time */
+      validUntil: string
+      roles?: string[]
+      documentClass?: string
+      reason?: string
+      createdBy: string
+      /** Format: date-time */
+      createdAt: string
+      /** Format: date-time */
+      endedAt?: string
+      endedBy?: string
+      status: string
     }
     /** DeviationChange */
     DeviationChange:
@@ -1455,6 +1541,21 @@ export interface components {
        */
       type: 'Number'
     }
+    /** OpenDraftView */
+    OpenDraftView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title: string
+      author: string
+      version: string
+      status: string
+      /** Format: int32 */
+      templateVersion: number
+      /** Format: date-time */
+      updatedAt: string
+    }
     /** OrderedList */
     OrderedList: {
       items?: components['schemas']['Block'][][]
@@ -1799,6 +1900,14 @@ export interface components {
        */
       type: 'Selection'
     }
+    /** StatusCountView */
+    StatusCountView: {
+      status: string
+      /** Format: int32 */
+      versions: number
+      /** Format: int32 */
+      documents: number
+    }
     /** StepView */
     StepView: {
       key: string
@@ -1852,6 +1961,11 @@ export interface components {
        */
       type: 'Table'
     }
+    /** TaskDeputyView */
+    TaskDeputyView: {
+      deputy: string
+      principal: string
+    }
     /** TaskView */
     TaskView: {
       id: string
@@ -1875,6 +1989,8 @@ export interface components {
       /** Format: date-time */
       completedAt?: string
       completedBy?: string
+      deputies?: components['schemas']['TaskDeputyView'][]
+      actingFor?: string
     }
     /** TemplateContent */
     TemplateContent: {
@@ -1908,6 +2024,21 @@ export interface components {
       fields?: components['schemas']['TemplateFieldView'][]
       references?: components['schemas']['ReferenceFieldView'][]
     }
+    /** TemplateImpactView */
+    TemplateImpactView: {
+      /** Format: uuid */
+      templateId: string
+      /** Format: int32 */
+      version: number
+      status: string
+      /** Format: int32 */
+      documents: number
+      byStatus?: components['schemas']['StatusCountView'][]
+      byVersion?: components['schemas']['TemplateVersionUseView'][]
+      openDrafts?: components['schemas']['OpenDraftView'][]
+      existingDocumentsUnchanged: boolean
+      explanation: string
+    }
     /** TemplateRequest */
     TemplateRequest: {
       name: string
@@ -1917,6 +2048,14 @@ export interface components {
       /** Format: int32 */
       documentClassVersion: number
       content: components['schemas']['TemplateContent']
+    }
+    /** TemplateVersionUseView */
+    TemplateVersionUseView: {
+      /** Format: int32 */
+      templateVersion: number
+      /** Format: int32 */
+      documents: number
+      byStatus?: components['schemas']['StatusCountView'][]
     }
     /** TemplateVersionView */
     TemplateVersionView: {
@@ -2090,6 +2229,7 @@ export interface components {
       votedAt: string
       /** Format: date-time */
       invalidatedAt?: string
+      actingFor?: string
     }
     /** WorkflowCaseView */
     WorkflowCaseView: {
@@ -3042,6 +3182,47 @@ export interface operations {
       }
     }
   }
+  getApiV1TemplatesIdVersionsVersionImpact: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+        /** @description Template version number */
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateImpactView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   getApiV1Documents: {
     parameters: {
       query?: {
@@ -3843,6 +4024,126 @@ export interface operations {
         }
       }
       /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1Deputyships: {
+    parameters: {
+      query?: {
+        /** @description Deputyships of this principal (others: admins) */
+        principal?: string
+        /** @description All deputyships of the tenant (admins) */
+        all?: boolean
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeputyshipView'][]
+        }
+      }
+      /** @description Invalid value for: query parameter all */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1Deputyships: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateDeputyship']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeputyshipView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  deleteApiV1DeputyshipsId: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Deputyship id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeputyshipView']
+        }
+      }
+      /** @description Invalid value for: path parameter id */
       400: {
         headers: {
           [name: string]: unknown
