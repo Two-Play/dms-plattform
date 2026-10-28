@@ -8,9 +8,10 @@ export function App({ router }: { router: ReturnType<typeof createAppRouter> }) 
   const auth = useAuth()
 
   // Re-run route guards when the session starts or ends (sign-in, sign-out, failed renewal).
+  // Not while the session is loading: the router has no `auth` in its context yet (DMS-78).
   useEffect(() => {
-    void router.invalidate()
-  }, [router, auth.isAuthenticated])
+    if (!auth.isLoading) void router.invalidate()
+  }, [router, auth.isLoading, auth.isAuthenticated])
 
   // Wait until the stored session is loaded or the sign-in callback is processed,
   // otherwise the guards would see a signed-out user for a moment.
