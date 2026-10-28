@@ -10,7 +10,7 @@
 
 US-06.3 (DMS-45): an owner sets a valid-from date; the new version becomes valid automatically at 00:00 of that date in the tenant's time zone, and the old one ends at the same moment. There must never be a moment with two or with no valid version, and readers of the old version must be pointed to the new one. US-05.2 (DMS-46): an owner publishes an editorial correction as a minor version without the full approval process; the classification "editorial" needs a reason and is confirmed by the owner (business concept 5.2), an automatic comparison warns when more than a configurable share of the text changed, and minor versions do not ask readers for a new acknowledgement by default (business concept 6.3, configurable).
 
-Given: `validFrom` is a core field required from review on (ADR 0019); versions are frozen packages with a partial unique index "one valid version per document and scope" and a guard trigger (ADR 0021); publication supersedes the valid version of the same scope inside `DocumentService`; the job queue with idempotency keys and `run_at` exists (ADR 0010) and is used for periodic audit work (DMS-75); workflows are generated from JSON definitions, the business truth lives in our tables, the final approval is segregated from the author by a database check (ADR 0024, 0021). Tenants had no time zone. Acknowledgement itself is not built yet. Another change (DMS-44, migration V12, ADR 0025) works on the final approval and renditions at the same time, so this change must not replace the V9/V10 guard function and must keep its changes to `ApprovalWorkflow` small.
+Given: `validFrom` is a core field required from review on (ADR 0019); versions are frozen packages with a partial unique index "one valid version per document and scope" and a guard trigger (ADR 0021); publication supersedes the valid version of the same scope inside `DocumentService`; the job queue with idempotency keys and `run_at` exists (ADR 0010) and is used for periodic audit work (DMS-75); workflows are generated from JSON definitions, the business truth lives in our tables, the final approval is segregated from the author by a database check (ADR 0024, 0021). Tenants had no time zone. Acknowledgement itself is not built yet. Another change (DMS-44, migration V13, ADR 0025) works on the final approval and renditions at the same time, so this change must not replace the V9/V10 guard function and must keep its changes to `ApprovalWorkflow` small.
 
 ## Decision
 
@@ -64,7 +64,7 @@ Given: `validFrom` is a core field required from review on (ADR 0019); versions 
 - Overlapping scopes (`DE` and `AT|DE`) are still not detected (ADR 0021).
 - The editorial path is the same for all classes; custom definitions cannot use the `DocumentOwner` lane yet (role validation in `WorkflowApi`).
 - A failing publication job ends dead after its attempts; nobody is notified yet.
-- Migration V12 must be applied after V12 of DMS-44; databases that already ran V12 without V12 need Flyway `outOfOrder` or a renumbering.
+- Migration V12 lands before DMS-44 (migration V13), so the order of migrations matches the order of merges.
 
 ## Follow-ups
 
