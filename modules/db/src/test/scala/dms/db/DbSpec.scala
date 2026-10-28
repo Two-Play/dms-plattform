@@ -72,10 +72,9 @@ object DbSpec extends ZIOSpecDefault:
 
   private def insertAudit(tenant: TenantId): IO[DbError, Int] =
     Db.sql(
-      sql"""insert into dms.audit_event (tenant_id, occurred_at, actor_id, actor_kind, action, object_type, channel, hash)
-            values (${tenant.value}, now(), ${"user-1"}, ${"person"}, ${"test"}, ${"tenant"}, ${"automation"}, ${Array[
-          Byte
-        ](0)})""".update
+      sql"""insert into dms.audit_event (tenant_id, chain_seq, occurred_at, actor_id, actor_kind, action, object_type, channel, hash)
+            values (${tenant.value}, 1, now(), ${"user-1"}, ${"person"}, ${"test"}, ${"tenant"}, ${"automation"}, ${Array
+          .fill[Byte](32)(0)})""".update
         .run()
     )
 

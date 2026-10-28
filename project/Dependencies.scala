@@ -14,6 +14,7 @@ object Versions {
   val nimbusJose    = "10.10"
   val testcontainer = "0.44.1"
   val magnum        = "1.3.1"
+  val bouncyCastle  = "1.86"
 }
 
 object Dependencies {
@@ -56,6 +57,9 @@ object Dependencies {
   val magnum = Seq("com.augustnagro" %% "magnum" % Versions.magnum)
 
   val jwt = Seq("com.nimbusds" % "nimbus-jose-jwt" % Versions.nimbusJose)
+
+  /** RFC 3161 timestamping for the audit trail anchors (ADR 0017). */
+  val timestamping = Seq("org.bouncycastle" % "bcpkix-jdk18on" % Versions.bouncyCastle)
 
   val integrationTest = Seq(
     "com.dimafeng" %% "testcontainers-scala-postgresql" % Versions.testcontainer % Test

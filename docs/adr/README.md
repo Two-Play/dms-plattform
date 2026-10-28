@@ -29,3 +29,4 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0013](0013-api-first-tapir.md) | API-first with Tapir on ZIO HTTP | Accepted | medium |
 | [0014](0014-mandantentrennung-rls.md) | Tenant isolation with tenant_id and row-level security | Accepted | high |
 | [0015](0015-frontend-react-tailwind-shadcn.md) | Frontend with React, Tailwind CSS and shadcn/ui | Accepted | medium |
+| [0017](0017-audit-hash-chain.md) | Audit trail as hash chain per tenant with RFC 3161 anchoring | Accepted | medium |
