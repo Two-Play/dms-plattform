@@ -51,7 +51,7 @@ Each document version is one row in `dms.document_version` holding the complete 
 
 - Must be done: compaction of working states after approval (privileged job; the side table is insert-only for the application).
 - Must be done: rendering fills rendition key, object version and SHA-256 before approval (sprint 7); destruction path that clears content but keeps the deletion record.
-- Must be done: owner confirmation of minor (editorial) versions in the workflow; language variants as a second validity dimension.
+- Done (DMS-46, ADR 0026): owner confirmation of minor (editorial) versions in the workflow. Must be done: language variants as a second validity dimension.
 - Ruled out: storing versions as deltas.
 
 ## Reversibility

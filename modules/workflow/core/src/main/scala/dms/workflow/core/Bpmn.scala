@@ -16,6 +16,9 @@ object Bpmn:
   /** `approval-<class key>`, or `approval.default` for the built-in workflow (class keys contain no dot). */
   def processKey(classKey: Option[String]): String = classKey.fold("approval.default")(k => s"approval-$k")
 
+  /** The process of the editorial path of minor versions ([[WorkflowDefinition.editorial]]). */
+  val EditorialKey = "approval.editorial"
+
   def render(processKey: String, name: String, definition: WorkflowDefinition): String =
     val steps                 = definition.steps.toVector
     def enter(i: Int): String = if i < steps.size then s"enter.${steps(i).key}" else "end"

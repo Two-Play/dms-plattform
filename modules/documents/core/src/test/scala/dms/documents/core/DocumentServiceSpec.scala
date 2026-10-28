@@ -303,9 +303,10 @@ object DocumentServiceSpec extends ZIOSpecDefault:
 
   /** The core fields required from review on. */
   private val reviewValues = initialValues ++ manual(
-    "owner"                -> MetadataValue.PersonRef("owner-1"),
-    "organizationalUnit"   -> MetadataValue.Text("Legal"),
-    "validFrom"            -> MetadataValue.Date(LocalDate.of(2027, 1, 1)),
+    "owner"              -> MetadataValue.PersonRef("owner-1"),
+    "organizationalUnit" -> MetadataValue.Text("Legal"),
+    // In the past: publication is only possible from the valid-from date on (DMS-45).
+    "validFrom"            -> MetadataValue.Date(LocalDate.of(2026, 1, 1)),
     "confidentiality"      -> MetadataValue.Selection("Internal"),
     "language"             -> MetadataValue.Text("de"),
     "retentionRule"        -> MetadataValue.Text("contract-10y"),

@@ -110,6 +110,23 @@ object RulesSpec extends ZIOSpecDefault:
           WorkflowDefinition.problems(unknown).exists(_.contains("unknown step"))
         )
       },
+      test("the editorial path is one approval step in which the document owner confirms (DMS-46)") {
+        val editorial = WorkflowDefinition.editorial
+        assertTrue(
+          WorkflowDefinition.problems(editorial).isEmpty,
+          editorial.steps.map(_.kind) == List(StepKind.Approval),
+          editorial.steps.flatMap(_.lanes).map(_.role) == List(WorkflowDefinition.DocumentOwner)
+        )
+      },
+      test("the owner confirms an editorial version unless they wrote it or there is no owner") {
+        val owner  = UserId("owner-1")
+        val author = UserId("author-1")
+        assertTrue(
+          Rules.ownerConfirmation(Some(owner), author) == List(owner),
+          Rules.ownerConfirmation(Some(author), author).isEmpty,
+          Rules.ownerConfirmation(None, author).isEmpty
+        )
+      },
       test("task keys round-trip") {
         assertTrue(Rules.parseTaskKey(Rules.taskKey("review", "legal")) == Some(("review", "legal")))
       }

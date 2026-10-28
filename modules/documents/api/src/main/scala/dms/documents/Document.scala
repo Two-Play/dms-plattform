@@ -4,7 +4,7 @@ import dms.documents.metadata.{DocumentClassId, MetadataValue}
 import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
 import dms.templates.{Block, DeviationReport, TemplateContent}
 
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 import java.util.UUID
 
 /** Where a field value comes from (business concept 4.3, hybrid creation). */
@@ -78,6 +78,16 @@ final case class Document(
   *   the deviation report of the content against the template (DMS-79): every change of a locked section with
   *   the active deviation requests of its section; stored with the version and frozen with it once it leaves
   *   Draft
+  * @param validFrom
+  *   the valid-from date of the approved version, taken from its `validFrom` field on approval (DMS-45): the
+  *   version is published automatically at 00:00 of this date in the tenant's time zone; `None` before
+  *   approval
+  * @param supersededBy
+  *   the version that replaced this one when it was superseded; readers of a superseded version are pointed
+  *   to it (DMS-45)
+  * @param requiresAcknowledgement
+  *   whether publishing this version asks its readers for a new acknowledgement (business concept 6.3): by
+  *   default for major versions only (DMS-46); decided when the version is created
   */
 final case class DocumentVersion(
     id: UUID,
@@ -100,7 +110,10 @@ final case class DocumentVersion(
     updatedAt: Instant,
     releasedBy: Option[UserId],
     releasedAt: Option[Instant],
-    deviations: DeviationReport = DeviationReport(Nil)
+    deviations: DeviationReport = DeviationReport(Nil),
+    validFrom: Option[LocalDate] = None,
+    supersededBy: Option[UUID] = None,
+    requiresAcknowledgement: Boolean = true
 ):
   def label: String = Versioning.label(number, status, workingState)
 

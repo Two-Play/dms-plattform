@@ -21,8 +21,8 @@ import zio.*
 import zio.json.*
 import zio.json.ast.Json
 
-import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.time.{Instant, ZoneId}
 import java.util.UUID
 
 enum DocumentError:
@@ -106,13 +106,55 @@ final case class DraftChange(
     content: Option[TemplateContent]
 )
 
-/** A document with all its versions and the effective profile of its class version. */
+/** A document with all its versions and the effective profile of its class version.
+  *
+  * @param zone
+  *   the time zone of the tenant; scheduled publications switch at 00:00 there (DMS-45)
+  */
 final case class DocumentDetails(
     document: Document,
     versions: List[DocumentVersion],
-    profile: MetadataProfile
+    profile: MetadataProfile,
+    zone: ZoneId = Publication.DefaultZone
 ):
   def open: Option[DocumentVersion] = versions.find(v => Versioning.isOpen(v.status))
+
+  /** The version readers of `v` are pointed to (see [[Publication.successor]]). */
+  def successor(v: DocumentVersion): Option[DocumentVersion] = Publication.successor(v, versions)
+
+  /** When an approved version is published automatically: 00:00 of its valid-from date in the tenant's time
+    * zone (at once if it has none).
+    */
+  def publicationDue(v: DocumentVersion): Option[Instant] =
+    Option.when(v.status == DocumentStatus.Approved)(
+      v.validFrom.fold(Instant.EPOCH)(Publication.dueAt(_, zone))
+    )
+
+  /** The automatic comparison of a minor version with its basis (see [[EditorialCheck]]). */
+  def editorialCheck(v: DocumentVersion, threshold: Double): Option[EditorialCheck] =
+    EditorialCheck.of(v, versions, threshold)
+
+/** Settings of the documents module (DMS-46).
+  *
+  * @param editorialChangeThreshold
+  *   share of changed text (0 to 1) above which the automatic comparison warns about an editorial (minor)
+  *   version
+  * @param minorVersionsRequireAcknowledgement
+  *   whether publishing a minor version asks readers for a new acknowledgement, unless the version decides
+  *   otherwise when it is created; major versions do by default
+  */
+final case class DocumentSettings(
+    editorialChangeThreshold: Double = 0.1,
+    minorVersionsRequireAcknowledgement: Boolean = false
+)
+
+object DocumentSettings:
+  val default: DocumentSettings = DocumentSettings()
+
+/** An approved version waiting for its publication at `dueAt` (00:00 of its valid-from date in the tenant's
+  * time zone).
+  */
+final case class ScheduledPublication(documentId: DocumentId, versionId: UUID, dueAt: Instant)
 
 /** Creates documents from released templates and manages their versions (business concept 4.3, 5.1, 5.2).
   *
@@ -122,7 +164,12 @@ final case class DocumentDetails(
   * status are missing. Every change is recorded in the audit trail, and creation and status changes are
   * published to the outbox, both in the same transaction. Authorization is the caller's job.
   */
-final class DocumentService(audit: AuditTrail, classes: DocumentClassService, templates: TemplateSource):
+final class DocumentService(
+    audit: AuditTrail,
+    classes: DocumentClassService,
+    templates: TemplateSource,
+    val settings: DocumentSettings = DocumentSettings.default
+):
   import DocumentService.*
 
   /** The released template version and the profile of its class version, e.g. to authorize a creation. */
@@ -203,7 +250,8 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
       versions <- sql(DocumentStore.versions(id, templates))
       profile  <- profile(document.classId, document.classVersion)
-    yield DocumentDetails(document, versions, profile)
+      zone     <- sql(DocumentStore.tenantZone)
+    yield DocumentDetails(document, versions, profile, zone)
 
   /** The most recently changed documents with all their versions; the caller filters what may be read. */
   def recent(limit: Int): IO[DocumentError, List[DocumentDetails]] =
@@ -268,7 +316,64 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
       current  <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
       updated  <- transition(document, current, LifecycleEvent.Submit, actor)
+      _        <- ZIO.when(updated.changeKind == ChangeKind.Minor)(recordEditorialCheck(updated, actor))
     yield updated
+
+  /** The automatic comparison of a submitted minor version with its basis (DMS-46), recorded in the audit
+    * trail so that the confirmation of the editorial classification can be traced to the warning.
+    */
+  private def recordEditorialCheck(v: DocumentVersion, actor: UserId): IO[DocumentError, Unit] =
+    for
+      versions <- sql(DocumentStore.versions(v.documentId, templates))
+      _ <- ZIO.foreachDiscard(EditorialCheck.of(v, versions, settings.editorialChangeThreshold))(check =>
+        record(
+          actor,
+          "document.editorial-check",
+          v,
+          Json.Obj(
+            "basedOn"          -> Json.Str(check.basedOn),
+            "changedRatio"     -> Json.Num(check.changedRatio),
+            "threshold"        -> Json.Num(check.threshold),
+            "exceedsThreshold" -> Json.Bool(check.exceedsThreshold),
+            "reason"           -> v.changeReason.fold(Json.Null)(Json.Str(_))
+          )
+        )
+      )
+    yield ()
+
+  /** Approved versions waiting for publication, with the moment each becomes valid (DMS-45). */
+  def scheduledPublications: IO[DocumentError, List[ScheduledPublication]] =
+    sql {
+      val zone = DocumentStore.tenantZone
+      DocumentStore.scheduled.map((id, document, validFrom) =>
+        ScheduledPublication(
+          DocumentId(document),
+          id,
+          validFrom.fold(Instant.EPOCH)(Publication.dueAt(_, zone))
+        )
+      )
+    }
+
+  /** Publishes an approved version whose valid-from date has come (DMS-45): the valid version of the same
+    * scope is superseded in the same transaction, so readers see either the old or the new valid version.
+    * Does nothing (`None`) if the version is not approved any more (already published) or not due yet (e.g.
+    * the tenant's time zone changed), which makes the publication job idempotent. Recorded as done by the
+    * platform ([[DocumentService.Scheduler]]).
+    */
+  def publishScheduled(versionId: UUID): IO[DocumentError, Option[DocumentVersion]] =
+    for
+      current   <- sql(DocumentStore.lockVersion(versionId, templates)).someOrFail(versionNotFound(versionId))
+      zone      <- sql(DocumentStore.tenantZone)
+      now       <- Clock.instant
+      published <-
+        if current.status != DocumentStatus.Approved || !Publication.isDue(current.validFrom, zone, now) then
+          ZIO.none
+        else
+          sql(DocumentStore.document(current.documentId))
+            .someOrFail(documentNotFound(current.documentId))
+            .flatMap(document => transition(document, current, LifecycleEvent.Publish, Scheduler))
+            .asSome
+    yield published
 
   /** Applies a lifecycle event to a version (review, approval, publication, ...). Approval needs a person
     * other than the author and freezes the version with a metadata snapshot; publication supersedes the valid
@@ -318,13 +423,23 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       id: DocumentId,
       kind: ChangeKind,
       reason: Option[String],
-      actor: UserId
+      actor: UserId,
+      requiresAcknowledgement: Option[Boolean] = None
   ): IO[DocumentError, DocumentVersion] =
     for
       document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
       versions <- sql(DocumentStore.versions(id, templates))
       _        <- ZIO.foreachDiscard(versions.find(v => Versioning.isOpen(v.status)).toList)(open =>
         ZIO.fail(DocumentError.Conflict(s"version ${open.label} is still ${open.status}; finish it first"))
+      )
+      // A new version starts from the valid one; an approved version that is not valid yet would be lost.
+      _ <- ZIO.foreachDiscard(versions.find(_.status == DocumentStatus.Approved).toList)(pending =>
+        ZIO.fail(
+          DocumentError.Conflict(
+            s"version ${pending.label} is approved and becomes valid on " +
+              s"${pending.validFrom.fold("its valid-from date")(_.toString)}; start the next version after that"
+          )
+        )
       )
       base <- ZIO
         .fromOption(versions.filter(v => Versioning.isValid(v.status)).maxByOption(_.number))
@@ -358,7 +473,12 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
         updatedAt = now,
         releasedBy = None,
         releasedAt = None,
-        deviations = DeviationReport.compare(template.content, base.content, carried.map(_.request))
+        deviations = DeviationReport.compare(template.content, base.content, carried.map(_.request)),
+        validFrom = None,
+        supersededBy = None,
+        requiresAcknowledgement = requiresAcknowledgement.getOrElse(
+          kind == ChangeKind.Major || settings.minorVersionsRequireAcknowledgement
+        )
       )
       _ <- sql {
         DocumentStore.insertVersion(version, templates)
@@ -370,10 +490,11 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
         "document.version-created",
         version,
         Json.Obj(
-          "basedOn"           -> Json.Str(base.label),
-          "changeKind"        -> Json.Str(kind.toString),
-          "reason"            -> changeReason.fold(Json.Null)(Json.Str(_)),
-          "deviationRequests" -> Json.Arr(carried.map(r => Json.Str(r.id.toString))*)
+          "basedOn"                 -> Json.Str(base.label),
+          "changeKind"              -> Json.Str(kind.toString),
+          "reason"                  -> changeReason.fold(Json.Null)(Json.Str(_)),
+          "requiresAcknowledgement" -> Json.Bool(version.requiresAcknowledgement),
+          "deviationRequests"       -> Json.Arr(carried.map(r => Json.Str(r.id.toString))*)
         )
       )
       _ <- publish("document.version-created", document, version)
@@ -625,7 +746,8 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       document: Document,
       before: DocumentVersion,
       event: LifecycleEvent,
-      actor: UserId
+      actor: UserId,
+      successor: Option[UUID] = None
   ): IO[DocumentError, DocumentVersion] =
     for
       current <-
@@ -655,14 +777,29 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
           case TransitionBlocked.Incomplete(target, issue) => DocumentError.Incomplete(target, issue)
         }
       now <- Clock.instant
+      _   <- ZIO.when(event == LifecycleEvent.Publish)(checkDue(current, now))
       snapshot = Option.when(target == DocumentStatus.Approved)(
         MetadataSnapshot(
           metadataOf(current.values) ++ values + (StatusField -> MetadataValue.Selection(target.toString)),
           now
         )
       )
+      // On approval the valid-from date is frozen with the snapshot; on supersession the successor is named.
+      validFrom    = snapshot.flatMap(_ => Publication.validFrom(current.metadata))
+      supersededBy = successor.filter(_ => target == DocumentStatus.Superseded)
       _ <- ZIO.when(target == DocumentStatus.Published)(supersedeValid(document, current, actor))
-      _ <- sql(DocumentStore.changeStatus(current.id, current.status, target, actor, now, snapshot))
+      _ <- sql(
+        DocumentStore.changeStatus(
+          current.id,
+          current.status,
+          target,
+          actor,
+          now,
+          snapshot,
+          validFrom,
+          supersededBy
+        )
+      )
         .filterOrFail(identity)(changedConcurrently(current))
         .mapError(conflict(s"document ${document.id.value} already has a valid version in this scope"))
       updated = current.copy(
@@ -670,12 +807,17 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
         updatedAt = now,
         metadataSnapshot = snapshot.orElse(current.metadataSnapshot),
         releasedBy = if snapshot.isDefined then Some(actor) else current.releasedBy,
-        releasedAt = if snapshot.isDefined then Some(now) else current.releasedAt
+        releasedAt = if snapshot.isDefined then Some(now) else current.releasedAt,
+        validFrom = validFrom.orElse(current.validFrom),
+        supersededBy = supersededBy.orElse(current.supersededBy)
       )
       details = Json.Obj(
-        "event" -> Json.Str(event.toString),
-        "from"  -> Json.Str(current.status.toString),
-        "to"    -> Json.Str(target.toString)
+        (List(
+          "event" -> Json.Str(event.toString),
+          "from"  -> Json.Str(current.status.toString),
+          "to"    -> Json.Str(target.toString)
+        ) ++ validFrom.map(d => "validFrom" -> Json.Str(d.toString)) ++
+          supersededBy.map(s => "supersededBy" -> Json.Str(s.toString)))*
       )
       _ <- record(actor, statusAction(event), updated, details)
       _ <- publish(
@@ -685,7 +827,24 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       )
     yield updated
 
-  /** Publication replaces the valid version of the same scope (business concept 5.2). */
+  /** A version is never published before 00:00 of its valid-from date in the tenant's time zone (DMS-45); the
+    * publication job publishes it then.
+    */
+  private def checkDue(v: DocumentVersion, now: Instant): IO[DocumentError, Unit] =
+    sql(DocumentStore.tenantZone).flatMap { zone =>
+      val validFrom = v.validFrom.orElse(Publication.validFrom(v.metadata))
+      ZIO
+        .unless(Publication.isDue(validFrom, zone, now))(
+          ZIO.fail(
+            DocumentError.Conflict(
+              s"version ${v.label} becomes valid on ${validFrom.fold("")(_.toString)} ($zone); it is " +
+                "published automatically then"
+            )
+          )
+        )
+        .unit
+    }
+
   /** Fields without value that computed fields of the version read (DMS-83): an approved document must not
     * contain computed fields without value, so these fields are required for the approval.
     */
@@ -701,6 +860,9 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       FieldIssue(key, label, IssueKind.MissingRequired(DocumentStatus.Approved))
     }
 
+  /** Publication replaces the valid version of the same scope (business concept 5.2) in the same transaction;
+    * the replaced version names its successor, which the database checks on commit (migration V12).
+    */
   private def supersedeValid(
       document: Document,
       publishing: DocumentVersion,
@@ -717,19 +879,21 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
           document,
           valid,
           LifecycleEvent.Supersede,
-          actor
+          actor,
+          Some(publishing.id)
         )
       )
     yield ()
 
   private def record(actor: UserId, action: String, v: DocumentVersion, details: Json.Obj) =
+    val automated = actor == Scheduler
     audit
       .record(
         AuditEvent(
-          Actor(actor.value, ActorKind.Person),
+          Actor(actor.value, if automated then ActorKind.Technical else ActorKind.Person),
           action,
           AuditObject("document", Some(v.documentId.value), Some(v.label)),
-          Channel.Api,
+          if automated then Channel.Automation else Channel.Api,
           Jsonb(details.merge(Json.Obj("versionId" -> Json.Str(v.id.toString))).toJson)
         )
       )
@@ -738,16 +902,21 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
 
   private def publish(eventType: String, document: Document, v: DocumentVersion) =
     val payload = Json.Obj(
-      "documentId"      -> Json.Str(document.id.value.toString),
-      "versionId"       -> Json.Str(v.id.toString),
-      "version"         -> Json.Str(v.label),
-      "status"          -> Json.Str(v.status.toString),
-      "classId"         -> Json.Str(document.classId.value.toString),
-      "classVersion"    -> Json.Num(v.classVersion),
-      "templateId"      -> Json.Str(v.templateId.value.toString),
-      "templateVersion" -> Json.Num(v.templateVersion),
-      // True if the workflow adds the additional review step for deviations (DMS-79).
-      "requiresExtraReview" -> Json.Bool(v.requiresExtraReview)
+      (List(
+        "documentId"      -> Json.Str(document.id.value.toString),
+        "versionId"       -> Json.Str(v.id.toString),
+        "version"         -> Json.Str(v.label),
+        "status"          -> Json.Str(v.status.toString),
+        "classId"         -> Json.Str(document.classId.value.toString),
+        "classVersion"    -> Json.Num(v.classVersion),
+        "templateId"      -> Json.Str(v.templateId.value.toString),
+        "templateVersion" -> Json.Num(v.templateVersion),
+        // True if the workflow adds the additional review step for deviations (DMS-79).
+        "requiresExtraReview" -> Json.Bool(v.requiresExtraReview),
+        // Minor versions take the editorial workflow path (DMS-46); acknowledgement per version (6.3).
+        "changeKind"              -> Json.Str(v.changeKind.toString),
+        "requiresAcknowledgement" -> Json.Bool(v.requiresAcknowledgement)
+      ) ++ v.validFrom.map(d => "validFrom" -> Json.Str(d.toString)))*
     )
     Outbox
       .publish("document", document.id.value, eventType, Jsonb(payload.toJson))
@@ -755,8 +924,17 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       .unit
 
 object DocumentService:
+  /** With the default [[DocumentSettings]]. */
   val layer: URLayer[AuditTrail & DocumentClassService & TemplateSource, DocumentService] =
     ZLayer.fromFunction(DocumentService(_, _, _))
+
+  def configured(
+      settings: DocumentSettings
+  ): URLayer[AuditTrail & DocumentClassService & TemplateSource, DocumentService] =
+    ZLayer.fromFunction(DocumentService(_, _, _, settings))
+
+  /** The platform as actor of scheduled publications (DMS-45); recorded as technical actor. */
+  val Scheduler: UserId = UserId("system:publication")
 
   private val TitleField  = "title"
   private val StatusField = "status"

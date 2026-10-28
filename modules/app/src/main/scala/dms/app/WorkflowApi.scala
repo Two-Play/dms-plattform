@@ -178,7 +178,11 @@ object WorkflowApi:
                 action,
                 DocumentApi
                   .resource(p.tenantId, details, version)
-                  .copy(assignedParticipants = task.candidates.toSet)
+                  .copy(
+                    assignedParticipants = task.candidates.toSet,
+                    // The owner confirms editorial (minor) versions in the shortened path (DMS-46).
+                    ownerMayApprove = task.role == WorkflowDefinition.DocumentOwner
+                  )
               )
               result <- ctx.workflow.vote(id, decision, req.reason, p.userId, p.authenticatedAt)
             yield caseView(result)
