@@ -137,4 +137,8 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | US-06.1 | DMS-93 | Task | Backlog (MVP) | – | DMS-44: retry failed rendering, Object Lock, worker image digest |
 | US-06.1 | DMS-94 | Task | Backlog (R2) | – | DMS-44: confidentiality watermark, PDF/A-3b, PDF/UA |
 | T-00 | DMS-95 | Task | Sprint 8 | – | One-command local development setup with demo users and data |
+| – | DMS-97 | Bug | Sprint 8 | – | DMS-95: dev-setup waited for the frontend on IPv4 only |
+| US-01.2 | DMS-98 | Task | Backlog (MVP) | – | DMS-50: template management UI incl. impact analysis before release |
+| US-10.1 | DMS-99 | Task | Backlog (MVP) | – | DMS-49: deputyship UI and notification at period start |
+| US-06.2 | DMS-100 | Task | Backlog (MVP) | – | DMS-47: acknowledgement overview for owners, reminders, audience per class |
 | – | DMS-96 | Bug | Sprint 8 | – | /api/v1/me returned no roles for users with role assignments in the DMS |
