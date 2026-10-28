@@ -1,0 +1,67 @@
+# Local development environment. Development only: all credentials are test values.
+# Sprint 0 state: PostgreSQL is verified; ZITADEL is set up and verified with T-00.3 (DMS-19).
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: dms
+      POSTGRES_USER: dms
+      POSTGRES_PASSWORD: dms-lokal
+    ports:
+      - "5433:5432"  # 5433 to avoid clashing with a local PostgreSQL on 5432
+    volumes:
+      - dms-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dms -d dms"]
+      interval: 5s
+      retries: 10
+
+  zitadel-db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres-lokal
+    volumes:
+      - zitadel-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:v4.19.5
+    command: start-from-init --masterkeyFromEnv --tlsMode disabled
+    environment:
+      ZITADEL_MASTERKEY: "LocalTestMasterkeyWith32Chars!!!"
+      ZITADEL_EXTERNALDOMAIN: localhost
+      ZITADEL_EXTERNALPORT: 8085
+      ZITADEL_EXTERNALSECURE: "false"
+      ZITADEL_DATABASE_POSTGRES_HOST: zitadel-db
+      ZITADEL_DATABASE_POSTGRES_PORT: 5432
+      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: zitadel-lokal
+      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: postgres
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: postgres-lokal
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+      # To verify in T-00.3: v4 requires the new login UI (separate container) by default.
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "false"
+      # Machine user with a personal access token for scripts/zitadel-setup.sh (written to .local/zitadel/).
+      ZITADEL_FIRSTINSTANCE_PATPATH: /setup/admin.pat
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: dms-setup
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: DMS setup
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2030-01-01T00:00:00Z"
+    user: "1000"
+    volumes:
+      - ./.local/zitadel:/setup
+    ports:
+      - "8085:8080"
+    depends_on:
+      zitadel-db:
+        condition: service_healthy
+
+volumes:
+  dms-db:
+  zitadel-db:

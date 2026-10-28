@@ -1,0 +1,110 @@
+// DMS platform – multi-module build.
+// Rule (docs/adr/0001): modules depend only on `kernel` and on the `*-api` of other modules,
+// never on another module's `*-core`. Only `app` wires the core modules together.
+
+ThisBuild / organization := "de.itheimnet.dms"
+ThisBuild / version      := "0.1.0-SNAPSHOT"
+ThisBuild / scalaVersion := Versions.scala
+// Compiler options come from sbt-tpolecat; with SBT_TPOLECAT_CI=1 (CI) warnings become errors.
+
+lazy val commonSettings = Seq(
+  libraryDependencies ++= Dependencies.zio ++ Dependencies.zioTest,
+  Test / fork := true
+)
+
+def module(id: String, dir: String): Project =
+  Project(id, file(dir)).settings(commonSettings)
+
+/** Business module with a public interface (`api`) and an implementation (`core`). */
+def apiModule(name: String): Project  = module(s"$name-api", s"modules/$name/api").dependsOn(kernel)
+def coreModule(name: String): Project = module(s"$name-core", s"modules/$name/core").dependsOn(kernel)
+
+lazy val kernel = module("kernel", "modules/kernel")
+
+lazy val identity = module("identity", "modules/identity")
+  .dependsOn(kernel)
+  .settings(libraryDependencies ++= Dependencies.jwt)
+
+lazy val authz = module("authz", "modules/authz").dependsOn(kernel, identity)
+
+lazy val templatesApi      = apiModule("templates")
+lazy val templatesCore     = coreModule("templates").dependsOn(templatesApi)
+lazy val documentsApi      = apiModule("documents")
+lazy val documentsCore     = coreModule("documents").dependsOn(documentsApi, templatesApi, auditApi)
+lazy val workflowApi       = apiModule("workflow")
+lazy val workflowCore      = coreModule("workflow").dependsOn(workflowApi, documentsApi)
+lazy val renderingApi      = apiModule("rendering")
+lazy val renderingCore     = coreModule("rendering").dependsOn(renderingApi, documentsApi)
+lazy val archiveApi        = apiModule("archive")
+lazy val archiveCore       = coreModule("archive").dependsOn(archiveApi, documentsApi)
+lazy val searchApi         = apiModule("search")
+lazy val searchCore        = coreModule("search").dependsOn(searchApi, documentsApi, authz)
+lazy val auditApi          = apiModule("audit")
+lazy val auditCore         = coreModule("audit").dependsOn(auditApi)
+lazy val notificationsApi  = apiModule("notifications")
+lazy val notificationsCore = coreModule("notifications").dependsOn(notificationsApi)
+
+lazy val integration = module("integration", "modules/integration")
+  .dependsOn(kernel, documentsApi)
+
+lazy val app = module("app", "modules/app")
+  .enablePlugins(JavaAppPackaging, DockerPlugin)
+  .dependsOn(
+    identity,
+    authz,
+    integration,
+    templatesCore,
+    documentsCore,
+    workflowCore,
+    renderingCore,
+    archiveCore,
+    searchCore,
+    auditCore,
+    notificationsCore
+  )
+  .settings(
+    libraryDependencies ++= Dependencies.http ++ Dependencies.config ++
+      Dependencies.logging ++ Dependencies.database ++ Dependencies.integrationTest,
+    Compile / mainClass := Some("dms.app.Main"),
+    Compile / sourceGenerators += Def.task {
+      val file = (Compile / sourceManaged).value / "dms" / "app" / "AppBuildInfo.scala"
+      val v    = version.value
+      IO.write(
+        file,
+        s"""package dms.app
+                        |
+                        |object AppBuildInfo:
+                        |  val version: String = "$v"
+                        |""".stripMargin
+      )
+      Seq(file)
+    }.taskValue,
+    dockerBaseImage    := "eclipse-temurin:21-jre",
+    dockerExposedPorts := Seq(8080)
+  )
+
+lazy val root = (project in file("."))
+  .settings(name := "dms-plattform", publish / skip := true)
+  .aggregate(
+    kernel,
+    identity,
+    authz,
+    integration,
+    app,
+    templatesApi,
+    templatesCore,
+    documentsApi,
+    documentsCore,
+    workflowApi,
+    workflowCore,
+    renderingApi,
+    renderingCore,
+    archiveApi,
+    archiveCore,
+    searchApi,
+    searchCore,
+    auditApi,
+    auditCore,
+    notificationsApi,
+    notificationsCore
+  )

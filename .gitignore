@@ -1,0 +1,14 @@
+target/
+project/target/
+project/project/
+.bsp/
+.metals/
+.bloop/
+.idea/
+.vscode/
+*.log
+.env
+node_modules/
+__pycache__/
+.venv/
+.local/

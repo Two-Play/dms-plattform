@@ -1,0 +1,1343 @@
+<title>Fachkonzept Dokumentenplattform</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,650&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: Akten-Dokument – feste Gliederung links, Fließtext rechts; Kapitelnummern entsprechen der echten Dokumentstruktur */
+:root{
+  --paper:#f6f7f5;
+  --surface:#ffffff;
+  --ink:#1c2530;
+  --muted:#5b6672;
+  --line:#dde2df;
+  --accent:#1f5d54;
+  --accent-soft:#e2eeeb;
+  --stamp:#9a4316;
+  --stamp-soft:#f6e7dc;
+  --ok:#2f6b3a;
+  --warn:#8a6100;
+  --crit:#a3302a;
+  --f-display:"Source Serif 4",Georgia,"Times New Roman",serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#121719;--surface:#192124;--ink:#e3e8e7;--muted:#9aa6a6;--line:#2b3538;
+  --accent:#74c2b3;--accent-soft:#1c2e2c;--stamp:#e59a6b;--stamp-soft:#2e2119;
+  --ok:#86c78f;--warn:#e0b85a;--crit:#ef8a83;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#121719;--surface:#192124;--ink:#e3e8e7;--muted:#9aa6a6;--line:#2b3538;
+  --accent:#74c2b3;--accent-soft:#1c2e2c;--stamp:#e59a6b;--stamp-soft:#2e2119;
+  --ok:#86c78f;--warn:#e0b85a;--crit:#ef8a83;color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--f-body);font-size:15.5px;line-height:1.62;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+a{color:var(--accent)}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.wrap{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:250px minmax(0,1fr);gap:48px;padding-block:40px 80px}
+@media (max-width:900px){.wrap{grid-template-columns:minmax(0,1fr);gap:24px;padding-block:24px 60px}}
+
+/* Gliederung */
+nav.toc{position:sticky;top:calc(env(safe-area-inset-top,0px) + 24px);align-self:start;max-height:calc(100vh - 48px);overflow:auto;font-size:13.5px}
+nav.toc details{border-left:1px solid var(--line);padding-left:14px}
+nav.toc summary{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);cursor:pointer;margin-bottom:10px;list-style:none}
+nav.toc summary::-webkit-details-marker{display:none}
+nav.toc ol{list-style:none;margin:0;padding:0;display:grid;gap:5px}
+nav.toc a{color:var(--ink);text-decoration:none;display:grid;grid-template-columns:2.2em 1fr}
+nav.toc a span{font-family:var(--f-mono);color:var(--muted);font-size:12px;padding-top:1px}
+nav.toc a:hover{color:var(--accent)}
+@media (max-width:900px){nav.toc{position:static;max-height:none}}
+
+main{min-width:0}
+header.doc{border-bottom:2px solid var(--ink);padding-bottom:22px;margin-bottom:12px}
+.eyebrow{font-family:var(--f-mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--f-display);font-weight:650;font-size:clamp(30px,4.4vw,44px);line-height:1.1;margin:10px 0 14px;text-wrap:balance}
+.lede{font-size:17px;max-width:64ch;color:var(--ink);margin:0}
+dl.docmeta{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px 24px;margin:22px 0 0;font-size:13px}
+dl.docmeta dt{font-family:var(--f-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+dl.docmeta dd{margin:2px 0 0;font-weight:500}
+.stamp{display:inline-block;font-family:var(--f-mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--stamp);border:1.5px solid var(--stamp);padding:1px 8px;border-radius:3px}
+
+section.ch{padding-top:40px}
+h2{font-family:var(--f-display);font-weight:650;font-size:27px;line-height:1.2;margin:0 0 14px;display:flex;gap:14px;align-items:baseline;text-wrap:balance}
+h2 .no{font-family:var(--f-mono);font-size:15px;font-weight:500;color:var(--accent);min-width:2.2em}
+h3{font-family:var(--f-display);font-weight:650;font-size:19.5px;margin:30px 0 8px;text-wrap:balance}
+h3 .no{font-family:var(--f-mono);font-size:13px;font-weight:500;color:var(--muted);margin-right:10px}
+h4{font-size:14px;font-weight:600;margin:20px 0 6px;letter-spacing:.01em}
+p,li{max-width:72ch}
+p{margin:0 0 12px}
+ul,ol{margin:0 0 14px;padding-left:1.3em}
+li{margin-bottom:4px}
+code,.mono{font-family:var(--f-mono);font-size:.88em}
+code{background:var(--accent-soft);color:var(--ink);padding:1px 5px;border-radius:3px;white-space:nowrap}
+strong{font-weight:600}
+
+.tbl{overflow-x:auto;margin:10px 0 18px;border:1px solid var(--line);border-radius:4px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;line-height:1.45}
+th,td{text-align:left;vertical-align:top;padding:8px 12px;border-bottom:1px solid var(--line)}
+th{font-weight:600;font-size:12px;letter-spacing:.03em;color:var(--muted);background:var(--paper);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.c,th.c{text-align:center}
+.matrix td.c{font-family:var(--f-mono);font-size:13px}
+.y{color:var(--ok);font-weight:600}.p{color:var(--warn);font-weight:600}.n{color:var(--muted)}
+
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:12px 16px;margin:14px 0 18px;border-radius:0 4px 4px 0;max-width:72ch}
+.note p:last-child{margin:0}
+.note.warn{border-color:var(--stamp);background:var(--stamp-soft)}
+.label{font-family:var(--f-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:4px}
+
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin:12px 0 18px}
+.grid2>div{min-width:0;border:1px solid var(--line);background:var(--surface);border-radius:4px;padding:14px 16px}
+.grid2 h4{margin-top:0}
+.grid2 ul{margin:0}
+
+pre.ph{font-family:var(--f-mono);font-size:13px;background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:14px 16px;overflow-x:auto;line-height:1.55;margin:10px 0 18px}
+pre.mermaid{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:16px;overflow-x:auto;margin:12px 0 18px}
+
+/* End-to-End-Schritte */
+ol.e2e{list-style:none;padding:0;margin:16px 0;display:grid;gap:0;counter-reset:s}
+ol.e2e>li{counter-increment:s;display:grid;grid-template-columns:44px minmax(0,1fr);gap:0 16px;max-width:none;margin:0}
+ol.e2e>li::before{content:counter(s,decimal-leading-zero);font-family:var(--f-mono);font-size:13px;font-weight:500;color:var(--accent);border:1.5px solid var(--accent);border-radius:50%;width:36px;height:36px;display:grid;place-items:center;background:var(--paper);position:relative;z-index:1}
+ol.e2e>li>div{border-left:1px solid var(--line);margin-left:-42px;padding:6px 0 26px 42px;min-width:0}
+ol.e2e>li:last-child>div{border-left-color:transparent}
+ol.e2e h4{font-family:var(--f-display);font-size:17.5px;font-weight:650;margin:4px 0 6px}
+.kv{display:grid;grid-template-columns:120px minmax(0,1fr);gap:4px 14px;font-size:14px;margin-top:6px}
+.kv dt{font-family:var(--f-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding-top:3px}
+.kv dd{margin:0}
+@media (max-width:560px){.kv{grid-template-columns:minmax(0,1fr)}.kv dd{margin-bottom:6px}}
+
+/* Backlog */
+.epic{border:1px solid var(--line);background:var(--surface);border-radius:4px;margin:16px 0;padding:0}
+.epic>summary{cursor:pointer;padding:14px 18px;display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;list-style:none}
+.epic>summary::-webkit-details-marker{display:none}
+.epic>summary::before{content:"+";font-family:var(--f-mono);color:var(--accent);width:1ch}
+.epic[open]>summary::before{content:"–"}
+.epic .eid{font-family:var(--f-mono);font-size:12.5px;color:var(--accent);font-weight:500}
+.epic .etitle{font-family:var(--f-display);font-weight:650;font-size:18px}
+.epic .egoal{flex-basis:100%;font-size:13.5px;color:var(--muted);padding-left:calc(1ch + 12px)}
+.epic .ebody{padding:0 18px 16px;border-top:1px solid var(--line)}
+.feat{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+.feat span{font-size:12.5px;border:1px solid var(--line);border-radius:3px;padding:2px 8px;background:var(--paper)}
+.feat span b{font-family:var(--f-mono);font-weight:500;color:var(--muted);margin-right:5px;font-size:11.5px}
+.story{border-top:1px dashed var(--line);padding-top:12px;margin-top:12px}
+.story .sid{font-family:var(--f-mono);font-size:12px;color:var(--stamp);font-weight:500}
+.story p.us{margin:4px 0 8px;font-style:italic}
+.story ul{font-size:14px;margin:0}
+.story li::marker{color:var(--accent)}
+.prio{font-family:var(--f-mono);font-size:11px;padding:0 6px;border-radius:3px;border:1px solid var(--line);color:var(--muted);margin-left:8px}
+
+.sev{font-family:var(--f-mono);font-size:11.5px;font-weight:500;white-space:nowrap}
+.sev.h{color:var(--crit)}.sev.m{color:var(--warn)}.sev.l{color:var(--ok)}
+
+footer.doc{margin-top:56px;padding-top:16px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+html{scroll-behavior:smooth}
+</style>
+
+<div class="wrap">
+<nav class="toc" aria-label="Gliederung">
+  <details open id="tocdetails">
+    <summary>Gliederung</summary>
+    <ol>
+      <li><a href="#k1"><span>1</span>Zielbild &amp; Nutzen</a></li>
+      <li><a href="#k2"><span>2</span>Zielgruppen, Rollen, Berechtigungen</a></li>
+      <li><a href="#k3"><span>3</span>Dokumentenklassen &amp; Metadaten</a></li>
+      <li><a href="#k4"><span>4</span>Vorlagen &amp; Platzhalter</a></li>
+      <li><a href="#k5"><span>5</span>Lebenszyklus &amp; Versionierung</a></li>
+      <li><a href="#k6"><span>6</span>Workflows, Review, Rezertifizierung</a></li>
+      <li><a href="#k7"><span>7</span>Historie, Audit-Trail, Archiv</a></li>
+      <li><a href="#k8"><span>8</span>Suche, Aufgaben, Benachrichtigungen</a></li>
+      <li><a href="#k9"><span>9</span>Mehrsprachigkeit &amp; Mandanten</a></li>
+      <li><a href="#k10"><span>10</span>Compliance &amp; Datenschutz</a></li>
+      <li><a href="#k11"><span>11</span>End-to-End-Prozess</a></li>
+      <li><a href="#k12"><span>12</span>Epics, Features, User Stories</a></li>
+      <li><a href="#k13"><span>13</span>Nichtfunktionale Anforderungen</a></li>
+      <li><a href="#k14"><span>14</span>Sicherheit &amp; Skalierung</a></li>
+      <li><a href="#k15"><span>15</span>Integrationen</a></li>
+      <li><a href="#k16"><span>16</span>Reporting &amp; Dashboards</a></li>
+      <li><a href="#k17"><span>17</span>Risiken &amp; Best Practices</a></li>
+      <li><a href="#k18"><span>18</span>Technische Zielarchitektur</a></li>
+      <li><a href="#k19"><span>19</span>Glossar</a></li>
+    </ol>
+  </details>
+</nav>
+
+<main>
+<header class="doc">
+  <span class="eyebrow">Fachkonzept · Kapitel 1–17 technologieunabhängig · Kapitel 18 Zielarchitektur</span>
+  <h1>Dokumenten- und Vorlagenmanagement-Plattform</h1>
+  <p class="lede">Webbasierte Plattform für die vorlagenbasierte Erstellung, Lenkung, Freigabe, Veröffentlichung und revisionssichere Aufbewahrung geschäftskritischer Dokumente: Verträge, Policies, Richtlinien, Handbücher und Formulare.</p>
+  <dl class="docmeta">
+    <div><dt>Dokument-ID</dt><dd class="mono">FK-DMS-001</dd></div>
+    <div><dt>Version</dt><dd class="mono">0.10 (Entwurf)</dd></div>
+    <div><dt>Stand</dt><dd>28.10.2026</dd></div>
+    <div><dt>Status</dt><dd><span class="stamp">Zur Abstimmung</span></dd></div>
+    <div><dt>Perspektiven</dt><dd>Product Owner · Architektur · UX · Compliance</dd></div>
+  </dl>
+</header>
+
+<!-- ============ 1 ============ -->
+<section class="ch" id="k1">
+<h2><span class="no">1</span>Zielbild und geschäftlicher Nutzen</h2>
+
+<h3><span class="no">1.1</span>Zielbild</h3>
+<p>Die Plattform ist die <strong>einzige maßgebliche Quelle (Single Source of Truth)</strong> für gelenkte Dokumente eines Unternehmens oder Konzerns. Jedes Dokument entsteht aus einer freigegebenen Vorlage, trägt ein vollständiges, validiertes Metadatenprofil, durchläuft einen definierten Lebenszyklus und ist zu jedem Zeitpunkt in jeder Version nachvollziehbar und unveränderbar abrufbar.</p>
+<p>Leitprinzipien des Zielbilds:</p>
+<ul>
+  <li><strong>Struktur vor Datei.</strong> Ein Dokument ist ein fachliches Objekt aus Inhalt, Metadaten, Feldwerten, Beziehungen und Historie. Die PDF-Datei ist eine abgeleitete, versiegelte Darstellung (Rendition).</li>
+  <li><strong>Vorlage als Steuerungsinstrument.</strong> Vorlagen sind selbst gelenkte, versionierte Objekte. Wer die Vorlage steuert, steuert Qualität, Corporate Design und rechtliche Mindestinhalte.</li>
+  <li><strong>Governance by Design.</strong> Freigaben, Vier-Augen-Prinzip, Aufbewahrung und Rezertifizierung sind konfigurierte Regeln je Dokumentenklasse, keine Disziplinfrage einzelner Personen.</li>
+  <li><strong>Unveränderlichkeit freigegebener Stände.</strong> Freigegebene Versionen werden nie überschrieben, sondern nur durch neue Versionen abgelöst.</li>
+  <li><strong>Stichtagsfähigkeit.</strong> Die Frage „Welche Fassung galt am 14.03.2025 für Gesellschaft X?“ ist jederzeit beantwortbar.</li>
+  <li><strong>Automatisierbar.</strong> Jede manuelle Funktion ist auch über dokumentierte Schnittstellen für Fachsysteme nutzbar.</li>
+</ul>
+
+<h3><span class="no">1.2</span>Geschäftlicher Nutzen</h3>
+<div class="tbl"><table>
+<thead><tr><th>Nutzendimension</th><th>Wirkung</th><th>Messgröße (Beispiel)</th></tr></thead>
+<tbody>
+<tr><td>Effizienz</td><td>Schnellere Erstellung durch Vorlagen, Bausteine und automatische Befüllung; weniger Abstimmungsschleifen durch strukturierte Workflows.</td><td>Durchlaufzeit Entwurf → Veröffentlichung; Anteil automatisch erzeugter Dokumente</td></tr>
+<tr><td>Qualität &amp; Konsistenz</td><td>Einheitliche Struktur, Pflichtklauseln und Corporate Design; weniger Tipp- und Übertragungsfehler.</td><td>Rückweisungsquote im Review; Anzahl Abweichungen von Standardklauseln</td></tr>
+<tr><td>Compliance &amp; Prüfungssicherheit</td><td>Lückenloser Nachweis von Erstellung, Prüfung, Freigabe und Kenntnisnahme; Audit-Anfragen in Minuten statt Tagen beantwortet.</td><td>Aufwand je Prüfungsanfrage; Anzahl Prüfungsfeststellungen</td></tr>
+<tr><td>Risikoreduktion</td><td>Keine veralteten Policies im Umlauf; Vertragsfristen werden aktiv überwacht.</td><td>Anzahl überfälliger Reviews; verpasste Kündigungsfristen</td></tr>
+<tr><td>Transparenz</td><td>Bestandsübersicht über alle gelenkten Dokumente, Verantwortliche und Status.</td><td>Anteil Dokumente mit zugewiesenem Owner; Datenqualitätsindex</td></tr>
+<tr><td>Skalierung</td><td>Konzernweite Wiederverwendung von Vorlagen bei lokaler Anpassbarkeit je Gesellschaft und Sprache.</td><td>Wiederverwendungsquote zentraler Vorlagen</td></tr>
+</tbody></table></div>
+
+<h3><span class="no">1.3</span>Abgrenzung</h3>
+<p><strong>Im Umfang:</strong> Vorlagen, Bausteine, Dokumenterstellung, Metadaten, Workflows, Versionierung, Rendering, Veröffentlichung, Kenntnisnahme, Review, Archivierung, Suche, Reporting, Schnittstellen.</p>
+<p><strong>Nicht im Umfang (Anbindung über Schnittstellen):</strong> vollständiges Vertragsverhandlungs- und Claim-Management, qualifizierte elektronische Signatur als eigener Vertrauensdienst, allgemeines Kollaborations-Filesharing, Buchhaltungs- und Belegarchivierung außerhalb gelenkter Dokumente.</p>
+</section>
+
+<!-- ============ 2 ============ -->
+<section class="ch" id="k2">
+<h2><span class="no">2</span>Zielgruppen, Rollen und Berechtigungen</h2>
+
+<h3><span class="no">2.1</span>Zielgruppen</h3>
+<div class="grid2">
+  <div><h4>Fachbereiche</h4><ul><li>Rechtsabteilung (Verträge, AGB)</li><li>Compliance, Informationssicherheit, Datenschutz (Policies)</li><li>Personal (Arbeitsverträge, Handbücher)</li><li>Qualitätsmanagement (Verfahrens- und Arbeitsanweisungen)</li><li>Einkauf, Vertrieb (Rahmen- und Einzelverträge)</li></ul></div>
+  <div><h4>Querschnitt</h4><ul><li>Alle Mitarbeitenden als Lesende und Kenntnisnehmende</li><li>Führungskräfte als Genehmigende</li><li>Interne Revision, externe Prüfer, Aufsicht</li><li>IT und Administration</li><li>Externe Partner mit eingeschränktem Zugriff (z.&nbsp;B. Vertragspartner im Review)</li></ul></div>
+</div>
+
+<h3><span class="no">2.2</span>Rollenmodell</h3>
+<p>Rollen sind fachlich definiert und werden je Mandant, Organisationseinheit und Dokumentenklasse zugewiesen. Eine Person kann mehrere Rollen haben; widersprüchliche Rollen werden durch Funktionstrennungsregeln (siehe 2.4) verhindert.</p>
+<div class="tbl"><table>
+<thead><tr><th>Rolle</th><th>Verantwortung</th></tr></thead>
+<tbody>
+<tr><td><strong>Leser</strong></td><td>Liest veröffentlichte Dokumente im eigenen Sichtbarkeitsbereich, bestätigt Kenntnisnahme.</td></tr>
+<tr><td><strong>Autor</strong></td><td>Erstellt Dokumente aus Vorlagen, befüllt Felder, bearbeitet Entwürfe, reicht zur Prüfung ein.</td></tr>
+<tr><td><strong>Dokumentverantwortlicher (Owner)</strong></td><td>Fachlich verantwortlich für Inhalt, Aktualität und Rezertifizierung; Pflichtrolle für jedes gelenkte Dokument.</td></tr>
+<tr><td><strong>Reviewer</strong></td><td>Prüft fachlich, rechtlich oder redaktionell; kommentiert, fordert Änderungen an, gibt Prüfvotum ab.</td></tr>
+<tr><td><strong>Genehmiger</strong></td><td>Erteilt die verbindliche Freigabe; Zeichnungsbefugnis wird je Klasse/Schwellwert definiert.</td></tr>
+<tr><td><strong>Vorlagen-Designer</strong></td><td>Erstellt und pflegt Vorlagen, Bausteine, Felddefinitionen und Logik.</td></tr>
+<tr><td><strong>Vorlagen-Verantwortlicher</strong></td><td>Gibt Vorlagen fachlich frei (z.&nbsp;B. Rechtsabteilung für Vertragsvorlagen).</td></tr>
+<tr><td><strong>Records Manager</strong></td><td>Pflegt Aufbewahrungsregeln, Klassifikation, Legal Holds; verantwortet Archivierung und Vernichtung.</td></tr>
+<tr><td><strong>Compliance-Beauftragter</strong></td><td>Überwacht Kenntnisnahmen, Review-Fristen, Abweichungen; lesender Zugriff auf Audit-Berichte.</td></tr>
+<tr><td><strong>Auditor</strong></td><td>Zeitlich befristeter, rein lesender Zugriff auf Dokumente, Historie und Audit-Trail eines definierten Umfangs.</td></tr>
+<tr><td><strong>Fachadministrator (Mandant)</strong></td><td>Konfiguriert Klassen, Metadaten, Workflows, Taxonomien und Rollenzuweisungen im eigenen Mandanten.</td></tr>
+<tr><td><strong>Plattformadministrator</strong></td><td>Betreibt die Plattform mandantenübergreifend; <em>kein</em> Zugriff auf Dokumentinhalte ohne protokollierten Notfallzugang.</td></tr>
+<tr><td><strong>Technischer Nutzer</strong></td><td>Identität für Schnittstellen und automatische Prozesse, mit eng begrenzten Rechten und eigener Protokollierung.</td></tr>
+</tbody></table></div>
+
+<h3><span class="no">2.3</span>Berechtigungskonzept</h3>
+<p>Das Berechtigungsmodell kombiniert <strong>rollenbasierte</strong> Rechte (was darf eine Rolle grundsätzlich) mit <strong>attributbasierten</strong> Regeln (auf welche Dokumente konkret). Ausgewertete Attribute sind u.&nbsp;a. Mandant, Organisationseinheit, Dokumentenklasse, Vertraulichkeitsstufe, Status und Lebenszyklusphase.</p>
+<ul>
+  <li><strong>Deny by default:</strong> Ohne explizite Berechtigung kein Zugriff, auch nicht auf Existenz und Metadaten.</li>
+  <li><strong>Vertraulichkeitsstufen:</strong> <code>Öffentlich</code>, <code>Intern</code>, <code>Vertraulich</code>, <code>Streng vertraulich</code>. Ab „Vertraulich“ ist der Zugriff auf benannte Gruppen beschränkt; ab „Streng vertraulich“ zusätzlich Download- und Druckbeschränkung sowie Wasserzeichen.</li>
+  <li><strong>Statusabhängigkeit:</strong> Entwürfe sehen nur Autoren, Owner und Prüfende; veröffentlichte Fassungen sieht der definierte Leserkreis.</li>
+  <li><strong>Feldebene:</strong> Einzelne Metadaten oder Feldwerte (z.&nbsp;B. Vertragswert, Gehalt) können für bestimmte Rollen maskiert werden.</li>
+  <li><strong>Vererbung:</strong> Rechte werden über Ablagestruktur/Klasse vererbt; Abweichungen sind möglich, werden aber im Berechtigungsbericht hervorgehoben.</li>
+  <li><strong>Stellvertretung:</strong> Zeitlich befristete Delegation von Aufgaben und Rechten mit Protokollierung; Genehmigungsbefugnis nur an Personen mit gleicher Zeichnungsbefugnis delegierbar.</li>
+  <li><strong>Rezertifizierung der Berechtigungen:</strong> Owner und Fachadministratoren bestätigen regelmäßig (z.&nbsp;B. halbjährlich) die vergebenen Rechte.</li>
+</ul>
+
+<h4>Berechtigungsmatrix (Grundrechte, vor attributbasierter Einschränkung)</h4>
+<div class="tbl"><table class="matrix">
+<thead><tr><th>Funktion</th><th class="c">Leser</th><th class="c">Autor</th><th class="c">Owner</th><th class="c">Reviewer</th><th class="c">Genehm.</th><th class="c">Vorl.-Des.</th><th class="c">Records</th><th class="c">Auditor</th><th class="c">Fach-Admin</th></tr></thead>
+<tbody>
+<tr><td>Veröffentlichte Dokumente lesen</td><td class="c y">●</td><td class="c y">●</td><td class="c y">●</td><td class="c y">●</td><td class="c y">●</td><td class="c y">●</td><td class="c y">●</td><td class="c y">●</td><td class="c p">◐</td></tr>
+<tr><td>Dokument aus Vorlage erstellen</td><td class="c n">–</td><td class="c y">●</td><td class="c y">●</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td></tr>
+<tr><td>Entwurf bearbeiten</td><td class="c n">–</td><td class="c y">●</td><td class="c y">●</td><td class="c p">◐</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td></tr>
+<tr><td>Kommentieren im Review</td><td class="c n">–</td><td class="c y">●</td><td class="c y">●</td><td class="c y">●</td><td class="c y">●</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td></tr>
+<tr><td>Freigeben / Genehmigen</td><td class="c n">–</td><td class="c n">–</td><td class="c p">◐</td><td class="c n">–</td><td class="c y">●</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td></tr>
+<tr><td>Veröffentlichen</td><td class="c n">–</td><td class="c n">–</td><td class="c y">●</td><td class="c n">–</td><td class="c p">◐</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td></tr>
+<tr><td>Außer Kraft setzen</td><td class="c n">–</td><td class="c n">–</td><td class="c y">●</td><td class="c n">–</td><td class="c y">●</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td></tr>
+<tr><td>Vorlagen bearbeiten</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c y">●</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td></tr>
+<tr><td>Aufbewahrung / Legal Hold</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c y">●</td><td class="c n">–</td><td class="c n">–</td></tr>
+<tr><td>Vernichtung nach Fristablauf</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c p">◐</td><td class="c n">–</td><td class="c n">–</td></tr>
+<tr><td>Historie &amp; Audit-Trail einsehen</td><td class="c n">–</td><td class="c p">◐</td><td class="c y">●</td><td class="c p">◐</td><td class="c p">◐</td><td class="c n">–</td><td class="c y">●</td><td class="c y">●</td><td class="c p">◐</td></tr>
+<tr><td>Konfiguration (Klassen, Workflows)</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c n">–</td><td class="c p">◐</td><td class="c n">–</td><td class="c y">●</td></tr>
+</tbody></table></div>
+<p style="font-size:13px;color:var(--muted)">● uneingeschränkt im zugewiesenen Bereich · ◐ eingeschränkt (eigene Dokumente, nur bestimmte Klassen oder nur mit zweiter Bestätigung) · – kein Recht. Fach-Admins sehen Dokumentinhalte nur, wenn ihnen zusätzlich eine fachliche Rolle zugewiesen ist.</p>
+
+<h3><span class="no">2.4</span>Funktionstrennung (Segregation of Duties)</h3>
+<ul>
+  <li>Autor und Genehmiger derselben Version dürfen nicht identisch sein (konfigurierbar je Klasse, Standard: aktiv).</li>
+  <li>Vorlagen-Designer kann eigene Vorlage nicht selbst freigeben.</li>
+  <li>Records Manager kann Vernichtung nur mit Bestätigung einer zweiten berechtigten Person auslösen.</li>
+  <li>Plattformadministratoren können sich keine fachlichen Rollen selbst zuweisen.</li>
+  <li>Verletzungen werden nicht nur verhindert, sondern bei Regeländerungen rückwirkend geprüft und berichtet.</li>
+</ul>
+</section>
+
+<!-- ============ 3 ============ -->
+<section class="ch" id="k3">
+<h2><span class="no">3</span>Dokumentenklassen, Metadaten und Beziehungen</h2>
+
+<h3><span class="no">3.1</span>Dokumentenklassen</h3>
+<p>Eine Dokumentenklasse bündelt alle Regeln, die für eine Art von Dokument gelten: Metadatenprofil, zulässige Vorlagen, Workflow, Review-Zyklus, Aufbewahrung, Vertraulichkeits-Standard und Nummernkreis. Klassen sind hierarchisch (z.&nbsp;B. <em>Vertrag → Dienstleistungsvertrag → IT-Dienstleistungsvertrag</em>) und erben Regeln vom Elternknoten.</p>
+<div class="tbl"><table>
+<thead><tr><th>Klasse</th><th>Beispiele</th><th>Besonderheiten</th><th>Review-Zyklus</th><th>Aufbewahrung (Richtwert)</th></tr></thead>
+<tbody>
+<tr><td><strong>Vertrag</strong></td><td>Rahmenvertrag, Einzelvertrag, NDA, Arbeitsvertrag, AV-Vertrag</td><td>Vertragsparteien, Laufzeit, Kündigungsfristen, Wert; Unterschriftenprozess; Anlagen; Nachträge</td><td>Fristgesteuert (Verlängerung, Kündigung)</td><td>Ende Vertrag + 6 bzw. 10 Jahre</td></tr>
+<tr><td><strong>Policy</strong></td><td>Informationssicherheits-Policy, Code of Conduct, Datenschutz-Policy</td><td>Oberste Normebene; Genehmigung durch Geschäftsleitung; Kenntnisnahmepflicht</td><td>Jährlich</td><td>Außerkraftsetzung + 10 Jahre</td></tr>
+<tr><td><strong>Richtlinie</strong></td><td>Reiserichtlinie, Zugriffsrichtlinie, Beschaffungsrichtlinie</td><td>Konkretisiert eine Policy; muss auf übergeordnete Policy verweisen</td><td>Jährlich bis zweijährlich</td><td>Außerkraftsetzung + 10 Jahre</td></tr>
+<tr><td><strong>Verfahrens-/Arbeitsanweisung</strong></td><td>SOP, Prozessbeschreibung, Checkliste</td><td>Operativ; häufige Änderungen; Schulungsbezug</td><td>Jährlich</td><td>Außerkraftsetzung + 6 bis 10 Jahre</td></tr>
+<tr><td><strong>Handbuch</strong></td><td>Mitarbeiterhandbuch, QM-Handbuch, Betriebshandbuch</td><td>Umfangreich, kapitelweise Struktur, Teilverantwortlichkeiten je Kapitel</td><td>Jährlich (kapitelweise)</td><td>Außerkraftsetzung + 10 Jahre</td></tr>
+<tr><td><strong>Formular</strong></td><td>Antragsformular, Erklärung, Checkliste zum Ausfüllen</td><td>Leere Vorlage ist gelenkt; ausgefüllte Instanzen sind Aufzeichnungen (Records) mit eigener Aufbewahrung</td><td>Zweijährlich</td><td>Formularversion: wie Richtlinie; Instanz: nach Zweck</td></tr>
+<tr><td><strong>Korrespondenz/Bescheinigung</strong></td><td>Kündigungsschreiben, Bestätigung, Zeugnis</td><td>Hochautomatisiert, Massenerzeugung, oft ohne Review</td><td>Keiner (Vorlage: jährlich)</td><td>Nach Zweck, i.&nbsp;d.&nbsp;R. 6 Jahre</td></tr>
+</tbody></table></div>
+<div class="note"><p>Aufbewahrungsfristen sind Richtwerte nach typischer deutscher Rechtslage (u.&nbsp;a. Handels- und Steuerrecht). Sie werden je Mandant und Rechtsraum durch den Records Manager verbindlich konfiguriert und rechtlich bestätigt.</p></div>
+
+<h3><span class="no">3.2</span>Metadatenmodell</h3>
+<p>Metadaten sind in vier Schichten organisiert. Jede Schicht hat eigene Verantwortliche und Änderungsregeln.</p>
+<div class="grid2">
+  <div><h4>1 · Kernmetadaten</h4><p style="margin:0">Für alle Dokumente verbindlich, plattformweit einheitlich definiert. Nicht durch Mandanten veränderbar.</p></div>
+  <div><h4>2 · Klassenspezifische Metadaten</h4><p style="margin:0">Je Dokumentenklasse, z.&nbsp;B. Vertragspartei, Kündigungsfrist, Geltungsbereich einer Policy.</p></div>
+  <div><h4>3 · Mandantenspezifische Erweiterungen</h4><p style="margin:0">Zusätzliche Felder eines Mandanten, z.&nbsp;B. interne Kostenstelle; nicht im Widerspruch zu Schicht 1 und 2.</p></div>
+  <div><h4>4 · Systemmetadaten</h4><p style="margin:0">Von der Plattform automatisch gesetzt und nicht editierbar: Zeitstempel, Prüfsummen, Vorlagenversion, Status.</p></div>
+</div>
+
+<h4>Kernmetadaten</h4>
+<div class="tbl"><table>
+<thead><tr><th>Feld</th><th>Typ</th><th>Pflicht</th><th>Quelle</th><th>Hinweis</th></tr></thead>
+<tbody>
+<tr><td>Dokument-ID</td><td>Kennung</td><td>ja</td><td>System</td><td>Unveränderlich, sprechender Nummernkreis je Klasse, z.&nbsp;B. <code>POL-ISM-2026-0042</code></td></tr>
+<tr><td>Titel</td><td>Text, mehrsprachig</td><td>ja</td><td>Autor</td><td>Je Sprachvariante</td></tr>
+<tr><td>Dokumentenklasse</td><td>Auswahl (Taxonomie)</td><td>ja</td><td>Vorlage</td><td>Steuert Regelwerk</td></tr>
+<tr><td>Version / Status</td><td>System</td><td>ja</td><td>System</td><td>Siehe Kapitel 5</td></tr>
+<tr><td>Owner</td><td>Person/Funktion</td><td>ja</td><td>Autor</td><td>Bevorzugt Funktion statt Person, damit Personalwechsel kein verwaistes Dokument erzeugt</td></tr>
+<tr><td>Mandant / Organisationseinheit</td><td>Struktur</td><td>ja</td><td>Kontext</td><td>Steuert Sichtbarkeit</td></tr>
+<tr><td>Geltungsbereich</td><td>Mehrfachauswahl</td><td>klassenabh.</td><td>Autor</td><td>Gesellschaften, Standorte, Funktionen</td></tr>
+<tr><td>Gültig ab / Gültig bis</td><td>Datum</td><td>ja / nein</td><td>Autor, Workflow</td><td>Grundlage für Stichtagsabfragen</td></tr>
+<tr><td>Nächster Review</td><td>Datum</td><td>klassenabh.</td><td>Berechnet</td><td>Aus Freigabedatum + Zyklus, manuell verkürzbar</td></tr>
+<tr><td>Vertraulichkeit</td><td>Auswahl</td><td>ja</td><td>Klassen-Standard</td><td>Nur erhöhbar ohne zusätzliche Freigabe</td></tr>
+<tr><td>Sprache / Mastersprache</td><td>Auswahl</td><td>ja</td><td>Autor</td><td>Verbindliche Fassung kennzeichnen</td></tr>
+<tr><td>Aufbewahrungsregel</td><td>Referenz</td><td>ja</td><td>Klasse</td><td>Nur Records Manager änderbar</td></tr>
+<tr><td>Enthält personenbezogene Daten</td><td>Ja/Nein + Kategorien</td><td>ja</td><td>Vorlage, Autor</td><td>Steuert Datenschutzmaßnahmen</td></tr>
+<tr><td>Schlagwörter</td><td>Kontrolliert + frei</td><td>nein</td><td>Autor</td><td>Siehe 3.3</td></tr>
+<tr><td>Vorlage + Vorlagenversion</td><td>Referenz</td><td>ja</td><td>System</td><td>Nachweis, aus welcher Vorlagenfassung erzeugt wurde</td></tr>
+<tr><td>Prüfsumme der Rendition</td><td>Hash</td><td>ja (ab Freigabe)</td><td>System</td><td>Integritätsnachweis</td></tr>
+</tbody></table></div>
+
+<h4>Regeln für das Metadatenmodell</h4>
+<ul>
+  <li><strong>Felddefinitionen sind zentral</strong> und werden von Vorlagen und Klassen referenziert, nicht kopiert. Ein Feld „Vertragspartner“ existiert einmal.</li>
+  <li><strong>Datentypen und Validierung:</strong> Text, Zahl, Betrag mit Währung, Datum, Zeitraum, Person, Organisation, Auswahlliste, Referenz auf Dokument, Referenz auf externes Objekt. Jeder Typ hat Validierungsregeln (Format, Wertebereich, Abhängigkeiten).</li>
+  <li><strong>Pflichtigkeit ist statusabhängig:</strong> Ein Feld kann im Entwurf optional, für die Einreichung zum Review aber Pflicht sein.</li>
+  <li><strong>Wertelisten werden versioniert.</strong> Ein entfernter Listenwert bleibt in historischen Dokumenten gültig und lesbar.</li>
+  <li><strong>Schemaänderungen</strong> an Klassen erzeugen eine neue Profilversion; bestehende Dokumente werden nicht stillschweigend verändert, sondern bei Bedarf über einen protokollierten Migrationslauf nachgepflegt.</li>
+</ul>
+
+<h3><span class="no">3.3</span>Tagging und Kategorisierung</h3>
+<ul>
+  <li><strong>Kontrollierte Taxonomien</strong> (hierarchisch): Dokumentenklasse, Themengebiet, Prozesslandkarte, Regulierungsbezug (z.&nbsp;B. Norm-Kapitel), Geltungsbereich. Gepflegt durch Fachadministratoren.</li>
+  <li><strong>Freie Schlagwörter</strong> für Auffindbarkeit, mit Vorschlägen aus bestehenden Tags, um Wildwuchs zu begrenzen. Regelmäßige Bereinigung (Zusammenführen von Synonymen).</li>
+  <li><strong>Regulatorische Zuordnung:</strong> Dokumente können Anforderungen oder Kontrollen eines Regelwerks zugeordnet werden. Dadurch wird sichtbar, welche Anforderung durch welche Policy abgedeckt ist und wo Lücken bestehen.</li>
+  <li><strong>Automatische Klassifikationsvorschläge</strong> auf Basis von Inhalt und Vorlage sind zulässig, müssen aber vom Menschen bestätigt werden, wenn sie Rechte oder Aufbewahrung beeinflussen.</li>
+</ul>
+
+<h3><span class="no">3.4</span>Dokumentenbeziehungen und Referenzen</h3>
+<div class="tbl"><table>
+<thead><tr><th>Beziehungstyp</th><th>Bedeutung</th><th>Systemverhalten</th></tr></thead>
+<tbody>
+<tr><td>ersetzt / ersetzt durch</td><td>Nachfolgedokument (nicht neue Version, sondern neues Dokument)</td><td>Ersetztes Dokument wird bei Veröffentlichung des Nachfolgers automatisch außer Kraft gesetzt</td></tr>
+<tr><td>konkretisiert / übergeordnet</td><td>Normenhierarchie: Policy → Richtlinie → Arbeitsanweisung</td><td>Änderung des übergeordneten Dokuments erzeugt Prüfaufgabe für alle untergeordneten</td></tr>
+<tr><td>Anlage zu / hat Anlage</td><td>Bestandteil eines Hauptdokuments</td><td>Gemeinsame Freigabe, gemeinsame Aufbewahrung</td></tr>
+<tr><td>Nachtrag zu</td><td>Vertragsänderung</td><td>Konsolidierte Sicht auf gültigen Vertragsstand</td></tr>
+<tr><td>Rahmen zu Einzel</td><td>Rahmenvertrag und Abrufverträge</td><td>Kündigung des Rahmens markiert Einzelverträge zur Prüfung</td></tr>
+<tr><td>Übersetzung von</td><td>Sprachvariante</td><td>Master-Änderung markiert Übersetzungen als veraltet</td></tr>
+<tr><td>referenziert</td><td>Inhaltlicher Verweis</td><td>Warnung, wenn das Ziel außer Kraft gesetzt wird (verwaiste Referenz)</td></tr>
+<tr><td>erzeugt aus</td><td>Vorlage → Dokument</td><td>Auswirkungsanalyse bei Vorlagenänderung</td></tr>
+</tbody></table></div>
+<p>Referenzen im Dokumenttext werden als <strong>strukturierte Verweise</strong> (auf Dokument-ID, optional auf Version oder auf „jeweils gültige Fassung“) gespeichert, nicht als kopierte Links. Eine Beziehungsansicht zeigt das Netz eines Dokuments und dient als Auswirkungsanalyse vor Änderungen.</p>
+</section>
+
+<!-- ============ 4 ============ -->
+<section class="ch" id="k4">
+<h2><span class="no">4</span>Vorlagen, Platzhalter und Dokumenterstellung</h2>
+
+<h3><span class="no">4.1</span>Vorlagenverwaltung</h3>
+<p>Vorlagen sind eigenständige, gelenkte Objekte mit eigenem Lebenszyklus (Entwurf → Test → Freigegeben → Abgekündigt → Archiviert).</p>
+<ul>
+  <li><strong>Bestandteile einer Vorlage:</strong> Layout (Seitenformat, Kopf- und Fußzeilen, Corporate Design), Struktur (Kapitel, Abschnitte), Textbausteine, Felddefinitionen, Logik (Bedingungen, Wiederholungen, Berechnungen), Metadaten-Vorbelegung, Zuordnung zu Klasse und Workflow.</li>
+  <li><strong>Bausteinbibliothek (Klauselbibliothek):</strong> Wiederverwendbare, einzeln versionierte und freigegebene Textbausteine, z.&nbsp;B. Haftungsklausel, Gerichtsstand, Datenschutzhinweis. Vorlagen referenzieren Bausteine, statt sie zu kopieren.</li>
+  <li><strong>Gesperrte und editierbare Bereiche:</strong> Der Designer legt fest, welche Abschnitte der Autor ändern darf. Abweichungen von gesperrten Standardklauseln erfordern einen zusätzlichen Prüfschritt (z.&nbsp;B. Rechtsabteilung).</li>
+  <li><strong>Vererbung:</strong> Konzernvorlage → Gesellschaftsvorlage. Die abgeleitete Vorlage darf nur freigegebene Erweiterungspunkte nutzen und erhält Hinweise, wenn die Basisvorlage sich ändert.</li>
+  <li><strong>Testmodus:</strong> Vorschau mit Testdatensätzen, inklusive Randfällen (leere optionale Felder, lange Werte, alle Bedingungszweige).</li>
+  <li><strong>Auswirkungsanalyse:</strong> Vor Freigabe einer neuen Vorlagenversion zeigt das System, wie viele Dokumente in welchem Status auf der Vorgängerversion basieren.</li>
+  <li><strong>Keine rückwirkende Änderung:</strong> Bereits erzeugte Dokumente bleiben an ihre Vorlagenversion gebunden. Eine Migration auf eine neue Vorlagenversion ist eine bewusste Aktion und erzeugt eine neue Dokumentversion.</li>
+</ul>
+
+<h3><span class="no">4.2</span>Variable Platzhalter und Dokumentfelder</h3>
+<p>Platzhalter verbinden Vorlagentext mit Feldwerten. Die Notation ist ein fachliches Beispiel; entscheidend sind Namensraum, Typisierung und eine sichere, nicht ausführbare Ausdruckssprache.</p>
+<pre class="ph">Zwischen {{partei.auftraggeber.name}}, {{partei.auftraggeber.anschrift}}
+und {{partei.auftragnehmer.name}} wird folgender Vertrag geschlossen.
+
+§ 3 Vergütung
+Die monatliche Vergütung beträgt {{vertrag.verguetung | betrag}}  zzgl. USt.
+
+{% wenn vertrag.laufzeit.art == "befristet" %}
+Der Vertrag endet am {{vertrag.laufzeit.ende | datum:"lang"}}.
+{% sonst %}
+Der Vertrag kann mit einer Frist von {{vertrag.kuendigungsfrist}} gekündigt werden.
+{% ende %}
+
+{% für jede leistung in vertrag.leistungen %}
+  – {{leistung.bezeichnung}}: {{leistung.preis | betrag}}
+{% ende %}
+
+{{baustein:KL-DS-004}}          ← freigegebener Datenschutzbaustein</pre>
+
+<div class="tbl"><table>
+<thead><tr><th>Feldart</th><th>Beschreibung</th><th>Beispiel</th></tr></thead>
+<tbody>
+<tr><td>Eingabefeld</td><td>Vom Autor befüllt, mit Typ, Validierung, Hilfetext, Standardwert</td><td>Vertragsbeginn</td></tr>
+<tr><td>Referenzfeld</td><td>Wert aus Stammdaten oder externem System, nach Auswahl übernommen</td><td>Vertragspartner aus Partnerstamm</td></tr>
+<tr><td>Berechnetes Feld</td><td>Aus anderen Feldern abgeleitet, nicht editierbar</td><td>Gesamtwert = Monatsbetrag × Laufzeit</td></tr>
+<tr><td>Systemfeld</td><td>Vom System gesetzt</td><td>Dokument-ID, Version, Freigabedatum, Genehmiger</td></tr>
+<tr><td>Bedingter Abschnitt</td><td>Text wird abhängig von Feldwerten ein- oder ausgeblendet</td><td>Klausel nur bei Auslandsbezug</td></tr>
+<tr><td>Wiederholgruppe</td><td>Liste gleichartiger Einträge</td><td>Leistungspositionen, Ansprechpartner</td></tr>
+<tr><td>Baustein-Platzhalter</td><td>Bindet einen versionierten Textbaustein ein</td><td>Gerichtsstandklausel</td></tr>
+<tr><td>Formularfeld</td><td>Bleibt im erzeugten Formular für Endnutzer ausfüllbar</td><td>Unterschriftsfeld, Ankreuzfeld</td></tr>
+</tbody></table></div>
+<ul>
+  <li><strong>Formatierung ist sprach- und regionsabhängig</strong> (Datum, Zahl, Währung, Anrede), gesteuert über die Dokumentsprache, nicht über die Sprache der Bedienoberfläche.</li>
+  <li><strong>Feldwerte werden je Version als Datensatz gespeichert</strong> (Snapshot). Damit ist nachweisbar, welche Werte in welche Fassung eingeflossen sind, und Dokumente können strukturiert ausgewertet werden.</li>
+  <li><strong>Leere Pflichtfelder blockieren das Rendering</strong> eines freigabefähigen Dokuments. Ein Entwurfs-PDF markiert fehlende Werte sichtbar.</li>
+  <li><strong>Die Ausdruckssprache ist abgeschlossen:</strong> keine beliebigen Funktionsaufrufe, kein Zugriff auf Systemressourcen, begrenzte Schleifen und Laufzeit (Schutz vor Template-Injection).</li>
+</ul>
+
+<h3><span class="no">4.3</span>Manuelle und automatische Dokumentenerstellung</h3>
+<div class="grid2">
+  <div><h4>Manuell (geführt)</h4><ul>
+    <li>Vorlagenauswahl über Katalog mit Suche, Beschreibung, Anwendungshinweis</li>
+    <li>Assistentengeführte Befüllung in logischen Schritten; Fragen steuern Bedingungen</li>
+    <li>Live-Vorschau neben dem Formular</li>
+    <li>Zwischenspeichern, Fortsetzen, Übergabe an Kollegen</li>
+    <li>Freitextbearbeitung nur in freigegebenen Bereichen, mit Änderungsmarkierung</li>
+  </ul></div>
+  <div><h4>Automatisch (Dunkelverarbeitung)</h4><ul>
+    <li>Auslösung durch Fachsystem, Ereignis oder Zeitplan</li>
+    <li>Einzel- und Massenerzeugung (z.&nbsp;B. 20.000 Vertragsanpassungsschreiben)</li>
+    <li>Datensatzvalidierung vor Erzeugung, fehlerhafte Sätze in Klärungsliste</li>
+    <li>Konfigurierbar, ob Ergebnis direkt freigegeben (nur risikoarme Klassen) oder in Review geht</li>
+    <li>Idempotenz: wiederholter Auftrag erzeugt keine Dubletten</li>
+  </ul></div>
+  <div><h4>Hybrid</h4><ul>
+    <li>Fachsystem befüllt Stammdaten, Autor ergänzt individuelle Teile</li>
+    <li>Herkunft jedes Feldwerts (manuell / System X / berechnet) wird gespeichert</li>
+  </ul></div>
+  <div><h4>Import</h4><ul>
+    <li>Übernahme bestehender Dokumente (Altbestand, Fremdpapier des Vertragspartners)</li>
+    <li>Pflicht-Metadaten beim Import, Texterkennung für Durchsuchbarkeit</li>
+    <li>Kennzeichnung „nicht vorlagenbasiert“</li>
+  </ul></div>
+</div>
+</section>
+
+<!-- ============ 5 ============ -->
+<section class="ch" id="k5">
+<h2><span class="no">5</span>Dokumentenlebenszyklus und Versionierung</h2>
+
+<h3><span class="no">5.1</span>Statusmodell</h3>
+<p>Das Basisstatusmodell gilt für alle Klassen. Klassen können zusätzliche Zwischenstatus definieren (z.&nbsp;B. Verträge: <em>In Verhandlung</em>, <em>In Unterzeichnung</em>, <em>Gekündigt</em>), aber keine Kernübergänge umgehen.</p>
+<pre class="mermaid">
+stateDiagram-v2
+    [*] --> Entwurf
+    Entwurf --> InPruefung: Einreichen
+    InPruefung --> Entwurf: Änderung angefordert
+    InPruefung --> InFreigabe: Prüfung positiv
+    InFreigabe --> Entwurf: Abgelehnt
+    InFreigabe --> Freigegeben: Genehmigt
+    Freigegeben --> Veroeffentlicht: Veröffentlichen / Gültig-ab erreicht
+    Veroeffentlicht --> ReviewFaellig: Review-Termin erreicht
+    ReviewFaellig --> Veroeffentlicht: Rezertifiziert ohne Änderung
+    ReviewFaellig --> Entwurf: Überarbeitung (neue Version)
+    Veroeffentlicht --> AusserKraft: Außer Kraft gesetzt / ersetzt
+    Entwurf --> Zurueckgezogen: Verworfen
+    AusserKraft --> Archiviert
+    Zurueckgezogen --> Archiviert
+    Archiviert --> Vernichtet: Frist abgelaufen, kein Legal Hold
+    Vernichtet --> [*]
+</pre>
+<div class="tbl"><table>
+<thead><tr><th>Status</th><th>Bedeutung</th><th>Änderbar</th><th>Sichtbar für</th></tr></thead>
+<tbody>
+<tr><td>Entwurf</td><td>In Bearbeitung</td><td>Inhalt, Felder, Metadaten</td><td>Autor, Owner, Mitbearbeitende</td></tr>
+<tr><td>In Prüfung</td><td>Fachliche/rechtliche Prüfung läuft</td><td>Nur Kommentare, ggf. Vorschläge</td><td>+ Reviewer</td></tr>
+<tr><td>In Freigabe</td><td>Genehmigung läuft</td><td>Nichts</td><td>+ Genehmiger</td></tr>
+<tr><td>Freigegeben</td><td>Genehmigt, Gültigkeit noch nicht begonnen</td><td>Nichts (nur Veröffentlichungsdatum)</td><td>Beteiligte</td></tr>
+<tr><td>Veröffentlicht</td><td>Gültige, verbindliche Fassung</td><td>Nichts; nur nicht-inhaltliche Metadaten mit Protokoll</td><td>Definierter Leserkreis</td></tr>
+<tr><td>Review fällig</td><td>Weiterhin gültig, aber Überprüfung überfällig/anstehend</td><td>Nichts</td><td>Leserkreis, mit Hinweis</td></tr>
+<tr><td>Außer Kraft</td><td>Nicht mehr gültig</td><td>Nichts</td><td>Owner, Compliance; Leser mit Hinweis „ungültig“</td></tr>
+<tr><td>Archiviert</td><td>In Langzeitaufbewahrung</td><td>Nichts</td><td>Records Manager, Auditor, berechtigte Rollen</td></tr>
+<tr><td>Vernichtet</td><td>Inhalt gelöscht, Löschnachweis bleibt</td><td>–</td><td>Nur Löschprotokoll</td></tr>
+</tbody></table></div>
+
+<h3><span class="no">5.2</span>Versionierungskonzept</h3>
+<ul>
+  <li><strong>Hauptversion</strong> (<code>1.0</code>, <code>2.0</code>): inhaltliche Änderung, voller Freigabeworkflow, ggf. erneute Kenntnisnahme.</li>
+  <li><strong>Nebenversion</strong> (<code>1.1</code>): redaktionelle Änderung ohne inhaltliche Auswirkung (Tippfehler, Layout, Verweiskorrektur), vereinfachter Workflow. Die Einstufung als „redaktionell“ muss begründet und vom Owner bestätigt werden.</li>
+  <li><strong>Arbeitsstände</strong> (<code>1.1-Entwurf.3</code>): automatische Zwischenstände im Entwurf, nicht veröffentlicht, nach Freigabe auf Wunsch verdichtbar (die freigegebenen Versionen bleiben immer erhalten).</li>
+  <li><strong>Unveränderlichkeit:</strong> Jede freigegebene Version ist eingefroren: Inhalt, Feldwerte, Metadaten-Snapshot, Vorlagenversion, Bausteinversionen, Rendition und Prüfsumme.</li>
+  <li><strong>Eine gültige Version je Dokument und Geltungsbereich</strong> zu jedem Zeitpunkt. Parallele Gültigkeit nur über verschiedene Geltungsbereiche oder Sprachvarianten.</li>
+  <li><strong>Parallele Bearbeitung:</strong> Während Version 2.0 gültig ist, kann 3.0 im Entwurf sein. Ein Dokument hat höchstens einen offenen Entwurf (Sperre oder geführte Zusammenführung), um konkurrierende Fassungen zu vermeiden.</li>
+  <li><strong>Vertragsspezifisch:</strong> Unterzeichnete Fassung ist eine eigene, nicht mehr änderbare Version. Änderungen erfolgen ausschließlich über Nachträge als eigene, verknüpfte Dokumente.</li>
+</ul>
+</section>
+
+<!-- ============ 6 ============ -->
+<section class="ch" id="k6">
+<h2><span class="no">6</span>Workflows, Review und Rezertifizierung</h2>
+
+<h3><span class="no">6.1</span>Freigabe- und Genehmigungsworkflows</h3>
+<p>Workflows werden je Dokumentenklasse konfiguriert (nicht programmiert) und selbst versioniert. Ein laufender Vorgang bleibt auf der Workflowversion, mit der er gestartet wurde.</p>
+<ul>
+  <li><strong>Bausteine:</strong> sequenzielle Schritte, parallele Prüfungen (alle / Mehrheit / einer), bedingte Schritte (z.&nbsp;B. Vertragswert &gt; 250.000 € → zusätzlich Geschäftsführung), Rücksprung, Eskalation.</li>
+  <li><strong>Regelbasierte Bestimmung der Beteiligten:</strong> aus Organisationsstruktur, Rollen, Metadaten (Geltungsbereich, Betrag, Vertraulichkeit), nicht aus fest eingetragenen Personen.</li>
+  <li><strong>Prüfvotum mit Begründung:</strong> Zustimmen, Zustimmen mit Auflagen, Änderung anfordern, Ablehnen. Begründung bei allem außer reiner Zustimmung verpflichtend.</li>
+  <li><strong>Kommentare und Änderungsvorschläge</strong> sind an Textstellen verankert, haben einen Status (offen, umgesetzt, abgelehnt mit Begründung) und blockieren die Einreichung, solange sie offen sind (konfigurierbar).</li>
+  <li><strong>Freigabe ist an eine konkrete Version gebunden.</strong> Jede inhaltliche Änderung nach einer Zustimmung macht diese Zustimmung ungültig.</li>
+  <li><strong>Elektronische Freigabe:</strong> Bestätigung mit erneuter Authentifizierung; je nach Klasse Anbindung an elektronische Signaturverfahren unterschiedlicher Vertrauensstufen.</li>
+  <li><strong>Fristen und Eskalation:</strong> Jeder Schritt hat eine Soll-Dauer; Erinnerung, dann Eskalation an Vorgesetzte oder Owner.</li>
+  <li><strong>Externe Beteiligte:</strong> Prüfung durch Vertragspartner über eingeschränkten, zeitlich begrenzten Zugang auf genau ein Dokument.</li>
+</ul>
+
+<h4>Standardworkflows (Beispiele)</h4>
+<div class="tbl"><table>
+<thead><tr><th>Klasse</th><th>Prüfung</th><th>Freigabe</th><th>Nach Veröffentlichung</th></tr></thead>
+<tbody>
+<tr><td>Policy</td><td>Fachbereich + Compliance + ggf. Datenschutz + Betriebsrat (wo mitbestimmungspflichtig)</td><td>Geschäftsleitung</td><td>Kenntnisnahme durch Zielgruppe, Schulungszuweisung</td></tr>
+<tr><td>Richtlinie</td><td>Fachbereich + Owner der übergeordneten Policy</td><td>Bereichsleitung</td><td>Kenntnisnahme durch Zielgruppe</td></tr>
+<tr><td>Vertrag (Standard, ohne Abweichung)</td><td>Fachbereich</td><td>Zeichnungsberechtigte gemäß Betragsgrenze</td><td>Unterzeichnung, Fristenüberwachung</td></tr>
+<tr><td>Vertrag (mit Klauselabweichung)</td><td>+ Rechtsabteilung (Pflicht)</td><td>wie oben</td><td>wie oben</td></tr>
+<tr><td>Formular</td><td>Fachbereich + ggf. Datenschutz</td><td>Owner</td><td>Bereitstellung im Formularkatalog</td></tr>
+<tr><td>Massenkorrespondenz</td><td>Stichprobe aus Probelauf</td><td>Owner (für den Lauf)</td><td>Versand über Fachsystem</td></tr>
+</tbody></table></div>
+
+<h3><span class="no">6.2</span>Review- und Rezertifizierungsprozess</h3>
+<ul>
+  <li><strong>Zyklus je Klasse</strong> (z.&nbsp;B. jährlich), verkürzbar je Dokument. Der nächste Termin wird bei jeder Freigabe neu berechnet.</li>
+  <li><strong>Vorlauf:</strong> Owner erhält Aufgabe 30–60 Tage vor Fälligkeit, mit Kontext: Änderungen an übergeordneten Dokumenten, neue regulatorische Anforderungen, offene Kommentare, Lesestatistik.</li>
+  <li><strong>Ergebnisse:</strong> (a) Rezertifiziert ohne Änderung → neues Reviewdatum, Version bleibt, Rezertifizierung wird protokolliert; (b) Überarbeitung erforderlich → neuer Entwurf; (c) Nicht mehr benötigt → Außerkraftsetzung.</li>
+  <li><strong>Überfällige Reviews</strong> bleiben gültig, werden aber sichtbar markiert und im Compliance-Cockpit eskaliert. Ein automatisches Außerkraftsetzen ist nicht Standard, da es Lücken im Regelwerk erzeugen würde.</li>
+  <li><strong>Ereignisgetriebene Reviews:</strong> ausgelöst durch Änderung eines übergeordneten Dokuments, einer referenzierten Norm, einer Organisationsänderung oder eines Vorfalls.</li>
+  <li><strong>Owner-Verlust:</strong> Scheidet der Owner aus oder wechselt die Funktion, wird das Dokument als „verwaist“ markiert und eine Neuzuweisung angestoßen.</li>
+</ul>
+
+<h3><span class="no">6.3</span>Veröffentlichung und Kenntnisnahme</h3>
+<ul>
+  <li>Veröffentlichung sofort oder zum Gültig-ab-Datum. Die Vorgängerversion wird im selben Moment außer Kraft gesetzt, ohne Lücke und ohne Überschneidung.</li>
+  <li>Zielgruppe wird aus Geltungsbereich abgeleitet; Kenntnisnahmepflicht je Klasse oder Dokument.</li>
+  <li>Kenntnisnahme bezieht sich auf eine konkrete Version und wird mit Zeitpunkt protokolliert. Bei Nebenversionen ist keine erneute Kenntnisnahme nötig (konfigurierbar).</li>
+  <li>Optional: Verständnisfragen oder Verknüpfung mit Schulungsnachweis.</li>
+  <li>Änderungsübersicht für Lesende: „Was hat sich gegenüber der letzten Version geändert?“ in Klartext, vom Autor gepflegt, plus automatischer Vergleich.</li>
+</ul>
+</section>
+
+<!-- ============ 7 ============ -->
+<section class="ch" id="k7">
+<h2><span class="no">7</span>Änderungsverfolgung, Historie, Audit-Trail und Archiv</h2>
+
+<h3><span class="no">7.1</span>Änderungsverfolgung</h3>
+<ul>
+  <li>Im Entwurf werden Textänderungen gegenüber der letzten freigegebenen Version markiert (eingefügt, gelöscht, verschoben), einschließlich Autor und Zeitpunkt.</li>
+  <li>Vergleich beliebiger zweier Versionen: Text, Feldwerte, Metadaten und Anlagen, jeweils getrennt darstellbar.</li>
+  <li>Abweichungen von Vorlagen-Standardtext und Bausteinen werden gesondert ausgewiesen („Abweichungsbericht“), weil sie für Rechts- und Compliance-Prüfung entscheidend sind.</li>
+  <li>Änderungsbegründung ist bei jeder neuen Hauptversion Pflicht.</li>
+</ul>
+
+<h3><span class="no">7.2</span>Historisierung</h3>
+<p>Historisiert werden nicht nur Dokumentinhalte, sondern alle fachlich relevanten Objekte, jeweils mit fachlicher Gültigkeit (gültig von/bis) und technischem Erfassungszeitpunkt:</p>
+<ul>
+  <li>Dokumentversionen, Metadaten, Feldwerte, Beziehungen</li>
+  <li>Vorlagen, Bausteine, Wertelisten, Taxonomien</li>
+  <li>Workflowdefinitionen und Aufbewahrungsregeln</li>
+  <li>Rollen- und Berechtigungszuweisungen, Organisationsstruktur</li>
+</ul>
+<p>Damit lassen sich Fragen wie „Wer durfte am 01.02.2026 die Reiserichtlinie freigeben, und nach welchem Workflow?“ beantworten.</p>
+
+<h3><span class="no">7.3</span>Audit-Trail</h3>
+<div class="tbl"><table>
+<thead><tr><th>Element</th><th>Inhalt</th></tr></thead>
+<tbody>
+<tr><td>Wer</td><td>Eindeutige Identität (Person, technischer Nutzer), handelnd ggf. als Stellvertretung für …</td></tr>
+<tr><td>Was</td><td>Ereignistyp (angelegt, gelesen*, geändert, eingereicht, zugestimmt, freigegeben, veröffentlicht, heruntergeladen, Rechte geändert, exportiert, gelöscht …)</td></tr>
+<tr><td>Woran</td><td>Objekt, Version, betroffene Felder mit Vorher- und Nachher-Wert</td></tr>
+<tr><td>Wann</td><td>Zeitstempel aus synchronisierter, vertrauenswürdiger Zeitquelle</td></tr>
+<tr><td>Warum</td><td>Begründung, Workflowkontext, auslösender Auftrag</td></tr>
+<tr><td>Womit</td><td>Kanal (Oberfläche, Schnittstelle, Automatik), Korrelationskennung über Systemgrenzen</td></tr>
+</tbody></table></div>
+<ul>
+  <li><strong>Manipulationsschutz:</strong> nur anhängend (append-only), kryptografisch verkettet, getrennt von den Fachdaten gespeichert; auch Administratoren können Einträge weder ändern noch löschen.</li>
+  <li><strong>Regelmäßige Integritätsprüfung</strong> der Verkettung mit Bericht.</li>
+  <li><strong>Lesezugriffe*</strong> werden für vertrauliche und streng vertrauliche Dokumente protokolliert; für allgemeine Dokumente nur aggregiert (Datensparsamkeit).</li>
+  <li>Aufbewahrung des Audit-Trails mindestens so lange wie die längste Aufbewahrung der betroffenen Dokumente.</li>
+  <li>Export als prüfungsfähiger Bericht je Dokument, Zeitraum oder Person.</li>
+</ul>
+
+<h3><span class="no">7.4</span>Archivierungsstrategie</h3>
+<ul>
+  <li><strong>Archivierungspaket:</strong> Rendition im Langzeitformat (archivfähiges PDF nach anerkanntem Standard), Originalquellformat, Feldwerte und Metadaten in offenem, selbstbeschreibendem Format, Freigabenachweise, Prüfsummen, Auszug Audit-Trail.</li>
+  <li><strong>Aufbewahrungsregeln</strong> mit Auslöser (z.&nbsp;B. Vertragsende, Außerkraftsetzung, Erstellung) und Dauer; Fristbeginn häufig Jahresende.</li>
+  <li><strong>Legal Hold:</strong> setzt Fristablauf und Vernichtung aus, bis zur ausdrücklichen Aufhebung; wirkt auf Dokument, Vorgang oder Suchergebnis.</li>
+  <li><strong>Vernichtung:</strong> Vorschlagsliste nach Fristablauf, Prüfung und Freigabe durch Records Manager plus zweite Person, endgültige Löschung aller Kopien (inkl. Suchindex, Vorschauen, Zwischenspeicher) nach definierter Frist auch aus Sicherungen; Löschprotokoll ohne Inhalt bleibt.</li>
+  <li><strong>Formaterhalt:</strong> Regelmäßige Prüfung, ob archivierte Formate noch darstellbar sind; Migrationsplan für Formate und Prüfsummenverfahren (kryptografische Algorithmen altern).</li>
+  <li><strong>Speicherstufen:</strong> aktive, nahe und ferne Ablage, transparent für Nutzer, mit dokumentierten Wiederherstellungszeiten.</li>
+  <li><strong>Unveränderbarer Speicher</strong> (WORM-Prinzip) für archivierte Pakete.</li>
+</ul>
+</section>
+
+<!-- ============ 8 ============ -->
+<section class="ch" id="k8">
+<h2><span class="no">8</span>Suche, Aufgaben und Benachrichtigungen</h2>
+
+<h3><span class="no">8.1</span>Such- und Filterfunktionen</h3>
+<ul>
+  <li><strong>Volltextsuche</strong> über Inhalte, Anlagen und Texterkennung gescannter Dokumente, mit Wortstamm- und Synonymunterstützung je Sprache.</li>
+  <li><strong>Facetten:</strong> Klasse, Status, Owner, Organisationseinheit, Geltungsbereich, Sprache, Tags, Vertraulichkeit, Zeiträume, Regulierungsbezug.</li>
+  <li><strong>Stichtagssuche:</strong> „Gültig am“-Filter liefert die damals gültigen Versionen.</li>
+  <li><strong>Strukturierte Feldsuche:</strong> z.&nbsp;B. alle Verträge mit Partner X, Laufzeitende in den nächsten 90 Tagen, Wert über 100.000 €.</li>
+  <li><strong>Suche nach Bausteinverwendung:</strong> alle Dokumente, die Klausel KL-DS-004 in Version 2 enthalten.</li>
+  <li><strong>Berechtigungsgefiltert:</strong> Treffer, Trefferzahlen, Facettenzähler und Textauszüge berücksichtigen Rechte; keine Rückschlüsse auf nicht sichtbare Dokumente.</li>
+  <li><strong>Standardsicht nur auf gültige Fassungen;</strong> historische und außer Kraft gesetzte Versionen über bewusste Erweiterung.</li>
+  <li>Gespeicherte Suchen, abonnierbar (Benachrichtigung bei neuen Treffern).</li>
+</ul>
+
+<h3><span class="no">8.2</span>Aufgabenmanagement</h3>
+<ul>
+  <li>Zentraler Aufgabeneingang je Person: Prüfen, Freigeben, Kenntnis nehmen, Review durchführen, Daten ergänzen, Klärungsfall bearbeiten.</li>
+  <li>Aufgaben haben Fälligkeit, Priorität, Kontext (Dokument, Workflowschritt, Vorgeschichte) und direkt ausführbare Aktionen.</li>
+  <li>Gruppenaufgaben (Pool) mit Übernahme, Stellvertretung, Abwesenheitsregel, Neuzuweisung durch Owner.</li>
+  <li>Eskalationsketten und Service-Level-Messung je Schritt.</li>
+  <li>Ad-hoc-Aufgaben am Dokument (z.&nbsp;B. „Bitte Anlage 3 nachreichen“).</li>
+  <li>Massenaktionen mit Vorsicht: Kenntnisnahme nie massenhaft durch Dritte; Freigaben nur einzeln.</li>
+</ul>
+
+<h3><span class="no">8.3</span>Benachrichtigungen und Erinnerungen</h3>
+<div class="tbl"><table>
+<thead><tr><th>Ereignis</th><th>Empfänger</th><th>Zeitpunkt</th></tr></thead>
+<tbody>
+<tr><td>Aufgabe zugewiesen</td><td>Bearbeiter</td><td>Sofort</td></tr>
+<tr><td>Aufgabe überfällig</td><td>Bearbeiter, danach Eskalationsstufe</td><td>Fälligkeit, +3, +7 Tage (konfigurierbar)</td></tr>
+<tr><td>Review anstehend</td><td>Owner</td><td>60 / 30 / 7 Tage vorher</td></tr>
+<tr><td>Neues Dokument mit Kenntnisnahmepflicht</td><td>Zielgruppe</td><td>Bei Veröffentlichung, Erinnerung nach 14 Tagen</td></tr>
+<tr><td>Vertragsfrist (Kündigung, Verlängerung)</td><td>Owner, Fachbereich</td><td>Konfigurierbar je Vertrag, z.&nbsp;B. 90 / 30 Tage vor Frist</td></tr>
+<tr><td>Übergeordnetes Dokument geändert</td><td>Owner untergeordneter Dokumente</td><td>Bei Veröffentlichung</td></tr>
+<tr><td>Vorlage geändert</td><td>Autoren offener Entwürfe auf alter Vorlage</td><td>Bei Freigabe der Vorlage</td></tr>
+<tr><td>Abonnierte Suche / Dokument</td><td>Abonnent</td><td>Sofort oder als Sammelmeldung</td></tr>
+</tbody></table></div>
+<ul>
+  <li>Kanäle: In-App, E-Mail, Kollaborationswerkzeuge; Sammelmeldung (täglich/wöchentlich) wählbar.</li>
+  <li>Benachrichtigungen enthalten <strong>keine vertraulichen Inhalte</strong>, nur Titel (bei hoher Vertraulichkeit nicht einmal das) und Link.</li>
+  <li>Nutzer können Kanäle und Häufigkeit wählen, aber Pflichtbenachrichtigungen (Fristen, Eskalationen) nicht abbestellen.</li>
+</ul>
+</section>
+
+<!-- ============ 9 ============ -->
+<section class="ch" id="k9">
+<h2><span class="no">9</span>Mehrsprachigkeit und Mandantenfähigkeit</h2>
+
+<h3><span class="no">9.1</span>Mehrsprachigkeit</h3>
+<p>Zwei getrennte Ebenen:</p>
+<ul>
+  <li><strong>Bedienoberfläche:</strong> vollständig lokalisiert, Sprache je Nutzer wählbar, inklusive Hilfetexte, Feldbezeichnungen, Fehlermeldungen und Wertelisten.</li>
+  <li><strong>Dokumentinhalte:</strong> Sprachvarianten als verknüpfte Dokumente mit gemeinsamer Dokument-ID und Sprachkennung, z.&nbsp;B. <code>POL-ISM-2026-0042-DE</code>, <code>…-EN</code>.</li>
+</ul>
+<ul>
+  <li>Je Dokument ist eine <strong>Mastersprache</strong> festgelegt und die <strong>rechtlich verbindliche Fassung</strong> gekennzeichnet (bei Verträgen häufig vertraglich geregelt).</li>
+  <li>Übersetzungsstatus: aktuell, veraltet (Master geändert), in Übersetzung, freigegeben. Veraltete Übersetzungen werden Lesenden deutlich angezeigt.</li>
+  <li>Vorlagen und Bausteine sind mehrsprachig; ein Platzhalter hat sprachunabhängigen Wert, aber sprachabhängige Formatierung.</li>
+  <li>Zweisprachige Dokumente (Spaltensatz) als eigene Vorlagenart.</li>
+  <li>Unterstützung für Schriften mit anderer Laufrichtung und Sonderzeichen in Suche, Rendering und Dateinamen.</li>
+  <li>Übersetzungsprozess als Workflowschritt; Export/Import für externe Übersetzungsdienstleister mit Abgleich.</li>
+</ul>
+
+<h3><span class="no">9.2</span>Mandantenfähigkeit</h3>
+<ul>
+  <li><strong>Strikte Isolation</strong> von Daten, Konfiguration, Suchindex, Audit-Trail und Schlüsseln je Mandant. Kein Mandant kann Existenz oder Daten eines anderen erkennen.</li>
+  <li><strong>Hierarchische Mandanten:</strong> Konzern → Gesellschaft → Bereich. Der übergeordnete Mandant kann Vorlagen, Bausteine, Taxonomien und Mindestregeln vorgeben; untergeordnete erweitern innerhalb definierter Grenzen.</li>
+  <li><strong>Konfiguration je Mandant:</strong> Corporate Design, Sprachen, Klassen, Metadaten-Erweiterungen, Workflows, Aufbewahrungsregeln (Rechtsraum), Nummernkreise, Integrationen.</li>
+  <li><strong>Mandantenübergreifende Sicht</strong> nur für explizit berechtigte Konzernrollen (z.&nbsp;B. Konzern-Compliance), protokolliert.</li>
+  <li><strong>Datenresidenz:</strong> Speicherort je Mandant festlegbar, falls rechtlich erforderlich.</li>
+  <li><strong>Lebenszyklus des Mandanten:</strong> Anlage, Abspaltung (z.&nbsp;B. Verkauf einer Gesellschaft mit vollständigem, prüfbarem Datenexport), Zusammenführung, Stilllegung mit geregelter Übergabe von Aufbewahrungspflichten.</li>
+  <li><strong>Ressourcengrenzen</strong> je Mandant, damit Massenläufe eines Mandanten andere nicht beeinträchtigen.</li>
+</ul>
+</section>
+
+<!-- ============ 10 ============ -->
+<section class="ch" id="k10">
+<h2><span class="no">10</span>Compliance, Datenschutz und Revisionssicherheit</h2>
+
+<h3><span class="no">10.1</span>Compliance-Anforderungen</h3>
+<p>Die Plattform muss die Erfüllung folgender Anforderungsquellen unterstützen. Welche davon verbindlich sind, hängt von Branche, Rechtsform und Rechtsraum ab und ist im Projekt festzulegen.</p>
+<div class="tbl"><table>
+<thead><tr><th>Anforderungsquelle</th><th>Relevanz für die Plattform</th></tr></thead>
+<tbody>
+<tr><td>Handels- und steuerrechtliche Aufbewahrungspflichten (HGB, AO) sowie Grundsätze ordnungsmäßiger elektronischer Buchführung und Aufbewahrung (GoBD)</td><td>Unveränderbarkeit, Vollständigkeit, Nachvollziehbarkeit, Verfügbarkeit, Verfahrensdokumentation</td></tr>
+<tr><td>Datenschutz-Grundverordnung (DSGVO), BDSG</td><td>Siehe 10.2</td></tr>
+<tr><td>Dokumentenlenkung nach Managementsystem-Normen (z.&nbsp;B. ISO 9001 Abschn. 7.5, ISO/IEC 27001)</td><td>Freigabe vor Gebrauch, Review, Kennzeichnung von Änderungen, Verfügbarkeit gültiger Fassungen, Verhinderung unbeabsichtigter Nutzung veralteter Dokumente</td></tr>
+<tr><td>Records-Management-Standards (z.&nbsp;B. ISO 15489)</td><td>Authentizität, Zuverlässigkeit, Integrität, Benutzbarkeit von Aufzeichnungen</td></tr>
+<tr><td>Elektronische Signaturen und Vertrauensdienste (eIDAS)</td><td>Passendes Signaturniveau je Dokumentenklasse, Validierung und Langzeiterhalt von Signaturen</td></tr>
+<tr><td>Branchenspezifische Aufsicht (z.&nbsp;B. Finanzsektor: DORA, aufsichtliche IT-Anforderungen; Pharma: GxP-Anforderungen an elektronische Aufzeichnungen und Signaturen)</td><td>Erweiterte Nachweise, validierte Prozesse, strengere Signatur- und Audit-Anforderungen</td></tr>
+<tr><td>Internes Kontrollsystem, ggf. kapitalmarktrechtliche Kontrollanforderungen</td><td>Funktionstrennung, nachweisbare Kontrollen, Berechtigungsrezertifizierung</td></tr>
+<tr><td>Hinweisgeberschutz, Lieferkettengesetze, Nachhaltigkeitsberichterstattung</td><td>Policies mit Kenntnisnahme und Nachweis der Verbreitung</td></tr>
+</tbody></table></div>
+
+<h3><span class="no">10.2</span>Datenschutzanforderungen</h3>
+<ul>
+  <li><strong>Datenschutz durch Technikgestaltung und datenschutzfreundliche Voreinstellungen:</strong> minimale Standardsichtbarkeit, Felder mit Personenbezug gekennzeichnet.</li>
+  <li><strong>Datenkategorien je Feld und Vorlage</strong> deklariert (z.&nbsp;B. Kontaktdaten, Beschäftigtendaten, besondere Kategorien). Daraus abgeleitet: Maskierung, Exportbeschränkung, verkürzte Aufbewahrung, Protokollierung von Lesezugriffen.</li>
+  <li><strong>Konflikt Löschpflicht vs. Aufbewahrungspflicht:</strong> Während laufender Aufbewahrungspflicht wird die Verarbeitung eingeschränkt (Sperrung), nach Fristablauf gelöscht. Die Regel ist dokumentiert und automatisiert.</li>
+  <li><strong>Betroffenenrechte:</strong> Auffinden aller Dokumente zu einer Person (über strukturierte Felder, nicht nur Volltext), Auskunftsbericht, Berichtigung (über neue Version), Einschränkung, Löschung soweit zulässig.</li>
+  <li><strong>Verzeichnis von Verarbeitungstätigkeiten</strong> für die Plattform; Datenschutz-Folgenabschätzung vor Einführung, insbesondere bei Beschäftigtendaten und Lesezugriffsprotokollierung.</li>
+  <li><strong>Beschäftigtendatenschutz und Mitbestimmung:</strong> Kenntnisnahme- und Zugriffsprotokolle dürfen nicht zur Leistungs- und Verhaltenskontrolle zweckentfremdet werden; Auswertungen sind zweckgebunden und ggf. per Vereinbarung mit der Arbeitnehmervertretung geregelt.</li>
+  <li><strong>Auftragsverarbeitung</strong> bei Betrieb durch Dienstleister; Unterauftragnehmer und Speicherorte transparent.</li>
+  <li><strong>Testdaten:</strong> keine produktiven personenbezogenen Daten in Test- und Schulungsumgebungen ohne Anonymisierung.</li>
+</ul>
+
+<h3><span class="no">10.3</span>Nachvollziehbarkeit und Revisionssicherheit</h3>
+<p>Revisionssicherheit wird nicht durch ein einzelnes Merkmal erreicht, sondern durch das Zusammenwirken dieser Eigenschaften:</p>
+<div class="tbl"><table>
+<thead><tr><th>Kriterium</th><th>Umsetzung in der Plattform</th></tr></thead>
+<tbody>
+<tr><td>Vollständigkeit</td><td>Jedes gelenkte Dokument hat lückenlose Versionskette; keine Freigabe außerhalb der Plattform</td></tr>
+<tr><td>Unveränderbarkeit</td><td>Eingefrorene Versionen, Prüfsummen, unveränderbarer Archivspeicher</td></tr>
+<tr><td>Nachvollziehbarkeit</td><td>Audit-Trail, Historisierung, Begründungspflichten, Stichtagsabfragen</td></tr>
+<tr><td>Ordnung und Auffindbarkeit</td><td>Pflichtmetadaten, Klassifikation, Suche, Exportfähigkeit</td></tr>
+<tr><td>Verfügbarkeit und Lesbarkeit</td><td>Langzeitformate, Formatmigration, Wiederherstellungstests</td></tr>
+<tr><td>Zugriffsschutz</td><td>Berechtigungskonzept, Protokollierung, Funktionstrennung</td></tr>
+<tr><td>Fristgerechte Vernichtung</td><td>Regelbasierte, dokumentierte, zweistufig freigegebene Löschung</td></tr>
+<tr><td>Verfahrensdokumentation</td><td>Fachliche und technische Beschreibung des Verfahrens, versioniert in der Plattform selbst</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- ============ 11 ============ -->
+<section class="ch" id="k11">
+<h2><span class="no">11</span>End-to-End-Prozess</h2>
+<p>Durchgängiges Beispiel: Die Konzern-Compliance erstellt eine Vorlage für Richtlinien, daraus entsteht die „Richtlinie Umgang mit Geschenken und Einladungen“, die freigegeben, veröffentlicht, jährlich überprüft und schließlich durch eine Nachfolgerichtlinie ersetzt wird.</p>
+<ol class="e2e">
+<li><div>
+  <h4>Erstellung einer Dokumentvorlage</h4>
+  <p>Der Vorlagen-Designer legt eine neue Vorlage in der Klasse „Richtlinie“ an: Layout nach Corporate Design, Gliederung (Zweck, Geltungsbereich, Regelungen, Verantwortlichkeiten, Verstöße, Inkrafttreten), gesperrte Pflichtabschnitte, Bausteine (z.&nbsp;B. Standardabsatz „Verstöße“), Felddefinitionen. Testlauf mit Beispieldaten in allen Bedingungszweigen. Freigabe durch den Vorlagen-Verantwortlichen (nicht identisch mit Designer).</p>
+  <dl class="kv"><dt>Ergebnis</dt><dd>Vorlage <code>VL-RL-STD</code> Version 1.0, freigegeben, im Katalog sichtbar</dd><dt>Kontrollen</dt><dd>Vier-Augen-Freigabe, Testprotokoll, Auswirkungsanalyse (bei Folgeversionen)</dd></dl>
+</div></li>
+<li><div>
+  <h4>Definition von Metadaten und Pflichtfeldern</h4>
+  <p>Der Fachadministrator ordnet der Vorlage das Metadatenprofil der Klasse zu und ergänzt klassenspezifische Felder: übergeordnete Policy (Pflichtreferenz), Geltungsbereich, Zielgruppe für Kenntnisnahme, Review-Zyklus, Vertraulichkeit. Für jedes Feld werden Typ, Validierung, Statuspflichtigkeit, Herkunft (manuell/automatisch) und Datenschutzkategorie festgelegt.</p>
+  <dl class="kv"><dt>Ergebnis</dt><dd>Versioniertes Metadatenprofil, an Vorlage gebunden</dd><dt>Kontrollen</dt><dd>Keine Freigabe ohne Owner-, Aufbewahrungs- und Vertraulichkeitsfeld</dd></dl>
+</div></li>
+<li><div>
+  <h4>Befüllung durch Benutzer oder automatische Prozesse</h4>
+  <p>Die Autorin wählt die Vorlage im Katalog. Ein Assistent fragt Geltungsbereich und Wertgrenzen ab; Organisationsdaten (Gesellschaften, Funktionen) kommen aus dem Organisationsverzeichnis, die Wertgrenze ist ein Eingabefeld mit Betragsvalidierung. Die Live-Vorschau zeigt das Ergebnis. Freie Texte werden nur in den Abschnitten „Regelungen“ ergänzt. Bei automatischer Erzeugung (z.&nbsp;B. Länderfassungen für 14 Gesellschaften) befüllt ein Fachsystem die Werte, unvollständige Sätze landen in einer Klärungsliste.</p>
+  <dl class="kv"><dt>Ergebnis</dt><dd>Dokument <code>RL-CMP-2026-0117</code>, Status Entwurf, Version 1.0-Entwurf.4</dd><dt>Kontrollen</dt><dd>Feldvalidierung, Pflichtfeldprüfung vor Einreichung, Herkunftskennzeichnung jedes Feldwerts</dd></dl>
+</div></li>
+<li><div>
+  <h4>Review und Freigabe</h4>
+  <p>Einreichung startet den Workflow der Klasse: parallele Prüfung durch Compliance und Rechtsabteilung, sequenziell danach Owner der übergeordneten Policy. Kommentare werden textverankert gelöst. Weil die Autorin einen gesperrten Absatz ändern wollte, ist ein zusätzlicher Prüfschritt hinzugekommen. Die Bereichsleitung genehmigt mit erneuter Authentifizierung; die Genehmigung ist an die exakte Version gebunden.</p>
+  <dl class="kv"><dt>Ergebnis</dt><dd>Status Freigegeben, Version 1.0</dd><dt>Kontrollen</dt><dd>Funktionstrennung Autor ≠ Genehmiger, keine offenen Kommentare, Begründung bei Ablehnung</dd></dl>
+</div></li>
+<li><div>
+  <h4>PDF-Erzeugung</h4>
+  <p>Mit der Freigabe erzeugt die Plattform die verbindliche Rendition im archivfähigen PDF-Format: eingebettete Schriften, Dokumentkennung, Version, Gültigkeitsdatum und Freigabevermerk im Fußbereich, ggf. Wasserzeichen nach Vertraulichkeit, eingebettete Metadaten, optional elektronisches Siegel. Rendering ist deterministisch: gleiche Eingaben ergeben das gleiche Ergebnis.</p>
+  <dl class="kv"><dt>Ergebnis</dt><dd>Rendition mit Prüfsumme, mit Version verknüpft</dd><dt>Kontrollen</dt><dd>Formatvalidierung gegen Archivstandard; bei Fehler kein Statuswechsel</dd></dl>
+</div></li>
+<li><div>
+  <h4>Speicherung des Originaldokuments</h4>
+  <p>Gespeichert wird ein vollständiges Versionspaket: Quellinhalt in strukturiertem Format, Feldwerte-Snapshot, Metadaten-Snapshot, Referenzen auf Vorlagen- und Bausteinversionen, Rendition, Prüfsummen und Freigabenachweise. Das Paket ist ab jetzt unveränderbar.</p>
+  <dl class="kv"><dt>Ergebnis</dt><dd>Eingefrorenes Versionspaket</dd><dt>Kontrollen</dt><dd>Prüfsummenabgleich nach Speicherung, Audit-Eintrag</dd></dl>
+</div></li>
+<li><div>
+  <h4>Versionierung</h4>
+  <p>Die Version erhält die Nummer 1.0. Arbeitsstände des Entwurfs bleiben gemäß Regel erhalten oder werden verdichtet. Spätere redaktionelle Korrekturen ergeben 1.1, inhaltliche Änderungen 2.0, jeweils mit Begründung und Änderungsübersicht.</p>
+  <dl class="kv"><dt>Ergebnis</dt><dd>Lückenlose Versionskette</dd><dt>Kontrollen</dt><dd>Höchstens ein offener Entwurf, höchstens eine gültige Version je Geltungsbereich</dd></dl>
+</div></li>
+<li><div>
+  <h4>Veröffentlichung</h4>
+  <p>Zum Gültig-ab-Datum 01.01.2027 wird die Richtlinie automatisch veröffentlicht. Die Zielgruppe (rund 8.400 Mitarbeitende in 14 Gesellschaften) erhält eine Kenntnisnahmeaufgabe. Das Intranet zeigt über die Schnittstelle stets die gültige Fassung. Der Owner der übergeordneten Policy sieht die neue Verknüpfung.</p>
+  <dl class="kv"><dt>Ergebnis</dt><dd>Status Veröffentlicht, Kenntnisnahmequote messbar</dd><dt>Kontrollen</dt><dd>Atomarer Wechsel der gültigen Fassung, Erinnerungen und Eskalation bei fehlender Kenntnisnahme</dd></dl>
+</div></li>
+<li><div>
+  <h4>Regelmäßige Überprüfung</h4>
+  <p>60 Tage vor dem Reviewtermin erhält die Ownerin eine Aufgabe mit Kontext: Die übergeordnete Policy wurde zwischenzeitlich geändert, zwei Kommentare von Lesenden liegen vor. Sie entscheidet sich für eine Überarbeitung: Ein neuer Entwurf 2.0 entsteht, die Fassung 1.0 bleibt bis zur Veröffentlichung von 2.0 gültig. Alternativ wäre eine Rezertifizierung ohne Änderung mit neuem Reviewdatum möglich gewesen.</p>
+  <dl class="kv"><dt>Ergebnis</dt><dd>Protokollierte Rezertifizierung oder neue Version</dd><dt>Kontrollen</dt><dd>Überfällige Reviews im Compliance-Cockpit, Eskalation an Bereichsleitung</dd></dl>
+</div></li>
+<li><div>
+  <h4>Archivierung oder Außerkraftsetzung</h4>
+  <p>Im Zuge einer Neuordnung wird die Richtlinie durch eine konzernweite Richtlinie ersetzt. Mit deren Veröffentlichung wird die alte Richtlinie automatisch außer Kraft gesetzt (Beziehung „ersetzt durch“), Lesende sehen einen Hinweis mit Link auf die Nachfolgerin, untergeordnete Arbeitsanweisungen erhalten Prüfaufgaben. Das Dokument wird archiviert, die Aufbewahrungsfrist (Außerkraftsetzung + 10 Jahre, ab Jahresende) beginnt. Nach Fristablauf und ohne Legal Hold wird die Vernichtung vorgeschlagen, doppelt freigegeben und protokolliert.</p>
+  <dl class="kv"><dt>Ergebnis</dt><dd>Status Außer Kraft → Archiviert → (später) Vernichtet</dd><dt>Kontrollen</dt><dd>Keine Lücke in der Regelung, Legal-Hold-Prüfung, Löschnachweis</dd></dl>
+</div></li>
+</ol>
+</section>
+
+<!-- ============ 12 ============ -->
+<section class="ch" id="k12">
+<h2><span class="no">12</span>Epics, Features und User Stories</h2>
+<p>Priorisierung: <span class="prio" style="margin:0">MVP</span> erste produktive Stufe · <span class="prio" style="margin:0">R2</span> zweite Ausbaustufe · <span class="prio" style="margin:0">R3</span> spätere Stufe. Akzeptanzkriterien sind als prüfbare Aussagen formuliert und dienen als Grundlage für Abnahmetests.</p>
+
+<details class="epic" open>
+<summary><span class="eid">EP-01</span><span class="etitle">Vorlagen und Bausteine</span><span class="egoal">Gelenkte, wiederverwendbare Vorlagen und Textbausteine als Grundlage aller Dokumente.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-01.1</b>Vorlageneditor</span><span><b>F-01.2</b>Bausteinbibliothek</span><span><b>F-01.3</b>Vorlagen-Lebenszyklus</span><span><b>F-01.4</b>Testmodus mit Beispieldaten</span><span><b>F-01.5</b>Vorlagenvererbung</span><span><b>F-01.6</b>Auswirkungsanalyse</span></div>
+<div class="story"><span class="sid">US-01.1</span><span class="prio">MVP</span>
+<p class="us">Als Vorlagen-Designer möchte ich Abschnitte einer Vorlage als gesperrt oder editierbar kennzeichnen, damit Autoren rechtlich geprüfte Standardtexte nicht unbemerkt verändern.</p>
+<ul><li>Gesperrte Abschnitte sind im Autorenmodus sichtbar, aber nicht editierbar.</li><li>Ein Autor kann für einen gesperrten Abschnitt eine Abweichung beantragen; das Dokument erhält dann automatisch den zusätzlichen Prüfschritt der Klasse.</li><li>Der Abweichungsbericht listet jede Änderung an Standardtext mit Ort und Begründung.</li></ul></div>
+<div class="story"><span class="sid">US-01.2</span><span class="prio">MVP</span>
+<p class="us">Als Vorlagen-Verantwortlicher möchte ich vor der Freigabe einer neuen Vorlagenversion sehen, welche Dokumente betroffen sind, damit ich die Folgen einschätzen kann.</p>
+<ul><li>Die Analyse zeigt Anzahl der Dokumente je Status, die auf der Vorgängerversion basieren.</li><li>Offene Entwürfe werden namentlich mit Autor gelistet.</li><li>Bereits freigegebene Dokumente werden durch die neue Vorlagenversion nicht verändert.</li></ul></div>
+<div class="story"><span class="sid">US-01.3</span><span class="prio">R2</span>
+<p class="us">Als Rechtsabteilung möchte ich eine Klausel zentral aktualisieren und sehen, in welchen Vorlagen sie verwendet wird, damit ich Änderungen gezielt ausrolle.</p>
+<ul><li>Jede Bausteinversion hat eine Verwendungsliste (Vorlagen und Dokumente).</li><li>Vorlagen können die neue Bausteinversion übernehmen; dies erzeugt eine neue Vorlagenversion mit Freigabe.</li><li>Dokumente behalten die Bausteinversion, mit der sie freigegeben wurden.</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-02</span><span class="etitle">Metadaten und Klassifikation</span><span class="egoal">Einheitliches, validiertes Metadatenmodell und kontrollierte Taxonomien.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-02.1</b>Dokumentenklassen</span><span><b>F-02.2</b>Felddefinitionen</span><span><b>F-02.3</b>Taxonomieverwaltung</span><span><b>F-02.4</b>Tagging</span><span><b>F-02.5</b>Regulatorische Zuordnung</span></div>
+<div class="story"><span class="sid">US-02.1</span><span class="prio">MVP</span>
+<p class="us">Als Fachadministrator möchte ich für eine Dokumentenklasse festlegen, welche Felder in welchem Status Pflicht sind, damit Dokumente erst bei Vollständigkeit weitergegeben werden.</p>
+<ul><li>Pflichtigkeit ist je Feld und Status konfigurierbar.</li><li>Einreichung ist gesperrt, solange Pflichtfelder fehlen; die fehlenden Felder werden benannt und sind direkt ansteuerbar.</li><li>Änderungen am Profil erzeugen eine neue Profilversion; bestehende Dokumente bleiben unverändert.</li></ul></div>
+<div class="story"><span class="sid">US-02.2</span><span class="prio">R2</span>
+<p class="us">Als Compliance-Beauftragter möchte ich Policies den Anforderungen eines Regelwerks zuordnen, damit ich Abdeckungslücken erkenne.</p>
+<ul><li>Ein Dokument kann mehreren Anforderungen zugeordnet werden und umgekehrt.</li><li>Ein Bericht zeigt Anforderungen ohne gültiges zugeordnetes Dokument.</li><li>Wird ein zugeordnetes Dokument außer Kraft gesetzt, erscheint die Anforderung als ungedeckt.</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-03</span><span class="etitle">Dokumenterstellung und Befüllung</span><span class="egoal">Geführte manuelle sowie automatische Erzeugung von Dokumenten aus Vorlagen.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-03.1</b>Vorlagenkatalog</span><span><b>F-03.2</b>Erfassungsassistent</span><span><b>F-03.3</b>Live-Vorschau</span><span><b>F-03.4</b>Datenübernahme aus Fachsystemen</span><span><b>F-03.5</b>Massenerzeugung</span><span><b>F-03.6</b>Import Altbestand</span></div>
+<div class="story"><span class="sid">US-03.1</span><span class="prio">MVP</span>
+<p class="us">Als Autor möchte ich beim Ausfüllen eines Vertrags den Vertragspartner aus dem Partnerstamm auswählen, damit Name und Anschrift korrekt übernommen werden.</p>
+<ul><li>Die Suche im Partnerstamm liefert Treffer nach Name und Kennung.</li><li>Übernommene Werte sind als „aus System übernommen“ gekennzeichnet und nicht frei editierbar.</li><li>Ist der Partnerstamm nicht erreichbar, erhält der Autor eine klare Meldung und kann den Entwurf speichern und später fortsetzen.</li></ul></div>
+<div class="story"><span class="sid">US-03.2</span><span class="prio">MVP</span>
+<p class="us">Als Autor möchte ich während der Eingabe eine Vorschau sehen, damit ich Bedingungen und Formatierung sofort prüfen kann.</p>
+<ul><li>Die Vorschau aktualisiert sich nach jeder Feldänderung innerhalb von 2 Sekunden (p95).</li><li>Fehlende Pflichtwerte sind in der Vorschau sichtbar markiert.</li><li>Die Vorschau ist als „Entwurf – nicht gültig“ gekennzeichnet.</li></ul></div>
+<div class="story"><span class="sid">US-03.3</span><span class="prio">R2</span>
+<p class="us">Als Fachsystem möchte ich 20.000 Anschreiben in einem Auftrag erzeugen lassen, damit Massenkorrespondenz ohne manuelle Arbeit entsteht.</p>
+<ul><li>Der Auftrag wird angenommen und mit Auftragskennung bestätigt; der Fortschritt ist abfragbar.</li><li>Ungültige Datensätze werden nicht erzeugt, sondern mit Fehlergrund in einer Klärungsliste ausgegeben.</li><li>Wiederholte Übermittlung desselben Auftrags erzeugt keine Dubletten.</li><li>Andere Mandanten erleben während des Laufs keine messbare Verschlechterung der Antwortzeiten.</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-04</span><span class="etitle">Workflow und Freigabe</span><span class="egoal">Konfigurierbare Prüf- und Genehmigungsprozesse mit Funktionstrennung.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-04.1</b>Workflow-Konfiguration</span><span><b>F-04.2</b>Regelbasierte Beteiligtenermittlung</span><span><b>F-04.3</b>Kommentare &amp; Vorschläge</span><span><b>F-04.4</b>Elektronische Freigabe</span><span><b>F-04.5</b>Eskalation</span><span><b>F-04.6</b>Externe Prüfer</span></div>
+<div class="story"><span class="sid">US-04.1</span><span class="prio">MVP</span>
+<p class="us">Als Genehmiger möchte ich eine Freigabe nur für genau die Version erteilen, die ich gesehen habe, damit nachträgliche Änderungen nicht von meiner Freigabe gedeckt sind.</p>
+<ul><li>Die Freigabe speichert Version und Prüfsumme des Inhalts.</li><li>Jede inhaltliche Änderung nach einer Zustimmung setzt den Workflow auf den definierten Schritt zurück.</li><li>Die Freigabe erfordert eine erneute Authentifizierung.</li></ul></div>
+<div class="story"><span class="sid">US-04.2</span><span class="prio">MVP</span>
+<p class="us">Als Compliance-Beauftragter möchte ich, dass Autor und Genehmiger nicht dieselbe Person sein können, damit das Vier-Augen-Prinzip technisch erzwungen wird.</p>
+<ul><li>Ist der Autor als Genehmiger ermittelt, wird automatisch die nächste berechtigte Person bestimmt.</li><li>Gibt es keine andere berechtigte Person, wird der Fachadministrator benachrichtigt; der Workflow bleibt stehen.</li><li>Die Regel ist je Klasse konfigurierbar, ihre Deaktivierung wird protokolliert.</li></ul></div>
+<div class="story"><span class="sid">US-04.3</span><span class="prio">R2</span>
+<p class="us">Als Fachadministrator möchte ich Bedingungen wie „Vertragswert über 250.000 € → zusätzlich Geschäftsführung“ ohne Programmierung festlegen.</p>
+<ul><li>Bedingungen können auf Metadaten und Feldwerte verweisen.</li><li>Eine Vorschau zeigt für ein Beispieldokument den resultierenden Ablauf.</li><li>Laufende Vorgänge bleiben auf der Workflowversion, mit der sie gestartet wurden.</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-05</span><span class="etitle">Versionierung und Änderungsverfolgung</span><span class="egoal">Lückenlose, unveränderbare Versionskette mit Vergleich.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-05.1</b>Haupt-/Nebenversionen</span><span><b>F-05.2</b>Versionsvergleich</span><span><b>F-05.3</b>Änderungsmarkierung</span><span><b>F-05.4</b>Änderungsübersicht für Lesende</span></div>
+<div class="story"><span class="sid">US-05.1</span><span class="prio">MVP</span>
+<p class="us">Als Leser möchte ich zwei Versionen eines Dokuments vergleichen, damit ich Änderungen schnell erfasse.</p>
+<ul><li>Der Vergleich zeigt Text-, Feldwert- und Metadatenänderungen getrennt.</li><li>Ich kann nur Versionen vergleichen, die ich lesen darf.</li><li>Die Änderungsübersicht des Autors wird über dem Vergleich angezeigt.</li></ul></div>
+<div class="story"><span class="sid">US-05.2</span><span class="prio">MVP</span>
+<p class="us">Als Owner möchte ich eine redaktionelle Korrektur als Nebenversion veröffentlichen, ohne den vollen Freigabeprozess zu durchlaufen.</p>
+<ul><li>Die Einstufung „redaktionell“ erfordert eine Begründung.</li><li>Ein automatischer Vergleich warnt, wenn mehr als ein konfigurierbarer Schwellwert an Text geändert wurde.</li><li>Nebenversionen lösen keine erneute Kenntnisnahme aus (Standard, konfigurierbar).</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-06</span><span class="etitle">Rendering und Veröffentlichung</span><span class="egoal">Verbindliche, versiegelte Renditionen und kontrollierte Bereitstellung.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-06.1</b>Archivfähige PDF-Erzeugung</span><span><b>F-06.2</b>Wasserzeichen &amp; Freigabevermerk</span><span><b>F-06.3</b>Zeitgesteuerte Veröffentlichung</span><span><b>F-06.4</b>Kenntnisnahme</span><span><b>F-06.5</b>Bereitstellung in Zielkanälen</span></div>
+<div class="story"><span class="sid">US-06.1</span><span class="prio">MVP</span>
+<p class="us">Als Records Manager möchte ich, dass jede freigegebene Version als archivfähiges PDF mit Prüfsumme erzeugt wird, damit die Fassung später unverändert nachgewiesen werden kann.</p>
+<ul><li>Die Rendition besteht die Validierung gegen den gewählten Archivstandard.</li><li>Dokument-ID, Version, Gültig-ab und Freigabevermerk sind auf jeder Seite sichtbar.</li><li>Schlägt das Rendering fehl, bleibt das Dokument im Status „In Freigabe“, und der Owner wird benachrichtigt.</li></ul></div>
+<div class="story"><span class="sid">US-06.2</span><span class="prio">MVP</span>
+<p class="us">Als Mitarbeitende möchte ich neue Richtlinien bestätigen, damit meine Kenntnisnahme nachgewiesen ist.</p>
+<ul><li>Die Kenntnisnahme ist erst möglich, nachdem das Dokument geöffnet wurde.</li><li>Sie wird mit Version und Zeitpunkt gespeichert.</li><li>Ich sehe in meiner Übersicht, welche Kenntnisnahmen offen sind.</li></ul></div>
+<div class="story"><span class="sid">US-06.3</span><span class="prio">MVP</span>
+<p class="us">Als Owner möchte ich ein Gültig-ab-Datum setzen, damit die neue Fassung automatisch zum Stichtag gilt und die alte gleichzeitig endet.</p>
+<ul><li>Zum Stichtag 00:00 Uhr (Zeitzone des Mandanten) wechselt die gültige Fassung.</li><li>Es gibt keinen Zeitpunkt mit zwei oder keiner gültigen Fassung.</li><li>Lesende der alten Fassung sehen einen Hinweis auf die neue.</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-07</span><span class="etitle">Review und Rezertifizierung</span><span class="egoal">Regelmäßige und ereignisgetriebene Überprüfung der Aktualität.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-07.1</b>Reviewplanung</span><span><b>F-07.2</b>Review-Kontext</span><span><b>F-07.3</b>Rezertifizierung ohne Änderung</span><span><b>F-07.4</b>Ereignisgetriebene Reviews</span><span><b>F-07.5</b>Verwaiste Dokumente</span></div>
+<div class="story"><span class="sid">US-07.1</span><span class="prio">MVP</span>
+<p class="us">Als Owner möchte ich rechtzeitig vor dem Reviewtermin eine Aufgabe erhalten, damit ich die Überprüfung planen kann.</p>
+<ul><li>Die Aufgabe entsteht gemäß Vorlaufzeit der Klasse (Standard 60 Tage).</li><li>Ich kann „Rezertifizieren“, „Überarbeiten“ oder „Außer Kraft setzen“ wählen.</li><li>Rezertifizierung setzt einen neuen Reviewtermin und wird protokolliert, ohne neue Version.</li></ul></div>
+<div class="story"><span class="sid">US-07.2</span><span class="prio">R2</span>
+<p class="us">Als Owner einer Arbeitsanweisung möchte ich informiert werden, wenn die übergeordnete Richtlinie geändert wird, damit meine Anweisung konsistent bleibt.</p>
+<ul><li>Bei Veröffentlichung einer neuen Hauptversion des übergeordneten Dokuments entsteht eine Prüfaufgabe.</li><li>Die Aufgabe verlinkt den Versionsvergleich des übergeordneten Dokuments.</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-08</span><span class="etitle">Archivierung und Aufbewahrung</span><span class="egoal">Regelbasierte Aufbewahrung, Legal Hold und nachweisbare Vernichtung.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-08.1</b>Aufbewahrungsregeln</span><span><b>F-08.2</b>Legal Hold</span><span><b>F-08.3</b>Vernichtungsprozess</span><span><b>F-08.4</b>Archivpaket-Export</span><span><b>F-08.5</b>Integritätsprüfung</span></div>
+<div class="story"><span class="sid">US-08.1</span><span class="prio">MVP</span>
+<p class="us">Als Records Manager möchte ich Dokumente unter Legal Hold stellen, damit sie während eines Rechtsstreits nicht vernichtet werden.</p>
+<ul><li>Legal Hold kann auf Dokument, Vorgang oder Suchergebnis gesetzt werden.</li><li>Dokumente unter Legal Hold erscheinen nie in Vernichtungsvorschlägen.</li><li>Setzen und Aufheben erfordert eine Begründung und wird protokolliert.</li></ul></div>
+<div class="story"><span class="sid">US-08.2</span><span class="prio">R2</span>
+<p class="us">Als Records Manager möchte ich nach Fristablauf eine Vernichtungsliste prüfen und freigeben, damit Dokumente fristgerecht gelöscht werden.</p>
+<ul><li>Die Liste enthält nur Dokumente mit abgelaufener Frist und ohne Legal Hold.</li><li>Die Vernichtung erfordert die Bestätigung einer zweiten berechtigten Person.</li><li>Nach Vernichtung bleibt ein Löschprotokoll mit ID, Klasse, Fristgrundlage und Freigebenden; Inhalte sind auch aus Suchindex und Vorschauen entfernt.</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-09</span><span class="etitle">Suche und Navigation</span><span class="egoal">Schnelles, berechtigungsgerechtes Auffinden gültiger und historischer Fassungen.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-09.1</b>Volltextsuche</span><span><b>F-09.2</b>Facettenfilter</span><span><b>F-09.3</b>Stichtagssuche</span><span><b>F-09.4</b>Feldsuche</span><span><b>F-09.5</b>Gespeicherte Suchen</span><span><b>F-09.6</b>Beziehungsansicht</span></div>
+<div class="story"><span class="sid">US-09.1</span><span class="prio">MVP</span>
+<p class="us">Als Auditor möchte ich alle Policies sehen, die an einem bestimmten Datum gültig waren, damit ich den damaligen Regelungsstand prüfen kann.</p>
+<ul><li>Der Filter „gültig am“ liefert je Dokument genau die damals gültige Version.</li><li>Das Ergebnis ist als Liste mit Version, Gültigkeitszeitraum und Genehmiger exportierbar.</li></ul></div>
+<div class="story"><span class="sid">US-09.2</span><span class="prio">MVP</span>
+<p class="us">Als Leser möchte ich in Suchergebnissen nur Dokumente sehen, auf die ich Zugriff habe, damit keine vertraulichen Informationen preisgegeben werden.</p>
+<ul><li>Trefferliste, Trefferzahl, Facettenzähler und Textauszüge enthalten keine Informationen aus nicht berechtigten Dokumenten.</li><li>Rechteänderungen wirken in der Suche innerhalb von 60 Sekunden.</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-10</span><span class="etitle">Aufgaben und Benachrichtigungen</span><span class="egoal">Zentrale Arbeitsliste, Fristen, Erinnerungen und Eskalationen.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-10.1</b>Aufgabeneingang</span><span><b>F-10.2</b>Stellvertretung</span><span><b>F-10.3</b>Benachrichtigungseinstellungen</span><span><b>F-10.4</b>Vertragsfristen</span><span><b>F-10.5</b>Sammelmeldungen</span></div>
+<div class="story"><span class="sid">US-10.1</span><span class="prio">MVP</span>
+<p class="us">Als Genehmiger möchte ich für meinen Urlaub eine Stellvertretung festlegen, damit Freigaben nicht liegen bleiben.</p>
+<ul><li>Stellvertretung ist zeitlich befristet und auf Personen mit gleicher Befugnis beschränkt.</li><li>Aufgaben werden im Zeitraum automatisch weitergeleitet; im Audit-Trail steht „X i.&nbsp;V. für Y“.</li></ul></div>
+<div class="story"><span class="sid">US-10.2</span><span class="prio">R2</span>
+<p class="us">Als Vertragsverantwortlicher möchte ich vor Ablauf einer Kündigungsfrist erinnert werden, damit keine ungewollte Verlängerung eintritt.</p>
+<ul><li>Die Frist wird aus Laufzeitende und Kündigungsfrist berechnet.</li><li>Erinnerungen erfolgen zu den konfigurierten Vorlaufzeiten; ohne Reaktion wird an die Vertretung eskaliert.</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-11</span><span class="etitle">Berechtigungen und Mandanten</span><span class="egoal">Sichere Isolation, feingranulare Rechte und Rezertifizierung der Zugriffe.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-11.1</b>Rollen- und Attributregeln</span><span><b>F-11.2</b>Vertraulichkeitsstufen</span><span><b>F-11.3</b>Mandantenhierarchie</span><span><b>F-11.4</b>Berechtigungsrezertifizierung</span><span><b>F-11.5</b>Notfallzugang</span></div>
+<div class="story"><span class="sid">US-11.1</span><span class="prio">MVP</span>
+<p class="us">Als Konzern-Compliance möchte ich eine Konzernvorlage bereitstellen, die Gesellschaften lokal ergänzen, aber in Pflichtteilen nicht ändern können.</p>
+<ul><li>Abgeleitete Vorlagen können nur freigegebene Erweiterungspunkte nutzen.</li><li>Bei Änderung der Konzernvorlage erhalten die Vorlagen-Verantwortlichen der Gesellschaften eine Aufgabe.</li></ul></div>
+<div class="story"><span class="sid">US-11.2</span><span class="prio">R2</span>
+<p class="us">Als Owner möchte ich halbjährlich bestätigen, wer auf meine vertraulichen Dokumente zugreifen darf, damit Rechte nicht unbemerkt anwachsen.</p>
+<ul><li>Die Aufgabe listet alle direkten und vererbten Berechtigungen.</li><li>Nicht bestätigte Einzelrechte werden nach Ablauf der Frist entzogen (konfigurierbar).</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-12</span><span class="etitle">Audit und Compliance</span><span class="egoal">Manipulationssicherer Nachweis aller relevanten Vorgänge.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-12.1</b>Audit-Trail</span><span><b>F-12.2</b>Integritätsprüfung</span><span><b>F-12.3</b>Prüferzugang</span><span><b>F-12.4</b>Prüfungsberichte</span><span><b>F-12.5</b>Datenschutzfunktionen</span></div>
+<div class="story"><span class="sid">US-12.1</span><span class="prio">MVP</span>
+<p class="us">Als interne Revision möchte ich für ein Dokument einen vollständigen Nachweisbericht erzeugen, damit ich Prüfungsanfragen ohne manuelles Zusammensuchen beantworte.</p>
+<ul><li>Der Bericht enthält Versionskette, Prüf- und Freigabeschritte mit Personen und Zeitpunkten, Begründungen, Kenntnisnahmequote und Integritätsstatus.</li><li>Der Bericht trägt selbst Erstellungszeitpunkt, Ersteller und Prüfsumme.</li></ul></div>
+<div class="story"><span class="sid">US-12.2</span><span class="prio">R2</span>
+<p class="us">Als Datenschutzbeauftragter möchte ich alle Dokumente finden, die Daten einer bestimmten Person enthalten, damit ich Auskunftsersuchen fristgerecht beantworte.</p>
+<ul><li>Die Suche nutzt strukturierte Personenfelder und Volltext.</li><li>Das Ergebnis weist je Dokument Aufbewahrungsgrund und frühestmögliches Löschdatum aus.</li><li>Die Durchführung der Suche wird protokolliert.</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-13</span><span class="etitle">Mehrsprachigkeit</span><span class="egoal">Lokalisierte Oberfläche und synchronisierte Sprachvarianten von Dokumenten.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-13.1</b>UI-Lokalisierung</span><span><b>F-13.2</b>Sprachvarianten</span><span><b>F-13.3</b>Übersetzungsstatus</span><span><b>F-13.4</b>Übersetzungsaustausch</span></div>
+<div class="story"><span class="sid">US-13.1</span><span class="prio">R2</span>
+<p class="us">Als Leser einer englischen Fassung möchte ich sehen, wenn die deutsche Masterfassung neuer ist, damit ich nicht nach einer veralteten Übersetzung handle.</p>
+<ul><li>Veraltete Übersetzungen tragen einen deutlichen Hinweis mit Link zur Masterfassung.</li><li>Die rechtlich verbindliche Sprachfassung ist auf jeder Variante gekennzeichnet.</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-14</span><span class="etitle">Integration und Automatisierung</span><span class="egoal">Vollständige Nutzbarkeit über Schnittstellen und Ereignisse.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-14.1</b>Programmierschnittstelle</span><span><b>F-14.2</b>Ereignisbenachrichtigung</span><span><b>F-14.3</b>Identitätsanbindung</span><span><b>F-14.4</b>Signaturanbindung</span><span><b>F-14.5</b>Migration</span></div>
+<div class="story"><span class="sid">US-14.1</span><span class="prio">MVP</span>
+<p class="us">Als Intranet möchte ich stets die gültige Fassung einer Richtlinie abrufen, damit Mitarbeitende nie eine veraltete Version sehen.</p>
+<ul><li>Eine stabile Adresse liefert immer die aktuell gültige Fassung.</li><li>Bei Veröffentlichung oder Außerkraftsetzung wird ein Ereignis an abonnierte Systeme gesendet.</li><li>Der Zugriff erfolgt über einen technischen Nutzer mit Leserechten auf genau die freigegebenen Klassen.</li></ul></div>
+<div class="story"><span class="sid">US-14.2</span><span class="prio">R2</span>
+<p class="us">Als Vertragsverantwortlicher möchte ich einen freigegebenen Vertrag zur elektronischen Unterzeichnung senden, damit die unterschriebene Fassung automatisch zurückkommt.</p>
+<ul><li>Das Signaturniveau ergibt sich aus der Dokumentenklasse.</li><li>Die signierte Fassung wird als eigene, unveränderbare Version mit Signaturnachweis gespeichert.</li><li>Abgelehnte oder abgelaufene Signaturvorgänge erzeugen eine Aufgabe.</li></ul></div>
+</div></details>
+
+<details class="epic">
+<summary><span class="eid">EP-15</span><span class="etitle">Reporting und Dashboards</span><span class="egoal">Rollenbezogene Steuerungs- und Nachweissichten.</span></summary>
+<div class="ebody">
+<div class="feat"><span><b>F-15.1</b>Compliance-Cockpit</span><span><b>F-15.2</b>Prozesskennzahlen</span><span><b>F-15.3</b>Vertragsfristen-Übersicht</span><span><b>F-15.4</b>Datenqualität</span><span><b>F-15.5</b>Berichtsexport</span></div>
+<div class="story"><span class="sid">US-15.1</span><span class="prio">MVP</span>
+<p class="us">Als Compliance-Beauftragter möchte ich auf einen Blick überfällige Reviews und offene Kenntnisnahmen sehen, damit ich gezielt eskalieren kann.</p>
+<ul><li>Das Cockpit zeigt Anzahl und Liste überfälliger Reviews je Organisationseinheit und Owner.</li><li>Die Kenntnisnahmequote je Dokument und Einheit ist sichtbar; Einzelpersonen nur gemäß Zweckbindung.</li><li>Jede Kennzahl führt per Klick zur zugrunde liegenden Liste.</li></ul></div>
+</div></details>
+
+<h3><span class="no">12.1</span>Empfohlener Zuschnitt der ersten Stufe</h3>
+<p>Die erste produktive Stufe sollte eine Dokumentenklasse mit hohem Compliance-Druck vollständig abdecken (typischerweise Policies und Richtlinien), statt alle Klassen oberflächlich. Verträge folgen in Stufe 2, weil Fristenlogik, Nachträge, externe Prüfer und Signatur zusätzliche Komplexität bringen. Massenerzeugung und Mehrsprachigkeit der Inhalte folgen, sobald Vorlagen- und Workflowmodell stabil sind.</p>
+</section>
+
+<!-- ============ 13 ============ -->
+<section class="ch" id="k13">
+<h2><span class="no">13</span>Nichtfunktionale Anforderungen</h2>
+<p>Zielwerte sind Ausgangspunkte für die Abstimmung und im Projekt anhand von Volumen und Kritikalität zu kalibrieren.</p>
+<div class="tbl"><table>
+<thead><tr><th>Kategorie</th><th>Anforderung</th><th>Zielwert (Richtwert)</th></tr></thead>
+<tbody>
+<tr><td>Verfügbarkeit</td><td>Verfügbarkeit Lesen und Suchen gültiger Dokumente</td><td>≥ 99,9 % im Monat</td></tr>
+<tr><td>Verfügbarkeit</td><td>Verfügbarkeit Bearbeitung und Workflow</td><td>≥ 99,5 % im Monat</td></tr>
+<tr><td>Wiederherstellung</td><td>Maximaler Datenverlust / maximale Ausfallzeit</td><td>≤ 15 Minuten / ≤ 4 Stunden</td></tr>
+<tr><td>Antwortzeit</td><td>Seitenaufbau Dokumentansicht</td><td>p95 ≤ 1,5 s</td></tr>
+<tr><td>Antwortzeit</td><td>Suche mit Facetten</td><td>p95 ≤ 2 s bei 10 Mio. Dokumentversionen</td></tr>
+<tr><td>Antwortzeit</td><td>Rendering eines Dokuments bis 50 Seiten</td><td>p95 ≤ 10 s</td></tr>
+<tr><td>Durchsatz</td><td>Massenerzeugung</td><td>≥ 50.000 Dokumente pro Stunde, horizontal erweiterbar</td></tr>
+<tr><td>Benutzbarkeit</td><td>Barrierefreiheit der Oberfläche und der erzeugten PDFs</td><td>Konform zu den einschlägigen Barrierefreiheitsstandards (WCAG 2.2 AA, barrierefreies PDF)</td></tr>
+<tr><td>Benutzbarkeit</td><td>Erlernbarkeit für Lesende und Autoren</td><td>Lesen/Bestätigen ohne Schulung; Autor ≤ 1 Stunde Einweisung</td></tr>
+<tr><td>Endgeräte</td><td>Lesen, Bestätigen, Freigeben auf Mobilgeräten</td><td>Vollständig nutzbar; Vorlagenbearbeitung nur Desktop</td></tr>
+<tr><td>Wartbarkeit</td><td>Konfiguration statt Programmierung für Klassen, Felder, Workflows, Regeln</td><td>≥ 90 % fachlicher Änderungen ohne Release</td></tr>
+<tr><td>Wartbarkeit</td><td>Konfiguration ist versioniert, exportierbar, zwischen Umgebungen übertragbar</td><td>Vollständig</td></tr>
+<tr><td>Portabilität</td><td>Vollständiger Export aller Daten in offenen Formaten</td><td>Jederzeit, je Mandant</td></tr>
+<tr><td>Langlebigkeit</td><td>Lesbarkeit archivierter Dokumente</td><td>≥ 30 Jahre, mit Formatmigrationsplan</td></tr>
+<tr><td>Betrieb</td><td>Überwachung, Alarmierung, Kapazitätsplanung</td><td>Fachliche Kennzahlen (z.&nbsp;B. Rendering-Warteschlange) zusätzlich zu technischen</td></tr>
+<tr><td>Zeit</td><td>Konsistente Zeitstempel</td><td>Synchronisierte, vertrauenswürdige Zeitquelle; Speicherung in UTC, Anzeige lokal</td></tr>
+</tbody></table></div>
+</section>
+
+<!-- ============ 14 ============ -->
+<section class="ch" id="k14">
+<h2><span class="no">14</span>Sicherheit und Skalierung</h2>
+
+<h3><span class="no">14.1</span>Sicherheitsanforderungen</h3>
+<div class="grid2">
+<div><h4>Identität und Zugriff</h4><ul>
+<li>Anbindung an zentrale Identitätsverwaltung mit Einmalanmeldung</li>
+<li>Mehrfaktor-Authentifizierung verpflichtend für Autoren, Genehmiger und Administratoren</li>
+<li>Erneute Authentifizierung bei Freigabe, Vernichtung, Rechteänderung</li>
+<li>Automatischer Entzug bei Austritt über Identitätsverwaltung</li>
+<li>Protokollierter, zeitlich begrenzter Notfallzugang mit nachträglicher Prüfung</li>
+</ul></div>
+<div><h4>Daten</h4><ul>
+<li>Verschlüsselung bei Übertragung und Speicherung, Schlüssel je Mandant, optional vom Kunden verwaltet</li>
+<li>Getrennte Speicherung von Audit-Trail und Fachdaten</li>
+<li>Prüfsummen für alle freigegebenen Inhalte</li>
+<li>Sichere Löschung inklusive abgeleiteter Daten</li>
+</ul></div>
+<div><h4>Anwendung</h4><ul>
+<li>Abgeschlossene Ausdruckssprache für Vorlagen, Ausführung isoliert mit Ressourcenlimits</li>
+<li>Schadcodeprüfung aller hochgeladenen Dateien, Entfernen aktiver Inhalte</li>
+<li>Eingabevalidierung und Kodierung gegen Injektionsangriffe</li>
+<li>Schutz gegen Missbrauch der Schnittstellen (Ratenbegrenzung, Berechtigung je Endpunkt)</li>
+<li>Sichere Entwicklungspraxis, regelmäßige Penetrationstests, Abhängigkeitsprüfung</li>
+</ul></div>
+<div><h4>Informationsabfluss</h4><ul>
+<li>Dynamische Wasserzeichen (Name, Zeitpunkt) bei vertraulichen Downloads</li>
+<li>Download- und Druckbeschränkung je Vertraulichkeitsstufe</li>
+<li>Externe Freigabelinks befristet, an Identität gebunden, widerrufbar</li>
+<li>Auffällige Massendownloads erkennen und melden</li>
+</ul></div>
+</div>
+<p>Grundlage ist ein Informationssicherheitsmanagement mit Schutzbedarfsfeststellung, Bedrohungsmodellierung je Kernprozess (Freigabe, Rendering, Schnittstelle) und dokumentierten technischen und organisatorischen Maßnahmen.</p>
+
+<h3><span class="no">14.2</span>Skalierungsanforderungen</h3>
+<ul>
+  <li><strong>Mengengerüst festlegen</strong> (Beispiel Großkonzern): 50 Mandanten, 100.000 Nutzer, 5.000 gleichzeitige Sitzungen, 2 Mio. Dokumente, 10 Mio. Versionen, 50 TB Inhalte nach 10 Jahren, Spitzenlast bei Policy-Veröffentlichung mit 100.000 Kenntnisnahmen in 48 Stunden.</li>
+  <li><strong>Lese- und Schreiblast trennen:</strong> Lesen gültiger Fassungen und Suche skalieren unabhängig von Bearbeitung und Workflow.</li>
+  <li><strong>Rechenintensive Vorgänge asynchron:</strong> Rendering, Texterkennung, Indexierung, Massenerzeugung und Berichte über Warteschlangen mit Priorisierung (interaktive Vorschau vor Massenlauf).</li>
+  <li><strong>Horizontale Erweiterbarkeit</strong> aller zustandslosen Verarbeitungskomponenten.</li>
+  <li><strong>Mandantenfairness:</strong> Kontingente und Drosselung je Mandant.</li>
+  <li><strong>Speicherstufen</strong> nach Zugriffshäufigkeit, mit transparenter Rückholung.</li>
+  <li><strong>Suchindex</strong> als ableitbarer, vollständig neu aufbaubarer Bestand, nicht als führende Datenquelle.</li>
+  <li><strong>Lasttests</strong> mit realistischem Mengengerüst vor jedem größeren Rollout.</li>
+</ul>
+</section>
+
+<!-- ============ 15 ============ -->
+<section class="ch" id="k15">
+<h2><span class="no">15</span>Integrationsmöglichkeiten</h2>
+<div class="tbl"><table>
+<thead><tr><th>Zielsystemkategorie</th><th>Richtung</th><th>Zweck</th></tr></thead>
+<tbody>
+<tr><td>Identitäts- und Verzeichnisdienst</td><td>ein</td><td>Anmeldung, Benutzer, Gruppen, Organisationszuordnung, Austritte</td></tr>
+<tr><td>Personalsystem / Organisationsverzeichnis</td><td>ein</td><td>Organisationsstruktur, Funktionen, Vorgesetzte (Workflow, Zielgruppen, Owner)</td></tr>
+<tr><td>Kunden- und Partnerverwaltung, Unternehmenssoftware</td><td>ein/aus</td><td>Stammdaten für Platzhalter; Rückmeldung Vertragsstatus, Laufzeiten, Werte</td></tr>
+<tr><td>Dienste für elektronische Signaturen</td><td>aus/ein</td><td>Unterzeichnung, Rücklauf signierter Fassungen und Nachweise</td></tr>
+<tr><td>Intranet, Portale, Wissensdatenbanken</td><td>aus</td><td>Bereitstellung gültiger Fassungen über stabile Adressen</td></tr>
+<tr><td>E-Mail und Kollaborationswerkzeuge</td><td>aus</td><td>Benachrichtigungen, Aufgaben, Freigabe aus der Nachricht heraus</td></tr>
+<tr><td>Lernplattform</td><td>aus/ein</td><td>Schulungszuweisung zu Policies, Rückmeldung Schulungsnachweis</td></tr>
+<tr><td>Governance-, Risiko- und Compliance-Werkzeuge</td><td>aus/ein</td><td>Zuordnung Policies ↔ Kontrollen und Anforderungen</td></tr>
+<tr><td>Ticket- und Vorgangssysteme</td><td>ein/aus</td><td>Änderungsanträge zu Dokumenten, Klärungsfälle</td></tr>
+<tr><td>Langzeitarchiv</td><td>aus</td><td>Übergabe von Archivpaketen, Rückmeldung Archivierungsstatus</td></tr>
+<tr><td>Scan- und Texterkennungsdienste</td><td>ein</td><td>Import Papierbestand und Fremdpapier</td></tr>
+<tr><td>Übersetzungsdienstleister / Übersetzungsspeicher</td><td>aus/ein</td><td>Übersetzungsaufträge, Rücklauf</td></tr>
+<tr><td>Analyse- und Berichtswerkzeuge</td><td>aus</td><td>Kennzahlen, Datenexporte, berechtigungsgerecht</td></tr>
+<tr><td>Sicherheitsüberwachung</td><td>aus</td><td>Sicherheitsrelevante Ereignisse, Anomalien</td></tr>
+</tbody></table></div>
+<h4>Integrationsprinzipien</h4>
+<ul>
+  <li>Jede fachliche Funktion ist über eine <strong>dokumentierte, versionierte Schnittstelle</strong> nutzbar; die Oberfläche nutzt dieselben Funktionen.</li>
+  <li><strong>Ereignisse</strong> für alle Lebenszyklusübergänge (erstellt, eingereicht, freigegeben, veröffentlicht, außer Kraft, archiviert, vernichtet), damit Zielsysteme reagieren statt abfragen.</li>
+  <li><strong>Idempotente Aufrufe</strong> und Korrelationskennungen für sichere Wiederholung und Nachverfolgung.</li>
+  <li><strong>Lose Kopplung:</strong> Ausfall eines Zielsystems blockiert nicht die Kernprozesse; Zwischenspeicherung und Wiederholung.</li>
+  <li><strong>Feldwerte aus Fremdsystemen werden zum Zeitpunkt der Freigabe eingefroren;</strong> spätere Änderungen im Quellsystem ändern keine freigegebenen Dokumente.</li>
+  <li>Schnittstellenänderungen mit Abkündigungsfristen, Rückwärtskompatibilität innerhalb einer Hauptversion.</li>
+</ul>
+</section>
+
+<!-- ============ 16 ============ -->
+<section class="ch" id="k16">
+<h2><span class="no">16</span>Reporting- und Dashboard-Anforderungen</h2>
+<div class="tbl"><table>
+<thead><tr><th>Dashboard</th><th>Zielgruppe</th><th>Kernkennzahlen</th></tr></thead>
+<tbody>
+<tr><td>Compliance-Cockpit</td><td>Compliance, Geschäftsleitung</td><td>Überfällige Reviews; Kenntnisnahmequote je Dokument/Einheit; Dokumente ohne Owner; ungedeckte regulatorische Anforderungen; Abweichungen von Standardklauseln</td></tr>
+<tr><td>Prozesscockpit</td><td>Fachadministration, Prozessverantwortliche</td><td>Durchlaufzeit je Workflowschritt; Rückweisungsquote; Eskalationen; Engpässe je Person/Rolle (aggregiert)</td></tr>
+<tr><td>Vertragsfristen</td><td>Rechtsabteilung, Einkauf, Vertrieb</td><td>Kündigungs- und Verlängerungsfristen der nächsten 30/90/180 Tage; Vertragsvolumen nach Partner und Gesellschaft</td></tr>
+<tr><td>Bestand</td><td>Records Management</td><td>Dokumente je Klasse und Status; Wachstum; anstehende Archivierung und Vernichtung; Legal Holds</td></tr>
+<tr><td>Vorlagennutzung</td><td>Vorlagen-Verantwortliche</td><td>Nutzung je Vorlage und Version; ungenutzte Vorlagen; Anteil Dokumente auf veralteten Vorlagenversionen</td></tr>
+<tr><td>Datenqualität</td><td>Fachadministration</td><td>Fehlende oder inkonsistente Metadaten; verwaiste Referenzen; ungepflegte Tags</td></tr>
+<tr><td>Sicherheit &amp; Audit</td><td>Informationssicherheit, Revision</td><td>Integritätsprüfungsstatus; Notfallzugriffe; ungewöhnliche Downloads; Berechtigungsrezertifizierung</td></tr>
+<tr><td>Meine Arbeit</td><td>Alle Nutzer</td><td>Offene Aufgaben, Fristen, eigene Dokumente mit anstehendem Review</td></tr>
+</tbody></table></div>
+<ul>
+  <li>Jede Kennzahl führt per Drill-down zur zugrunde liegenden Liste.</li>
+  <li>Berichte respektieren Berechtigungen; aggregierte Kennzahlen dürfen keine Rückschlüsse auf nicht sichtbare Einzeldokumente erlauben.</li>
+  <li>Personenbezogene Auswertungen (z.&nbsp;B. individuelle Bearbeitungszeiten) nur zweckgebunden und abgestimmt.</li>
+  <li>Stichtagsberichte reproduzierbar: ein Bericht „Stand 31.12.“ liefert später dasselbe Ergebnis.</li>
+  <li>Geplante Berichte mit Versand und Export in gängige, offene Formate.</li>
+</ul>
+</section>
+
+<!-- ============ 17 ============ -->
+<section class="ch" id="k17">
+<h2><span class="no">17</span>Risiken, typische Fehler und Best Practices</h2>
+
+<h3><span class="no">17.1</span>Risikobewertung</h3>
+<div class="tbl"><table>
+<thead><tr><th>Risiko</th><th>Auswirkung</th><th>W</th><th>Maßnahme</th></tr></thead>
+<tbody>
+<tr><td>Geringe Akzeptanz; Dokumente werden weiter außerhalb erstellt und nur „abgelegt“</td><td><span class="sev h">hoch</span></td><td>hoch</td><td>Erstellung muss schneller sein als der alte Weg; verbindliche Regel „nur in der Plattform freigegeben gilt“; frühe Einbindung von Key-Usern</td></tr>
+<tr><td>Überkomplexes Metadatenmodell</td><td><span class="sev h">hoch</span></td><td>hoch</td><td>Kernmodell klein halten; jedes Pflichtfeld braucht nachweisbaren Nutzen; Feldnutzung messen und unnötige Felder entfernen</td></tr>
+<tr><td>Wildwuchs an Vorlagen und Workflows</td><td><span class="sev m">mittel</span></td><td>hoch</td><td>Vorlagen-Governance mit Verantwortlichen, Nutzungsmetriken, regelmäßige Bereinigung; Vererbung statt Kopie</td></tr>
+<tr><td>Migration des Altbestands unterschätzt</td><td><span class="sev h">hoch</span></td><td>mittel</td><td>Bestandsanalyse früh; Altbestand bewerten (migrieren, nur archivieren, vernichten); Metadaten-Anreicherung einplanen</td></tr>
+<tr><td>Fehlerhafte Aufbewahrungsregeln führen zu vorzeitiger Löschung</td><td><span class="sev h">hoch</span></td><td>niedrig</td><td>Rechtliche Abnahme der Regeln, Vier-Augen-Vernichtung, Karenzzeit, Simulation vor Aktivierung</td></tr>
+<tr><td>Rendering nicht deterministisch, Freigabe und PDF weichen ab</td><td><span class="sev h">hoch</span></td><td>mittel</td><td>Freigabe immer auf der Rendition oder einer garantiert identischen Vorschau; Regressionstests mit Referenzdokumenten</td></tr>
+<tr><td>Template-Injection über Ausdruckssprache</td><td><span class="sev h">hoch</span></td><td>niedrig</td><td>Abgeschlossene, isoliert ausgeführte Ausdruckssprache; Sicherheitstests</td></tr>
+<tr><td>Mitbestimmung und Datenschutz bei Protokollierung nicht geklärt</td><td><span class="sev m">mittel</span></td><td>mittel</td><td>Frühe Abstimmung mit Arbeitnehmervertretung und Datenschutz; zweckgebundene Auswertungen</td></tr>
+<tr><td>Abhängigkeit von einem Anbieter, kein Ausstieg möglich</td><td><span class="sev m">mittel</span></td><td>mittel</td><td>Vollständiger Export in offenen Formaten als Anforderung; regelmäßiger Exporttest</td></tr>
+<tr><td>Organisationsänderungen erzeugen verwaiste Owner und Workflows</td><td><span class="sev m">mittel</span></td><td>hoch</td><td>Funktionen statt Personen zuweisen; automatische Erkennung verwaister Objekte</td></tr>
+</tbody></table></div>
+
+<h3><span class="no">17.2</span>Typische Fehler bei der Umsetzung</h3>
+<ul>
+  <li><strong>Datei statt Objekt:</strong> Die Plattform wird als bessere Dateiablage gebaut. Feldwerte stecken nur im Text, Auswertungen und Automatisierung sind unmöglich.</li>
+  <li><strong>Vorlagen werden kopiert statt referenziert:</strong> Eine Klauseländerung muss in 80 Kopien nachgezogen werden.</li>
+  <li><strong>Vorlagenänderung verändert freigegebene Dokumente rückwirkend,</strong> weil Dokumente zur Anzeigezeit aus der aktuellen Vorlage gerendert werden.</li>
+  <li><strong>Freigabe bezieht sich auf das Dokument, nicht auf die Version.</strong> Spätere Änderungen gelten scheinbar als genehmigt.</li>
+  <li><strong>Personen statt Funktionen</strong> in Workflows und als Owner hinterlegt.</li>
+  <li><strong>Audit-Trail als normales, administrierbares Protokoll</strong> ohne Manipulationsschutz.</li>
+  <li><strong>Suche ignoriert Berechtigungen</strong> bei Trefferzahlen, Facetten oder Auszügen.</li>
+  <li><strong>Workflowlogik im Code</strong> statt in versionierter Konfiguration; jede Organisationsänderung wird zum Entwicklungsprojekt.</li>
+  <li><strong>Löschung vergessen:</strong> Aufbewahrung wird gebaut, Vernichtung nicht. Ergebnis: Datenschutzverstoß durch Überaufbewahrung.</li>
+  <li><strong>Mehrsprachigkeit nachträglich:</strong> Datenmodell kennt nur einen Titel und einen Inhalt.</li>
+  <li><strong>Mandantenfähigkeit nachträglich:</strong> Isolation wird über Filter in der Oberfläche statt im Datenzugriff umgesetzt.</li>
+  <li><strong>Zu viele Pflichtfelder</strong> in der ersten Stufe; Nutzer füllen Platzhalterwerte ein, die Datenqualität sinkt.</li>
+</ul>
+
+<h3><span class="no">17.3</span>Best Practices für eine langfristig wartbare Enterprise-Lösung</h3>
+<div class="grid2">
+<div><h4>Fachliches Modell</h4><ul>
+<li>Klare fachliche Begriffe (Dokument, Version, Rendition, Vorlage, Baustein, Klasse) und ein gemeinsames Glossar</li>
+<li>Unveränderliche Versionen als Grundprinzip; Änderungen nur durch neue Versionen</li>
+<li>Zeitliche Gültigkeit für alle Stamm- und Konfigurationsdaten</li>
+<li>Feldwerte strukturiert speichern, Text daraus erzeugen</li>
+</ul></div>
+<div><h4>Architektur</h4><ul>
+<li>Fachliche Module mit klaren Grenzen: Vorlagen, Dokumente, Workflow, Rendering, Archiv, Suche, Audit, Identität</li>
+<li>Ereignisgetriebene Kopplung zwischen Modulen</li>
+<li>Konfiguration als versioniertes, übertragbares Artefakt mit eigenem Freigabeprozess</li>
+<li>Abgeleitete Daten (Index, Vorschau, Berichte) jederzeit neu erzeugbar</li>
+<li>Offene Formate für Speicherung und Export</li>
+</ul></div>
+<div><h4>Governance</h4><ul>
+<li>Benanntes Gremium für Klassen, Metadaten und Vorlagenstandards</li>
+<li>Verantwortliche für jedes Konfigurationsobjekt</li>
+<li>Regelmäßige Bereinigung: Vorlagen, Tags, Workflows, Rechte</li>
+<li>Verfahrensdokumentation in der Plattform selbst, gelenkt wie jedes andere Dokument</li>
+</ul></div>
+<div><h4>Einführung und Betrieb</h4><ul>
+<li>Schrittweiser Rollout nach Dokumentenklassen mit messbaren Zielen</li>
+<li>Key-User-Netzwerk in den Fachbereichen</li>
+<li>Referenzdokumente als automatisierte Abnahmetests für Rendering und Vorlagen</li>
+<li>Regelmäßige Wiederherstellungs-, Export- und Integritätstests</li>
+<li>Nutzungsdaten auswerten und Bedienung danach verbessern</li>
+</ul></div>
+</div>
+</section>
+
+<!-- ============ 18 ============ -->
+<section class="ch" id="k18">
+<h2><span class="no">18</span>Technische Zielarchitektur</h2>
+<div class="note"><p>Dieses Kapitel hält die getroffenen Technologieentscheidungen fest. Die fachlichen Kapitel 1–17 bleiben davon unabhängig und gelten unverändert, falls einzelne Entscheidungen später revidiert werden.</p></div>
+
+<h3><span class="no">18.1</span>Architekturentscheidungen</h3>
+<div class="tbl"><table>
+<thead><tr><th>Nr.</th><th>Entscheidung</th><th>Wahl</th><th>Begründung</th></tr></thead>
+<tbody>
+<tr><td class="mono">AE-01</td><td>Architekturstil</td><td>Modularer Monolith mit asynchronen Workern</td><td>Workflow, Versionierung und Audit sind transaktional eng gekoppelt; verteilte Transaktionen würden die Revisionssicherheit gefährden. Module bleiben herauslösbar.</td></tr>
+<tr><td class="mono">AE-02</td><td>Backend-Sprache</td><td>Scala 3</td><td>Starkes Typsystem für das Domänenmodell (Lebenszyklus, Versionen, Freigaben), Unveränderlichkeit als Standard, volle Nutzung der Java-Bibliotheken.</td></tr>
+<tr><td class="mono">AE-03</td><td>Effekt- und Laufzeitsystem</td><td>ZIO 2</td><td>Integriertes Ökosystem (HTTP, JSON, Konfiguration, Logging, Tests, Streams), typisierte Fehler, Abhängigkeitsverwaltung über ZLayer.</td></tr>
+<tr><td class="mono">AE-04</td><td>Build</td><td>sbt, Multi-Modul</td><td>Fachliche Modulgrenzen werden als sbt-Teilprojekte vom Compiler erzwungen.</td></tr>
+<tr><td class="mono">AE-05</td><td>Identität</td><td>ZITADEL</td><td>OIDC/SAML, MFA und Passkeys, Organisationen als natürliche Abbildung von Mandanten, Service-User für technische Nutzer.</td></tr>
+<tr><td class="mono">AE-06</td><td>Workflow-Engine</td><td>Flowable, eingebettet</td><td>Versionierte BPMN/DMN-Abläufe; laufende Instanzen bleiben auf ihrer Definition. Kein Eigenbau.</td></tr>
+<tr><td class="mono">AE-07</td><td>Führendes Inhaltsformat</td><td>Strukturierte Blöcke (JSON), DOCX nur Import/Export</td><td>Voraussetzung für Klauselbibliothek, Abweichungsbericht, Vergleich und deterministisches Rendering.</td></tr>
+<tr><td class="mono">AE-08</td><td>Rendering</td><td>HTML → PDF/A mit WeasyPrint, Prüfung mit veraPDF, Python-Worker</td><td>Deterministisch bei gepinnter Version, gutes Druck-CSS, PDF/A-Unterstützung.</td></tr>
+<tr><td class="mono">AE-09</td><td>Persistenz</td><td>PostgreSQL, S3-kompatibler Speicher mit Object Lock, OpenSearch</td><td>Transaktionen und JSONB; unveränderbarer Speicher für Renditionen; Suchindex als ableitbarer Bestand.</td></tr>
+<tr><td class="mono">AE-10</td><td>Ereignisse und Jobs</td><td>Transactional Outbox und Job-Warteschlange in PostgreSQL</td><td>Keine verlorenen Ereignisse, eine Infrastrukturkomponente weniger. Kafka erst bei nachgewiesenem Bedarf.</td></tr>
+</tbody></table></div>
+
+<h3><span class="no">18.2</span>Komponentenübersicht</h3>
+<pre class="mermaid">
+flowchart LR
+  UI["Web-Frontend<br/>TypeScript · React · TipTap"]
+  ZIT["ZITADEL<br/>Identität · MFA · Organisationen"]
+  subgraph BE["Backend · Scala 3 · ZIO"]
+    API["Tapir-API<br/>ZIO HTTP"]
+    DOM["Fachmodule<br/>Vorlagen · Dokumente · Archiv · Audit"]
+    FL["Flowable<br/>eingebettet"]
+  end
+  PG[("PostgreSQL<br/>Fachdaten · Outbox · Jobs · Audit")]
+  S3[("Object Storage<br/>Object Lock")]
+  OS[("OpenSearch")]
+  RW["Rendering-Worker<br/>WeasyPrint · veraPDF"]
+  OCR["OCR-Worker<br/>OCRmyPDF"]
+  EXT["Intranet · ERP · Signatur · GRC"]
+  TSA["Zeitstempeldienst<br/>RFC 3161"]
+  UI -- OIDC --> ZIT
+  UI -- JWT --> API
+  API --> DOM
+  DOM --> FL
+  API -. JWKS .-> ZIT
+  DOM --> PG
+  FL --> PG
+  DOM --> S3
+  DOM --> OS
+  PG -- Jobs --> RW
+  PG -- Jobs --> OCR
+  RW --> S3
+  OCR --> S3
+  DOM -- Outbox-Ereignisse --> EXT
+  DOM -- Hash-Verankerung --> TSA
+</pre>
+
+<h3><span class="no">18.3</span>Backend-Stack</h3>
+<div class="tbl"><table>
+<thead><tr><th>Bereich</th><th>Wahl</th><th>Hinweis</th></tr></thead>
+<tbody>
+<tr><td>Sprache / Laufzeit</td><td>Scala 3 (LTS-Linie), ZIO 2, aktuelle LTS-JVM</td><td>Nur Bibliotheken mit Scala-3-Unterstützung</td></tr>
+<tr><td>HTTP-API</td><td>Tapir mit ZIO-HTTP-Server</td><td>Typisierte Endpunkte; OpenAPI-Beschreibung wird erzeugt und ist Vertrag für Frontend und Integrationen</td></tr>
+<tr><td>JSON</td><td>zio-json</td><td>Tapir-Integration vorhanden</td></tr>
+<tr><td>Datenbankzugriff</td><td>Magnum (ZIO-Modul), alternativ ZIO Quill</td><td>Explizites SQL ist hier ein Vorteil: Row-Level Security, <code>FOR UPDATE SKIP LOCKED</code>, JSONB, Audit-Tabellen. Entscheidung nach kurzem Spike (siehe 18.7)</td></tr>
+<tr><td>Migrationen</td><td>Flyway</td><td>Eigenständiger Schritt im Deployment, nicht beim Start jeder Instanz</td></tr>
+<tr><td>Konfiguration</td><td>zio-config (HOCON und Umgebungsvariablen)</td><td>Geheimnisse ausschließlich aus dem Secret-Store</td></tr>
+<tr><td>Streams</td><td>ZStream</td><td>Massenerzeugung, Exporte, Archivpakete</td></tr>
+<tr><td>Abhängigkeiten</td><td>ZLayer</td><td>Ein Layer je Modul-Adapter; Verdrahtung nur im <code>app</code>-Modul</td></tr>
+<tr><td>Workflow</td><td>Flowable-Java-API</td><td>Aufrufe über <code>ZIO.attemptBlocking</code>; Flowable nutzt eigenes Schema in derselben Datenbank</td></tr>
+<tr><td>Ausdruckssprache</td><td>CEL (Java-Implementierung)</td><td>Bedingungen und berechnete Felder in Vorlagen; Auswertung mit Zeit- und Größenlimit</td></tr>
+<tr><td>Token-Prüfung</td><td>Nimbus JOSE + JWT gegen ZITADEL-JWKS</td><td>Als Tapir-Security-Logik; Schlüssel werden zwischengespeichert und rotiert</td></tr>
+<tr><td>Dokumentbibliotheken</td><td>Apache Tika, PDFBox, docx4j</td><td>Textextraktion, PDF-Prüfungen, DOCX-Import und -Export</td></tr>
+<tr><td>Logging / Telemetrie</td><td>zio-logging mit SLF4J-Brücke, OpenTelemetry</td><td>Korrelationskennung vom Request bis in Worker und Outbox</td></tr>
+<tr><td>Tests</td><td>zio-test, Testcontainers</td><td>Integrationstests gegen echtes PostgreSQL, OpenSearch und ZITADEL</td></tr>
+<tr><td>Codequalität</td><td>scalafmt, scalafix, strenge Compiler-Optionen</td><td>Warnungen als Fehler in der CI</td></tr>
+<tr><td>Auslieferung</td><td>sbt-native-packager → Container-Image</td><td>Ein Image für API, ein Image je Worker</td></tr>
+</tbody></table></div>
+
+<h3><span class="no">18.4</span>Modulschnitt im Build</h3>
+<p>Jedes Fachmodul besteht aus einem schlanken <code>api</code>-Teilprojekt (öffentliche Typen und Schnittstellen) und einem <code>core</code>-Teilprojekt (Fachlogik und Adapter). Andere Module dürfen nur von <code>api</code> abhängen. Damit sind die Modulgrenzen aus Kapitel 17.3 vom Compiler erzwungen.</p>
+<pre class="ph">dokumentenplattform/
+├─ build.sbt
+├─ modules/
+│  ├─ kernel/            gemeinsame Typen: DocumentId, TenantId, VersionNo, Fehler
+│  ├─ identity/          ZITADEL-Adapter, Rollen, Mandantenauflösung
+│  ├─ authz/             RBAC+ABAC-Regeln, Vertraulichkeit, Funktionstrennung
+│  ├─ templates/         api · core   Vorlagen, Bausteine, Felddefinitionen, CEL
+│  ├─ documents/         api · core   Dokumente, Versionen, Metadaten, Beziehungen
+│  ├─ workflow/          api · core   Flowable-Adapter, Aufgaben, Eskalation
+│  ├─ rendering/         api · core   Job-Erzeugung, Ergebnisübernahme, Prüfsummen
+│  ├─ archive/           api · core   Aufbewahrung, Legal Hold, Vernichtung
+│  ├─ search/            api · core   Indexierung, berechtigungsgefilterte Suche
+│  ├─ audit/             api · core   Hash-Kette, Zeitstempel-Verankerung, Berichte
+│  ├─ notifications/     api · core
+│  ├─ integration/       Outbox-Versand, Webhooks, Fachsystem-Adapter
+│  └─ app/               ZLayer-Verdrahtung, Tapir-Endpunkte, main
+├─ workers/
+│  ├─ rendering/         Python · WeasyPrint · veraPDF
+│  └─ ocr/               Python · OCRmyPDF
+└─ frontend/             TypeScript · React · TipTap</pre>
+
+<h3><span class="no">18.5</span>Identität mit ZITADEL</h3>
+<div class="tbl"><table>
+<thead><tr><th>Fachkonzept</th><th>Abbildung in ZITADEL</th><th>Verantwortung der Plattform</th></tr></thead>
+<tbody>
+<tr><td>Mandant</td><td>Organisation</td><td>Mandantenhierarchie (Konzern → Gesellschaft → Bereich) wird in der Plattform gepflegt, da Organisationen in ZITADEL flach sind</td></tr>
+<tr><td>Anmeldung, MFA, SSO</td><td>Login-Richtlinien je Organisation, externe Identitätsanbieter je Mandant</td><td>MFA-Pflicht für Autoren, Genehmiger und Administratoren über Richtlinien durchsetzen</td></tr>
+<tr><td>Grobe Rollen</td><td>Projektrollen im Token</td><td>Nur Grundrollen aus Kapitel 2.2; dokumentbezogene Rechte (ABAC) bleiben vollständig in der Plattform</td></tr>
+<tr><td>Erneute Authentifizierung bei Freigabe</td><td>OIDC mit <code>prompt=login</code> bzw. <code>max_age</code></td><td>Backend prüft <code>auth_time</code> und Authentifizierungsmethode, bevor eine Freigabe oder Vernichtung angenommen wird</td></tr>
+<tr><td>Technische Nutzer</td><td>Service-User mit Client-Credentials oder JWT-Profil</td><td>Eigene, eng begrenzte Rechte und gesonderte Audit-Kennzeichnung</td></tr>
+<tr><td>Austritt / Deaktivierung</td><td>Benutzerstatus, Ereignisse</td><td>Ereignisse abonnieren, Sitzungen beenden, Aufgaben neu zuweisen, Owner-Verlust auslösen (Kapitel 6.2)</td></tr>
+<tr><td>Externe Prüfer</td><td>Eigene Organisation oder Gastzugang</td><td>Zugriff auf genau ein Dokument, zeitlich begrenzt</td></tr>
+</tbody></table></div>
+<div class="note warn"><p><strong>Lizenz prüfen:</strong> ZITADEL steht seit Version 3 unter AGPL-3.0. Der unveränderte Betrieb als eigenständiger Dienst ist in der Regel unkritisch; eigene Änderungen am ZITADEL-Code oder ein Angebot als Dienst für Dritte sollten vorab rechtlich bewertet werden. ZITADEL benötigt eine eigene PostgreSQL-Datenbank; sie sollte von der Plattformdatenbank getrennt sein.</p></div>
+
+<h3><span class="no">18.6</span>Leitplanken für den Scala-Code</h3>
+<ul>
+  <li><strong>Domänenmodell ohne Effekte:</strong> Zustandsübergänge, Freigabe- und Versionsregeln sind reine Funktionen auf unveränderlichen Typen; ZIO nur in Anwendungsdiensten und Adaptern.</li>
+  <li><strong>Ungültige Zustände nicht darstellbar:</strong> Status als <code>enum</code>, Kennungen als <code>opaque type</code>, Übergänge nur über Funktionen, die den passenden Ausgangszustand verlangen.</li>
+  <li><strong>Typisierte Fehler:</strong> Fachfehler als eigene ADTs im Fehlerkanal; Defekte (Programmierfehler) bleiben getrennt.</li>
+  <li><strong>Konkrete Typen statt Abstraktion um ihrer selbst willen:</strong> <code>ZIO[R, E, A]</code> direkt, keine Tagless-Final-Schichten.</li>
+  <li><strong>Blockierende Java-APIs</strong> (Flowable, JDBC, PDFBox) immer über <code>ZIO.attemptBlocking</code>.</li>
+  <li><strong>Mandantenkontext</strong> wird als Teil des Request-Kontexts durchgereicht und zusätzlich in der Datenbanksitzung für Row-Level Security gesetzt.</li>
+  <li><strong>Styleguide und Architekturtests</strong> im Repository; Modulabhängigkeiten werden im Build geprüft.</li>
+</ul>
+
+<h3><span class="no">18.7</span>Offene technische Punkte</h3>
+<div class="tbl"><table>
+<thead><tr><th>Punkt</th><th>Vorgehen</th></tr></thead>
+<tbody>
+<tr><td>Magnum oder ZIO Quill</td><td>Spike von zwei Tagen mit Outbox, Row-Level Security und JSONB-Abfrage; Entscheidung nach Lesbarkeit und Compile-Zeit</td></tr>
+<tr><td>Flowable unter ZIO</td><td>Spike: Prozessstart, Benutzeraufgabe, Timer-Eskalation, Transaktionsgrenze zusammen mit Fachdaten</td></tr>
+<tr><td>Determinismus des Renderings</td><td>Referenzdokumente rendern und Prüfsummen über mehrere Läufe und Container vergleichen</td></tr>
+<tr><td>ZITADEL-Lizenz und Betriebsmodell</td><td>Rechtliche Bewertung AGPL; Entscheidung Eigenbetrieb oder gehosteter Dienst</td></tr>
+<tr><td>Step-up-Authentifizierung</td><td>Ablauf mit ZITADEL prototypisch prüfen, einschließlich Mobilgeräten</td></tr>
+</tbody></table></div>
+</section>
+
+<section class="ch" id="k19">
+<h2><span class="no">19</span>Glossar</h2>
+<div class="tbl"><table>
+<thead><tr><th>Begriff</th><th>Definition</th></tr></thead>
+<tbody>
+<tr><td>Gelenktes Dokument</td><td>Dokument, dessen Erstellung, Prüfung, Freigabe, Verteilung und Änderung definierten Regeln unterliegt</td></tr>
+<tr><td>Aufzeichnung (Record)</td><td>Nachweisdokument eines Vorgangs, das nach Fertigstellung nicht mehr geändert wird (z.&nbsp;B. ausgefülltes Formular, unterzeichneter Vertrag)</td></tr>
+<tr><td>Rendition</td><td>Abgeleitete, verbindliche Darstellung einer Version, z.&nbsp;B. archivfähiges PDF</td></tr>
+<tr><td>Baustein / Klausel</td><td>Wiederverwendbarer, einzeln versionierter Textabschnitt</td></tr>
+<tr><td>Platzhalter</td><td>Stelle in einer Vorlage, die durch einen Feldwert ersetzt wird</td></tr>
+<tr><td>Owner</td><td>Fachlich verantwortliche Funktion oder Person für ein Dokument</td></tr>
+<tr><td>Rezertifizierung</td><td>Bestätigung, dass ein Dokument (oder eine Berechtigung) weiterhin korrekt und erforderlich ist</td></tr>
+<tr><td>Legal Hold</td><td>Aussetzung der Vernichtung wegen rechtlicher Gründe</td></tr>
+<tr><td>Stichtagsabfrage</td><td>Abfrage des zu einem vergangenen Zeitpunkt gültigen Stands</td></tr>
+<tr><td>Funktionstrennung</td><td>Verteilung kritischer Tätigkeiten auf verschiedene Personen</td></tr>
+<tr><td>Mandant</td><td>Organisatorisch und datentechnisch abgegrenzte Einheit innerhalb der Plattform</td></tr>
+</tbody></table></div>
+</section>
+
+<footer class="doc">FK-DMS-001 · Version 0.10 (Entwurf) · Stand 28.10.2026 · Kapitel 1–17 sind technologieunabhängig; Kapitel 18 hält die technischen Architekturentscheidungen fest. Rechtliche Angaben sind Orientierung und ersetzen keine Rechtsberatung; verbindliche Fristen und Anforderungen sind im Projekt mit Recht, Datenschutz und Records Management festzulegen.</footer>
+</main>
+</div>
+<script>
+(function(){
+  var d=document.getElementById('tocdetails');
+  function fit(){ if(window.matchMedia('(max-width:900px)').matches){d.removeAttribute('open');} else {d.setAttribute('open','');} }
+  try{fit();}catch(e){}
+})();
+</script>
