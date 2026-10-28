@@ -28,9 +28,11 @@ enum Action:
     EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
     ManageRetention, Destroy, ViewHistory, Configure
 
-/** Areas of tenant configuration (matrix row "Configuration"). */
+/** Areas of tenant configuration (matrix row "Configuration"). `Search` is the operation of the tenant's
+  * search index, e.g. rebuilding it (DMS-51, ADR 0029).
+  */
 enum ConfigurationArea:
-  case DocumentClasses, Workflows, Taxonomies, Retention
+  case DocumentClasses, Workflows, Taxonomies, Retention, Search
 
 enum Confidentiality:
   case Public, Internal, Confidential, StrictlyConfidential

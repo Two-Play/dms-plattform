@@ -12,4 +12,6 @@ Workflows (business concept 6.1, DMS-40): `Review` (casting a review vote) is gr
 
 Deputies (DMS-49, ADR 0028 and addendum to ADR 0018): `Authorizer.onBehalfOf(subject, principal, roles)` extends a deputy's subject by the principal's assignments of the given roles. The application uses it only for the document of a workflow task the deputy may complete during an active deputyship; `Policy` itself is unchanged.
 
+Document resources and search (DMS-51/52, ADR 0029 and addendum to ADR 0018): `DocumentResource(tenant, document, classPath, version, participants)` builds the `Resource` of a version from the document and its field values (`organizationalUnit`, `confidentiality`, optional `allowedGroups`); the document API and the search indexer use it, and the search's permission filter mirrors `Policy` on these attributes. `ConfigurationArea.Search` covers rebuilding the search index.
+
 Single module without an `api`/`core` split.

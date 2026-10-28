@@ -4,29 +4,17 @@ import { ApiRequestError, requestError } from './errors'
 import type { components } from './schema'
 
 /**
- * Full-text search (DMS-52) and the "valid on" history (DMS-53).
+ * Full-text search (DMS-51, DMS-52) and the "valid on" history (DMS-53).
  *
- * The search endpoint is built separately; until it is in the generated schema its types are
- * written by hand here, following the agreed contract:
- * `GET /api/v1/search?q=&class=&status=&lang=&page=1&size=20`.
+ * `GET /api/v1/search?q=&class=&status=&lang=&page=1&size=20`, types from the generated schema.
  */
 
 /** One hit. `snippet` is plain text whose matches are wrapped in `<mark>…</mark>`, nothing else. */
-export interface SearchHit {
-  documentId: string
-  versionId: string
-  title: string
-  versionLabel: string
+export type SearchHit = Omit<components['schemas']['SearchHitView'], 'classPath'> & {
   classPath: string[]
-  status: string
-  validFrom?: string
-  snippet?: string
 }
 
-export interface FacetValue {
-  value: string
-  count: number
-}
+export type FacetValue = components['schemas']['FacetCountView']
 
 export interface SearchFacets {
   class: FacetValue[]
@@ -54,11 +42,10 @@ export interface SearchParams {
 
 export const SEARCH_PAGE_SIZE = 20
 
-type UntypedReply = Promise<{ data?: unknown; error?: unknown; response: Response }>
-type UntypedGet = (
-  path: string,
-  init: { params: { query: Record<string, unknown> } },
-) => UntypedReply
+/** One value as a list parameter, or none. */
+function listParam(value: string | undefined): string[] | undefined {
+  return value ? [value] : undefined
+}
 
 /** Query parameters without empty values. */
 function definedQuery(params: Record<string, string | number | undefined>) {
@@ -75,33 +62,30 @@ export async function searchDocuments(
   client: ApiClient,
   params: SearchParams,
 ): Promise<SearchResult> {
-  // Not in the generated schema yet: called without its path types.
-  const get = client.GET as unknown as UntypedGet
-  const { data, error, response } = await get('/api/v1/search', {
+  const { data, error, response } = await client.GET('/api/v1/search', {
     params: {
-      query: definedQuery({
-        q: params.q,
-        class: params.class,
-        status: params.status,
-        lang: params.lang,
+      query: {
+        q: params.q || undefined,
+        class: listParam(params.class),
+        status: listParam(params.status),
+        lang: listParam(params.lang),
         page: params.page ?? 1,
         size: params.size ?? SEARCH_PAGE_SIZE,
-      }),
+      },
     },
   })
   if (!response.ok || !data) {
     throw requestError(response, error, `Searching failed with HTTP ${response.status}`)
   }
-  const result = data as Partial<SearchResult>
   return {
-    total: result.total ?? 0,
-    page: result.page ?? params.page ?? 1,
-    size: result.size ?? params.size ?? SEARCH_PAGE_SIZE,
-    hits: result.hits ?? [],
+    total: data.total,
+    page: data.page,
+    size: data.size,
+    hits: (data.hits ?? []).map((hit) => ({ ...hit, classPath: hit.classPath ?? [] })),
     facets: {
-      class: result.facets?.class ?? [],
-      status: result.facets?.status ?? [],
-      language: result.facets?.language ?? [],
+      class: data.facets.class ?? [],
+      status: data.facets.status ?? [],
+      language: data.facets.language ?? [],
     },
   }
 }

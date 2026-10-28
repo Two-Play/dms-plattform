@@ -56,8 +56,8 @@ lazy val renderingApi      = apiModule("rendering")
 lazy val renderingCore     = renderingCoreModule.dependsOn(renderingApi, documentsApi, auditApi)
 lazy val archiveApi        = apiModule("archive")
 lazy val archiveCore       = coreModule("archive").dependsOn(archiveApi, documentsApi)
-lazy val searchApi         = apiModule("search")
-lazy val searchCore        = coreModule("search").dependsOn(searchApi, documentsApi, authz)
+lazy val searchApi         = apiModule("search").dependsOn(documentsApi)
+lazy val searchCore        = searchCoreModule.dependsOn(searchApi, documentsApi, authz)
 lazy val auditApi          = apiModule("audit").dependsOn(db)
 lazy val auditCore         = coreModule("audit").dependsOn(auditApi).settings(auditCoreSettings)
 lazy val integrationApi    = apiModule("integration")
@@ -68,6 +68,16 @@ lazy val notificationsCore = coreModule("notifications").dependsOn(notifications
 def documentsCoreModule: Project = coreModule("documents").settings(
   libraryDependencies ++= Dependencies.json ++ Dependencies.integrationTest ++
     Dependencies.logging.map(_ % Test)
+)
+
+/** Full-text search (ADR 0009, 0029): OpenSearch over HTTP with zio-json; tests start OpenSearch and
+  * PostgreSQL with Testcontainers.
+  */
+def searchCoreModule: Project = coreModule("search").settings(
+  libraryDependencies ++= Dependencies.json ++ Dependencies.integrationTest ++ Dependencies.objectStorageTest ++
+    Dependencies.logging.map(_ % Test),
+  // Not logback-test.xml: the app tests depend on these test classes and have their own logback-test.xml.
+  Test / javaOptions += "-Dlogback.configurationFile=logback-search-test.xml"
 )
 
 /** Approval workflows (ADR 0006, 0024): embedded Flowable; integration tests against PostgreSQL. */
@@ -131,7 +141,8 @@ lazy val app = module("app", "modules/app")
     // test->test: the rendering worker container and PDF helpers of the rendering tests
     renderingCore % "compile->compile;test->test",
     archiveCore,
-    searchCore,
+    // test->test: the OpenSearch container of the search tests
+    searchCore % "compile->compile;test->test",
     auditCore,
     notificationsCore
   )

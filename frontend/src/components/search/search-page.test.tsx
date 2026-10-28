@@ -205,7 +205,7 @@ describe('Search page', () => {
     await waitFor(() => {
       expect(queries(get, '/api/v1/search')).toContainEqual({
         q: 'glove',
-        class: 'policy',
+        class: ['policy'],
         page: 1,
         size: 20,
       })
@@ -218,7 +218,7 @@ describe('Search page', () => {
     await waitFor(() => {
       expect(queries(get, '/api/v1/search')).toContainEqual({
         q: 'glove',
-        class: 'policy',
+        class: ['policy'],
         page: 2,
         size: 20,
       })

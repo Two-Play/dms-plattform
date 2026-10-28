@@ -1,6 +1,7 @@
 # Local development environment. Development only: all credentials are test values.
 # Sprint 0 state: PostgreSQL is verified; ZITADEL is set up and verified with T-00.3 (DMS-19);
-# object storage (SeaweedFS with Object Lock) with DMS-30; rendering worker (WeasyPrint) with DMS-44.
+# object storage (SeaweedFS with Object Lock) with DMS-30; rendering worker (WeasyPrint) with DMS-44;
+# search index (OpenSearch) with DMS-51.
 
 services:
   db:
@@ -116,7 +117,28 @@ services:
       interval: 10s
       retries: 5
 
+  # Search index (ADR 0009, 0029): derived from the database, rebuildable at any time. Single node, security plugin
+  # disabled: local development only, never expose this port. The application uses dms.search.url (default
+  # http://localhost:9200).
+  opensearch:
+    image: opensearchproject/opensearch:3.8.0@sha256:fafe3fc3587088674669235575aa166228c48bdb940294a8cdbbc1da75236a40
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - dms-search:/usr/share/opensearch/data
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' > /dev/null"]
+      interval: 10s
+      retries: 30
+
 volumes:
   dms-db:
   zitadel-db:
   dms-objectstore:
+  dms-search:

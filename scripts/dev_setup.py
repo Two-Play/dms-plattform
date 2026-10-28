@@ -7,6 +7,7 @@ Subcommands:
   token USER      print an access token for a demo user (e.g. `author`)
   seed --api URL  create demo field definitions, classes, workflows, templates and a draft through the API
   approve-tasks USER --api URL  approve all open workflow tasks of a demo user (until the UI can vote, DMS-91)
+  search-rebuild --api URL      rebuild the tenant's search index from the database (DMS-51, idempotent)
   env-file PATH KEY=VALUE...   set keys in a dotenv file, keeping all other lines
 
 Development only. Uses the standard library only. Passwords are kept in .local/dev-users.env (mode 600) and are
@@ -610,6 +611,14 @@ def cmd_seed(api_base: str) -> None:
     print("Demo content ready.")
 
 
+def cmd_search_rebuild(api_base: str) -> None:
+    """Rebuilds the tenant's search index from the database as the tenant administrator (DMS-51). Idempotent."""
+    admin = Api(api_base, user_token(Zitadel(), "admin"))
+    result = admin("POST", "/api/v1/admin/search/rebuild")
+    print(f"Search index rebuilt: {result['documents']} documents, {result['versions']} versions "
+          f"in {result['index']} ({result['tookMillis']} ms)")
+
+
 def cmd_approve_tasks(username: str, api_base: str) -> None:
     """Approves every open task of a demo user with a fresh sign-in. Stands in for voting in the web UI until it
     exists (DMS-91). Approval votes need a sign-in within dms.workflow.reauthenticationSeconds (step-up); the API
@@ -636,6 +645,8 @@ def main(argv: list[str]) -> None:
         cmd_token(args[0])
     elif command == "seed" and len(args) == 2 and args[0] == "--api":
         cmd_seed(args[1])
+    elif command == "search-rebuild" and len(args) == 2 and args[0] == "--api":
+        cmd_search_rebuild(args[1])
     elif command == "approve-tasks" and len(args) == 3 and args[1] == "--api":
         cmd_approve_tasks(args[0], args[2])
     elif command == "env-file" and args:

@@ -7,6 +7,7 @@ import dms.documents.core.{AcknowledgementService, DocumentClassService, Documen
 import dms.identity.{Authenticator, TenantDirectory, TokenVerifier}
 import dms.integration.partners.PartnerDirectories
 import dms.rendering.core.{VeraPdfValidator, WeasyPrintRenderer}
+import dms.search.core.{OpenSearch, SearchIndex}
 import dms.storage.ObjectStore
 import dms.templates.core.TemplateService
 import dms.workflow.core.{ApprovalWorkflow, Deputyships, FlowableEngine, WorkflowConfig}
@@ -26,7 +27,7 @@ object Main extends ZIOAppDefault:
       Runtime.setConfigProvider(TypesafeConfigProvider.fromResourcePath())
 
   private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
-    PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env
+    PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env & SearchApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -42,7 +43,8 @@ object Main extends ZIOAppDefault:
       AcknowledgementApi.endpoints.map(_.widen[Env]) ++
       WorkflowApi.endpoints.map(_.widen[Env]) ++
       DeputyshipApi.endpoints.map(_.widen[Env]) ++
-      PartnerApi.endpoints.map(_.widen[Env])
+      PartnerApi.endpoints.map(_.widen[Env]) ++
+      SearchApi.endpoints.map(_.widen[Env])
 
   private val docs =
     SwaggerInterpreter()
@@ -95,6 +97,11 @@ object Main extends ZIOAppDefault:
           VeraPdfValidator.layer,
           RenditionWiring.archive,
           DocumentRenditions.layer,
-          RenditionWiring.jobs
+          RenditionWiring.jobs,
+          ZLayer.succeed(cfg.search.openSearch),
+          ZLayer.succeed(cfg.search.settings),
+          OpenSearch.layer,
+          SearchDocuments.layer,
+          SearchIndex.layer
         )
     yield ()

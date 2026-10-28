@@ -41,7 +41,7 @@ Provide Java 21 (once per shell):
 eval "$(cs java --jvm temurin:21 --env)"
 ```
 
-Build and test (the integration tests of `db` and `storage` start PostgreSQL and SeaweedFS with Testcontainers and need Docker):
+Build and test (the integration tests start PostgreSQL, SeaweedFS, OpenSearch and the rendering worker with Testcontainers and need Docker):
 
 ```bash
 sbt test
@@ -63,13 +63,14 @@ scripts/dev-setup.sh
 
 The script is idempotent and never deletes data (except `--reset`). It
 
-1. starts the services (`docker compose up -d --build`: PostgreSQL on 5433, ZITADEL on `http://localhost:8085`, SeaweedFS on 9100, rendering worker on 9180) and waits for them,
+1. starts the services (`docker compose up -d --build`: PostgreSQL on 5433, ZITADEL on `http://localhost:8085`, SeaweedFS on 9100, rendering worker on 9180, OpenSearch on 9200) and waits for them,
 2. creates the ZITADEL project and OIDC application (`scripts/zitadel-setup.sh`, writes `.local/zitadel/dms.env`),
 3. builds the backend (`sbt app/stage`) and migrates the database (`dms.app.Migrate`),
 4. registers the ZITADEL organization as tenant (`dms.tenant.zitadel_org_id`, time zone Europe/Berlin),
 5. creates the demo users in ZITADEL and their role assignments,
 6. seeds demo content through the API as the demo users (so the audit trail stays a valid hash chain),
-7. writes `frontend/.env.local` and starts backend and frontend dev server in the background (logs and process ids in `.local/logs/`).
+7. rebuilds the search index from the database (`POST /api/v1/admin/search/rebuild` as `admin`),
+8. writes `frontend/.env.local` and starts backend and frontend dev server in the background (logs and process ids in `.local/logs/`).
 
 Then sign in at `http://localhost:5173`. Stop the background processes with `scripts/dev-stop.sh` (the docker services keep running; `docker compose stop` stops them).
 
@@ -130,7 +131,8 @@ The partner master is the built-in demo directory (`dms.partners.directory = dem
 4. Approve as `approver`: `scripts/dev_setup.py approve-tasks approver --api http://localhost:8080`. Tasks: `GET /api/v1/workflow/tasks`, vote: `POST /api/v1/workflow/tasks/{taskId}/votes` with `{"decision":"Approve"}`. Approval votes need a sign-in within the last 300 s (step-up, `dms.workflow.reauthenticationSeconds`). ZITADEL access tokens carry no `auth_time`, so the vote request also sends the OIDC ID token of the same sign-in in header `X-DMS-Id-Token` (the script signs in afresh and does this; the backend needs `DMS_ZITADEL_CLIENT_ID` from `.local/zitadel/dms.env`). Without a recent sign-in the API answers `401 reauthentication_required`; the web UI then signs in again with `prompt=login` and the vote has to be cast again (ADR 0024, addendum DMS-86).
 5. After the last approval the rendering worker produces the PDF/A rendition; the version becomes Approved once it is attached. Download it with `GET /api/v1/documents/{id}/versions/{versionId}/rendition`.
 6. The approved version is published at 00:00 of its "Valid from" date in the tenant's time zone (Europe/Berlin). With today's date or a date in the past it is published within a minute (`dms.documents.publicationCheckSeconds`). `reader` then sees the published version.
-7. Acknowledge as `reader` (DMS-47, ADR 0027): every major version (and minor versions configured to) asks everyone who may read it for an acknowledgement. Open the published document; the page records the opening and the "Acknowledgement" card enables "Acknowledge". After clicking it the card shows the acknowledgement with version and time. Open and done acknowledgements: `GET /api/v1/acknowledgements?status=open|done`. Acknowledging without opening first is rejected (`409 not_opened`), a second time too (`409 already_acknowledged`); when a new version supersedes the published one, the open acknowledgement moves to the new version if it requires acknowledgement.
+7. Search as `reader` (DMS-51, DMS-52, ADR 0029): `GET /api/v1/search?q=Nordlicht` finds the published version a few seconds after publication (outbox and job queue; changes without an event within `dms.search.syncIntervalSeconds`). Hits, hit count, facets and snippets only cover versions the caller may read; role assignment changes apply to the next search. Filters: `class`, `status` (default: valid versions; `Superseded` for the history), `lang`; paging with `page` and `size`.
+8. Acknowledge as `reader` (DMS-47, ADR 0027): every major version (and minor versions configured to) asks everyone who may read it for an acknowledgement. Open the published document; the page records the opening and the "Acknowledgement" card enables "Acknowledge". After clicking it the card shows the acknowledgement with version and time. Open and done acknowledgements: `GET /api/v1/acknowledgements?status=open|done`. Acknowledging without opening first is rejected (`409 not_opened`), a second time too (`409 already_acknowledged`); when a new version supersedes the published one, the open acknowledgement moves to the new version if it requires acknowledgement.
 
 ### Manual steps
 
@@ -176,7 +178,12 @@ Start the API (reads the ZITADEL issuer and project id from `.local/zitadel/dms.
 set -a && . .local/zitadel/dms.env && set +a && sbt app/run
 ```
 
-Then open `http://localhost:8080/health` and the API documentation at `http://localhost:8080/docs`. The S3 API of the object storage (SeaweedFS, bucket `dms` with Object Lock, created by `objectstore-init`) is at `http://localhost:9100`.
+Then open `http://localhost:8080/health` and the API documentation at `http://localhost:8080/docs`. The S3 API of the object storage (SeaweedFS, bucket `dms` with Object Lock, created by `objectstore-init`) is at `http://localhost:9100`. The search index (OpenSearch, single node without security plugin, local only) is at `http://localhost:9200`; it is derived from the database and can be rebuilt at any time:
+
+```bash
+scripts/dev_setup.py search-rebuild --api http://localhost:8080   # the tenant of the demo users, through the API
+sbt "app/runMain dms.app.SearchRebuild"                           # every tenant (or the tenant ids given)
+```
 
 For API tests with the machine user `dms-api-tester` (client credentials, created on first run; it needs role assignments of its own):
 
