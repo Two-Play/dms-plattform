@@ -21,7 +21,7 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0005](0005-zitadel-identitaet.md) | ZITADEL as identity provider | Accepted | medium |
 | [0006](0006-flowable-workflow.md) | Flowable as embedded workflow engine | Accepted (validated by spike) | medium |
 | [0007](0007-strukturiertes-inhaltsformat.md) | Structured content format is primary, DOCX for import/export only | Accepted | high |
-| [0008](0008-rendering-weasyprint.md) | Rendering HTML → PDF/A with WeasyPrint, validation with veraPDF | Accepted (spike DMS-23) | low |
+| [0008](0008-rendering-weasyprint.md) | Rendering HTML → PDF/A with WeasyPrint, validation with veraPDF | Accepted (spike DMS-23; addendum DMS-44) | low |
 | [0009](0009-persistenz.md) | PostgreSQL, S3 with Object Lock, OpenSearch | Accepted | medium |
 | [0010](0010-outbox-und-jobs-in-postgres.md) | Transactional outbox and job queue in PostgreSQL | Accepted | low |
 | [0011](0011-java-21-lts.md) | Java 21 LTS as runtime | Accepted | low |
@@ -38,4 +38,5 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0022](0022-deviation-requests.md) | Deviation requests as rows per version, deviation report stored with the version | Accepted | high |
 | [0023](0023-partner-master-integration.md) | Partner master: live lookup through a port, snapshot into field values | Accepted | high |
 | [0024](0024-approval-workflow-integration.md) | Approval workflows: Flowable routes the steps, our tables hold the business truth | Accepted | medium |
+| [0025](0025-archive-renditions.md) | Archive renditions: WeasyPrint as HTTP sidecar, PDF/A-2b checked with veraPDF, rendered between the last vote and the approval | Accepted | medium |
 | [0026](0026-scheduled-publication-and-editorial-versions.md) | Scheduled publication by a job at tenant midnight; editorial versions through an owner-confirmation path | Accepted | medium |

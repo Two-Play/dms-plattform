@@ -109,7 +109,9 @@ final case class WorkflowCaseView(
     definitionVersion: Option[Int],
     fourEyes: Boolean,
     round: Int,
-    /** Running, Returned or Approved. */
+    /** Running, Returned, Rendering (all steps approved, the archive rendition is being produced) or
+      * Approved.
+      */
     status: String,
     currentStep: Option[String],
     returnedStep: Option[String],

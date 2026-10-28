@@ -6,6 +6,7 @@ import dms.db.Db
 import dms.documents.core.{DocumentClassService, DocumentService}
 import dms.identity.{Authenticator, TenantDirectory, TokenVerifier}
 import dms.integration.partners.PartnerDirectories
+import dms.rendering.core.{VeraPdfValidator, WeasyPrintRenderer}
 import dms.storage.ObjectStore
 import dms.templates.core.TemplateService
 import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
@@ -25,7 +26,7 @@ object Main extends ZIOAppDefault:
       Runtime.setConfigProvider(TypesafeConfigProvider.fromResourcePath())
 
   private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
-    PartnerApi.Env
+    PartnerApi.Env & RenditionApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -34,6 +35,7 @@ object Main extends ZIOAppDefault:
       TemplateLifecycleApi.endpoints.map(_.widen[Env]) ++
       TemplatePreviewApi.endpoints.map(_.widen[Env]) ++
       DocumentApi.endpoints.map(_.widen[Env]) ++
+      RenditionApi.endpoints.map(_.widen[Env]) ++
       WorkflowApi.endpoints.map(_.widen[Env]) ++
       PartnerApi.endpoints.map(_.widen[Env])
 
@@ -59,6 +61,7 @@ object Main extends ZIOAppDefault:
           Authenticator.layer,
           ZLayer.succeed(cfg.storage),
           ObjectStore.client,
+          ObjectStore.live,
           RoleAssignments.postgres,
           Authorizer.layer,
           // Recording does not verify timestamps, so no TSA trust anchors are needed here; verification and
@@ -77,7 +80,14 @@ object Main extends ZIOAppDefault:
           ZLayer.succeed(
             WorkflowConfig(java.time.Duration.ofSeconds(cfg.workflow.reauthenticationSeconds.toLong))
           ),
+          WorkflowRendition.layer,
           ApprovalWorkflow.layer,
-          PartnerDirectories.layer(cfg.partners)
+          PartnerDirectories.layer(cfg.partners),
+          ZLayer.succeed(cfg.rendering),
+          WeasyPrintRenderer.layer,
+          VeraPdfValidator.layer,
+          RenditionWiring.archive,
+          DocumentRenditions.layer,
+          RenditionWiring.jobs
         )
     yield ()

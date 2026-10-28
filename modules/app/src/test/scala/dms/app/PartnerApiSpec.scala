@@ -200,6 +200,7 @@ object PartnerApiSpec extends ZIOSpecDefault:
       RoleDirectory.layer,
       WorkflowExtraReview.layer,
       ZLayer.succeed(WorkflowConfig.default),
+      WorkflowRendition.layer,
       ApprovalWorkflow.layer,
       ZLayer.succeed(directory)
     )

@@ -2,7 +2,7 @@ import sbt.*
 
 /** Central version management. Changes here affect all modules. */
 object Versions {
-  val scala         = "3.9.0" // Scala 3 LTS, see docs/adr/0002
+  val scala         = "3.9.0"  // Scala 3 LTS, see docs/adr/0002
   val zio           = "2.1.27"
   val zioConfig     = "4.1.0"
   val zioLogging    = "2.5.3"
@@ -16,9 +16,11 @@ object Versions {
   val magnum        = "1.3.1"
   val bouncyCastle  = "1.86"
   val awsSdk        = "2.57.5"
-  val zioJson       = "1.1.1" // same as tapir-json-zio
+  val zioJson       = "1.1.1"  // same as tapir-json-zio
   val cel           = "0.15.0"
-  val flowable      = "8.0.0" // embedded workflow engine, see docs/adr/0006 and 0024
+  val flowable      = "8.0.0"  // embedded workflow engine, see docs/adr/0006 and 0024
+  val veraPdf       = "1.30.2" // PDF/A validation, same release as the CLI of spike DMS-23 (ADR 0008, 0025)
+  val pdfbox        = "3.0.8"  // tests only: text extraction from renditions
 }
 
 object Dependencies {
@@ -77,6 +79,12 @@ object Dependencies {
 
   /** RFC 3161 timestamping for the audit trail anchors (ADR 0017). */
   val timestamping = Seq("org.bouncycastle" % "bcpkix-jdk18on" % Versions.bouncyCastle)
+
+  /** PDF/A validation of renditions in-process (ADR 0025); veraPDF's model for Jakarta XML Binding. */
+  val pdfValidation = Seq("org.verapdf" % "validation-model-jakarta" % Versions.veraPdf)
+
+  /** Text extraction from PDFs, to check the running header and footer of renditions in tests. */
+  val pdfText = Seq("org.apache.pdfbox" % "pdfbox" % Versions.pdfbox % Test)
 
   val integrationTest = Seq(
     "com.dimafeng" %% "testcontainers-scala-postgresql" % Versions.testcontainer % Test

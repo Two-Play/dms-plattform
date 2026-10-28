@@ -5,7 +5,7 @@ import dms.documents.{ChangeKind, DocumentStatus, LifecycleEvent}
 import dms.kernel.{DocumentId, UserId}
 import zio.*
 
-import java.time.Duration
+import java.time.{Duration, Instant}
 import java.util.UUID
 
 enum WorkflowError:
@@ -89,6 +89,20 @@ trait ParticipantDirectory:
 
   /** Tenant administrators to notify when a step has no eligible participant. */
   def tenantAdmins: IO[WorkflowError, List[UserId]]
+
+/** Produces the archive rendition before a version is approved (DMS-44, ADR 0025): the database requires a
+  * rendition for `Approved` (ADR 0021). Called inside the transaction of the last approving vote; the
+  * application enqueues an idempotent rendering job, which stores the rendition, attaches it and then calls
+  * [[ApprovalWorkflow.completeApproval]]. A failure rolls back the vote.
+  */
+trait ApprovalRendition:
+  def request(
+      caseId: UUID,
+      subject: ReviewSubject,
+      approver: UserId,
+      approvedAt: Instant,
+      authenticatedAt: Instant
+  ): IO[WorkflowError, Unit]
 
 /** Whether a version needs the extra review step (deviations from locked standard text, DMS-79). */
 trait ExtraReviewCheck:

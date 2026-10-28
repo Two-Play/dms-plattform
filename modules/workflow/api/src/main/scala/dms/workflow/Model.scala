@@ -30,7 +30,13 @@ enum CaseStatus:
   /** A vote returned the version to its author (changes requested or rejected); waits for resubmission. */
   case Returned
 
-  /** All steps approved; the version is approved. */
+  /** All steps approved; the archive rendition of the version is being produced (DMS-44). The version stays
+    * in approval until the rendition is attached, then the case becomes `Approved`. If rendering fails for
+    * good, the case stays here.
+    */
+  case Rendering
+
+  /** All steps approved and the rendition attached; the version is approved. */
   case Approved
 
 /** The review and approval of one document version. Every submission starts a round; all rounds of a case run

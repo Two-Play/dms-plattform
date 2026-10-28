@@ -71,6 +71,15 @@ Constraints that follow from it:
 - Record the rendering version (image digest, WeasyPrint, fonts, template version) per PDF in the audit trail.
 - Ruled out if accepted: LibreOffice and Chromium in the archive path.
 
+## Addendum (DMS-44, 2026-10-28): job orchestration in the JVM, validation in-process
+
+Implemented with [ADR 0025](0025-archive-renditions.md). Engine and validator stay as decided (WeasyPrint 70.0, image pinned as in the spike; veraPDF 1.30.2). Two deviations from the plan above:
+
+- **The worker does not claim jobs.** `workers/rendering` is a stateless HTTP service (`POST /render`: HTML in, PDF out) without database or object storage access. The job (`document.render-rendition`) runs in the application's job runner (ADR 0010), which loads the version, calls the worker, validates, stores the PDF and completes the approval in its own transactions. Reason: transactions, row-level security, audit and outbox stay in one runtime; the worker needs no credentials.
+- **veraPDF runs as a Java library in the application**, not in the worker image (which would need a JRE) and not as a CLI container per call.
+
+Default flavour PDF/A-2b, as recommended by the spike; PDF/A-3b and tagged variants remain follow-ups. The worker refuses pages with external references instead of fetching them.
+
 ## Reversibility
 
 **low**: The renderer is encapsulated behind the worker job; the input is HTML. A switch to Chromium affects only the worker; a switch to Typst requires a new generator from the content model. PDFs that are already archived remain unaffected.

@@ -37,6 +37,7 @@ final class ApprovalWorkflow(
     documents: DocumentGateway,
     directory: ParticipantDirectory,
     extraReview: ExtraReviewCheck,
+    rendition: ApprovalRendition,
     config: WorkflowConfig
 ):
   import ApprovalWorkflow.*
@@ -135,8 +136,9 @@ final class ApprovalWorkflow(
     yield details
 
   /** Records a vote on a task. Approving votes complete the task and move the case on; when the last step is
-    * done, the version is approved by the voter. Requesting changes or rejecting returns the version to its
-    * author and cancels the other tasks of the round.
+    * done, the archive rendition is requested and the case waits in `Rendering`; once the rendition is
+    * attached, [[completeApproval]] approves the version as the voter (DMS-44). Requesting changes or
+    * rejecting returns the version to its author and cancels the other tasks of the round.
     *
     * @param authenticatedAt
     *   the voter's last sign-in (`auth_time` of the token); approval votes need it within the configured
@@ -553,7 +555,9 @@ final class ApprovalWorkflow(
       _ <- record(actor, "workflow.returned", target(subject), payload, None)
     yield ()
 
-  /** The last step is done: the voter approves the version, bound to the content the votes were cast on. */
+  /** The last step is done: the archive rendition is requested (DMS-44, ADR 0025). The version stays in
+    * approval until the rendering job attaches the rendition and calls [[completeApproval]].
+    */
   private def approve(
       row: CaseRow,
       subject: ReviewSubject,
@@ -566,23 +570,81 @@ final class ApprovalWorkflow(
       _        <- ZIO.unless(current.contentSha256 == row.contentSha256)(
         ZIO.fail(WorkflowError.Conflict("the content changed during the review"))
       )
-      approved <- documents.advance(DocumentId(row.documentId), row.versionId, LifecycleEvent.Approve, actor)
-      now      <- Clock.instant
+      now <- Clock.instant
+      _   <- rendition.request(row.id, current, actor, now, authTime)
+      _   <- sql(
+        WorkflowStore.updateCase(
+          row.copy(status = CaseStatus.Rendering.toString, processInstanceId = None, currentStep = None)
+        )
+      )
+      payload = Json.Obj(
+        "caseId"        -> Json.Str(row.id.toString),
+        "documentId"    -> Json.Str(subject.documentId.value.toString),
+        "versionId"     -> Json.Str(row.versionId.toString),
+        "contentSha256" -> Json.Str(row.contentSha256),
+        "authTime"      -> Json.Str(authTime.toString)
+      )
+      _ <- record(actor, "workflow.rendition-requested", target(current), payload, None)
+    yield ()
+
+  /** Completes the approval of a case in `Rendering` once its archive rendition is attached (called by the
+    * rendering job, DMS-44): `approver`, who cast the last approving vote, approves the version, bound to the
+    * content the votes were cast on. Idempotent: an approved case is returned unchanged, so a repeated job
+    * does not fail.
+    *
+    * @param authenticatedAt
+    *   the approver's sign-in at the vote (`auth_time`), stored with the approval
+    */
+  def completeApproval(
+      caseId: UUID,
+      approver: UserId,
+      authenticatedAt: Instant
+  ): IO[WorkflowError, CaseDetails] =
+    for
+      row <- sql(WorkflowStore.lockCase(caseId))
+        .someOrFail(WorkflowError.NotFound(s"workflow case $caseId does not exist"))
+      _ <- CaseStatus.valueOf(row.status) match
+        case CaseStatus.Approved  => ZIO.unit
+        case CaseStatus.Rendering => finishApproval(row, approver, authenticatedAt)
+        case other                =>
+          ZIO.fail(WorkflowError.Conflict(s"workflow case $caseId is $other, not waiting for its rendition"))
+      details <- details(caseId)
+    yield details
+
+  private def finishApproval(row: CaseRow, approver: UserId, authTime: Instant): IO[WorkflowError, Unit] =
+    for
+      votes <- sql(WorkflowStore.votesOfCase(row.id))
+      _     <- ZIO.unless(
+        votes.exists(v =>
+          v.voter == approver && v.round == row.round && v.decision.approves && v.invalidatedAt.isEmpty
+        )
+      )(
+        ZIO.fail(WorkflowError.Conflict(s"${approver.value} did not approve round ${row.round} of this case"))
+      )
+      subject <- documents.subject(DocumentId(row.documentId), row.versionId)
+      _       <- ZIO.unless(subject.contentSha256 == row.contentSha256)(
+        ZIO.fail(WorkflowError.Conflict("the content changed during the review"))
+      )
+      approved <- documents.advance(
+        DocumentId(row.documentId),
+        row.versionId,
+        LifecycleEvent.Approve,
+        approver
+      )
+      now <- Clock.instant
       approval = Approval(
         UUID.randomUUID(),
         row.id,
         row.versionId,
         approved.versionLabel,
         row.contentSha256,
-        actor,
+        approver,
         authTime,
         now
       )
       _ <- sql {
         WorkflowStore.insertApproval(approval, subject.author)
-        WorkflowStore.updateCase(
-          row.copy(status = CaseStatus.Approved.toString, processInstanceId = None, currentStep = None)
-        )
+        WorkflowStore.updateCase(row.copy(status = CaseStatus.Approved.toString))
       }
       payload = Json.Obj(
         "caseId"        -> Json.Str(row.id.toString),
@@ -595,7 +657,7 @@ final class ApprovalWorkflow(
       _ <- Outbox
         .publish("workflow", row.id, "workflow.approved", Jsonb(payload.toJson))
         .mapError(WorkflowError.Database(_))
-      _ <- record(actor, "workflow.approved", target(approved), payload, None)
+      _ <- record(approver, "workflow.approved", target(approved), payload, None)
     yield ()
 
   private def checkParticipant(row: CaseRow, task: TaskRow, actor: UserId): IO[WorkflowError, Unit] =
@@ -643,9 +705,10 @@ final class ApprovalWorkflow(
 
 object ApprovalWorkflow:
   val layer: URLayer[
-    FlowableEngine & AuditTrail & DocumentGateway & ParticipantDirectory & ExtraReviewCheck & WorkflowConfig,
+    FlowableEngine & AuditTrail & DocumentGateway & ParticipantDirectory & ExtraReviewCheck &
+      ApprovalRendition & WorkflowConfig,
     ApprovalWorkflow
-  ] = ZLayer.fromFunction(ApprovalWorkflow(_, _, _, _, _, _))
+  ] = ZLayer.fromFunction(ApprovalWorkflow(_, _, _, _, _, _, _))
 
   private def sql[A](f: DbTx ?=> A): IO[WorkflowError, A] = Db.sql(f).mapError(WorkflowError.Database(_))
 
