@@ -76,6 +76,15 @@ sbt app/run
 
 Then open `http://localhost:8080/health` and the API documentation at `http://localhost:8080/docs`. PostgreSQL listens on port 5433, ZITADEL on `http://localhost:8085`.
 
+Start the web UI (Node 24; details in [frontend/README.md](frontend/README.md)):
+
+```bash
+cd frontend
+npm ci
+cp .env.example .env.local   # client and project id from .local/zitadel/dms.env
+npm run dev                  # http://localhost:5173, proxies /api to the backend
+```
+
 Check formatting and warnings like CI does:
 
 ```bash
