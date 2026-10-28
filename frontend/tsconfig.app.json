@@ -23,7 +23,8 @@
 
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@dms-document/*": ["../modules/templates/core/src/main/resources/dms/templates/*"]
     }
   },
   "include": ["src"]

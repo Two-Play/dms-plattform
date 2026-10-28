@@ -67,6 +67,7 @@ TanStack Router with **file-based routing**: the Vite plugin generates `src/rout
 | `/sign-in`                                          | `routes/sign-in.tsx`            | public landing and sign-in page                                    |
 | `/callback`                                         | `routes/callback.tsx`           | OIDC redirect target                                               |
 | `/`, `/documents`, `/templates`, `/tasks`, `/admin` | `routes/_app/*`                 | signed in; `_app.tsx` is the pathless protected layout (app shell) |
+| `/documents/new`                                    | `routes/_app/documents/new.tsx` | signed in; "New document" with live preview (DMS-39)               |
 | anything else                                       | `components/not-found-page.tsx` | 404 page                                                           |
 
 The protected layout checks `context.auth.isAuthenticated` in `beforeLoad` and redirects to `/sign-in?redirect=<path>`. After sign-in the original path is carried through the OIDC `state` and restored on `/callback` (only same-origin paths are accepted).
@@ -75,9 +76,9 @@ The protected layout checks `context.auth.isAuthenticated` in `beforeLoad` and r
 
 ```
 src/
-  api/           generated schema, typed client, query definitions
+  api/           generated schema, typed client, query definitions (templates.ts: catalog, fields, preview)
   auth/          oidc-client-ts UserManager, scopes, return-path check
-  components/    app shell, pages and cards; ui/ holds shadcn/ui components
+  components/    app shell, pages and cards; ui/ holds shadcn/ui components; documents/ the "New document" page
   lib/           utilities, theme switch
   routes/        file-based routes (files starting with "-" are ignored by the router)
   test/          Vitest setup
@@ -95,6 +96,15 @@ shadcn/ui components (style `radix-nova`, Radix primitives) live in `src/compone
 ```bash
 npx shadcn@latest add <component>
 ```
+
+## New document and live preview (DMS-39)
+
+`/documents/new` (`components/documents/`) lets an author pick a released template from the catalog (`GET /api/v1/templates`), fill in a form generated from the version's fields (`GET /api/v1/templates/{id}/versions/{version}/fields`) and watch the result next to the form:
+
+- `field-values.ts` converts form input into `MetadataValue`s and validates it like the backend's field rules (type, min/max, decimal places, length, pattern, options, currencies). Inputs by type: text, number, amount with currency, date, selection, yes/no; multiple values as one per line, multiple selections as checkboxes. Required fields (needed for approval) carry a `*` and `aria-required`; messages appear inline and invalid values are not sent.
+- The preview (`POST /api/v1/templates/{id}/versions/{version}/preview`) is a TanStack query keyed by the values, requested 300 ms after the last change (`useDebouncedValue`) and keeping the previous result while the next one loads. It shows the backend's HTML with the "Draft – not valid" banner and watermark, lists missing required values and focuses the field when a missing value (in the document or in the list) is clicked. Backend issues for a field are shown at the field while it still has the value that was sent.
+- The HTML is produced by the backend renderer, which escapes all text, and inserted as is. It is styled by the **document stylesheet shared with the PDF rendering**: `modules/templates/core/src/main/resources/dms/templates/document.css`, imported through the alias `@dms-document` (`vite.config.ts`, `tsconfig*.json`; the dev server is allowed to read that directory). Do not copy it; see `modules/templates/README.md` for the class names.
+- "Save draft" is disabled until documents can be stored (DMS-37, `POST /api/v1/documents`).
 
 ## Notes
 

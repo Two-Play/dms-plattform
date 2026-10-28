@@ -14,9 +14,10 @@ import { Route as CallbackRouteImport } from './routes/callback'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
-import { Route as AppDocumentsRouteImport } from './routes/_app/documents'
 import { Route as AppTasksRouteImport } from './routes/_app/tasks'
 import { Route as AppTemplatesRouteImport } from './routes/_app/templates'
+import { Route as AppDocumentsIndexRouteImport } from './routes/_app/documents/index'
+import { Route as AppDocumentsNewRouteImport } from './routes/_app/documents/new'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -42,11 +43,6 @@ const AppAdminRoute = AppAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => AppRoute,
 } as any)
-const AppDocumentsRoute = AppDocumentsRouteImport.update({
-  id: '/documents',
-  path: '/documents',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppTasksRoute = AppTasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
@@ -57,24 +53,36 @@ const AppTemplatesRoute = AppTemplatesRouteImport.update({
   path: '/templates',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDocumentsIndexRoute = AppDocumentsIndexRouteImport.update({
+  id: '/documents/',
+  path: '/documents/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDocumentsNewRoute = AppDocumentsNewRouteImport.update({
+  id: '/documents/new',
+  path: '/documents/new',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/callback': typeof CallbackRoute
   '/sign-in': typeof SignInRoute
   '/admin': typeof AppAdminRoute
-  '/documents': typeof AppDocumentsRoute
   '/tasks': typeof AppTasksRoute
   '/templates': typeof AppTemplatesRoute
+  '/documents/new': typeof AppDocumentsNewRoute
+  '/documents/': typeof AppDocumentsIndexRoute
 }
 export interface FileRoutesByTo {
   '/callback': typeof CallbackRoute
   '/sign-in': typeof SignInRoute
   '/admin': typeof AppAdminRoute
-  '/documents': typeof AppDocumentsRoute
   '/tasks': typeof AppTasksRoute
   '/templates': typeof AppTemplatesRoute
   '/': typeof AppIndexRoute
+  '/documents/new': typeof AppDocumentsNewRoute
+  '/documents': typeof AppDocumentsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -82,10 +90,11 @@ export interface FileRoutesById {
   '/callback': typeof CallbackRoute
   '/sign-in': typeof SignInRoute
   '/_app/admin': typeof AppAdminRoute
-  '/_app/documents': typeof AppDocumentsRoute
   '/_app/tasks': typeof AppTasksRoute
   '/_app/templates': typeof AppTemplatesRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/documents/new': typeof AppDocumentsNewRoute
+  '/_app/documents/': typeof AppDocumentsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -94,28 +103,31 @@ export interface FileRouteTypes {
     | '/callback'
     | '/sign-in'
     | '/admin'
-    | '/documents'
     | '/tasks'
     | '/templates'
+    | '/documents/new'
+    | '/documents/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/callback'
     | '/sign-in'
     | '/admin'
-    | '/documents'
     | '/tasks'
     | '/templates'
     | '/'
+    | '/documents/new'
+    | '/documents'
   id:
     | '__root__'
     | '/_app'
     | '/callback'
     | '/sign-in'
     | '/_app/admin'
-    | '/_app/documents'
     | '/_app/tasks'
     | '/_app/templates'
     | '/_app/'
+    | '/_app/documents/new'
+    | '/_app/documents/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -161,13 +173,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/documents': {
-      id: '/_app/documents'
-      path: '/documents'
-      fullPath: '/documents'
-      preLoaderRoute: typeof AppDocumentsRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/_app/tasks': {
       id: '/_app/tasks'
       path: '/tasks'
@@ -182,23 +187,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTemplatesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/documents/': {
+      id: '/_app/documents/'
+      path: '/documents'
+      fullPath: '/documents/'
+      preLoaderRoute: typeof AppDocumentsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/documents/new': {
+      id: '/_app/documents/new'
+      path: '/documents/new'
+      fullPath: '/documents/new'
+      preLoaderRoute: typeof AppDocumentsNewRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
-  AppDocumentsRoute: typeof AppDocumentsRoute
   AppTasksRoute: typeof AppTasksRoute
   AppTemplatesRoute: typeof AppTemplatesRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppDocumentsNewRoute: typeof AppDocumentsNewRoute
+  AppDocumentsIndexRoute: typeof AppDocumentsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
-  AppDocumentsRoute: AppDocumentsRoute,
   AppTasksRoute: AppTasksRoute,
   AppTemplatesRoute: AppTemplatesRoute,
   AppIndexRoute: AppIndexRoute,
+  AppDocumentsNewRoute: AppDocumentsNewRoute,
+  AppDocumentsIndexRoute: AppDocumentsIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

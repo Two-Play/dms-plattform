@@ -21,14 +21,1103 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/me': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The signed-in user and their tenant */
+    get: operations['getApiV1Me']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/field-definitions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Latest version of every field definition, including the built-in core fields */
+    get: operations['getApiV1AdminField-definitions']
+    put?: never
+    /** @description Creates version 1 of a field definition */
+    post: operations['postApiV1AdminField-definitions']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/field-definitions/{key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description All versions of a field definition, oldest first */
+    get: operations['getApiV1AdminField-definitionsKey']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/field-definitions/{key}/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Creates the next version of a field definition. The type kind stays the same; removed selection options remain as inactive options. */
+    post: operations['postApiV1AdminField-definitionsKeyVersions']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/document-classes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Latest version of every document class */
+    get: operations['getApiV1AdminDocument-classes']
+    put?: never
+    /** @description Creates a document class with profile version 1, optionally below a parent class */
+    post: operations['postApiV1AdminDocument-classes']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/document-classes/{id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description All profile versions of a document class, oldest first */
+    get: operations['getApiV1AdminDocument-classesId']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/document-classes/{id}/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Creates the next profile version of a document class. Existing documents keep their profile version. */
+    post: operations['postApiV1AdminDocument-classesIdVersions']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/document-classes/{id}/profile': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Effective profile of a class version: core, inherited and own fields with requiredness */
+    get: operations['getApiV1AdminDocument-classesIdProfile']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/document-classes/{id}/validate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Validates metadata values against the class profile for a target status: required fields of that status, types and rules. Missing fields are reported with their stable key and label. */
+    post: operations['postApiV1Document-classesIdValidate']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/templates': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Latest version of every template, in any status */
+    get: operations['getApiV1AdminTemplates']
+    put?: never
+    /** @description Creates a template with version 1 as a draft. The content is checked against the document class profile; invalid expressions and placeholders are reported with their position (422). */
+    post: operations['postApiV1AdminTemplates']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/templates/check': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Checks content against a document class profile version without saving it */
+    post: operations['postApiV1AdminTemplatesCheck']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/templates/{id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description All versions of a template, oldest first */
+    get: operations['getApiV1AdminTemplatesId']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/templates/{id}/versions/{version}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description One version of a template */
+    get: operations['getApiV1AdminTemplatesIdVersionsVersion']
+    /** @description Changes a draft; versions in any other status cannot be changed (409) */
+    put: operations['putApiV1AdminTemplatesIdVersionsVersion']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/templates/{id}/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Creates the next version as a draft. Fails with 409 while another version is in Draft or Testing. Released versions stay unchanged. */
+    post: operations['postApiV1AdminTemplatesIdVersions']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/templates/{id}/versions/{version}/test': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Test mode: resolves the version with the given values, or with generated sample data that shows every condition branch, empty optional fields and long values. Reports which branches were reached. */
+    post: operations['postApiV1AdminTemplatesIdVersionsVersionTest']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/templates/{id}/versions/{version}/status': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Changes the status of a version. Releasing requires a template designer who neither created nor changed the version (403 otherwise); other changes require EditTemplates. Releasing a version does not deprecate older released versions. */
+    post: operations['postApiV1AdminTemplatesIdVersionsVersionStatus']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/templates': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Released template versions, for creating documents. Open to every business role. */
+    get: operations['getApiV1Templates']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/templates/{id}/versions/{version}/fields': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Form fields for creating a document from a released template version: the editable fields of the class profile with type, rules and requiredness. Other versions are not found (404). */
+    get: operations['getApiV1TemplatesIdVersionsVersionFields']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/templates/{id}/versions/{version}/preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Live preview while filling in a document (US-03.2): resolves the released version with the values entered so far and returns HTML marked "Draft – not valid" with missing values marked. Values that do not fit their field are left out and reported in `issues`; the resolver's limits apply. */
+    post: operations['postApiV1TemplatesIdVersionsVersionPreview']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
   schemas: {
+    /** Amount */
+    Amount: {
+      min?: number
+      max?: number
+      currencies?: string[]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Amount'
+    }
+    /** Amount */
+    Amount1: {
+      value: number
+      currency: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Amount'
+    }
+    /** ApiError */
+    ApiError: {
+      code: string
+      message: string
+    }
+    /** Block */
+    Block:
+      | components['schemas']['BulletList']
+      | components['schemas']['ClauseRef']
+      | components['schemas']['Conditional']
+      | components['schemas']['Heading']
+      | components['schemas']['OrderedList']
+      | components['schemas']['PageBreak']
+      | components['schemas']['Paragraph']
+      | components['schemas']['Repeat']
+      | components['schemas']['Table']
+    /** BranchView */
+    BranchView: {
+      location: components['schemas']['LocationView']
+      condition: string
+      outcomes?: boolean[]
+    }
+    /** BulletList */
+    BulletList: {
+      items?: components['schemas']['Block'][][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'BulletList'
+    }
+    /** BulletList */
+    BulletList1: {
+      items?: components['schemas']['ResolvedBlock'][][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'BulletList'
+    }
+    /** CatalogEntry */
+    CatalogEntry: {
+      /** Format: uuid */
+      templateId: string
+      /** Format: int32 */
+      version: number
+      name: string
+      description?: string
+      /** Format: uuid */
+      documentClassId: string
+      /** Format: int32 */
+      documentClassVersion: number
+      /** Format: date-time */
+      releasedAt?: string
+    }
+    /** ChangeDocumentClass */
+    ChangeDocumentClass: {
+      label: string
+      description?: string
+      fields?: components['schemas']['FieldBindingView'][]
+      /** Format: int32 */
+      parentVersion?: number
+    }
+    /** ChangeFieldDefinition */
+    ChangeFieldDefinition: {
+      label: string
+      description?: string
+      fieldType: components['schemas']['FieldType']
+      multiple?: boolean
+    }
+    /** ChangeTemplateStatus */
+    ChangeTemplateStatus: {
+      status: string
+    }
+    /** CheckResult */
+    CheckResult: {
+      valid: boolean
+      issues?: components['schemas']['ContentIssueView'][]
+    }
+    /** CheckTemplate */
+    CheckTemplate: {
+      /** Format: uuid */
+      documentClassId: string
+      /** Format: int32 */
+      documentClassVersion: number
+      content: components['schemas']['TemplateContent']
+    }
+    /** ClauseRef */
+    ClauseRef: {
+      clauseKey: string
+      /** Format: int32 */
+      version: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'ClauseRef'
+    }
+    /** ClauseRef */
+    ClauseRef1: {
+      clauseKey: string
+      /** Format: int32 */
+      version: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'ClauseRef'
+    }
+    /** ComputedField */
+    ComputedField: {
+      key: string
+      expression: string
+    }
+    /** Conditional */
+    Conditional: {
+      condition: string
+      body?: components['schemas']['Block'][]
+      otherwise?: components['schemas']['Block'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Conditional'
+    }
+    /** ContentIssueView */
+    ContentIssueView: {
+      location: components['schemas']['LocationView']
+      message: string
+    }
+    /** CreateDocumentClass */
+    CreateDocumentClass: {
+      key: string
+      /** Format: uuid */
+      parentId?: string
+      /** Format: int32 */
+      parentVersion?: number
+      label: string
+      description?: string
+      fields?: components['schemas']['FieldBindingView'][]
+    }
+    /** CreateFieldDefinition */
+    CreateFieldDefinition: {
+      key: string
+      label: string
+      description?: string
+      fieldType: components['schemas']['FieldType']
+      multiple?: boolean
+    }
+    /** Date */
+    Date: {
+      /** Format: date */
+      min?: string
+      /** Format: date */
+      max?: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Date'
+    }
+    /** Date */
+    Date1: {
+      /** Format: date */
+      value: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Date'
+    }
+    /** DocumentClassView */
+    DocumentClassView: {
+      /** Format: uuid */
+      id: string
+      key: string
+      /** Format: int32 */
+      version: number
+      /** Format: uuid */
+      parentId?: string
+      /** Format: int32 */
+      parentVersion?: number
+      label: string
+      description?: string
+      fields?: components['schemas']['FieldBindingView'][]
+    }
+    /** DocumentRef */
+    DocumentRef: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'DocumentRef'
+    }
+    /** DocumentRef */
+    DocumentRef1: {
+      /** Format: uuid */
+      documentId: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'DocumentRef'
+    }
+    /**
+     * DocumentStatus
+     * @enum {string}
+     */
+    DocumentStatus:
+      | 'Approved'
+      | 'Archived'
+      | 'Destroyed'
+      | 'Draft'
+      | 'InApproval'
+      | 'InReview'
+      | 'Published'
+      | 'ReviewDue'
+      | 'Superseded'
+      | 'Withdrawn'
+    /** FieldBindingView */
+    FieldBindingView: {
+      key: string
+      /** Format: int32 */
+      version: number
+      requiredIn?: components['schemas']['DocumentStatus'][]
+    }
+    /** FieldDefinitionView */
+    FieldDefinitionView: {
+      key: string
+      /** Format: int32 */
+      version: number
+      label: string
+      description?: string
+      fieldType: components['schemas']['FieldType']
+      multiple: boolean
+      origin: string
+      editable: boolean
+    }
+    /** FieldType */
+    FieldType:
+      | components['schemas']['Amount']
+      | components['schemas']['Date']
+      | components['schemas']['DocumentRef']
+      | components['schemas']['Number']
+      | components['schemas']['PersonRef']
+      | components['schemas']['Selection']
+      | components['schemas']['Text']
+      | components['schemas']['YesNo']
+    /** Heading */
+    Heading: {
+      /** Format: int32 */
+      level: number
+      content?: components['schemas']['Inline'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Heading'
+    }
+    /** Heading */
+    Heading1: {
+      /** Format: int32 */
+      level: number
+      content?: components['schemas']['ResolvedInline'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Heading'
+    }
     /** Health */
     Health: {
       status: string
       version: string
+    }
+    /** Inline */
+    Inline:
+      | components['schemas']['LineBreak']
+      | components['schemas']['Placeholder']
+      | components['schemas']['Text2']
+    /** IssueView */
+    IssueView: {
+      field: string
+      label: string
+      code: string
+      message: string
+    }
+    /** LineBreak */
+    LineBreak: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'LineBreak'
+    }
+    /** LocationView */
+    LocationView: {
+      sectionId?: string
+      blockPath: string
+      part: string
+      /** Format: int32 */
+      line: number
+      /** Format: int32 */
+      column: number
+    }
+    /** Many */
+    Many: {
+      values: components['schemas']['MetadataValue'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Many'
+    }
+    /** Map_MetadataValue */
+    Map_MetadataValue: {
+      [key: string]: components['schemas']['MetadataValue']
+    }
+    /**
+     * Mark
+     * @enum {string}
+     */
+    Mark: 'Bold' | 'Italic' | 'Underline'
+    /** Me */
+    Me: {
+      userId: string
+      tenantId: string
+      roles?: string[]
+    }
+    /** MetadataValue */
+    MetadataValue:
+      | components['schemas']['Amount1']
+      | components['schemas']['Date1']
+      | components['schemas']['DocumentRef1']
+      | components['schemas']['Many']
+      | components['schemas']['Number1']
+      | components['schemas']['PersonRef1']
+      | components['schemas']['Selection1']
+      | components['schemas']['Text1']
+      | components['schemas']['YesNo1']
+    /** Missing */
+    Missing: {
+      path: string
+      required: boolean
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Missing'
+    }
+    /** MissingValueView */
+    MissingValueView: {
+      field: string
+      label: string
+    }
+    /** Number */
+    Number: {
+      min?: number
+      max?: number
+      /** Format: int32 */
+      scale?: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Number'
+    }
+    /** Number */
+    Number1: {
+      value: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Number'
+    }
+    /** OrderedList */
+    OrderedList: {
+      items?: components['schemas']['Block'][][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'OrderedList'
+    }
+    /** OrderedList */
+    OrderedList1: {
+      items?: components['schemas']['ResolvedBlock'][][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'OrderedList'
+    }
+    /** PageBreak */
+    PageBreak: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'PageBreak'
+    }
+    /** Paragraph */
+    Paragraph: {
+      content?: components['schemas']['Inline'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Paragraph'
+    }
+    /** Paragraph */
+    Paragraph1: {
+      content?: components['schemas']['ResolvedInline'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Paragraph'
+    }
+    /** PersonRef */
+    PersonRef: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'PersonRef'
+    }
+    /** PersonRef */
+    PersonRef1: {
+      userId: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'PersonRef'
+    }
+    /** Placeholder */
+    Placeholder: {
+      path: string
+      format?: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Placeholder'
+    }
+    /** PreviewIssueView */
+    PreviewIssueView: {
+      field?: string
+      label?: string
+      code: string
+      message: string
+    }
+    /** PreviewRequest */
+    PreviewRequest: {
+      values: components['schemas']['Map_MetadataValue']
+      language?: string
+    }
+    /** PreviewView */
+    PreviewView: {
+      html: string
+      missingRequired?: components['schemas']['MissingValueView'][]
+      issues?: components['schemas']['PreviewIssueView'][]
+    }
+    /** ProfileFieldView */
+    ProfileFieldView: {
+      key: string
+      /** Format: int32 */
+      version: number
+      label: string
+      description?: string
+      fieldType: components['schemas']['FieldType']
+      multiple: boolean
+      origin: string
+      editable: boolean
+      requiredIn?: components['schemas']['DocumentStatus'][]
+      definedBy?: string
+    }
+    /** ProfileView */
+    ProfileView: {
+      /** Format: uuid */
+      classId: string
+      classKey: string
+      /** Format: int32 */
+      version: number
+      classPath?: string[]
+      fields?: components['schemas']['ProfileFieldView'][]
+    }
+    /** Repeat */
+    Repeat: {
+      collection: string
+      itemName: string
+      body?: components['schemas']['Block'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Repeat'
+    }
+    /** ResolvedBlock */
+    ResolvedBlock:
+      | components['schemas']['BulletList1']
+      | components['schemas']['ClauseRef1']
+      | components['schemas']['Heading1']
+      | components['schemas']['OrderedList1']
+      | components['schemas']['PageBreak']
+      | components['schemas']['Paragraph1']
+      | components['schemas']['Table1']
+    /** ResolvedContent */
+    ResolvedContent: {
+      sections?: components['schemas']['ResolvedSection'][]
+    }
+    /** ResolvedInline */
+    ResolvedInline:
+      | components['schemas']['LineBreak']
+      | components['schemas']['Missing']
+      | components['schemas']['Text3']
+      | components['schemas']['Value']
+    /** ResolvedSection */
+    ResolvedSection: {
+      id: string
+      title?: string
+      locked: boolean
+      blocks?: components['schemas']['ResolvedBlock'][]
+    }
+    /** Section */
+    Section: {
+      id: string
+      title?: string
+      locked: boolean
+      blocks?: components['schemas']['Block'][]
+    }
+    /** SelectOption */
+    SelectOption: {
+      code: string
+      label: string
+      active: boolean
+    }
+    /** Selection */
+    Selection: {
+      options?: components['schemas']['SelectOption'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Selection'
+    }
+    /** Selection */
+    Selection1: {
+      code: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Selection'
+    }
+    /** Table */
+    Table: {
+      rows?: components['schemas']['Block'][][][]
+      /** Format: int32 */
+      headerRows: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Table'
+    }
+    /** Table */
+    Table1: {
+      rows?: components['schemas']['ResolvedBlock'][][][]
+      /** Format: int32 */
+      headerRows: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Table'
+    }
+    /** TemplateContent */
+    TemplateContent: {
+      sections?: components['schemas']['Section'][]
+      computed?: components['schemas']['ComputedField'][]
+    }
+    /** TemplateFieldView */
+    TemplateFieldView: {
+      key: string
+      label: string
+      description?: string
+      fieldType: components['schemas']['FieldType']
+      multiple: boolean
+      required: boolean
+      usedInTemplate: boolean
+    }
+    /** TemplateFieldsView */
+    TemplateFieldsView: {
+      /** Format: uuid */
+      templateId: string
+      /** Format: int32 */
+      version: number
+      name: string
+      description?: string
+      /** Format: uuid */
+      documentClassId: string
+      /** Format: int32 */
+      documentClassVersion: number
+      fields?: components['schemas']['TemplateFieldView'][]
+    }
+    /** TemplateRequest */
+    TemplateRequest: {
+      name: string
+      description?: string
+      /** Format: uuid */
+      documentClassId: string
+      /** Format: int32 */
+      documentClassVersion: number
+      content: components['schemas']['TemplateContent']
+    }
+    /** TemplateVersionView */
+    TemplateVersionView: {
+      /** Format: uuid */
+      templateId: string
+      /** Format: int32 */
+      version: number
+      name: string
+      description?: string
+      /** Format: uuid */
+      documentClassId: string
+      /** Format: int32 */
+      documentClassVersion: number
+      status: string
+      content: components['schemas']['TemplateContent']
+      createdBy: string
+      /** Format: date-time */
+      createdAt: string
+      editedBy?: string[]
+      releasedBy?: string
+      /** Format: date-time */
+      releasedAt?: string
+    }
+    /** TestCaseView */
+    TestCaseView: {
+      name: string
+      values: components['schemas']['Map_MetadataValue']
+      content?: components['schemas']['ResolvedContent']
+      text?: string
+      missingRequired?: string[]
+      branches?: components['schemas']['BranchView'][]
+      error?: string
+    }
+    /** TestRunView */
+    TestRunView: {
+      cases?: components['schemas']['TestCaseView'][]
+      coverage?: components['schemas']['BranchView'][]
+      allBranchesCovered: boolean
+    }
+    /** TestTemplate */
+    TestTemplate: {
+      values?: components['schemas']['Map_MetadataValue']
+      language?: string
+    }
+    /** Text */
+    Text: {
+      /** Format: int32 */
+      maxLength?: number
+      pattern?: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Text'
+    }
+    /** Text */
+    Text1: {
+      value: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Text'
+    }
+    /** Text */
+    Text2: {
+      value: string
+      marks?: components['schemas']['Mark'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Text'
+    }
+    /** Text */
+    Text3: {
+      value: string
+      marks?: components['schemas']['Mark'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Text'
+    }
+    /** ValidateMetadata */
+    ValidateMetadata: {
+      values: components['schemas']['Map_MetadataValue']
+      targetStatus: components['schemas']['DocumentStatus']
+      /** Format: int32 */
+      version?: number
+      includeSystemFields?: boolean
+    }
+    /** ValidationResult */
+    ValidationResult: {
+      /** Format: uuid */
+      classId: string
+      /** Format: int32 */
+      profileVersion: number
+      targetStatus: components['schemas']['DocumentStatus']
+      complete: boolean
+      issues?: components['schemas']['IssueView'][]
+    }
+    /** Value */
+    Value: {
+      path: string
+      text: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Value'
+    }
+    /** YesNo */
+    YesNo: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'YesNo'
+    }
+    /** YesNo */
+    YesNo1: {
+      value: boolean
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'YesNo'
     }
   }
   responses: never
@@ -54,6 +1143,885 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['Health']
+        }
+      }
+    }
+  }
+  getApiV1Me: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['Me']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminField-definitions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['FieldDefinitionView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1AdminField-definitions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateFieldDefinition']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['FieldDefinitionView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminField-definitionsKey': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Stable field key, e.g. contractPartner */
+        key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['FieldDefinitionView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1AdminField-definitionsKeyVersions': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Stable field key, e.g. contractPartner */
+        key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ChangeFieldDefinition']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['FieldDefinitionView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminDocument-classes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentClassView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1AdminDocument-classes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateDocumentClass']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentClassView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminDocument-classesId': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentClassView'][]
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1AdminDocument-classesIdVersions': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ChangeDocumentClass']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentClassView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminDocument-classesIdProfile': {
+    parameters: {
+      query?: {
+        /** @description Profile version; default: latest */
+        version?: number
+      }
+      header?: never
+      path: {
+        /** @description Document class id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ProfileView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: query parameter version */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1Document-classesIdValidate': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ValidateMetadata']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ValidationResult']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1AdminTemplates: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateVersionView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1AdminTemplates: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TemplateRequest']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateVersionView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1AdminTemplatesCheck: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CheckTemplate']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CheckResult']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1AdminTemplatesId: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateVersionView'][]
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1AdminTemplatesIdVersionsVersion: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+        /** @description Template version number */
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1AdminTemplatesIdVersionsVersion: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+        /** @description Template version number */
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TemplateRequest']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1AdminTemplatesIdVersions: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TemplateRequest']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1AdminTemplatesIdVersionsVersionTest: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+        /** @description Template version number */
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TestTemplate']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TestRunView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1AdminTemplatesIdVersionsVersionStatus: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+        /** @description Template version number */
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ChangeTemplateStatus']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1Templates: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CatalogEntry'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1TemplatesIdVersionsVersionFields: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+        /** @description Template version number */
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateFieldsView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1TemplatesIdVersionsVersionPreview: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+        /** @description Template version number */
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PreviewRequest']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
         }
       }
     }
