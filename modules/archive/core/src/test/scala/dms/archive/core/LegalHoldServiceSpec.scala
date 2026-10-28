@@ -20,7 +20,7 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.util.UUID
 import javax.sql.DataSource
 
-/** Legal holds (DMS-56, migration V18): the service, the database guards (row-level security, history,
+/** Legal holds (DMS-56, migration V19): the service, the database guards (row-level security, history,
   * destruction guard) and the object legal hold of renditions. Against PostgreSQL and SeaweedFS started by
   * Testcontainers.
   */
@@ -373,7 +373,7 @@ object LegalHoldServiceSpec extends ZIOSpecDefault:
         on      <- sync.sync(t._1, d._1)
         headOn  <- e.objects.head(key, Some(put.version.versionId))
         locked  <- e.objects.delete(key, put.version.versionId).either
-        // a new rendition of a held document enqueues the synchronization (trigger of migration V18)
+        // a new rendition of a held document enqueues the synchronization (trigger of migration V19)
         jobsBefore <- syncJobs(d._1)
         second     <- e.objects.put(
           key,

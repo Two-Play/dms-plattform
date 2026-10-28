@@ -73,7 +73,7 @@ enum LegalHoldError:
 
 /** Read access to legal holds for other modules, in particular the destruction proposals and the destruction
   * path (DMS-82): a document for which [[isUnderLegalHold]] is true must never be proposed or destroyed. The
-  * database enforces the latter as well (`dms.document_version_legal_hold_guard`, migration V18); SQL queries
+  * database enforces the latter as well (`dms.document_version_legal_hold_guard`, migration V19); SQL queries
   * can use `dms.document_under_legal_hold(document_id)`.
   *
   * Every method runs inside `Db.transact(tenant)`.
@@ -105,6 +105,6 @@ object LegalHoldEvents:
 
   /** Job that brings the object legal hold of a document's renditions in line with its holds. Payload:
     * `documentId`. Enqueued when documents are added to or released from a hold and when a rendition is
-    * attached to a version of a document under legal hold (migration V18).
+    * attached to a version of a document under legal hold (migration V19).
     */
   val SyncJobKind: String = "archive.legal-hold-sync"

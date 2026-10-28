@@ -356,7 +356,7 @@ object LegalHoldService:
       count.toInt
     )
 
-/** [[LegalHoldLookup]] on the tables of migration V18. */
+/** [[LegalHoldLookup]] on the tables of migration V19. */
 object LegalHoldStore extends LegalHoldLookup:
   import LegalHoldService.{heldDocuments, holds}
 
