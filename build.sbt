@@ -17,7 +17,8 @@ def module(id: String, dir: String): Project =
 
 /** Business module with a public interface (`api`) and an implementation (`core`). */
 def apiModule(name: String): Project  = module(s"$name-api", s"modules/$name/api").dependsOn(kernel)
-def coreModule(name: String): Project = module(s"$name-core", s"modules/$name/core").dependsOn(kernel, db)
+def coreModule(name: String): Project =
+  module(s"$name-core", s"modules/$name/core").dependsOn(kernel, db, storage)
 
 lazy val kernel = module("kernel", "modules/kernel")
 
@@ -26,6 +27,14 @@ lazy val db = module("db", "modules/db")
   .dependsOn(kernel)
   .settings(
     libraryDependencies ++= Dependencies.database ++ Dependencies.magnum ++ Dependencies.integrationTest ++
+      Dependencies.logging.map(_ % Test)
+  )
+
+/** Shared object storage infrastructure: S3 API with Object Lock (ADR 0009, 0016). */
+lazy val storage = module("storage", "modules/storage")
+  .dependsOn(kernel)
+  .settings(
+    libraryDependencies ++= Dependencies.objectStorage ++ Dependencies.objectStorageTest ++
       Dependencies.logging.map(_ % Test)
   )
 
@@ -67,6 +76,7 @@ lazy val app = module("app", "modules/app")
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .dependsOn(
     db,
+    storage,
     identity,
     authz,
     integration,
@@ -104,6 +114,7 @@ lazy val root = (project in file("."))
   .aggregate(
     kernel,
     db,
+    storage,
     identity,
     authz,
     integration,

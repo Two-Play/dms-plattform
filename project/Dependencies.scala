@@ -15,6 +15,7 @@ object Versions {
   val testcontainer = "0.44.1"
   val magnum        = "1.3.1"
   val bouncyCastle  = "1.86"
+  val awsSdk        = "2.57.5"
 }
 
 object Dependencies {
@@ -63,5 +64,17 @@ object Dependencies {
 
   val integrationTest = Seq(
     "com.dimafeng" %% "testcontainers-scala-postgresql" % Versions.testcontainer % Test
+  )
+
+  /** AWS SDK v2 S3 client with the JDK URL connection HTTP client (no Netty, no Apache HTTP). */
+  val objectStorage = Seq(
+    ("software.amazon.awssdk" % "s3" % Versions.awsSdk)
+      .exclude("software.amazon.awssdk", "apache-client")
+      .exclude("software.amazon.awssdk", "netty-nio-client"),
+    "software.amazon.awssdk" % "url-connection-client" % Versions.awsSdk
+  )
+
+  val objectStorageTest = Seq(
+    "com.dimafeng" %% "testcontainers-scala-core" % Versions.testcontainer % Test
   )
 }
