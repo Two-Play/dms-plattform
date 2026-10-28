@@ -16,7 +16,7 @@ object Migrate extends ZIOAppDefault:
 
   override def run: ZIO[Any, Throwable, Unit] =
     for
-      config <- ZIO.config(AppConfig.config)
+      config <- ZIO.config(MigrateConfig.config)
       result <- Migrations.migrate(config.database.url, config.migration.user, config.migration.password)
       _      <- ZIO.logInfo(s"Applied ${result.applied} migration(s), schema now at ${result.version}")
     yield ()

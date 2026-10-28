@@ -1,7 +1,10 @@
 package dms.app
 
+import dms.db.Db
+import dms.identity.{Authenticator, TenantDirectory, TokenVerifier}
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import sttp.tapir.swagger.bundle.SwaggerInterpreter
+import sttp.tapir.ztapir.*
 import zio.*
 import zio.config.typesafe.TypesafeConfigProvider
 import zio.http.Server
@@ -14,16 +17,29 @@ object Main extends ZIOAppDefault:
     Runtime.removeDefaultLoggers >>> SLF4J.slf4j >+>
       Runtime.setConfigProvider(TypesafeConfigProvider.fromResourcePath())
 
-  private val serverEndpoints = List(HealthApi.health)
+  private val apiEndpoints: List[ZServerEndpoint[Authenticator, Any]] =
+    List(HealthApi.health.widen[Authenticator], MeApi.me)
 
   private val docs =
-    SwaggerInterpreter().fromServerEndpoints[Task](serverEndpoints, "DMS Platform", AppBuildInfo.version)
+    SwaggerInterpreter()
+      .fromEndpoints[Task](apiEndpoints.map(_.endpoint), "DMS Platform", AppBuildInfo.version)
 
-  private val routes = ZioHttpInterpreter().toHttp(serverEndpoints ++ docs)
+  private val routes =
+    ZioHttpInterpreter().toHttp(apiEndpoints) ++ ZioHttpInterpreter().toHttp(docs)
 
   override def run: ZIO[Any, Throwable, Unit] =
     for
       cfg <- ZIO.config(AppConfig.config)
       _   <- ZIO.logInfo(s"DMS platform ${AppBuildInfo.version} starting on port ${cfg.http.port}")
-      _   <- Server.serve(routes).provide(Server.defaultWithPort(cfg.http.port))
+      _   <- Server
+        .serve(routes)
+        .provide(
+          Server.defaultWithPort(cfg.http.port),
+          ZLayer.succeed(cfg.auth),
+          TokenVerifier.layer,
+          Db.dataSource(cfg.database),
+          Db.layer,
+          TenantDirectory.layer,
+          Authenticator.layer
+        )
     yield ()

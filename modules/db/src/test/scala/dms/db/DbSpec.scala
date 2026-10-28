@@ -162,6 +162,24 @@ object DbSpec extends ZIOSpecDefault:
         )
       yield assertTrue(pids._1 == pids._2)
     },
+    test("a ZITADEL organization resolves to its tenant without tenant context") {
+      for
+        dbs <- ZIO.service[Databases]
+        id = TenantId.random()
+        _ <- dbs.owner.transactSystem(
+          Db.sql(
+            sql"insert into dms.tenant (id, name, zitadel_org_id) values (${id.value}, ${"Org tenant"}, ${"org-42"})".update
+              .run()
+          )
+        )
+        found <- dbs.app.transactSystem(
+          Db.sql(sql"select dms.tenant_by_zitadel_org(${"org-42"})".query[Option[UUID]].run().head)
+        )
+        missing <- dbs.app.transactSystem(
+          Db.sql(sql"select dms.tenant_by_zitadel_org(${"org-unknown"})".query[Option[UUID]].run().head)
+        )
+      yield assertTrue(found == Some(id.value), missing.isEmpty)
+    },
     test("database code outside a transaction fails with NoTransaction") {
       for result <- Db.sql(sql"select 1".query[Int].run()).either
       yield assertTrue(result == Left(DbError.NoTransaction))
