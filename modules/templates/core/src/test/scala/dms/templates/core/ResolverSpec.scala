@@ -85,6 +85,79 @@ object ResolverSpec extends ZIOSpecDefault:
         Resolver.computedValues(Fixtures.compiled(), Map("clientName" -> FieldValue.Number(1))).isLeft
       )
     },
+    test("a computed field that reads a field without value has no value itself, not 0 (DMS-83)") {
+      val r       = resolve(Fixtures.values - "termMonths")
+      val inlines =
+        r.content.sections.flatMap(_.blocks).collect { case ResolvedBlock.Paragraph(c) => c }.flatten
+      assertTrue(
+        inlines.contains(ResolvedInline.Missing("totalValue", required = true, List("termMonths"))),
+        text(r).contains("Total: [missing: totalValue]"),
+        r.missingComputed == List(MissingComputed("totalValue", List("termMonths"))),
+        Resolver.computedValues(Fixtures.compiled(), Fixtures.values - "termMonths") == Right(Map.empty),
+        Resolver.missingComputed(Fixtures.compiled(), Fixtures.values - "termMonths") ==
+          Right(List(MissingComputed("totalValue", List("termMonths")))),
+        Resolver.missingComputed(Fixtures.compiled(), Fixtures.values) == Right(Nil)
+      )
+    },
+    test("computed fields that check for absence keep their value; only reading a missing field counts") {
+      val template = Fixtures.compiled(
+        TemplateContent(
+          List(section("main", Paragraph(List(Placeholder("term"), Text(" "), Placeholder("guarded"))))),
+          computed = List(
+            ComputedField("term", "'termMonths' in present_fields ? termMonths : 12.0"),
+            ComputedField(
+              "guarded",
+              "!('endDate' in present_fields) || endDate > timestamp('2026-01-01T00:00:00Z')"
+            ),
+            ComputedField("perMonth", "monthlyFee.amount / termMonths"),
+            ComputedField("perYear", "perMonth * 12.0"),
+            ComputedField("both", "perYear + (international ? 1.0 : 0.0)")
+          )
+        )
+      )
+      val values   = Fixtures.values - "termMonths" - "endDate" - "international"
+      val missing  = Resolver.missingComputed(template, values)
+      val computed = Resolver.computedValues(template, values)
+      assertTrue(
+        computed == Right(
+          Map("term" -> FieldValue.Number(BigDecimal("12.0")), "guarded" -> FieldValue.YesNo(true))
+        ),
+        missing == Right(
+          List(
+            MissingComputed("perMonth", List("termMonths")),
+            MissingComputed("perYear", List("termMonths")),
+            MissingComputed("both", List("termMonths", "international"))
+          )
+        )
+      )
+    },
+    test("conditions still see empty values for missing fields and computed fields without value") {
+      val condition = Conditional(
+        "totalValue > 100.0",
+        List(Paragraph(List(Text("big")))),
+        List(Paragraph(List(Text("small"))))
+      )
+      val template = Fixtures.compiled(oneSection(condition).copy(computed = Fixtures.content.computed))
+      val r        = resolve(Fixtures.values - "termMonths", template = template)
+      val failing  = Fixtures.compiled(
+        oneSection(Conditional("ratio > 0", Nil))
+          .copy(computed = List(ComputedField("ratio", "100 / int(termMonths)")))
+      )
+      val unused = Fixtures.compiled(
+        oneSection(Paragraph(List(Placeholder("ratio"))))
+          .copy(computed = List(ComputedField("ratio", "100 / int(termMonths)")))
+      )
+      assertTrue(
+        text(r) == "small",
+        r.missingComputed.map(_.key) == List("totalValue"),
+        Resolver.resolve(failing, Fixtures.values - "termMonths", Language.En) match
+          case Left(ResolveError.Evaluation(location, message)) =>
+            location.part == "condition" && message.contains("ratio") && message.contains("termMonths")
+          case _ => false
+        ,
+        text(resolve(Fixtures.values - "termMonths", template = unused)) == "[missing: ratio]"
+      )
+    },
     test("formats follow the document language") {
       val r = resolve(language = Language.De)
       assertTrue(
@@ -127,8 +200,8 @@ object ResolverSpec extends ZIOSpecDefault:
       val inlines =
         r.content.sections.flatMap(_.blocks).collect { case ResolvedBlock.Paragraph(c) => c }.flatten
       assertTrue(
-        inlines.contains(ResolvedInline.Missing("endDate", required = false)),
-        inlines.contains(ResolvedInline.Missing("clientName", required = true)),
+        inlines.contains(ResolvedInline.Missing("endDate", required = false, Nil)),
+        inlines.contains(ResolvedInline.Missing("clientName", required = true, Nil)),
         r.missingRequired == List("clientName")
       )
     },

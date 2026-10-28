@@ -33,6 +33,9 @@ final case class PreviewIssue(field: Option[String], label: Option[String], code
   *
   * @param html
   *   the HTML fragment of [[HtmlRenderer.render]] with draft marking; empty when the resolution failed
+  * @param missingRequired
+  *   the required fields without value, then the fields without value that computed fields read (a document
+  *   cannot be approved without them either, DMS-83)
   */
 final case class PreviewResult(html: String, missingRequired: List[MissingValue], issues: List[PreviewIssue])
 
@@ -91,9 +94,11 @@ object Preview:
     ) ++ systemIssues
     Resolver.resolve(template.compiled, fieldValues, language) match
       case Right(resolution) =>
-        val missing = resolution.missingRequired.filterNot(systemKeys.contains).map { key =>
-          MissingValue(key, template.labels.getOrElse(key, key))
-        }
+        val computedInputs = resolution.missingComputed.flatMap(_.missingInputs)
+        val missing        =
+          (resolution.missingRequired ++ computedInputs).distinct.filterNot(systemKeys.contains).map { key =>
+            MissingValue(key, template.labels.getOrElse(key, key))
+          }
         val html =
           HtmlRenderer.render(resolution.content, HtmlOptions.draft(language, template.labels, systemKeys))
         PreviewResult(html, missing, issues)

@@ -67,7 +67,9 @@ object DocumentServiceSpec extends ZIOSpecDefault:
     given JsonCodec[Deviation]          = DeriveJsonCodec.gen
     given JsonCodec[DeviationReport]    = DeriveJsonCodec.gen
 
-  /** Template versions by id and number; computes `totalValue = monthlyFee.amount * termMonths`. */
+  /** Template versions by id and number; computes `totalValue = monthlyFee.amount * termMonths`, which has no
+    * value without `termMonths`.
+    */
   private object Templates extends TemplateSource:
     import Codecs.given
     val versions = ConcurrentHashMap[(TemplateId, Int), TemplateVersion]()
@@ -87,13 +89,25 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         content: TemplateContent,
         values: Map[String, MetadataValue]
     ): IO[DocumentError, Map[String, MetadataValue]] =
-      val fee =
-        values.get("monthlyFee").collect { case MetadataValue.Amount(a, _) => a }.getOrElse(BigDecimal(0))
-      val term =
-        values.get("termMonths").collect { case MetadataValue.Number(n) => n }.getOrElse(BigDecimal(0))
+      val fee  = values.get("monthlyFee").collect { case MetadataValue.Amount(a, _) => a }
+      val term = values.get("termMonths").collect { case MetadataValue.Number(n) => n }
       ZIO.succeed(
-        content.computed.collect { case ComputedField("totalValue", _) =>
-          "totalValue" -> MetadataValue.Number(fee * term)
+        content.computed.flatMap {
+          case ComputedField("totalValue", _) =>
+            fee.zip(term).map((f, t) => "totalValue" -> MetadataValue.Number(f * t))
+          case _ => None
+        }.toMap
+      )
+
+    def missingComputed(
+        template: TemplateVersion,
+        content: TemplateContent,
+        values: Map[String, MetadataValue]
+    ): IO[DocumentError, Map[String, List[String]]] =
+      ZIO.succeed(
+        content.computed.collect {
+          case ComputedField("totalValue", _) if !values.contains("termMonths") =>
+            "totalValue" -> List("termMonths")
         }.toMap
       )
 
@@ -675,6 +689,26 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         ),
         stored.metadataSnapshot.exists(_.values.get("totalValue").contains(MetadataValue.Number(1200))),
         rendition.left.exists(_.isInstanceOf[DocumentError.Conflict])
+      )
+    },
+    test(
+      "approval is blocked while a computed field has no value because a field it reads is empty (DMS-83)"
+    ) {
+      for
+        f       <- fixture
+        created <- create(f, reviewValues - "termMonths")
+        (doc, v) = created
+        _ <- as(f.tenant)(_.submit(doc.id, author))
+        _ <- as(f.tenant)(_.changeStatus(v.id, ReviewPassed, UserId("reviewer-1")))
+        _ <- as(f.tenant)(_.attachRendition(v.id, Rendition("renditions/1.pdf", None, "b" * 64), author))
+        blocked <- as(f.tenant)(_.changeStatus(v.id, Approve, approver)).either
+        stored  <- as(f.tenant)(_.get(doc.id)).map(_.versions.head)
+      yield assertTrue(
+        blocked.left.toOption.collect { case DocumentError.Incomplete(Approved, issues) =>
+          issues.map(i => (i.field, i.kind))
+        } == Some(List("termMonths" -> IssueKind.MissingRequired(Approved))),
+        !stored.values.contains("totalValue"),
+        stored.status == InApproval
       )
     },
     test(

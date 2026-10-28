@@ -44,7 +44,8 @@ object Resolver:
     running(template, values, language)(_.resolution())
 
   /** Evaluates only the computed fields, e.g. to store their values with a document (business concept 4.3).
-    * Returns the value of every computed field by key.
+    * Returns the value of every computed field that has one by key; computed fields that read a field without
+    * value have none (see [[missingComputed]]).
     */
   def computedValues(
       template: CompiledTemplate,
@@ -54,6 +55,15 @@ object Resolver:
       val scope = run.scope()
       template.computed.flatMap((field, _) => scope.get(field.key).flatMap(_.value).map(field.key -> _)).toMap
     }
+
+  /** The computed fields that have no value because they read fields without value, with those fields
+    * (DMS-83), e.g. to block the approval of a document.
+    */
+  def missingComputed(
+      template: CompiledTemplate,
+      values: Map[String, FieldValue]
+  ): Either[ResolveError, List[MissingComputed]] =
+    running(template, values, Language.default)(run => run.missingComputed(run.scope()))
 
   private def running[A](template: CompiledTemplate, values: Map[String, FieldValue], language: Language)(
       f: Run => A
@@ -71,12 +81,26 @@ object Resolver:
       extends RuntimeException
       with scala.util.control.NoStackTrace
 
-  /** Names in scope during resolution: the value (if any) and its static type. */
+  /** A name in scope during resolution.
+    *
+    * @param value
+    *   the value, if any
+    * @param cel
+    *   what conditions and repeats see: the CEL value; for a field without value its empty value
+    *   ([[Cel.zero]]); for a computed field without value the result of its expression with empty values, so
+    *   conditions behave as before DMS-83; `None` if that fails
+    * @param missing
+    *   a field or computed field without value: computed fields see it as unknown
+    * @param missingInputs
+    *   for a computed field without value: the fields without value it reads, in schema order
+    */
   private final case class Entry(
       value: Option[FieldValue],
-      cel: Object,
+      cel: Option[Object],
       valueType: Option[ValueType],
-      required: Boolean
+      required: Boolean,
+      missing: Boolean = false,
+      missingInputs: List[String] = Nil
   )
 
   private final class Run(template: CompiledTemplate, values: Map[String, FieldValue], language: Language):
@@ -87,27 +111,53 @@ object Resolver:
     private val branches                  = mutable.LinkedHashMap.empty[Location, (String, Set[Boolean])]
     var currentLocation: Option[Location] = None
 
-    /** The field values and, evaluated in order, the computed fields. */
+    /** The field values and, evaluated in order, the computed fields. A computed field that reads a field
+      * without value (or a computed field without value) has no value itself (DMS-83); one that only reads
+      * fields it checks first, e.g. `'endDate' in present_fields ? ... : ...`, keeps its value.
+      */
     def scope(): Map[String, Entry] =
       val fields = template.schema.variables.map { v =>
         val value = values.get(v.name)
-        v.name -> Entry(value, value.fold(Cel.zero(v.valueType))(Cel.toCel), Some(v.valueType), v.required)
+        v.name -> Entry(
+          value,
+          Some(value.fold(Cel.zero(v.valueType))(Cel.toCel)),
+          Some(v.valueType),
+          v.required,
+          missing = value.isEmpty
+        )
       }.toMap
       val present = Cel.PresentFields -> Entry(
         None,
-        template.schema.variables.map(_.name).filter(values.contains).asJava,
+        Some(template.schema.variables.map(_.name).filter(values.contains).asJava),
         None,
         required = false
       )
       template.computed.foldLeft(fields + present) { case (scope, (field, expression)) =>
-        val result = evaluate(expression, scope)
-        val value  = Cel.fromCel(result).fold(m => fail(expression.location, m), identity)
-        scope + (field.key -> Entry(
-          Some(value),
-          result,
-          template.computedTypes.get(field.key).flatten,
-          false
-        ))
+        val known     = scope.collect { case (name, e) if !e.missing => name -> e.cel }
+        val unknown   = scope.collect { case (name, e) if e.missing => name }
+        val result    = run(expression, known, unknown).fold(m => fail(expression.location, m), identity)
+        val valueType = template.computedTypes.get(field.key).flatten
+        Cel.unknownVariables(result) match
+          case None =>
+            val value = Cel.fromCel(result).fold(m => fail(expression.location, m), identity)
+            scope + (field.key -> Entry(Some(value), Some(result), valueType, required = false))
+          case Some(names) =>
+            val inputs =
+              names.flatMap(n => scope.get(n).map(_.missingInputs).filter(_.nonEmpty).getOrElse(List(n)))
+            val asBefore = conditionView(expression, scope).toOption.filter(Cel.unknownVariables(_).isEmpty)
+            scope + (field.key -> Entry(
+              None,
+              asBefore,
+              valueType,
+              required = false,
+              missing = true,
+              missingInputs = template.schema.variables.map(_.name).filter(inputs.contains)
+            ))
+      }
+
+    def missingComputed(scope: Map[String, Entry]): List[MissingComputed] =
+      template.computed.flatMap { (field, _) =>
+        scope.get(field.key).filter(_.missing).map(e => MissingComputed(field.key, e.missingInputs))
       }
 
     def resolution(): Resolution =
@@ -121,17 +171,41 @@ object Resolver:
         missing,
         branches.toList.map { case (location, (condition, outcomes)) =>
           BranchOutcome(location, condition, outcomes)
-        }
+        },
+        missingComputed(scope)
       )
 
     private def fail(location: Location, message: String): Nothing =
       throw Failure(ResolveError.Evaluation(location, message))
 
-    private def evaluate(expression: CompiledExpression, scope: Map[String, Entry]): Object =
+    private def run(
+        expression: CompiledExpression,
+        known: Iterable[(String, Option[Object])],
+        unknown: Iterable[String]
+    ): Either[String, Object] =
       currentLocation = Some(expression.location)
-      val activation = java.util.HashMap[String, Object](scope.size * 2)
-      scope.foreach((name, entry) => activation.put(name, entry.cel))
-      budget.evaluate(expression.program, activation).fold(m => fail(expression.location, m), identity)
+      val activation = java.util.HashMap[String, Object](known.size * 2)
+      known.foreach((name, cel) => cel.foreach(activation.put(name, _)))
+      budget.evaluate(expression.program, activation, unknown)
+
+    /** Evaluates a condition or repeat collection: fields without value read as empty values. */
+    private def conditionView(
+        expression: CompiledExpression,
+        scope: Map[String, Entry]
+    ): Either[String, Object] =
+      run(expression, scope.view.mapValues(_.cel), scope.collect { case (name, e) if e.cel.isEmpty => name })
+
+    private def evaluate(expression: CompiledExpression, scope: Map[String, Entry]): Object =
+      val result = conditionView(expression, scope).fold(m => fail(expression.location, m), identity)
+      Cel.unknownVariables(result).foreach { names =>
+        val inputs = names.toList.sorted.flatMap(n => scope.get(n).toList.flatMap(_.missingInputs)).distinct
+        fail(
+          expression.location,
+          s"it reads computed fields without value (${names.toList.sorted.mkString(", ")}); " +
+            s"missing: ${inputs.mkString(", ")}"
+        )
+      }
+      result
 
     private def blocks(
         bs: List[Block],
@@ -191,7 +265,7 @@ object Resolver:
             nested(
               body,
               "/body",
-              scope + (itemName -> Entry(Some(value), item.asInstanceOf[Object], itemType, false))
+              scope + (itemName -> Entry(Some(value), Some(item.asInstanceOf[Object]), itemType, false))
             )
           }
 
@@ -207,7 +281,13 @@ object Resolver:
             .flatMap((v, t) => select(v, t, segments.tail)) match
             case Some((value, valueType)) =>
               ResolvedInline.Value(path, Formatting.format(value, format, language, valueType))
-            case None => ResolvedInline.Missing(path, entry.exists(_.required) && segments.size == 1)
+            case None =>
+              val inputs = entry.fold(Nil)(_.missingInputs)
+              ResolvedInline.Missing(
+                path,
+                inputs.nonEmpty || (entry.exists(_.required) && segments.size == 1),
+                inputs
+              )
       }
       outputLength += resolved.iterator.map(_.plainText.length.toLong).sum
       if outputLength > limits.maxOutputLength then

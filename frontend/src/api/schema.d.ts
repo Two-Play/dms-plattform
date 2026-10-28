@@ -717,6 +717,7 @@ export interface components {
     Missing: {
       path: string
       required: boolean
+      missingInputs?: string[]
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}

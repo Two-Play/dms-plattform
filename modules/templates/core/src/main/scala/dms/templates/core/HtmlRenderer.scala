@@ -39,6 +39,11 @@ object HtmlOptions:
     case Language.De => "wird beim Speichern vergeben"
     case Language.En => "assigned on save"
 
+  /** The hint of a computed field without value, naming the fields it needs, in the document language. */
+  def missingInputsHint(language: Language, inputs: List[String]): String = language match
+    case Language.De => s"fehlt: ${inputs.mkString(", ")}"
+    case Language.En => s"missing: ${inputs.mkString(", ")}"
+
   def draft(
       language: Language,
       labels: Map[String, String] = Map.empty,
@@ -62,7 +67,9 @@ object HtmlOptions:
   *   - `table.dms-table` with `thead` for header rows (`th scope=col`) and `tbody`
   *   - `div.dms-clause-ref[data-clause][data-clause-version]`, `div.dms-page-break`
   *   - `span.dms-value[data-field]` for a field value, `span.dms-missing[data-field][data-required]` (plus
-  *     `dms-missing-required`) with the field label for a missing value
+  *     `dms-missing-required`) with the field label for a missing value; for a computed field that has no
+  *     value because it reads fields without value also `dms-missing-computed`, `data-missing-inputs` (the
+  *     field keys, space-separated) and `span.dms-missing-hint` naming those fields by label
   *   - `span.dms-system[data-field]` with the field label and `span.dms-system-hint` for a field the platform
   *     sets that has no value yet ([[HtmlOptions.systemFields]])
   *   - marks as `strong`, `em`, `u`; line breaks as `br`
@@ -202,14 +209,20 @@ object HtmlRenderer:
       case ResolvedInline.Text(value, marks) => marked(marks, out)(out(escape(value)))
       case ResolvedInline.Value(path, text)  =>
         out("<span class=\"dms-value\" data-field=\"", escape(path), "\">", escape(text), "</span>")
-      case ResolvedInline.Missing(path, _) if options.systemFields.contains(path.takeWhile(_ != '.')) =>
+      case ResolvedInline.Missing(path, _, _) if options.systemFields.contains(path.takeWhile(_ != '.')) =>
         out("<span class=\"dms-system\" data-field=\"", escape(path), "\">")
         out(escape(label(path, options.labels)), " <span class=\"dms-system-hint\">(")
         out(escape(HtmlOptions.systemHint(options.language)), ")</span></span>")
-      case ResolvedInline.Missing(path, required) =>
+      case ResolvedInline.Missing(path, required, inputs) =>
         out("<span class=\"dms-missing", if required then " dms-missing-required" else "")
-        out("\" data-field=\"", escape(path), "\" data-required=\"", required.toString, "\">")
-        out(escape(label(path, options.labels)), "</span>")
+        if inputs.nonEmpty then out(" dms-missing-computed")
+        out("\" data-field=\"", escape(path), "\" data-required=\"", required.toString, "\"")
+        if inputs.nonEmpty then out(" data-missing-inputs=\"", escape(inputs.mkString(" ")), "\"")
+        out(">", escape(label(path, options.labels)))
+        if inputs.nonEmpty then
+          val hint = HtmlOptions.missingInputsHint(options.language, inputs.map(label(_, options.labels)))
+          out(" <span class=\"dms-missing-hint\">(", escape(hint), ")</span>")
+        out("</span>")
       case ResolvedInline.LineBreak => out("<br>")
     }
 

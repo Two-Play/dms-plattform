@@ -78,6 +78,15 @@ trait TemplateSource extends ContentCodec:
       values: Map[String, MetadataValue]
   ): IO[DocumentError, Map[String, MetadataValue]]
 
+  /** The computed fields of `content` that have no value for the given field values because they read fields
+    * without value, each with those fields (DMS-83). A document cannot be approved while there are any.
+    */
+  def missingComputed(
+      template: TemplateVersion,
+      content: TemplateContent,
+      values: Map[String, MetadataValue]
+  ): IO[DocumentError, Map[String, List[String]]]
+
 /** Request to create a document. `values` are the entered field values with their origin (normally `Manual`;
   * a business system filling master data uses `System(source)`).
   */
@@ -581,6 +590,9 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
         else ZIO.succeed(before)
       profile <- profile(document.classId, current.classVersion)
       values = statusMetadata(current)
+      computedInputs <- ZIO
+        .when(event == LifecycleEvent.Approve)(missingComputedInputs(profile, current))
+        .someOrElse(Nil)
       target <- ZIO
         .fromEither(event match
           case LifecycleEvent.Approve =>
@@ -590,7 +602,8 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
               .map(TransitionBlocked.NotAllowed(_))
               .flatMap { target =>
                 val issues = Validation.validate(profile, values, target)
-                Either.cond(issues.isEmpty, target, TransitionBlocked.Incomplete(target, issues))
+                val all    = issues ++ computedInputs.filterNot(i => issues.exists(_.field == i.field))
+                Either.cond(all.isEmpty, target, TransitionBlocked.Incomplete(target, all))
               }
           case other => Validation.checkTransition(profile, values, current.status, other))
         .mapError {
@@ -629,6 +642,21 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
     yield updated
 
   /** Publication replaces the valid version of the same scope (business concept 5.2). */
+  /** Fields without value that computed fields of the version read (DMS-83): an approved document must not
+    * contain computed fields without value, so these fields are required for the approval.
+    */
+  private def missingComputedInputs(
+      profile: MetadataProfile,
+      current: DocumentVersion
+  ): IO[DocumentError, List[FieldIssue]] =
+    for
+      template <- templates.version(current.templateId, current.templateVersion)
+      missing  <- templates.missingComputed(template, current.content, metadataOf(current.values))
+    yield missing.values.flatten.toList.distinct.sorted.map { key =>
+      val label = profile.field(key).fold(key)(_.definition.label)
+      FieldIssue(key, label, IssueKind.MissingRequired(DocumentStatus.Approved))
+    }
+
   private def supersedeValid(
       document: Document,
       publishing: DocumentVersion,
