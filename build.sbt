@@ -47,10 +47,16 @@ lazy val archiveApi        = apiModule("archive")
 lazy val archiveCore       = coreModule("archive").dependsOn(archiveApi, documentsApi)
 lazy val searchApi         = apiModule("search")
 lazy val searchCore        = coreModule("search").dependsOn(searchApi, documentsApi, authz)
-lazy val auditApi          = apiModule("audit")
-lazy val auditCore         = coreModule("audit").dependsOn(auditApi)
+lazy val auditApi          = apiModule("audit").dependsOn(db)
+lazy val auditCore         = coreModule("audit").dependsOn(auditApi).settings(auditCoreSettings)
 lazy val notificationsApi  = apiModule("notifications")
 lazy val notificationsCore = coreModule("notifications").dependsOn(notificationsApi)
+
+/** Audit trail (ADR 0017): RFC 3161 timestamping; integration tests against PostgreSQL. */
+lazy val auditCoreSettings = Seq(
+  libraryDependencies ++= Dependencies.timestamping ++ Dependencies.integrationTest ++
+    Dependencies.logging.map(_ % Test)
+)
 
 lazy val integration = module("integration", "modules/integration")
   .dependsOn(kernel, documentsApi)
