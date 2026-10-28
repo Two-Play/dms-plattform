@@ -34,3 +34,28 @@ HTTP (module `app`, `PartnerApi`):
 | DELETE | `/api/v1/documents/{id}/references/{key}` | Remove the taken-over values | `EditDraft` |
 
 The partner master is called outside database transactions. Errors: `503 partner_directory_unavailable` and `502 partner_directory_invalid_response` with a message telling the author that the draft can be saved without the partner; `422 unknown_entry` if the partner master does not know the id; `404` for an unknown reference field.
+
+## Webhooks (DMS-58, ADR 0035)
+
+Package `dms.integration.webhooks`:
+
+- `WebhookJobs(db, events, sender, settings)`: `deliver(event)` is an outbox subscriber. For an event the port `WebhookEvents` describes as webhook event, it writes in one transaction of the event's tenant one `dms.webhook_delivery` row per matching `dms.webhook_subscription` (event type, class filter on the class path; exact JSON body `{"type","timestamp","data"}`) and a job `webhook.deliver` per row (idempotency key: the delivery id). Rows are unique per subscription and outbox event, so a retried event adds nothing. The job sends the body (`POST`, `Content-Type: application/json`, `User-Agent: DMS-Webhooks/1`) signed after Standard Webhooks (`WebhookSignature`: `webhook-id` = delivery id, `webhook-timestamp`, `webhook-signature: v1,<base64 HMAC-SHA256 of id.timestamp.body>`, secret `whsec_<base64>`). 2xx: `delivered`; otherwise the job fails and is retried with the job runner's backoff until `maxAttempts`, then the delivery is `dead`. Deliveries of deactivated or deleted subscriptions are `skipped`. `redeliver(id)` sets a delivery back to `pending` and enqueues a new job.
+- `UrlGuard`: SSRF protection. `parse` (absolute `https`, no user info, no fragment; `http` only for allowed hosts) and `check` (every resolved address public: no loopback, RFC 1918, link-local/metadata, CGNAT, ULA, multicast, documentation or reserved ranges). Runs when a subscription is saved and before every attempt; a blocked target makes the delivery dead at once.
+- `HttpWebhookSender`: JDK HTTP client, timeout per attempt, redirects not followed.
+- `WebhookStore`: subscriptions and deliveries (inside `Db.transact(tenant)`, RLS).
+- `WebhookSettings`: `allowedHosts` (development hosts exempt from the SSRF rules), `allowPrivateNetworks` (RFC 1918 / ULA with https), `timeout`, `maxAttempts`.
+
+Configuration (`dms.webhooks`): `allowedHosts` (`DMS_WEBHOOKS_ALLOWED_HOSTS`, comma-separated, default empty), `allowPrivateNetworks` (`DMS_WEBHOOKS_ALLOW_PRIVATE_NETWORKS`, false), `timeoutSeconds` (10), `maxAttempts` (12, about four hours of retries).
+
+HTTP (module `app`, `WebhookApi`; tenant administrators, `Configure` on `Webhooks`; changes are audited, secrets never):
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/admin/webhooks` | List subscriptions |
+| POST | `/api/v1/admin/webhooks` | Create (`{"url","eventTypes","documentClasses","description","active"}`); returns the secret once; 422 for unknown event types or unsafe URLs |
+| GET / PUT / DELETE | `/api/v1/admin/webhooks/{id}` | Read, change (`active: false` pauses), delete (log kept) |
+| POST | `/api/v1/admin/webhooks/{id}/secret` | Rotate the secret |
+| GET | `/api/v1/admin/webhooks/{id}/deliveries?status=&limit=` | Delivery log, newest first |
+| POST | `/api/v1/admin/webhooks/{id}/deliveries/{deliveryId}/redeliver` | Send again (409 while pending or retrying) |
+
+Event types (app, `DocumentWebhookEvents`): `document.published` (Approved → Published; not a recertification), `document.superseded`, `document.withdrawn` (only of versions that were valid). `data`: `documentId`, `versionId`, `version`, `title`, `classKey`, `classPath`, `scope`, `validFrom`, `renditionSha256`, `supersededBy`, `eventId` and `links` to the stable addresses (`current`, `currentPdf`, `currentHtml`) and the version's rendition. Confidential and strictly confidential documents are not announced. No order is guaranteed.
