@@ -55,3 +55,9 @@ Proposed: one shared database; every tenant-specific table carries `tenant_id`, 
 ## Reversibility
 
 **high**: Switching to schema or DB per tenant affects connection management, migrations, workers and data migration of all existing tenants. The hybrid route (moving individual tenants out) remains possible with medium effort if the `tenant_id` column is kept.
+
+## Open questions from spike DMS-21 (2026-10-28)
+
+- Without a tenant set, the policy `current_setting('app.tenant_id')::uuid` raises an error instead of returning zero rows. Decide whether that fail-closed behaviour is wanted (recommended: yes, it surfaces missing tenant context as a bug) or whether `current_setting('app.tenant_id', true)` should yield zero rows.
+- `SET LOCAL` cannot take bind parameters; use `set_config('app.tenant_id', ?, true)`.
+- RLS violations and missing grants share SQLSTATE 42501.

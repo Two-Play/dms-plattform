@@ -25,7 +25,7 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0009](0009-persistenz.md) | PostgreSQL, S3 with Object Lock, OpenSearch | Accepted | medium |
 | [0010](0010-outbox-und-jobs-in-postgres.md) | Transactional outbox and job queue in PostgreSQL | Accepted | low |
 | [0011](0011-java-21-lts.md) | Java 21 LTS as runtime | Accepted | low |
-| [0012](0012-datenbankzugriff.md) | Database access: Magnum, ZIO Quill or plain JDBC | Open – spike required | medium |
+| [0012](0012-datenbankzugriff.md) | Database access: Magnum, ZIO Quill or plain JDBC | Accepted (spike) | medium |
 | [0013](0013-api-first-tapir.md) | API-first with Tapir on ZIO HTTP | Accepted | medium |
 | [0014](0014-mandantentrennung-rls.md) | Tenant isolation with tenant_id and row-level security | Proposed | high |
 | [0015](0015-frontend-react-tailwind-shadcn.md) | Frontend with React, Tailwind CSS and shadcn/ui | Accepted | medium |
