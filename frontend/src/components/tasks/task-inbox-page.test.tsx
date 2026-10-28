@@ -151,7 +151,16 @@ function renderAt(path: string) {
     }
     if (p === '/api/v1/documents/{id}/versions/{versionId}/acknowledgement') {
       state.acks = []
-      return ok(undefined, 201)
+      return ok(
+        {
+          documentId: init?.params?.path?.id,
+          versionId: init?.params?.path?.versionId,
+          versionLabel: '3.0',
+          openedAt: '2026-10-27T09:00:00Z',
+          acknowledgedAt: '2026-10-27T09:05:00Z',
+        },
+        201,
+      )
     }
     if (p === '/api/v1/documents/{id}/versions/{versionId}/opened') return ok(undefined, 204)
     return failed(404, { code: 'not_found', message: `unexpected ${p}` })
@@ -294,6 +303,7 @@ describe('task inbox', () => {
         classPath: ['policy'],
         validFrom: '2026-11-01',
         publishedAt: '2026-10-26T10:00:00Z',
+        status: 'Published',
         opened: false,
       },
     ]

@@ -42,6 +42,7 @@ describe('inbox items', () => {
         title: 'Policy',
         versionLabel: '2.0',
         publishedAt: '2026-10-10T00:00:00Z',
+        status: 'Published',
         opened: false,
       }),
     ]

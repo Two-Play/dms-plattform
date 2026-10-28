@@ -40,4 +40,5 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0024](0024-approval-workflow-integration.md) | Approval workflows: Flowable routes the steps, our tables hold the business truth | Accepted (addenda DMS-44, DMS-86, DMS-49) | medium |
 | [0025](0025-archive-renditions.md) | Archive renditions: WeasyPrint as HTTP sidecar, PDF/A-2b checked with veraPDF, rendered between the last vote and the approval | Accepted | medium |
 | [0026](0026-scheduled-publication-and-editorial-versions.md) | Scheduled publication by a job at tenant midnight; editorial versions through an owner-confirmation path | Accepted | medium |
+| [0027](0027-acknowledgements.md) | Acknowledgements: readers of a valid version acknowledge it after an explicit opening, insert-only | Accepted | medium |
 | [0028](0028-deputies-for-workflow-participants.md) | Deputies for workflow participants: time-limited deputyships resolved when tasks are read | Accepted | medium |

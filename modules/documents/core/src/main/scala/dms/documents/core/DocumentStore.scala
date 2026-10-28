@@ -61,7 +61,8 @@ private[core] object DocumentStore:
       deviationReport: Jsonb,
       validFrom: Option[LocalDate],
       supersededBy: Option[UUID],
-      requiresAcknowledgement: Boolean
+      requiresAcknowledgement: Boolean,
+      publishedAt: Option[OffsetDateTime]
   ) derives DbCodec
 
   final case class DeviationRequestRow(
@@ -163,7 +164,8 @@ private[core] object DocumentStore:
     sql"""select id, document_id, major, minor, working_state, status, change_kind, change_reason, scope,
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
-                 released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement
+                 released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement,
+                 published_at
           from dms.document_version where document_id = ${id.value} order by major, minor, created_at"""
       .query[VersionRow]
       .run()
@@ -175,7 +177,8 @@ private[core] object DocumentStore:
     sql"""select id, document_id, major, minor, working_state, status, change_kind, change_reason, scope,
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
-                 released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement
+                 released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement,
+                 published_at
           from dms.document_version where id = $id for update"""
       .query[VersionRow]
       .run()
@@ -187,7 +190,8 @@ private[core] object DocumentStore:
     sql"""select id, document_id, major, minor, working_state, status, change_kind, change_reason, scope,
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
-                 released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement
+                 released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement,
+                 published_at
           from dms.document_version
           where document_id = ${id.value} and status in ('Draft', 'InReview', 'InApproval') for update"""
       .query[VersionRow]
@@ -367,7 +371,8 @@ private[core] object DocumentStore:
         ),
       r.validFrom,
       r.supersededBy,
-      r.requiresAcknowledgement
+      r.requiresAcknowledgement,
+      r.publishedAt.map(_.toInstant)
     )
 
   private def toDeviationRequest(r: DeviationRequestRow): RecordedDeviationRequest =

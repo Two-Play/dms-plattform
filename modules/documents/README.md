@@ -156,3 +156,23 @@ HTTP (module `app`, `DocumentApi`):
 | POST | `/api/v1/documents/{id}/versions` | Start the next version `{"changeKind":"Major"\|"Minor","reason","requiresAcknowledgement"}`; 201 | `EditDraft` on a draft of the caller |
 
 Version views additionally carry `validFrom`, `publicationDue` (approved versions), `successor` (`{versionId, version, status, validFrom, publicationDue}`), `requiresAcknowledgement` and `editorialCheck` (`{basedOn, changedRatio, threshold, exceedsThreshold}`, minor versions).
+
+## Acknowledgements (DMS-47, ADR 0027)
+
+US-06.2. Readers of a valid version that requires acknowledgement (`requiresAcknowledgement`, see DMS-46) confirm that they read it, after opening it.
+
+- `api`: `Acknowledgement` (id, document, version id and label, reader, first opening, acknowledgement time); `Acknowledgements.requested(version)`: valid (Published, ReviewDue) and requiring acknowledgement. `DocumentVersion.publishedAt`: when the version became valid.
+- `core`, `AcknowledgementService` (inside `Db.transact(tenant)`): `markOpened(version, reader)` records the first opening of a version that asks for acknowledgement (idempotent; audit `document.opened` once; nothing for other versions); `acknowledge(version, reader)` under a share lock on the version: `NotRequested` (not valid or not required), `AlreadyAcknowledged`, `NotOpened`; audit and outbox `document.acknowledged`. `pending(reader)`: valid versions asking for acknowledgement without an acknowledgement of the reader (the caller filters by `ReadPublished`); `openedValid`, `status`, `acknowledgementsOf`.
+- Migration V15: `dms.document_version_opened` (PK version, user) and `dms.document_acknowledgement` (unique version, user); both insert-only (triggers, insert-only grants), RLS with `dms.current_tenant()`. Insert guards: the version is valid and requires acknowledgement, the label is its number, the acknowledgement copies the reader's recorded opening. `dms.document_version.published_at`: set by trigger on Approved → Published, never otherwise; backfilled from the audit trail.
+- Superseded versions drop out of the open list; their successor asks on its own if it requires acknowledgement.
+
+HTTP (module `app`, `AcknowledgementApi`):
+
+| Method | Path | Purpose | Authorization |
+|---|---|---|---|
+| GET | `/api/v1/acknowledgements?status=open\|done` | The caller's open (readable valid versions not acknowledged) or done acknowledgements: `[{documentId, versionId, title, versionLabel, classPath, validFrom, publishedAt, status, opened, openedAt, acknowledgedAt}]`; 400 for another status | open: `ReadPublished` per version |
+| POST | `/api/v1/documents/{id}/versions/{versionId}/opened` | Record that the caller opened the version; 204, idempotent | `ReadDocument` on that version |
+| POST | `/api/v1/documents/{id}/versions/{versionId}/acknowledgement` | Acknowledge; 201 `{documentId, versionId, versionLabel, openedAt, acknowledgedAt}`; 409 `not_opened`, 409 `already_acknowledged`, 422 `acknowledgement_not_requested` | `ReadDocument` on that version |
+| GET | `/api/v1/documents/{id}/versions/{versionId}/acknowledgement` | `{versionId, versionLabel, requested, opened, openedAt, acknowledgedAt}` for the caller | `ReadDocument` on that version |
+
+Version views additionally carry `publishedAt`.

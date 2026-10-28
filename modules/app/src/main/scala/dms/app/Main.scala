@@ -3,7 +3,7 @@ package dms.app
 import dms.audit.core.{AuditTrailLive, TsaTrust}
 import dms.authz.{Authorizer, RoleAssignments}
 import dms.db.Db
-import dms.documents.core.{DocumentClassService, DocumentService}
+import dms.documents.core.{AcknowledgementService, DocumentClassService, DocumentService}
 import dms.identity.{Authenticator, TenantDirectory, TokenVerifier}
 import dms.integration.partners.PartnerDirectories
 import dms.rendering.core.{VeraPdfValidator, WeasyPrintRenderer}
@@ -26,7 +26,7 @@ object Main extends ZIOAppDefault:
       Runtime.setConfigProvider(TypesafeConfigProvider.fromResourcePath())
 
   private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
-    PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env
+    PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -37,6 +37,7 @@ object Main extends ZIOAppDefault:
       TemplateImpactApi.endpoints.map(_.widen[Env]) ++
       DocumentApi.endpoints.map(_.widen[Env]) ++
       RenditionApi.endpoints.map(_.widen[Env]) ++
+      AcknowledgementApi.endpoints.map(_.widen[Env]) ++
       WorkflowApi.endpoints.map(_.widen[Env]) ++
       DeputyshipApi.endpoints.map(_.widen[Env]) ++
       PartnerApi.endpoints.map(_.widen[Env])
@@ -75,6 +76,7 @@ object Main extends ZIOAppDefault:
           TemplateService.layer,
           DocumentTemplates.layer,
           DocumentService.configured(cfg.documents.settings),
+          AcknowledgementService.layer,
           FlowableEngine.layer,
           WorkflowDocuments.layer,
           RoleDirectory.layer,

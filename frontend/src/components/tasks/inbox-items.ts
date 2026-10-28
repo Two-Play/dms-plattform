@@ -58,7 +58,7 @@ export function acknowledgementItem(ack: Acknowledgement): InboxItem {
     title: ack.title,
     classPath: ack.classPath ?? [],
     versionLabel: ack.versionLabel,
-    createdAt: ack.publishedAt,
+    createdAt: ack.publishedAt ?? ack.validFrom ?? '',
     dueAt: undefined,
   }
 }
