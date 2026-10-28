@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import type { ReviewTask } from '@/api/reviews'
 import type { WorkflowTask } from '@/api/workflow'
-import { acknowledgementItem, isOverdue, sortInbox, workflowItem } from './inbox-items'
+import { acknowledgementItem, isOverdue, reviewItem, sortInbox, workflowItem } from './inbox-items'
 
 const now = Date.parse('2026-10-28T12:00:00Z')
 
@@ -71,5 +72,31 @@ describe('inbox items', () => {
       kind: 'Review',
     })
     expect(workflowItem({ ...t, versionId: 'other' }, doc).versionLabel).toBeUndefined()
+  })
+
+  it('turns a review task into an item whose deadline is the review date', () => {
+    const review: ReviewTask = {
+      id: 'r1',
+      documentId: 'd-r',
+      title: 'Handbook',
+      classPath: ['policy'],
+      versionId: 'v-r',
+      versionLabel: '3.0',
+      versionStatus: 'ReviewDue',
+      status: 'Open',
+      dueOn: '2026-10-28',
+      createdAt: '2026-08-29T22:00:00Z',
+    }
+    const item = reviewItem(review)
+    expect(item).toMatchObject({
+      key: 'review:r1',
+      kind: 'ReviewDate',
+      documentId: 'd-r',
+      title: 'Handbook',
+      versionLabel: '3.0',
+      dueAt: '2026-10-28T00:00:00Z',
+    })
+    expect(isOverdue(item, now)).toBe(true)
+    expect(isOverdue(reviewItem({ ...review, dueOn: '2026-12-01' }), now)).toBe(false)
   })
 })

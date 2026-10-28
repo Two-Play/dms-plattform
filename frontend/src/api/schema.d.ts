@@ -134,7 +134,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Creates the next profile version of a document class. Existing documents keep their profile version. */
+    /** @description Creates the next profile version of a document class. Existing documents keep their profile version; the review settings of the latest version apply to all documents of the class. */
     post: operations['postApiV1AdminDocument-classesIdVersions']
     delete?: never
     options?: never
@@ -623,6 +623,74 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/reviews': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Review tasks of the documents the caller is the owner of. open: tasks of valid versions waiting for a decision, the earliest review date first; done: decided and closed tasks, the latest first. At most 200. */
+    get: operations['getApiV1Reviews']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/reviews/{taskId}/recertify': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Recertifies the version without a change: it keeps its content and number and gets a new review date (`nextReviewOn`, or today plus the class's interval; 422 if neither or not after today); a version in ReviewDue is Published again. Recorded in the audit trail. 403 unless the caller is the document's owner, 409 if the task was decided already or the version is not valid any more. */
+    post: operations['postApiV1ReviewsTaskidRecertify']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/reviews/{taskId}/revise': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Revision required: starts the next version as a draft from the valid version (Major by default; Minor needs a reason) or links the version already open; the valid version stays in force until the new one is published. `newVersionId` names the draft. 403 unless the caller is the document's owner and may edit drafts, 409 if the task was decided already or an approved version waits for its valid-from date. */
+    post: operations['postApiV1ReviewsTaskidRevise']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/reviews/{taskId}/withdraw': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Not needed any more: the version goes out of force (Withdrawn) without a successor; other versions of the document (e.g. an approved one waiting for its valid-from date) are not affected. The reason is required (422). 403 unless the caller is the document's owner and may withdraw, 409 if the task was decided already or the version is not valid any more. */
+    post: operations['postApiV1ReviewsTaskidWithdraw']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/workflow/tasks': {
     parameters: {
       query?: never
@@ -1079,6 +1147,7 @@ export interface components {
       fields?: components['schemas']['FieldBindingView'][]
       /** Format: int32 */
       parentVersion?: number
+      review?: components['schemas']['ReviewSettingsChange']
     }
     /** ChangeFieldDefinition */
     ChangeFieldDefinition: {
@@ -1232,6 +1301,7 @@ export interface components {
       label: string
       description?: string
       fields?: components['schemas']['FieldBindingView'][]
+      review?: components['schemas']['ReviewSettingsChange']
     }
     /** CreateFieldDefinition */
     CreateFieldDefinition: {
@@ -1366,6 +1436,7 @@ export interface components {
       label: string
       description?: string
       fields?: components['schemas']['FieldBindingView'][]
+      review: components['schemas']['ReviewSettingsView']
     }
     /** DocumentRef */
     DocumentRef: {
@@ -1930,6 +2001,12 @@ export interface components {
       classPath?: string[]
       fields?: components['schemas']['ProfileFieldView'][]
     }
+    /** RecertifyVersion */
+    RecertifyVersion: {
+      /** Format: date */
+      nextReviewOn?: string
+      comment?: string
+    }
     /** ReferenceField */
     ReferenceField: {
       key: string
@@ -2014,6 +2091,53 @@ export interface components {
       title?: string
       locked: boolean
       blocks?: components['schemas']['ResolvedBlock'][]
+    }
+    /** ReviewSettingsChange */
+    ReviewSettingsChange: {
+      /** Format: int32 */
+      intervalMonths?: number
+      /** Format: int32 */
+      leadDays?: number
+    }
+    /** ReviewSettingsView */
+    ReviewSettingsView: {
+      /** Format: int32 */
+      intervalMonths?: number
+      /** Format: int32 */
+      leadDays: number
+    }
+    /** ReviewTaskView */
+    ReviewTaskView: {
+      /** Format: uuid */
+      id: string
+      /** Format: uuid */
+      documentId: string
+      title: string
+      classPath?: string[]
+      /** Format: uuid */
+      versionId: string
+      versionLabel: string
+      versionStatus: string
+      status: string
+      /** Format: date */
+      dueOn: string
+      /** Format: date-time */
+      createdAt: string
+      /** Format: date-time */
+      decidedAt?: string
+      decidedBy?: string
+      /** Format: date */
+      nextDueOn?: string
+      /** Format: uuid */
+      newVersionId?: string
+      comment?: string
+      /** Format: int32 */
+      reviewIntervalMonths?: number
+    }
+    /** ReviseVersion */
+    ReviseVersion: {
+      changeKind?: string
+      reason?: string
     }
     /** RoleAssignmentView */
     RoleAssignmentView: {
@@ -2563,6 +2687,10 @@ export interface components {
       /** Format: date-time */
       invalidatedAt?: string
       actingFor?: string
+    }
+    /** WithdrawVersion */
+    WithdrawVersion: {
+      reason: string
     }
     /** WorkflowCaseView */
     WorkflowCaseView: {
@@ -4274,6 +4402,165 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1Reviews: {
+    parameters: {
+      query?: {
+        /** @description open (default): to decide; done: decided or closed */
+        status?: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReviewTaskView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1ReviewsTaskidRecertify: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Review task id */
+        taskId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RecertifyVersion']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReviewTaskView']
+        }
+      }
+      /** @description Invalid value for: path parameter taskId, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1ReviewsTaskidRevise: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Review task id */
+        taskId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReviseVersion']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReviewTaskView']
+        }
+      }
+      /** @description Invalid value for: path parameter taskId, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1ReviewsTaskidWithdraw: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Review task id */
+        taskId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WithdrawVersion']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReviewTaskView']
+        }
+      }
+      /** @description Invalid value for: path parameter taskId, Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown

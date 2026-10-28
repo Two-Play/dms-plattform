@@ -143,6 +143,14 @@ object Policy:
           grantIf(has(Owner) || has(Approver), "withdrawing requires the owner or approver role")
         )
 
+      case Recertify =>
+        requireStatus(Published, ReviewDue)(
+          grantIf(
+            has(Owner) && resource.ownerId.contains(subject.userId),
+            "recertification is done by the document's owner"
+          )
+        )
+
       case EditTemplates =>
         grantIf(has(TemplateDesigner), "editing templates requires the template designer role")
 

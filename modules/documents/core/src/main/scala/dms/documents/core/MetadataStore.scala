@@ -2,6 +2,7 @@ package dms.documents.core
 
 import com.augustnagro.magnum.*
 import dms.db.Jsonb
+import dms.documents.ReviewPolicy
 import dms.documents.metadata.*
 import dms.documents.core.MetadataJson.given
 import zio.json.*
@@ -54,11 +55,13 @@ private[core] object MetadataStore:
       FieldOrigin.Tenant
     )
 
-  private type ClassRow = (UUID, String, Int, Option[UUID], Option[Int], String, Option[String], Jsonb)
+  private type ClassRow =
+    (UUID, String, Int, Option[UUID], Option[Int], String, Option[String], Jsonb, Option[Int], Int)
 
   /** The latest version of every class. */
   def latestClasses()(using DbTx): List[DocumentClassVersion] =
-    sql"""select distinct on (c.key) c.id, c.key, v.version, c.parent_id, v.parent_version, v.label, v.description, v.fields
+    sql"""select distinct on (c.key) c.id, c.key, v.version, c.parent_id, v.parent_version, v.label, v.description, v.fields,
+                 v.review_interval_months, v.review_lead_days
           from dms.document_class_version v join dms.document_class c on c.id = v.class_id
           order by c.key, v.version desc"""
       .query[ClassRow]
@@ -67,12 +70,14 @@ private[core] object MetadataStore:
       .toList
 
   def classVersions(id: DocumentClassId)(using DbTx): List[DocumentClassVersion] =
-    sql"""select c.id, c.key, v.version, c.parent_id, v.parent_version, v.label, v.description, v.fields
+    sql"""select c.id, c.key, v.version, c.parent_id, v.parent_version, v.label, v.description, v.fields,
+                 v.review_interval_months, v.review_lead_days
           from dms.document_class_version v join dms.document_class c on c.id = v.class_id
           where c.id = ${id.value} order by v.version""".query[ClassRow].run().map(toClass).toList
 
   def classVersion(id: DocumentClassId, version: Int)(using DbTx): Option[DocumentClassVersion] =
-    sql"""select c.id, c.key, v.version, c.parent_id, v.parent_version, v.label, v.description, v.fields
+    sql"""select c.id, c.key, v.version, c.parent_id, v.parent_version, v.label, v.description, v.fields,
+                 v.review_interval_months, v.review_lead_days
           from dms.document_class_version v join dms.document_class c on c.id = v.class_id
           where c.id = ${id.value} and v.version = $version"""
       .query[ClassRow]
@@ -81,7 +86,8 @@ private[core] object MetadataStore:
       .map(toClass)
 
   def latestClassVersion(id: DocumentClassId)(using DbTx): Option[DocumentClassVersion] =
-    sql"""select c.id, c.key, v.version, c.parent_id, v.parent_version, v.label, v.description, v.fields
+    sql"""select c.id, c.key, v.version, c.parent_id, v.parent_version, v.label, v.description, v.fields,
+                 v.review_interval_months, v.review_lead_days
           from dms.document_class_version v join dms.document_class c on c.id = v.class_id
           where c.id = ${id.value} order by v.version desc limit 1"""
       .query[ClassRow]
@@ -100,12 +106,14 @@ private[core] object MetadataStore:
 
   def insertClassVersion(cls: DocumentClassVersion, createdBy: String)(using DbTx): Int =
     sql"""insert into dms.document_class_version
-            (tenant_id, class_id, version, parent_version, label, description, fields, created_by)
+            (tenant_id, class_id, version, parent_version, label, description, fields, review_interval_months,
+             review_lead_days, created_by)
           values (dms.current_tenant(), ${cls.classId.value}, ${cls.version}, ${cls.parent.map(_.version)},
-                  ${cls.label}, ${cls.description}, ${Jsonb(cls.fields.toJson)}, $createdBy)""".update.run()
+                  ${cls.label}, ${cls.description}, ${Jsonb(cls.fields.toJson)}, ${cls.review.intervalMonths},
+                  ${cls.review.leadDays}, $createdBy)""".update.run()
 
   private def toClass(row: ClassRow): DocumentClassVersion =
-    val (id, key, version, parentId, parentVersion, label, description, fields) = row
+    val (id, key, version, parentId, parentVersion, label, description, fields, interval, leadDays) = row
     DocumentClassVersion(
       DocumentClassId(id),
       ClassKey.unsafe(key),
@@ -113,7 +121,8 @@ private[core] object MetadataStore:
       parentId.zip(parentVersion).map((p, v) => ClassRef(DocumentClassId(p), v)),
       label,
       description,
-      decode[List[FieldBinding]](fields, s"fields of class $key version $version")
+      decode[List[FieldBinding]](fields, s"fields of class $key version $version"),
+      ReviewPolicy(interval, leadDays)
     )
 
   private def decode[A: JsonDecoder](json: Jsonb, what: String): A =

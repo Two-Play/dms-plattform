@@ -33,9 +33,12 @@ object Lifecycle:
     (ReviewDue, Recertify)        -> Published,
     (Published, Supersede)        -> Superseded,
     (ReviewDue, Supersede)        -> Superseded,
-    (Superseded, Archive)         -> Archived,
-    (Withdrawn, Archive)          -> Archived,
-    (Archived, Destroy)           -> Destroyed
+    // Out of force without a successor, e.g. after a periodic review (business concept 6.2, US-07.1).
+    (Published, Withdraw) -> Withdrawn,
+    (ReviewDue, Withdraw) -> Withdrawn,
+    (Superseded, Archive) -> Archived,
+    (Withdrawn, Archive)  -> Archived,
+    (Archived, Destroy)   -> Destroyed
   )
 
   def allowedEvents(from: DocumentStatus): Set[LifecycleEvent] =

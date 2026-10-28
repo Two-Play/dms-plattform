@@ -1,6 +1,6 @@
 package dms.documents.metadata
 
-import dms.documents.DocumentStatus
+import dms.documents.{DocumentStatus, ReviewPolicy}
 
 import java.time.LocalDate
 import java.util.UUID
@@ -112,6 +112,10 @@ final case class ClassRef(id: DocumentClassId, version: Int)
 
 /** One immutable version of a document class: its own field bindings and the pinned parent version. The
   * effective profile including inherited fields is computed by [[Profiles.resolve]].
+  *
+  * @param review
+  *   periodic review settings (US-07.1); the latest class version's settings apply to all documents of the
+  *   class
   */
 final case class DocumentClassVersion(
     classId: DocumentClassId,
@@ -120,7 +124,8 @@ final case class DocumentClassVersion(
     parent: Option[ClassRef],
     label: String,
     description: Option[String],
-    fields: List[FieldBinding]
+    fields: List[FieldBinding],
+    review: ReviewPolicy = ReviewPolicy.default
 ):
   def ref: ClassRef = ClassRef(classId, version)
 

@@ -2,7 +2,7 @@ package dms.app
 
 import dms.authz.{AccessDenied, Action, Authorizer, ConfigurationArea, Resource}
 import dms.db.{Db, DbError}
-import dms.documents.DocumentStatus
+import dms.documents.{DocumentStatus, ReviewPolicy}
 import dms.documents.core.{ClassDraft, DocumentClassService, FieldDraft, MetadataError}
 import dms.documents.core.MetadataJson.given
 import dms.documents.metadata.*
@@ -74,6 +74,26 @@ final case class FieldBindingView(key: String, version: Int, requiredIn: List[Do
     derives JsonCodec,
       Schema
 
+/** Periodic review settings of a class (US-07.1). */
+final case class ReviewSettingsView(
+    /** Review cycle in months (1 to 120): a version is reviewed this long after it became valid. Empty: no
+      * periodic review unless a document sets its `nextReview` date.
+      */
+    intervalMonths: Option[Int],
+    /** Days before the review date the owner gets the review task (0 to 365). */
+    leadDays: Int
+) derives JsonCodec,
+      Schema
+
+/** Requested review settings; they replace the previous ones as a whole. */
+final case class ReviewSettingsChange(
+    /** Review cycle in months (1 to 120); omitted: no periodic review unless a document sets `nextReview`. */
+    intervalMonths: Option[Int],
+    /** Days before the review date the owner gets the review task (0 to 365); default 60. */
+    leadDays: Option[Int]
+) derives JsonCodec,
+      Schema
+
 final case class DocumentClassView(
     id: UUID,
     key: String,
@@ -82,7 +102,8 @@ final case class DocumentClassView(
     parentVersion: Option[Int],
     label: String,
     description: Option[String],
-    fields: List[FieldBindingView]
+    fields: List[FieldBindingView],
+    review: ReviewSettingsView
 ) derives JsonCodec,
       Schema
 
@@ -93,7 +114,9 @@ final case class CreateDocumentClass(
     parentVersion: Option[Int],
     label: String,
     description: Option[String],
-    fields: List[FieldBindingView]
+    fields: List[FieldBindingView],
+    /** Periodic review settings; default: no interval, 60 days lead time. */
+    review: Option[ReviewSettingsChange]
 ) derives JsonCodec,
       Schema
 
@@ -101,7 +124,9 @@ final case class ChangeDocumentClass(
     label: String,
     description: Option[String],
     fields: List[FieldBindingView],
-    parentVersion: Option[Int]
+    parentVersion: Option[Int],
+    /** Periodic review settings; omitted: those of the previous version. */
+    review: Option[ReviewSettingsChange]
 ) derives JsonCodec,
       Schema
 
@@ -254,7 +279,13 @@ object DocumentClassApi:
                 _.createClass(
                   req.key,
                   req.parentId.map(DocumentClassId(_)),
-                  ClassDraft(req.label, req.description, fields, req.parentVersion),
+                  ClassDraft(
+                    req.label,
+                    req.description,
+                    fields,
+                    req.parentVersion,
+                    req.review.map(reviewPolicy)
+                  ),
                   p.userId
                 )
               )
@@ -268,7 +299,8 @@ object DocumentClassApi:
       .in(jsonBody[ChangeDocumentClass])
       .out(statusCode(StatusCode.Created).and(jsonBody[DocumentClassView]))
       .description(
-        "Creates the next profile version of a document class. Existing documents keep their profile version."
+        "Creates the next profile version of a document class. Existing documents keep their profile version; " +
+          "the review settings of the latest version apply to all documents of the class."
       )
       .tag("Configuration")
       .serverLogic(p =>
@@ -278,7 +310,13 @@ object DocumentClassApi:
               configure(p)(
                 _.newClassVersion(
                   DocumentClassId(id),
-                  ClassDraft(req.label, req.description, fields, req.parentVersion),
+                  ClassDraft(
+                    req.label,
+                    req.description,
+                    fields,
+                    req.parentVersion,
+                    req.review.map(reviewPolicy)
+                  ),
                   p.userId
                 )
               )
@@ -414,8 +452,12 @@ object DocumentClassApi:
       c.parent.map(_.version),
       c.label,
       c.description,
-      c.fields.map(b => FieldBindingView(b.key.value, b.version, statuses(b.requiredIn)))
+      c.fields.map(b => FieldBindingView(b.key.value, b.version, statuses(b.requiredIn))),
+      ReviewSettingsView(c.review.intervalMonths, c.review.leadDays)
     )
+
+  private def reviewPolicy(change: ReviewSettingsChange): ReviewPolicy =
+    ReviewPolicy(change.intervalMonths, change.leadDays.getOrElse(ReviewPolicy.DefaultLeadDays))
 
   private def profileView(p: MetadataProfile): ProfileView =
     ProfileView(

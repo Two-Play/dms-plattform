@@ -361,13 +361,15 @@ private[core] object DocumentStore:
       validFrom: Option[LocalDate],
       publishedAt: OffsetDateTime,
       successorValidFrom: Option[LocalDate],
-      successorPublishedAt: Option[OffsetDateTime]
+      successorPublishedAt: Option[OffsetDateTime],
+      withdrawnAt: Option[OffsetDateTime]
   ) derives DbCodec
 
   /** Candidates for the versions in force at `at`: published before `at` and not replaced by a successor that
     * was published before `at` and whose valid-from date lies more than a day before `at` (any time zone).
     * These are necessary conditions only; the exact period is decided with [[Validity]] by the caller, so
-    * that the rule exists once. Destroyed versions and versions that were never published are left out.
+    * that the rule exists once. Destroyed versions and versions that were never published are left out; a
+    * version withdrawn while valid (US-07.1) counts until its withdrawal.
     */
   def validityCandidates(at: Instant)(using DbTx): List[ValidityRow] =
     val time     = OffsetDateTime.ofInstant(at, ZoneOffset.UTC)
@@ -375,14 +377,15 @@ private[core] object DocumentStore:
     sql"""select d.id, d.class_id, d.class_version, d.title, d.owner_id, d.author_id, d.template_id,
                  d.template_version, d.created_at, v.id, v.major, v.minor, v.status, v.scope, v.field_values,
                  v.created_by, v.released_by, v.released_at, v.valid_from, v.published_at, s.valid_from,
-                 s.published_at
+                 s.published_at, v.withdrawn_at
           from dms.document_version v
           join dms.document d on d.id = v.document_id
           left join dms.document_version s on s.id = v.superseded_by
-          where v.status in ('Published', 'ReviewDue', 'Superseded', 'Archived')
+          where v.status in ('Published', 'ReviewDue', 'Superseded', 'Withdrawn', 'Archived')
             and v.published_at is not null
             and v.published_at <= $time
             and (s.id is null or s.published_at > $time or s.valid_from >= $dayFloor)
+            and (v.withdrawn_at is null or v.withdrawn_at > $time)
           order by d.title, d.id, v.scope, v.major, v.minor"""
       .query[ValidityRow]
       .run()

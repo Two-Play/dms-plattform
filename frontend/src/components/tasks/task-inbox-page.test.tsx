@@ -9,6 +9,7 @@ import type { ApiClient } from '@/api/client'
 import { ApiClientProvider } from '@/api/context'
 import type { Me } from '@/api/me'
 import type { DocumentView } from '@/api/partners'
+import type { ReviewTask } from '@/api/reviews'
 import type { WorkflowTask } from '@/api/workflow'
 import { loadPendingVote } from '@/auth/pending-vote'
 import { createAppRouter } from '@/router'
@@ -95,7 +96,22 @@ interface State {
   me: Me
   tasks: WorkflowTask[]
   acks: Acknowledgement[] | 'missing'
+  reviews: ReviewTask[]
   voteReplies: (() => Reply)[]
+}
+
+const review: ReviewTask = {
+  id: 'review-handbook',
+  documentId: handbookId,
+  title: 'Handbook',
+  classPath: ['policy'],
+  versionId: 'vh',
+  versionLabel: '3.0',
+  versionStatus: 'Published',
+  status: 'Open',
+  dueOn: '2099-01-01',
+  createdAt: '2026-10-27T23:00:00Z',
+  reviewIntervalMonths: 12,
 }
 
 let state: State
@@ -119,6 +135,7 @@ beforeEach(() => {
       }),
     ],
     acks: [],
+    reviews: [],
     voteReplies: [],
   }
 })
@@ -134,6 +151,8 @@ function renderAt(path: string) {
         return state.acks === 'missing'
           ? failed(404, { code: 'not_found', message: 'Not found' })
           : ok(state.acks)
+      case '/api/v1/reviews':
+        return ok(state.reviews)
       case '/api/v1/documents/{id}':
         return ok(documents[init?.params?.path?.id ?? ''])
       case '/api/v1/documents/{id}/workflow':
@@ -143,6 +162,20 @@ function renderAt(path: string) {
     }
   })
   const post = vi.fn((p: string, init?: { params?: { path?: Record<string, string> } }) => {
+    const decided = (status: string, extra: Partial<ReviewTask>) => {
+      const task = state.reviews.find((r) => r.id === init?.params?.path?.taskId)
+      state.reviews = state.reviews.filter((r) => r.id !== init?.params?.path?.taskId)
+      return ok({ ...task, status, ...extra })
+    }
+    if (p === '/api/v1/reviews/{taskId}/recertify') {
+      return decided('Recertified', { nextDueOn: '2100-01-01' })
+    }
+    if (p === '/api/v1/reviews/{taskId}/withdraw') {
+      return decided('Withdrawn', { versionStatus: 'Withdrawn' })
+    }
+    if (p === '/api/v1/reviews/{taskId}/revise') {
+      return decided('Revised', { newVersionId: 'vh-next' })
+    }
     if (p === '/api/v1/workflow/tasks/{taskId}/votes') {
       const reply = state.voteReplies.shift()
       if (reply) return reply()
@@ -341,6 +374,94 @@ describe('task inbox', () => {
 
     expect(await rows()).toHaveLength(2)
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows the periodic review of an owned document with recertify, revise and withdraw', async () => {
+    state.tasks = []
+    state.reviews = [
+      review,
+      { ...review, id: 'review-overdue', dueOn: '2020-01-01', title: 'Code' },
+    ]
+    renderAt('/tasks')
+
+    const list = await taskList()
+    const overdue = await within(list).findByRole('listitem', {
+      name: 'Periodic review: Code (overdue)',
+    })
+    const row = within(list).getByRole('listitem', { name: 'Periodic review: Handbook' })
+    expect(within(list).getAllByRole('listitem')[0]).toBe(overdue)
+    expect(within(overdue).getByText(/Review overdue since/)).toBeInTheDocument()
+    expect(within(row).getByText(/^Review due /)).toBeInTheDocument()
+    expect(within(row).getByText('version 3.0')).toBeInTheDocument()
+    expect(within(row).getByText('policy · valid, review ahead')).toBeInTheDocument()
+    for (const name of ['Recertify…', 'Revise', 'Withdraw…']) {
+      expect(within(row).getByRole('button', { name })).toBeInTheDocument()
+    }
+    expect(screen.getByText('2 open, 1 overdue')).toBeInTheDocument()
+  })
+
+  it('recertifies with the default date of the class interval or a chosen one', async () => {
+    state.tasks = []
+    state.reviews = [review]
+    const { post, user } = renderAt('/tasks')
+
+    const row = await screen.findByRole('listitem', { name: 'Periodic review: Handbook' })
+    await user.click(within(row).getByRole('button', { name: 'Recertify…' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(
+      within(dialog).getByText(/today plus the class's review interval \(12 months\)/),
+    ).toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText(/^Next review date/), '2100-01-01')
+    await user.type(within(dialog).getByLabelText(/^Note/), 'Still accurate')
+    await user.click(within(dialog).getByRole('button', { name: 'Recertify' }))
+
+    expect(await screen.findByText(/^Recertified: Handbook 3.0, next review/)).toBeInTheDocument()
+    expect(post).toHaveBeenCalledWith('/api/v1/reviews/{taskId}/recertify', {
+      params: { path: { taskId: 'review-handbook' } },
+      body: { nextReviewOn: '2100-01-01', comment: 'Still accurate' },
+    })
+    expect(await screen.findByText('Nothing to do right now.')).toBeInTheDocument()
+  })
+
+  it('withdraws only with a reason', async () => {
+    state.tasks = []
+    state.reviews = [review]
+    const { post, user } = renderAt('/tasks')
+
+    const row = await screen.findByRole('listitem', { name: 'Periodic review: Handbook' })
+    await user.click(within(row).getByRole('button', { name: 'Withdraw…' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Withdraw version' }))
+    expect(within(dialog).getByText('A reason is required.')).toBeInTheDocument()
+    expect(post).not.toHaveBeenCalled()
+
+    await user.type(within(dialog).getByLabelText(/^Reason/), 'Replaced by the group policy')
+    await user.click(within(dialog).getByRole('button', { name: 'Withdraw version' }))
+
+    expect(
+      await screen.findByText('Withdrawn: Handbook 3.0 is no longer in force.'),
+    ).toBeInTheDocument()
+    expect(post).toHaveBeenCalledWith('/api/v1/reviews/{taskId}/withdraw', {
+      params: { path: { taskId: 'review-handbook' } },
+      body: { reason: 'Replaced by the group policy' },
+    })
+  })
+
+  it('starts the revision and opens the document', async () => {
+    state.tasks = []
+    state.reviews = [review]
+    const { post, user, router } = renderAt('/tasks')
+
+    const row = await screen.findByRole('listitem', { name: 'Periodic review: Handbook' })
+    await user.click(within(row).getByRole('button', { name: 'Revise' }))
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/documents/${handbookId}`)
+    })
+    expect(post).toHaveBeenCalledWith('/api/v1/reviews/{taskId}/revise', {
+      params: { path: { taskId: 'review-handbook' } },
+      body: {},
+    })
   })
 
   it('lets a participant vote from the document page', async () => {

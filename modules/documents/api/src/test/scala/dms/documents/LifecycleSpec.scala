@@ -34,6 +34,15 @@ object LifecycleSpec extends ZIOSpecDefault:
     test("recertification returns to published") {
       assertTrue(Lifecycle.transition(ReviewDue, Recertify) == Right(Published))
     },
+    test("a valid version can be withdrawn without a successor; a superseded one cannot") {
+      assertTrue(
+        Lifecycle.transition(Published, Withdraw) == Right(Withdrawn),
+        Lifecycle.transition(ReviewDue, Withdraw) == Right(Withdrawn),
+        Lifecycle.transition(Superseded, Withdraw).isLeft,
+        Lifecycle.transition(Approved, Withdraw).isLeft,
+        Lifecycle.transition(Withdrawn, Archive) == Right(Archived)
+      )
+    },
     test("a legal hold prevents destruction") {
       assertTrue(
         Lifecycle.destroy(Archived, legalHold = true) == Left(LifecycleError.LegalHoldActive),

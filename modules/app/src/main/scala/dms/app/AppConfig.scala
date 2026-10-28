@@ -39,7 +39,8 @@ final case class WorkerSettings(name: Option[String])
   */
 final case class WorkflowSettings(reauthenticationSeconds: Int)
 
-/** Documents: editorial versions (DMS-46) and scheduled publication (DMS-45, ADR 0026).
+/** Documents: editorial versions (DMS-46), scheduled publication (DMS-45, ADR 0026) and periodic review
+  * (DMS-55, ADR 0030).
   *
   * @param editorialChangeThresholdPercent
   *   the automatic comparison warns when an editorial (minor) version changes more than this share of the
@@ -48,11 +49,14 @@ final case class WorkflowSettings(reauthenticationSeconds: Int)
   *   whether publishing a minor version asks readers for a new acknowledgement by default
   * @param publicationCheckSeconds
   *   how often approved versions are looked up to schedule their publication jobs
+  * @param reviewCheckSeconds
+  *   how often the periodic review check runs per tenant: review tasks, review dates reached (US-07.1)
   */
 final case class DocumentsConfig(
     editorialChangeThresholdPercent: Int,
     minorVersionsRequireAcknowledgement: Boolean,
-    publicationCheckSeconds: Int
+    publicationCheckSeconds: Int,
+    reviewCheckSeconds: Int
 ):
   def settings: DocumentSettings =
     DocumentSettings(editorialChangeThresholdPercent / 100.0, minorVersionsRequireAcknowledgement)
