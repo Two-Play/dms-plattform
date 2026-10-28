@@ -31,7 +31,7 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0015](0015-frontend-react-tailwind-shadcn.md) | Frontend with React, Tailwind CSS and shadcn/ui | Accepted | medium |
 | [0016](0016-object-storage.md) | Object storage: S3 API with Object Lock, SeaweedFS for local development and CI | Accepted | high |
 | [0017](0017-audit-hash-chain.md) | Audit trail as hash chain per tenant with RFC 3161 anchoring | Accepted | medium |
-| [0018](0018-authorization-policy.md) | Authorization as an in-app policy (RBAC + ABAC) | Accepted (addendum DMS-49) | medium |
+| [0018](0018-authorization-policy.md) | Authorization as an in-app policy (RBAC + ABAC) | Accepted (addenda DMS-49, DMS-51, DMS-101) | medium |
 | [0019](0019-metadata-model.md) | Metadata as JSONB values validated against versioned profiles | Accepted | medium |
 | [0020](0020-template-expressions-cel.md) | Template expressions in CEL (Common Expression Language) | Accepted | medium |
 | [0021](0021-document-versions.md) | Document versions as full version packages, frozen by database guards | Accepted | medium |
@@ -42,5 +42,6 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0026](0026-scheduled-publication-and-editorial-versions.md) | Scheduled publication by a job at tenant midnight; editorial versions through an owner-confirmation path | Accepted (addendum DMS-53) | medium |
 | [0027](0027-acknowledgements.md) | Acknowledgements: readers of a valid version acknowledge it after an explicit opening, insert-only | Accepted | medium |
 | [0028](0028-deputies-for-workflow-participants.md) | Deputies for workflow participants: time-limited deputyships resolved when tasks are read | Accepted | medium |
-| [0029](0029-search-index.md) | Search index: one OpenSearch index per tenant, permission filter in the query, outbox plus periodic synchronization | Accepted | low |
+| [0029](0029-search-index.md) | Search index: one OpenSearch index per tenant, permission filter in the query, outbox plus periodic synchronization | Accepted (addendum DMS-101) | low |
+| [0032](0032-access-groups-for-confidential-documents.md) | Access groups for confidential documents: managed per tenant in the platform, named in a core field | Accepted | medium |
 | [0033](0033-version-comparison.md) | Version comparison computed on request from the structured version packages; the change reason is the author's change summary | Accepted | high |

@@ -24,6 +24,7 @@ object ProfilesSpec extends ZIOSpecDefault:
           "validUntil",
           "nextReview",
           "confidentiality",
+          "allowedGroups",
           "language",
           "retentionRule",
           "containsPersonalData",

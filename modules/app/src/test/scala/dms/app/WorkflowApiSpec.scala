@@ -10,7 +10,7 @@ import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jose.{JOSEObjectType, JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
 import dms.audit.core.{AuditTrailLive, TsaTrust}
-import dms.authz.{Authorizer, Role, RoleAssignment, RoleAssignments}
+import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
 import dms.db.{Db, DbConfig, DbError, Migrations}
 import dms.documents.core.*
 import dms.documents.metadata.*
@@ -160,13 +160,14 @@ object WorkflowApiSpec extends ZIOSpecDefault:
   }
 
   private type Env =
-    DocumentApi.Env & WorkflowApi.Env & Deputyships & RoleAssignments & RenditionSource & AuditTrail
+    DocumentApi.Env & WorkflowApi.Env & Deputyships & RoleAssignments & Groups & RenditionSource & AuditTrail
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
       database,
       authenticator,
       RoleAssignments.postgres,
+      Groups.postgres,
       Authorizer.layer,
       ZLayer.succeed(TsaTrust(Nil)),
       AuditTrailLive.layer,
@@ -239,7 +240,8 @@ object WorkflowApiSpec extends ZIOSpecDefault:
   private val routes =
     ZioHttpInterpreter().toHttp(
       DocumentApi.endpoints.map(_.widen[Env]) ++ WorkflowApi.endpoints.map(_.widen[Env]) ++
-        DeputyshipApi.endpoints.map(_.widen[Env]) :+ MeApi.me.widen[Env]
+        DeputyshipApi.endpoints.map(_.widen[Env]) ++ GroupApi.endpoints.map(_.widen[Env]) :+
+        MeApi.me.widen[Env]
     )
 
   private def call(
@@ -847,6 +849,112 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         back.exists(_.id == task2.id),
         endAudit.exists(_._1 == approver.value),
         doc2 != doc
+      )
+    },
+    test("confidential documents: only members of the allowed groups take part, without one the task waits") {
+      // DMS-101: the review and approval of a confidential version without bypassing any database guard.
+      def confidential(groups: String*) =
+        values("Initech").replace("\"Internal\"", "\"Confidential\"") +
+          groups
+            .map(g => s"""{"type":"Text","value":"$g"}""")
+            .mkString(""","allowedGroups":{"type":"Many","values":[""", ",", "]}")
+      val group = "/api/v1/groups"
+      for
+        s        <- setup.await
+        byAuthor <- call(author, "POST", group, Some("""{"key":"legal-board","name":"Legal board"}"""))
+        badKey   <- call(admin, "POST", group, Some("""{"key":"Legal Board","name":"Legal board"}"""))
+        created  <- call(admin, "POST", group, Some("""{"key":"legal-board","name":"Legal board"}"""))
+        taken    <- call(admin, "POST", group, Some("""{"key":"legal-board","name":"Other"}"""))
+        joined   <- call(admin, "PUT", s"$group/legal-board/members/${reviewer1.value}")
+        listed   <- call(reader, "GET", group).map(as[List[GroupView]])
+        unknown  <- call(
+          author,
+          "POST",
+          "/api/v1/documents",
+          Some(
+            s"""{"templateId":"${s.released.value}","templateVersion":1,"title":"Contract Initech",
+               |"values":{${confidential("nope")}}}""".stripMargin
+          )
+        )
+        draft <- call(
+          author,
+          "POST",
+          "/api/v1/documents",
+          Some(
+            s"""{"templateId":"${s.released.value}","templateVersion":1,"title":"Contract Initech",
+               |"values":{${confidential()}}}""".stripMargin
+          )
+        ).map(as[DocumentView])
+        blocked <- submit(draft.id)
+        _       <- call(
+          author,
+          "PUT",
+          s"/api/v1/documents/${draft.id}/draft",
+          Some(s"""{"values":{${confidential("legal-board")}}}""")
+        ).map(r => assertTrue(r._1 == Status.Ok))
+        submitted  <- submit(draft.id)
+        started    <- cases(draft.id).map(_.head)
+        inbox1     <- call(reviewer1, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
+        inbox2     <- call(reviewer2, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
+        readByRev1 <- call(reviewer1, "GET", s"/api/v1/documents/${draft.id}")
+        readByRev2 <- call(reviewer2, "GET", s"/api/v1/documents/${draft.id}")
+        me1        <- call(reviewer1, "GET", "/api/v1/me").map(as[Me])
+        department = openTask(started, "department")
+        byOutsider  <- vote(reviewer2, department, "Approve")
+        afterReview <- vote(reviewer1, department, "Approve").map(as[WorkflowCaseView])
+        waiting = openTask(afterReview, "approver")
+        missing  <- outbox("workflow.participant-missing")
+        _        <- call(admin, "PUT", s"$group/legal-board/members/${approver.value}")
+        resolved <- call(admin, "POST", s"/api/v1/workflow/tasks/${waiting.id}/participants")
+          .map(as[TaskView])
+        voted     <- vote(approver, resolved, "Approve", signedInSecondsAgo = 30)
+        _         <- renderPending
+        approved  <- cases(draft.id).map(_.head)
+        members   <- call(admin, "GET", s"$group/legal-board/members").map(as[List[GroupMemberView]])
+        left      <- call(admin, "DELETE", s"$group/legal-board/members/${reviewer1.value}")
+        again     <- call(admin, "DELETE", s"$group/legal-board/members/${reviewer1.value}")
+        afterLeft <- call(reviewer1, "GET", s"/api/v1/documents/${draft.id}")
+        audit     <- auditActions("group.")
+      yield assertTrue(
+        byAuthor._1 == Status.Forbidden,
+        badKey._1 == Status.UnprocessableEntity,
+        created._1 == Status.Created,
+        taken._1 == Status.Conflict,
+        joined._1 == Status.Ok,
+        listed.contains(GroupView("legal-board", "Legal board")),
+        unknown._1 == Status.UnprocessableEntity,
+        error(unknown._2).exists(
+          _.issues.exists(_.exists(i => i.field == "allowedGroups" && i.code == "unknown_option"))
+        ),
+        blocked._1 == Status.UnprocessableEntity,
+        error(blocked._2).exists(
+          _.issues.exists(_.exists(i => i.field == "allowedGroups" && i.code == "missing_required"))
+        ),
+        submitted._1 == Status.Ok,
+        // reviewer-2 holds the role but is no member; the author is excluded by the four-eyes rule
+        department.candidates == List(reviewer1.value),
+        inbox1.exists(_.id == department.id),
+        !inbox2.exists(_.documentId == draft.id),
+        readByRev1._1 == Status.Ok,
+        readByRev2._1 == Status.Forbidden,
+        me1.groups == List("legal-board"),
+        byOutsider._1 == Status.Forbidden,
+        waiting.status == "Waiting",
+        waiting.candidates.isEmpty,
+        missing
+          .map(_.replace(" ", ""))
+          .exists(p => p.contains(waiting.id) && p.contains(""""confidential":true""")),
+        resolved.status == "Open",
+        resolved.candidates == List(approver.value),
+        voted._1 == Status.Ok,
+        approved.status == "Approved",
+        members.map(m => (m.userId, m.removedAt.isEmpty)).toSet ==
+          Set((reviewer1.value, true), (approver.value, true)),
+        left._1 == Status.Ok,
+        again._1 == Status.NotFound,
+        afterLeft._1 == Status.Forbidden,
+        audit.map(_._1) ==
+          List("group.created", "group.member-added", "group.member-added", "group.member-removed")
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

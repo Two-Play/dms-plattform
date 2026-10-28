@@ -6,9 +6,11 @@ import { useApiClient } from '@/api/context'
 import { documentQuery } from '@/api/documents'
 import { ApiRequestError } from '@/api/errors'
 import type { DocumentVersionView, DocumentView } from '@/api/partners'
-import { templateFieldsQuery, type DocumentLanguage } from '@/api/templates'
+import { useGroups } from '@/api/groups'
+import { templateFieldsQuery, type DocumentLanguage, type MetadataValue } from '@/api/templates'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { allowedGroupsOf, confidentialityOf, isRestrictedLevel } from './access-groups'
 import { displayValue } from './draft-values'
 import { LanguageSelect } from './document-workspace'
 import { DocumentEditor } from './new-document-page'
@@ -63,6 +65,36 @@ function VersionValues({ document }: { document: DocumentView }) {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+const levelLabels: Record<string, string> = {
+  Confidential: 'Confidential',
+  StrictlyConfidential: 'Strictly confidential',
+}
+
+/**
+ * Who may see a confidential version besides its author and owner (DMS-101): the names of its access groups,
+ * or a note that nobody else may until groups are named.
+ */
+export function AccessNote({ document }: { document: DocumentView }) {
+  const values: Record<string, MetadataValue | undefined> = Object.fromEntries(
+    Object.entries(document.current.values).map(([key, field]) => [key, field.value]),
+  )
+  const level = confidentialityOf(values)
+  const restricted = isRestrictedLevel(level)
+  const groups = useGroups(restricted)
+  if (!restricted || level === undefined) return null
+  const keys = allowedGroupsOf(values)
+  const names = new Map((groups.data ?? []).map((g) => [g.key, g.name]))
+  const listed = keys.map((k) => names.get(k) ?? k)
+  return (
+    <p className="text-sm" data-testid="access-note">
+      <span className="font-medium">{levelLabels[level] ?? level}:</span>{' '}
+      {listed.length > 0
+        ? `visible to the author, the owner and members of ${listed.join(', ')}.`
+        : 'visible to the author and the owner only; name the allowed groups before submitting.'}
+    </p>
   )
 }
 
@@ -122,6 +154,7 @@ export function DocumentPage({ documentId }: { documentId: string }) {
               </div>
             )}
           </div>
+          <AccessNote document={document.data} />
           {document.data.current.status === 'Draft' ? (
             <DocumentEditor
               // A new open version (e.g. after a return) starts a fresh form; saves keep the form as is.

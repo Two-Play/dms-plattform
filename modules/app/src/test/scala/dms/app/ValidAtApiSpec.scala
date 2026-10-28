@@ -11,7 +11,7 @@ import com.nimbusds.jose.{JOSEObjectType, JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
 import dms.audit.AuditTrail
 import dms.audit.core.{AuditTrailLive, TsaTrust}
-import dms.authz.{Authorizer, Role, RoleAssignment, RoleAssignments}
+import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
 import dms.db.{Db, DbConfig, DbError, Migrations}
 import dms.documents.core.*
 import dms.identity.*
@@ -119,6 +119,10 @@ object ValidAtApiSpec extends ZIOSpecDefault:
             _ <- RoleAssignments.Postgres.grant(auditor, RoleAssignment(Role.Auditor), admin)
             _ <- RoleAssignments.Postgres
               .grant(outsider, RoleAssignment(Role.Reader, documentClass = Some("contract")), admin)
+            // The reviewer and the approver may see the confidential board rules (DMS-101).
+            _   <- Groups.Postgres.create("board", "Board", admin)
+            _   <- Groups.Postgres.addMember("board", reviewer, admin)
+            _   <- Groups.Postgres.addMember("board", approver, admin)
             cls <- classes.createClass("policy", None, ClassDraft("Policy", None, Nil), admin)
             draft = TemplateDraft("Policy", None, cls.classId.value, 1, content)
             t <- templates.create(draft, designer)
@@ -153,6 +157,7 @@ object ValidAtApiSpec extends ZIOSpecDefault:
       database,
       authenticator,
       RoleAssignments.postgres,
+      Groups.postgres,
       Authorizer.layer,
       ZLayer.succeed(TsaTrust(Nil)),
       AuditTrailLive.layer,
@@ -267,7 +272,13 @@ object ValidAtApiSpec extends ZIOSpecDefault:
       _           <- runPublicationJobs
     yield ()
 
-  private def create(title: String): ZIO[Env, Any, DocumentView] =
+  /** Confidential values: only author, owner and the members of group `board` see the version. */
+  private val confidentialValues =
+    values
+      .replace("\"Internal\"", "\"Confidential\"")
+      .stripSuffix("}") + ""","allowedGroups":{"type":"Many","values":[{"type":"Text","value":"board"}]}}"""
+
+  private def create(title: String, values: String = values): ZIO[Env, Any, DocumentView] =
     for
       s       <- setup.await
       created <- call(
@@ -327,17 +338,8 @@ object ValidAtApiSpec extends ZIOSpecDefault:
       _ <- call(author, "POST", s"/api/v1/documents/${code.id}/versions", Some("""{"changeKind":"Major"}"""))
       _ <- approveAndPublish(code.id, deputy)
       formula <- create(formulaTitle)
-      board   <- create("Board rules")
-      // Confidential documents cannot pass a review without allowed groups, so the published version is made
-      // confidential afterwards (the guard that freezes it is bypassed only for this).
-      _ <- s.owner
-        .transactSystem(Db.sql {
-          val _ = sql"set local session_replication_role = replica".update.run()
-          sql"""update dms.document_version
-                set field_values = jsonb_set(field_values, '{confidentiality,value}',
-                                             '{"type":"Selection","code":"Confidential"}')
-                where document_id = ${board.id}""".update.run()
-        })
+      // Confidential from the start: reviewed and approved by members of its access group (DMS-101).
+      board <- create("Board rules", confidentialValues)
     yield Fixture(code.id, formula.id, board.id, first.current.id, beforeSwitch)
 
   def spec = suite("Validity history API")(

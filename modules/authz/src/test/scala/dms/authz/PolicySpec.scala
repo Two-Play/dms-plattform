@@ -163,7 +163,11 @@ object PolicySpec extends ZIOSpecDefault:
       assertTrue(
         !Policy.decide(reader, ReadPublished, confidential, now).isPermitted,
         Policy.decide(reader.copy(groups = Set("legal")), ReadPublished, confidential, now).isPermitted,
-        Policy.decide(reader, ReadPublished, confidential.copy(ownerId = Some(user)), now).isPermitted
+        Policy.decide(reader, ReadPublished, confidential.copy(ownerId = Some(user)), now).isPermitted,
+        // the confidentiality part alone, used to filter task inboxes (DMS-101)
+        !Policy.clearedFor(reader, confidential),
+        Policy.clearedFor(reader.copy(groups = Set("legal")), confidential),
+        Policy.clearedFor(reader, confidential.copy(confidentiality = Confidentiality.Internal))
       )
     },
     test("a template designer cannot release a template version they created or changed") {

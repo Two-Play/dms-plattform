@@ -11,7 +11,7 @@ import com.nimbusds.jose.{JOSEObjectType, JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
 import dms.audit.AuditTrail
 import dms.audit.core.{AuditTrailLive, TsaTrust}
-import dms.authz.{Authorizer, Role, RoleAssignment, RoleAssignments}
+import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
 import dms.db.{Db, DbConfig, DbError, Migrations}
 import dms.documents.core.*
 import dms.identity.*
@@ -147,6 +147,7 @@ object AcknowledgementApiSpec extends ZIOSpecDefault:
       database,
       authenticator,
       RoleAssignments.postgres,
+      Groups.postgres,
       Authorizer.layer,
       ZLayer.succeed(TsaTrust(Nil)),
       AuditTrailLive.layer,

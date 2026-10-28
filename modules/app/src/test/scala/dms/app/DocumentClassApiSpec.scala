@@ -10,7 +10,7 @@ import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jose.{JOSEObjectType, JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
 import dms.audit.*
-import dms.authz.{Authorizer, Role, RoleAssignment, RoleAssignments}
+import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
 import dms.db.{Db, DbConfig, DbError, Migrations}
 import dms.documents.core.DocumentClassService
 import dms.identity.*
@@ -100,6 +100,7 @@ object DocumentClassApiSpec extends ZIOSpecDefault:
       database,
       authenticator,
       RoleAssignments.postgres,
+      Groups.postgres,
       Authorizer.layer,
       audit,
       DocumentClassService.layer

@@ -1,11 +1,11 @@
 package dms.app
 
-import dms.authz.{AccessDenied, Action, Authorizer, DocumentResource, Policy, Resource, Subject}
+import dms.authz.{AccessDenied, Action, Authorizer, DocumentResource, Groups, Policy, Resource, Subject}
 import dms.db.{Db, DbError}
 import dms.documents.*
 import dms.documents.core.*
 import dms.documents.core.MetadataJson.given
-import dms.documents.metadata.{FieldIssue, MetadataProfile, MetadataValue}
+import dms.documents.metadata.{CoreFields, FieldIssue, IssueKind, MetadataProfile, MetadataValue}
 import dms.identity.{Authenticator, Principal}
 import dms.kernel.{DocumentId, TemplateId, UserId}
 import dms.templates.{DeviationChange, Inline, PathStep, SectionId, TemplateContent}
@@ -283,6 +283,7 @@ object DocumentApi:
               (_, profile) = context
               values       = req.values.map((k, v) => k -> FieldEntry(v, ValueOrigin.Manual))
               _       <- ctx.check(Action.CreateFromTemplate, creationResource(p, profile, req.values))
+              _       <- ctx.checkGroups(profile, req.values)
               created <- ctx.service.create(
                 NewDocument(TemplateId(req.templateId), req.templateVersion, req.title, values),
                 p.userId
@@ -384,6 +385,7 @@ object DocumentApi:
               details <- ctx.service.get(DocumentId(id))
               open    <- openVersion(details)
               _       <- ctx.check(Action.EditDraft, resource(p, details, open))
+              _       <- ctx.checkGroups(details.profile, req.values)
               entered = req.values.map((k, v) => k -> FieldEntry(v, ValueOrigin.Manual))
               updated <- ctx.service.updateDraft(
                 DocumentId(id),
@@ -561,6 +563,18 @@ object DocumentApi:
   ):
     def check(action: Action, resource: Resource): IO[AccessDenied, Unit] =
       authz.check(subject, action, resource).unit
+
+    /** Entered access groups (core field `allowedGroups`, ADR 0032) must exist in the tenant (422
+      * `unknown_option` otherwise); their format is checked with the profile.
+      */
+    def checkGroups(profile: MetadataProfile, values: Map[String, MetadataValue]): IO[DocumentError, Unit] =
+      val entered = DocumentResource.allowedGroups(values).filter(Groups.isValidKey)
+      authz.groups.existing(entered).mapError(DocumentError.Database(_)).flatMap { known =>
+        val label = profile.field(CoreFields.AllowedGroups).fold(CoreFields.AllowedGroups)(_.definition.label)
+        val issues = (entered -- known).toList.sorted
+          .map(key => FieldIssue(CoreFields.AllowedGroups, label, IssueKind.UnknownOption(key)))
+        ZIO.unless(issues.isEmpty)(ZIO.fail(DocumentError.InvalidValues(issues))).unit
+      }
 
     /** Whether the caller may do `action` on `resource`, without logging a denial: for filtering lists. */
     def allowed(action: Action, resource: Resource): UIO[Boolean] =

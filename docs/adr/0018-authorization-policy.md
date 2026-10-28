@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (addenda DMS-49, DMS-51) |
+| Status | Accepted (addenda DMS-49, DMS-51, DMS-101) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -56,3 +56,7 @@ A deputy (ADR 0028) acts within the principal's scope on the principal's workflo
 ## Addendum (DMS-51/52, 2026-10-28): search filter and allowed groups
 
 The search (ADR 0029) applies the read rules of `Policy` as a filter inside the OpenSearch query (`dms.search.core.AccessFilter`), built from the caller's role assignments at query time; the mapping is documented in ADR 0029 and tested against `Policy` for generated cases. `dms.authz.DocumentResource` builds the `Resource` of a document version for the document API and the search indexer alike. It now fills `allowedGroups` from the optional field `allowedGroups` of the version (before, it was always empty, so confidential versions were visible to author and owner only). New configuration area `Search` (rebuilding the index): `Configure` for tenant administrators.
+
+## Addendum (DMS-101, 2026-10-28): groups from the platform instead of ZITADEL project roles
+
+The sentence "ZITADEL project roles are used as groups for confidential documents" is replaced by ADR 0032: `Subject.groups` are the caller's current memberships in the tenant's access groups (`dms.access_group_member`), and a version names its groups in the core field `allowedGroups`. `Policy.clearedFor` exposes the confidentiality rule on its own (used to filter task inboxes); the decision rules are unchanged. New configuration area `Groups` (administering access groups): `Configure` for tenant administrators.

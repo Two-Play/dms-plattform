@@ -28,7 +28,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description The signed-in user, their tenant and their currently active business role assignments (roles and restrictions from the tenant's role administration) */
+    /** @description The signed-in user, their tenant, their currently active business role assignments (roles and restrictions from the tenant's role administration) and their access groups */
     get: operations['getApiV1Me']
     put?: never
     post?: never
@@ -630,7 +630,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description The open review and approval tasks of the caller, oldest first, including the tasks of people the caller currently stands in for as deputy (actingFor names them) */
+    /** @description The open review and approval tasks of the caller, oldest first, including the tasks of people the caller currently stands in for as deputy (actingFor names them). Tasks of versions the caller may no longer read (e.g. after leaving the access group of a confidential document) are left out. */
     get: operations['getApiV1WorkflowTasks']
     put?: never
     post?: never
@@ -808,6 +808,59 @@ export interface paths {
     /** @description Rebuilds the caller's tenant's search index from the database: fills a new index and switches to it in one step; searches keep working meanwhile. Requires the tenant administrator role. */
     post: operations['postApiV1AdminSearchRebuild']
     delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/groups': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The access groups of the tenant, sorted by key, e.g. to pick the allowed groups of a document */
+    get: operations['getApiV1Groups']
+    put?: never
+    /** @description Creates an access group (tenant administrators). The key must be lowercase letters, digits and hyphens (422); a taken key is a conflict (409). Groups are not deleted, since versions keep naming them. */
+    post: operations['postApiV1Groups']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/groups/{key}/members': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Members of an access group, current ones first, then ended ones (tenant administrators) */
+    get: operations['getApiV1GroupsKeyMembers']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/groups/{key}/members/{userId}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Adds a user to an access group (tenant administrators); idempotent. The user sees the confidential documents of the group from the next request on and takes part in their workflows from the next assignment of a task. Returns the members. */
+    put: operations['putApiV1GroupsKeyMembersUserid']
+    post?: never
+    /** @description Ends the membership of a user in an access group (tenant administrators); the row is kept for the history. 404 if the user is no current member. Returns the members. */
+    delete: operations['deleteApiV1GroupsKeyMembersUserid']
     options?: never
     head?: never
     patch?: never
@@ -1188,6 +1241,11 @@ export interface components {
       fieldType: components['schemas']['FieldType']
       multiple?: boolean
     }
+    /** CreateGroup */
+    CreateGroup: {
+      key: string
+      name: string
+    }
     /** Date */
     Date: {
       /** Format: date */
@@ -1487,6 +1545,21 @@ export interface components {
        */
       type: 'FormattingChanged'
     }
+    /** GroupMemberView */
+    GroupMemberView: {
+      userId: string
+      addedBy: string
+      /** Format: date-time */
+      addedAt: string
+      removedBy?: string
+      /** Format: date-time */
+      removedAt?: string
+    }
+    /** GroupView */
+    GroupView: {
+      key: string
+      name: string
+    }
     /** HeaderRowsChanged */
     HeaderRowsChanged: {
       /** Format: int32 */
@@ -1612,6 +1685,7 @@ export interface components {
       roles?: string[]
       assignments?: components['schemas']['RoleAssignmentView'][]
       projectRoles?: string[]
+      groups?: string[]
     }
     /** MetadataValue */
     MetadataValue:
@@ -4744,6 +4818,167 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['SearchRebuildView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1Groups: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['GroupView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1Groups: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateGroup']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['GroupView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1GroupsKeyMembers: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Group key */
+        key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['GroupMemberView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1GroupsKeyMembersUserid: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Group key */
+        key: string
+        /** @description ZITADEL user id */
+        userId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['GroupMemberView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  deleteApiV1GroupsKeyMembersUserid: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Group key */
+        key: string
+        /** @description ZITADEL user id */
+        userId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['GroupMemberView'][]
         }
       }
       default: {

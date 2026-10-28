@@ -5,7 +5,8 @@ Subcommands:
   tenant          ensure the tenant of the local ZITADEL organization (SQL as schema owner, idempotent)
   users           ensure the demo users in ZITADEL and their role assignments (idempotent)
   token USER      print an access token for a demo user (e.g. `author`)
-  seed --api URL  create demo field definitions, classes, workflows, templates and a draft through the API
+  seed --api URL  create demo field definitions, classes, workflows, templates, an access group and a draft
+                  through the API
   approve-tasks USER --api URL  approve all open workflow tasks of a demo user (until the UI can vote, DMS-91)
   search-rebuild --api URL      rebuild the tenant's search index from the database (DMS-51, idempotent)
   env-file PATH KEY=VALUE...   set keys in a dotenv file, keeping all other lines
@@ -52,6 +53,11 @@ USERS: dict[str, tuple[str, str, list[str]]] = {
     "approver": ("Paul", "Approver", ["Approver"]),
     "reader": ("Rudi", "Reader", ["Reader"]),
     "records": ("Rosa", "Records", ["RecordsManager", "Auditor"]),
+}
+
+# Demo access groups for confidential documents (DMS-101): key -> (name, member usernames).
+GROUPS: dict[str, tuple[str, list[str]]] = {
+    "management": ("Management", ["author", "reviewer", "approver"]),
 }
 
 
@@ -541,6 +547,21 @@ def ensure_workflows(admin: Api) -> None:
             print(f"  workflow {key}: created")
 
 
+def ensure_groups(admin: Api, users: dict[str, str]) -> None:
+    """Creates the demo access groups and adds their members; both calls are idempotent."""
+    existing = {g["key"] for g in admin("GET", "/api/v1/groups")}
+    for key, (name, members) in GROUPS.items():
+        if key in existing:
+            print(f"  group {key}: exists")
+        else:
+            admin("POST", "/api/v1/groups", {"key": key, "name": name})
+            print(f"  group {key}: created")
+        for username in members:
+            user_id = users[user_id_key(username)]
+            admin("PUT", f"/api/v1/groups/{key}/members/{urllib.parse.quote(user_id, safe='')}")
+        print(f"  group {key}: members {', '.join(members)}")
+
+
 def ensure_template(designer: Api, designer2: Api, spec: dict, cls: dict) -> dict:
     """Creates the template as `designer`, moves it to Testing and releases it as `designer2` (four eyes)."""
     latest = {v["name"]: v for v in designer("GET", "/api/v1/admin/templates")}.get(spec["name"])
@@ -602,6 +623,7 @@ def cmd_seed(api_base: str) -> None:
         versions = ensure_fields(admin)
         classes = ensure_classes(admin, versions)
         ensure_workflows(admin)
+        ensure_groups(admin, users)
         contract = ensure_template(designer, designer2, SERVICE_CONTRACT, classes["contract"])
         ensure_template(designer, designer2, POLICY, classes["policy"])
         if contract["status"] == "Released":

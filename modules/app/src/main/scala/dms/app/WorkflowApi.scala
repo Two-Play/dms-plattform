@@ -181,10 +181,16 @@ object WorkflowApi:
       .out(jsonBody[List[TaskView]])
       .description(
         "The open review and approval tasks of the caller, oldest first, including the tasks of people the " +
-          "caller currently stands in for as deputy (actingFor names them)"
+          "caller currently stands in for as deputy (actingFor names them). Tasks of versions the caller may no " +
+          "longer read (e.g. after leaving the access group of a confidential document) are left out."
       )
       .tag("Workflow")
-      .serverLogic(p => _ => inTransaction(p)(ctx => ctx.workflow.myTasks(p.userId).map(_.map(taskView))))
+      .serverLogic(p =>
+        _ =>
+          inTransaction(p)(ctx =>
+            ctx.workflow.myTasks(p.userId).flatMap(ZIO.filter(_)(ctx.mayRead)).map(_.map(taskView))
+          )
+      )
 
   val vote: ZServerEndpoint[Env, Any] =
     SecuredApi.stepUp.post
@@ -322,6 +328,18 @@ object WorkflowApi:
         resource: Resource
     ): IO[WorkflowError | AccessDenied, Unit] =
       Delegation.subject(authz, subject, tasks).flatMap(s => authz.check(s, action, resource).unit)
+
+    /** Whether the confidentiality of the version of `task` still lets the caller see it, e.g. they still
+      * belong to an access group of a confidential version (DMS-101).
+      */
+    def mayRead(task: WorkflowTask): IO[WorkflowError, Boolean] =
+      documents
+        .get(task.documentId)
+        .map(details =>
+          details.versions
+            .find(_.id == task.versionId)
+            .exists(v => Policy.clearedFor(subject, DocumentApi.resource(subject.tenantId, details, v)))
+        )
 
     def configure(p: Principal): IO[AccessDenied, Unit] =
       check(Action.Configure, Resource(p.tenantId, configurationArea = Some(ConfigurationArea.Workflows)))
