@@ -169,6 +169,28 @@ final case class DocumentView(
 ) derives JsonCodec,
       Schema
 
+/** A document in the document list with the version the caller sees (its open version if readable, otherwise
+  * its latest readable version).
+  */
+final case class DocumentSummaryView(
+    id: UUID,
+    title: String,
+    classPath: List[String],
+    templateId: UUID,
+    templateVersion: Int,
+    authorId: String,
+    ownerId: Option[String],
+    versionId: UUID,
+    /** `1.1-draft.3` while open, `1.1` from approval on. */
+    version: String,
+    /** DocumentStatus, e.g. Draft, InReview, Published. */
+    status: String,
+    updatedAt: Instant,
+    /** True if the caller created the document or the shown version. */
+    mine: Boolean
+) derives JsonCodec,
+      Schema
+
 /** Documents created from released templates (business concept 4.3) and their versions (5.1, 5.2).
   *
   * Creating requires `CreateFromTemplate` in the scope of the template's document class; reading requires
@@ -208,6 +230,42 @@ object DocumentApi:
               )
               (document, version) = created
             yield documentView(document, profile, version)
+          }
+      )
+
+  /** Largest page of the document list. */
+  val MaxListSize: Int = 200
+
+  val list: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(documents)
+      .in(
+        query[Option[Int]]("limit").description(
+          s"Most recently changed documents to look at, 1 to $MaxListSize; default 50"
+        )
+      )
+      .out(jsonBody[List[DocumentSummaryView]])
+      .description(
+        "The most recently changed documents the caller may read, each with its open version if readable " +
+          "(e.g. the caller's own drafts) or its latest readable version. Documents without a readable version " +
+          "are left out, so the list can be shorter than `limit`."
+      )
+      .tag("Documents")
+      .serverLogic(p =>
+        limit =>
+          inTransaction(p) { ctx =>
+            for
+              size <- ZIO
+                .succeed(limit.getOrElse(50))
+                .filterOrFail(l => l >= 1 && l <= MaxListSize)(
+                  DocumentError.Invalid(List(s"limit must be between 1 and $MaxListSize"))
+                )
+              recent   <- ctx.service.recent(size)
+              readable <- ZIO.foreach(recent)(details => ctx.visible(details).map(details -> _))
+            yield readable.collect { case (details, versions @ (_ :: _)) =>
+              val current = versions.find(v => Versioning.isOpen(v.status)).getOrElse(versions.last)
+              summaryView(details, current, p.userId)
+            }
           }
       )
 
@@ -373,7 +431,7 @@ object DocumentApi:
       )
 
   def endpoints: List[ZServerEndpoint[Env, Any]] =
-    List(create, get, versions, updateDraft, submit, requestDeviation, withdrawDeviation, deviations)
+    List(create, list, get, versions, updateDraft, submit, requestDeviation, withdrawDeviation, deviations)
 
   /** What a request may use inside its transaction. */
   private final class Context(
@@ -385,23 +443,37 @@ object DocumentApi:
     def check(action: Action, resource: Resource): IO[AccessDenied, Unit] =
       authz.check(subject, action, resource).unit
 
+    /** The versions the caller may read, possibly none. */
+    def visible(details: DocumentDetails): IO[WorkflowError, List[DocumentVersion]] =
+      visibleWith(details).map(_._1)
+
     /** The versions the caller may read; denied (and logged) if there is none. */
     def readable(details: DocumentDetails): IO[AccessDenied | WorkflowError, List[DocumentVersion]] =
       for
-        cases <- workflow.cases(details.document.id)
-        participants = participantsOf(cases)
-        now <- Clock.instant
-        visible = details.versions.filter(v =>
-          Policy
-            .decide(subject, Action.ReadDocument, resource(subject, details, v, participants), now)
-            .isPermitted
-        )
+        result <- visibleWith(details)
+        (visible, participants) = result
         _ <- ZIO.when(visible.isEmpty)(
           details.versions.lastOption.fold(ZIO.unit)(v =>
             check(Action.ReadDocument, resource(subject, details, v, participants))
           )
         )
       yield visible
+
+    private def visibleWith(
+        details: DocumentDetails
+    ): IO[WorkflowError, (List[DocumentVersion], Map[UUID, Set[UserId]])] =
+      for
+        cases <- workflow.cases(details.document.id)
+        participants = participantsOf(cases)
+        now <- Clock.instant
+      yield (
+        details.versions.filter(v =>
+          Policy
+            .decide(subject, Action.ReadDocument, resource(subject, details, v, participants), now)
+            .isPermitted
+        ),
+        participants
+      )
 
     /** `ReadDocument` on one version; the participants of its workflow (e.g. the extra review step) may read
       * it.
@@ -515,6 +587,23 @@ object DocumentApi:
       d.templateVersion,
       d.createdAt,
       versionView(current)
+    )
+
+  private def summaryView(details: DocumentDetails, v: DocumentVersion, caller: UserId): DocumentSummaryView =
+    val d = details.document
+    DocumentSummaryView(
+      d.id.value,
+      d.title,
+      details.profile.classPath.map(_.value),
+      d.templateId.value,
+      d.templateVersion,
+      d.authorId.value,
+      d.ownerId.map(_.value),
+      v.id,
+      v.label,
+      v.status.toString,
+      v.updatedAt,
+      d.authorId == caller || v.createdBy == caller
     )
 
   private[app] def versionView(v: DocumentVersion): DocumentVersionView =

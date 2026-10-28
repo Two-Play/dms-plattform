@@ -17,6 +17,7 @@ import { Route as AppAdminRouteImport } from './routes/_app/admin'
 import { Route as AppTasksRouteImport } from './routes/_app/tasks'
 import { Route as AppTemplatesRouteImport } from './routes/_app/templates'
 import { Route as AppDocumentsIndexRouteImport } from './routes/_app/documents/index'
+import { Route as AppDocumentsDocumentIdRouteImport } from './routes/_app/documents/$documentId'
 import { Route as AppDocumentsNewRouteImport } from './routes/_app/documents/new'
 
 const AppRoute = AppRouteImport.update({
@@ -58,6 +59,11 @@ const AppDocumentsIndexRoute = AppDocumentsIndexRouteImport.update({
   path: '/documents/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDocumentsDocumentIdRoute = AppDocumentsDocumentIdRouteImport.update({
+  id: '/documents/$documentId',
+  path: '/documents/$documentId',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDocumentsNewRoute = AppDocumentsNewRouteImport.update({
   id: '/documents/new',
   path: '/documents/new',
@@ -71,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AppAdminRoute
   '/tasks': typeof AppTasksRoute
   '/templates': typeof AppTemplatesRoute
+  '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/documents/new': typeof AppDocumentsNewRoute
   '/documents/': typeof AppDocumentsIndexRoute
 }
@@ -81,6 +88,7 @@ export interface FileRoutesByTo {
   '/tasks': typeof AppTasksRoute
   '/templates': typeof AppTemplatesRoute
   '/': typeof AppIndexRoute
+  '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/documents/new': typeof AppDocumentsNewRoute
   '/documents': typeof AppDocumentsIndexRoute
 }
@@ -93,6 +101,7 @@ export interface FileRoutesById {
   '/_app/tasks': typeof AppTasksRoute
   '/_app/templates': typeof AppTemplatesRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/_app/documents/new': typeof AppDocumentsNewRoute
   '/_app/documents/': typeof AppDocumentsIndexRoute
 }
@@ -105,6 +114,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/tasks'
     | '/templates'
+    | '/documents/$documentId'
     | '/documents/new'
     | '/documents/'
   fileRoutesByTo: FileRoutesByTo
@@ -115,6 +125,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/templates'
     | '/'
+    | '/documents/$documentId'
     | '/documents/new'
     | '/documents'
   id:
@@ -126,6 +137,7 @@ export interface FileRouteTypes {
     | '/_app/tasks'
     | '/_app/templates'
     | '/_app/'
+    | '/_app/documents/$documentId'
     | '/_app/documents/new'
     | '/_app/documents/'
   fileRoutesById: FileRoutesById
@@ -194,6 +206,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDocumentsIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/documents/$documentId': {
+      id: '/_app/documents/$documentId'
+      path: '/documents/$documentId'
+      fullPath: '/documents/$documentId'
+      preLoaderRoute: typeof AppDocumentsDocumentIdRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/documents/new': {
       id: '/_app/documents/new'
       path: '/documents/new'
@@ -209,6 +228,7 @@ interface AppRouteChildren {
   AppTasksRoute: typeof AppTasksRoute
   AppTemplatesRoute: typeof AppTemplatesRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppDocumentsDocumentIdRoute: typeof AppDocumentsDocumentIdRoute
   AppDocumentsNewRoute: typeof AppDocumentsNewRoute
   AppDocumentsIndexRoute: typeof AppDocumentsIndexRoute
 }
@@ -218,6 +238,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppTasksRoute: AppTasksRoute,
   AppTemplatesRoute: AppTemplatesRoute,
   AppIndexRoute: AppIndexRoute,
+  AppDocumentsDocumentIdRoute: AppDocumentsDocumentIdRoute,
   AppDocumentsNewRoute: AppDocumentsNewRoute,
   AppDocumentsIndexRoute: AppDocumentsIndexRoute,
 }

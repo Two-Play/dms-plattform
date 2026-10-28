@@ -205,6 +205,18 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
       profile  <- profile(document.classId, document.classVersion)
     yield DocumentDetails(document, versions, profile)
 
+  /** The most recently changed documents with all their versions; the caller filters what may be read. */
+  def recent(limit: Int): IO[DocumentError, List[DocumentDetails]] =
+    for
+      documents <- sql(DocumentStore.recentDocuments(limit))
+      details   <- ZIO.foreach(documents)(d =>
+        for
+          versions <- sql(DocumentStore.versions(d.id, templates))
+          profile  <- profile(d.classId, d.classVersion)
+        yield DocumentDetails(d, versions, profile)
+      )
+    yield details
+
   /** Saves a changed draft as its next working state. Locked sections can only keep the template's text
     * unless a deviation request for the section is recorded (edit rules of the template); the computed fields
     * are those of the template. The deviation report is recomputed and stored with the draft.

@@ -72,6 +72,16 @@ private[core] object DocumentStore:
     sql"""select id, class_id, class_version, title, owner_id, author_id, template_id, template_version, created_at
           from dms.document where id = ${id.value}""".query[DocumentRow].run().headOption.map(toDocument)
 
+  /** The documents of the tenant, the most recently changed first (by their latest version). */
+  def recentDocuments(limit: Int)(using DbTx): List[Document] =
+    sql"""select d.id, d.class_id, d.class_version, d.title, d.owner_id, d.author_id, d.template_id,
+                 d.template_version, d.created_at
+          from dms.document d
+          order by greatest(d.updated_at,
+                            (select max(v.updated_at) from dms.document_version v where v.document_id = d.id))
+                   desc, d.id
+          limit $limit""".query[DocumentRow].run().map(toDocument).toList
+
   def insertDocument(d: Document)(using DbTx): Unit =
     val _ =
       sql"""insert into dms.document (id, tenant_id, class_id, class_version, title, owner_id, author_id,
