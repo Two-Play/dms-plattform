@@ -131,4 +131,8 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | S-04.a | DMS-87 | Task | Backlog (MVP) | – | DMS-40: deadlines, escalation, commit hook, notifications |
 | S-04.a | DMS-88 | Task | Backlog (MVP) | – | DMS-40/42: review modes, conditional steps, delegation, UI |
 | US-03.1 | DMS-89 | Task | Backlog (MVP) | – | DMS-43: real partner system, per-tenant config, health |
-| S-03.a | DMS-90 | Task | Backlog (MVP) | – | DMS-43: reopen saved drafts in the UI |
+| S-03.a | DMS-90 | Task | Sprint 7 | – | DMS-43: reopen saved drafts in the UI |
+| S-03.a | DMS-91 | Task | Backlog (MVP) | – | DMS-90: document page: history, display names, voting, partner id |
+| US-06.3 | DMS-92 | Task | Backlog (MVP) | – | DMS-45/46: publication failures, tenant time zone, withdraw, editorial path settings |
+| US-06.1 | DMS-93 | Task | Backlog (MVP) | – | DMS-44: retry failed rendering, Object Lock, worker image digest |
+| US-06.1 | DMS-94 | Task | Backlog (R2) | – | DMS-44: confidentiality watermark, PDF/A-3b, PDF/UA |
