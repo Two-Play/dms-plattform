@@ -28,7 +28,7 @@ final case class GroupMembership(
 ):
   def isCurrent: Boolean = removedAt.isEmpty
 
-/** Access groups and their members in the current tenant (`dms.access_group`, migration V19). Must run inside
+/** Access groups and their members in the current tenant (`dms.access_group`, migration V17). Must run inside
   * `Db.transact(tenant)`; RLS limits rows to the tenant.
   */
 trait Groups:
