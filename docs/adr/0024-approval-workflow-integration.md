@@ -96,4 +96,4 @@ The follow-up "rendering fills the rendition before the last approval vote" is i
 
 ## Addendum (DMS-49, 2026-10-28): deputies
 
-The follow-up "delegation" is implemented for workflow participants as time-limited deputyships, see [ADR 0028](0028-deputies-for-workflow-participants.md). Candidates stay a snapshot (decision 4); deputies of candidates are resolved whenever a task is read or voted on, the principal keeps the task. Votes and approvals record `acting_for` (migration V15), audit entries `on_behalf_of`. Owner confirmations (DMS-46) are not forwarded (DMS-88).
+The follow-up "delegation" is implemented for workflow participants as time-limited deputyships, see [ADR 0028](0028-deputies-for-workflow-participants.md). Candidates stay a snapshot (decision 4); deputies of candidates are resolved whenever a task is read or voted on, the principal keeps the task. Votes and approvals record `acting_for` (migration V14), audit entries `on_behalf_of`. Owner confirmations (DMS-46) are not forwarded (DMS-88).

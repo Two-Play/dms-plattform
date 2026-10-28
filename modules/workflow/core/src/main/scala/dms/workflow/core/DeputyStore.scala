@@ -9,7 +9,7 @@ import zio.json.*
 import java.time.{Instant, OffsetDateTime, ZoneOffset}
 import java.util.UUID
 
-/** SQL for `dms.deputyship` (migration V15, DMS-49). Runs inside `Db.sql` within `Db.transact(tenant)`;
+/** SQL for `dms.deputyship` (migration V14, DMS-49). Runs inside `Db.sql` within `Db.transact(tenant)`;
   * row-level security limits all rows to the current tenant.
   */
 private[core] object DeputyStore:

@@ -3,7 +3,6 @@
 -- A deputyship lets the deputy complete the open workflow tasks of the principal during a limited period. Tasks are
 -- not copied or reassigned: the workflow resolves the deputies of a task's candidates when the task is read or voted
 -- on, so the period starts and ends without a job. Votes and approvals record whom the deputy acted for.
--- (V14 is reserved for DMS-47.)
 
 create table dms.deputyship (
     id             uuid primary key,
