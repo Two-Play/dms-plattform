@@ -120,3 +120,11 @@ HTTP (module `app`, `DocumentApi`):
 | GET | `/api/v1/documents/{id}/versions/{versionId}/deviations` | Report and requests of a version, e.g. for reviewers | `ReadDocument` on that version |
 
 The report view: `{versionId, version, status, requiresExtraReview, requests:[{id,sectionId,reason,requestedBy,requestedAt,basedOn,active,withdrawnBy,withdrawnAt}], deviations:[{section,path,token,location,change,authorized,reasons}]}`; `change` carries a `type` discriminator, e.g. `{"type":"TextReplaced","from":"30 days","to":"60 days"}`. Version views carry `requiresExtraReview` too.
+
+## Values from business systems (DMS-43, ADR 0023)
+
+US-03.1. Values a business system sets carry `ValueOrigin.System(source)` (e.g. `partner-master`); the platform's own values are `System("dms")`.
+
+- `DocumentService.updateDraft` keeps them: a manual value for such a field is rejected as `not_editable` unless it equals the system value (then the system value and its origin are kept). Removing or replacing them is the job of the integration (`PartnerApi` passes the new values with their system origin).
+- Fields filled by a reference field of the template (`TemplateContent.references`) only accept values with the reference's source, on create and on change; the references of a document's content cannot be changed (like computed fields).
+- Taken-over values are a snapshot: they stay as picked, also when the partner master changes, and are frozen with the version on approval. The identifier is stored in a field as source reference.

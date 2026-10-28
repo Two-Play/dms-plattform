@@ -584,8 +584,7 @@ final class DocumentService(audit: AuditTrail, classes: DocumentClassService, te
 
   /** Edit rules for a changed content: locked sections keep the template's text unless a deviation request
     * for the section is recorded, computed and reference fields stay those of the template, and the content
-    * must fit the
-    * profile.
+    * must fit the profile.
     */
   private def checkContent(
       template: TemplateVersion,

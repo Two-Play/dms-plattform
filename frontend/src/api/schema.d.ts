@@ -433,6 +433,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/deviation-requests': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Records a deviation request for a locked section of the draft's template: with a reason, the section's standard text may be changed; the change then needs the additional review step. One active request per section (409); unknown or editable sections and empty reasons are rejected (422). Returns the draft's deviation report. */
+    post: operations['postApiV1DocumentsIdDeviation-requests']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/deviation-requests/{requestId}/withdraw': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Withdraws a deviation request while the version is a draft. A section that still deviates then blocks submission until its standard text is restored or the deviation is requested again. Returns the draft's deviation report. */
+    post: operations['postApiV1DocumentsIdDeviation-requestsRequestidWithdraw']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/deviations': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The deviation report of a version (changes of locked template sections with location, change and the author's reasons) and its deviation requests, e.g. for the additional review step */
+    get: operations['getApiV1DocumentsIdVersionsVersionidDeviations']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/partners': {
     parameters: {
       query?: never
@@ -514,6 +565,42 @@ export interface components {
       | components['schemas']['Paragraph']
       | components['schemas']['Repeat']
       | components['schemas']['Table']
+    /** Block */
+    Block1: {
+      /** Format: int32 */
+      index: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Block'
+    }
+    /** BlocksDeleted */
+    BlocksDeleted: {
+      blocks?: components['schemas']['Block'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'BlocksDeleted'
+    }
+    /** BlocksInserted */
+    BlocksInserted: {
+      blocks?: components['schemas']['Block'][]
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'BlocksInserted'
+    }
+    /** Body */
+    Body: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Body'
+    }
     /** BranchView */
     BranchView: {
       location: components['schemas']['LocationView']
@@ -553,6 +640,18 @@ export interface components {
       /** Format: date-time */
       releasedAt?: string
     }
+    /** Cell */
+    Cell: {
+      /** Format: int32 */
+      row: number
+      /** Format: int32 */
+      column: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Cell'
+    }
     /** ChangeDocumentClass */
     ChangeDocumentClass: {
       label: string
@@ -584,6 +683,20 @@ export interface components {
       /** Format: int32 */
       documentClassVersion: number
       content: components['schemas']['TemplateContent']
+    }
+    /** ClauseChanged */
+    ClauseChanged: {
+      fromKey: string
+      /** Format: int32 */
+      fromVersion: number
+      toKey: string
+      /** Format: int32 */
+      toVersion: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'ClauseChanged'
     }
     /** ClauseRef */
     ClauseRef: {
@@ -617,6 +730,16 @@ export interface components {
     ComputedField: {
       key: string
       expression: string
+    }
+    /** ConditionChanged */
+    ConditionChanged: {
+      from: string
+      to: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'ConditionChanged'
     }
     /** Conditional */
     Conditional: {
@@ -683,6 +806,63 @@ export interface components {
        * @enum {string}
        */
       type: 'Date'
+    }
+    /** DeviationChange */
+    DeviationChange:
+      | components['schemas']['BlocksDeleted']
+      | components['schemas']['BlocksInserted']
+      | components['schemas']['ClauseChanged']
+      | components['schemas']['ConditionChanged']
+      | components['schemas']['FormattingChanged']
+      | components['schemas']['HeaderRowsChanged']
+      | components['schemas']['HeadingLevelChanged']
+      | components['schemas']['PlaceholderChanged']
+      | components['schemas']['PlaceholderInserted']
+      | components['schemas']['PlaceholderRemoved']
+      | components['schemas']['RepeatChanged']
+      | components['schemas']['SectionMoved']
+      | components['schemas']['SectionRemoved']
+      | components['schemas']['SectionRenamed']
+      | components['schemas']['SectionUnlocked']
+      | components['schemas']['TextDeleted']
+      | components['schemas']['TextInserted']
+      | components['schemas']['TextReplaced']
+    /** DeviationRequestView */
+    DeviationRequestView: {
+      /** Format: uuid */
+      id: string
+      sectionId: string
+      reason: string
+      requestedBy: string
+      /** Format: date-time */
+      requestedAt: string
+      /** Format: uuid */
+      basedOn?: string
+      active: boolean
+      withdrawnBy?: string
+      /** Format: date-time */
+      withdrawnAt?: string
+    }
+    /** DeviationView */
+    DeviationView: {
+      section: string
+      path?: components['schemas']['PathStep'][]
+      /** Format: int32 */
+      token?: number
+      location: string
+      change: components['schemas']['DeviationChange']
+      authorized: boolean
+      reasons?: string[]
+    }
+    /** DeviationsView */
+    DeviationsView: {
+      /** Format: uuid */
+      versionId: string
+      version: string
+      status: string
+      requiresExtraReview: boolean
+      requests?: components['schemas']['DeviationRequestView'][]
+      deviations?: components['schemas']['DeviationView'][]
     }
     /** DocumentClassView */
     DocumentClassView: {
@@ -762,6 +942,7 @@ export interface components {
       releasedBy?: string
       /** Format: date-time */
       releasedAt?: string
+      requiresExtraReview: boolean
     }
     /** DocumentView */
     DocumentView: {
@@ -823,6 +1004,27 @@ export interface components {
       origin: string
       source?: string
     }
+    /** FormattingChanged */
+    FormattingChanged: {
+      text: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'FormattingChanged'
+    }
+    /** HeaderRowsChanged */
+    HeaderRowsChanged: {
+      /** Format: int32 */
+      from: number
+      /** Format: int32 */
+      to: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'HeaderRowsChanged'
+    }
     /** Heading */
     Heading: {
       /** Format: int32 */
@@ -845,6 +1047,18 @@ export interface components {
        */
       type: 'Heading'
     }
+    /** HeadingLevelChanged */
+    HeadingLevelChanged: {
+      /** Format: int32 */
+      from: number
+      /** Format: int32 */
+      to: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'HeadingLevelChanged'
+    }
     /** Health */
     Health: {
       status: string
@@ -861,6 +1075,16 @@ export interface components {
       label: string
       code: string
       message: string
+    }
+    /** Item */
+    Item: {
+      /** Format: int32 */
+      index: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Item'
     }
     /** LineBreak */
     LineBreak: {
@@ -974,6 +1198,14 @@ export interface components {
        */
       type: 'OrderedList'
     }
+    /** Otherwise */
+    Otherwise: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Otherwise'
+    }
     /** PageBreak */
     PageBreak: {
       /**
@@ -1011,6 +1243,15 @@ export interface components {
       address: string
       vatId?: string
     }
+    /** PathStep */
+    PathStep:
+      | components['schemas']['Block1']
+      | components['schemas']['Body']
+      | components['schemas']['Cell']
+      | components['schemas']['Item']
+      | components['schemas']['Otherwise']
+      | components['schemas']['Row']
+      | components['schemas']['Then']
     /** PersonRef */
     PersonRef: {
       /**
@@ -1037,6 +1278,39 @@ export interface components {
        * @enum {string}
        */
       type: 'Placeholder'
+    }
+    /** Placeholder */
+    Placeholder1: {
+      path: string
+      format?: string
+    }
+    /** PlaceholderChanged */
+    PlaceholderChanged: {
+      from: components['schemas']['Placeholder1']
+      to: components['schemas']['Placeholder1']
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'PlaceholderChanged'
+    }
+    /** PlaceholderInserted */
+    PlaceholderInserted: {
+      placeholder: components['schemas']['Placeholder1']
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'PlaceholderInserted'
+    }
+    /** PlaceholderRemoved */
+    PlaceholderRemoved: {
+      placeholder: components['schemas']['Placeholder1']
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'PlaceholderRemoved'
     }
     /** PreviewIssueView */
     PreviewIssueView: {
@@ -1122,6 +1396,23 @@ export interface components {
        */
       type: 'Repeat'
     }
+    /** RepeatChanged */
+    RepeatChanged: {
+      fromCollection: string
+      fromItem: string
+      toCollection: string
+      toItem: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'RepeatChanged'
+    }
+    /** RequestDeviation */
+    RequestDeviation: {
+      sectionId: string
+      reason: string
+    }
     /** ResolvedBlock */
     ResolvedBlock:
       | components['schemas']['BulletList1']
@@ -1148,12 +1439,56 @@ export interface components {
       locked: boolean
       blocks?: components['schemas']['ResolvedBlock'][]
     }
+    /** Row */
+    Row: {
+      /** Format: int32 */
+      index: number
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Row'
+    }
     /** Section */
     Section: {
       id: string
       title?: string
       locked: boolean
       blocks?: components['schemas']['Block'][]
+    }
+    /** SectionMoved */
+    SectionMoved: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'SectionMoved'
+    }
+    /** SectionRemoved */
+    SectionRemoved: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'SectionRemoved'
+    }
+    /** SectionRenamed */
+    SectionRenamed: {
+      from?: string
+      to?: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'SectionRenamed'
+    }
+    /** SectionUnlocked */
+    SectionUnlocked: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'SectionUnlocked'
     }
     /** SelectOption */
     SelectOption: {
@@ -1325,6 +1660,42 @@ export interface components {
        * @enum {string}
        */
       type: 'Text'
+    }
+    /** TextDeleted */
+    TextDeleted: {
+      text: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'TextDeleted'
+    }
+    /** TextInserted */
+    TextInserted: {
+      text: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'TextInserted'
+    }
+    /** TextReplaced */
+    TextReplaced: {
+      from: string
+      to: string
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'TextReplaced'
+    }
+    /** Then */
+    Then: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: 'Then'
     }
     /** UpdateDraft */
     UpdateDraft: {
@@ -2466,6 +2837,131 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1DocumentsIdDeviation-requests': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RequestDeviation']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeviationsView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1DocumentsIdDeviation-requestsRequestidWithdraw': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Deviation request id */
+        requestId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeviationsView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter requestId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdVersionsVersionidDeviations: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeviationsView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
       400: {
         headers: {
           [name: string]: unknown

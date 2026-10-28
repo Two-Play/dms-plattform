@@ -178,7 +178,7 @@ describe('NewDocumentPage', () => {
     expect(fieldControl('Tags').tagName).toBe('TEXTAREA')
     expect(screen.getByRole('group', { name: 'Template fields' })).toBeInTheDocument()
     expect(screen.getByRole('group', { name: 'Further metadata' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled()
   })
 
   it('shows the draft preview with missing values and updates it debounced after changes', async () => {
