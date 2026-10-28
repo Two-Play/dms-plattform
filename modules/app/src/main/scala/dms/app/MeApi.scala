@@ -1,6 +1,6 @@
 package dms.app
 
-import dms.authz.RoleAssignments
+import dms.authz.{Groups, RoleAssignments}
 import dms.db.Db
 import dms.identity.{AuthError, Authenticator, IdTokenCheck, Principal}
 import sttp.model.StatusCode
@@ -40,8 +40,12 @@ final case class Me(
     roles: List[String],
     /** The currently active role assignments with their restrictions, sorted by role. */
     assignments: List[RoleAssignmentView],
-    /** ZITADEL project roles from the access token; used as groups for confidential documents. */
-    projectRoles: List[String]
+    /** ZITADEL project roles from the access token (coarse application roles, ADR 0005). */
+    projectRoles: List[String],
+    /** Keys of the access groups the caller currently belongs to, sorted; members of a group see the
+      * confidential documents that name it (DMS-101, ADR 0032).
+      */
+    groups: List[String]
 ) derives JsonCodec,
       Schema
 
@@ -121,29 +125,33 @@ object SecuredApi:
       case other => other
 
 object MeApi:
-  type Env = Authenticator & Db & RoleAssignments
+  type Env = Authenticator & Db & RoleAssignments & Groups
 
   val me: ZServerEndpoint[Env, Any] =
     SecuredApi.base.get
       .in("api" / "v1" / "me")
       .out(jsonBody[Me])
       .description(
-        "The signed-in user, their tenant and their currently active business role assignments (roles and " +
-          "restrictions from the tenant's role administration)"
+        "The signed-in user, their tenant, their currently active business role assignments (roles and " +
+          "restrictions from the tenant's role administration) and their access groups"
       )
       .tag("Identity")
       .serverLogic(principal => _ => me(principal))
 
-  private def me(principal: Principal): ZIO[Db & RoleAssignments, (StatusCode, ApiError), Me] =
+  private def me(principal: Principal): ZIO[Db & RoleAssignments & Groups, (StatusCode, ApiError), Me] =
     for
       db          <- ZIO.service[Db]
       assignments <- ZIO.service[RoleAssignments]
+      groups      <- ZIO.service[Groups]
       now         <- Clock.instant
-      active      <- db
-        .transact(principal.tenantId)(assignments.forUser(principal.userId))
-        .map(_.filter(_.isActiveAt(now)).toList)
+      loaded      <- db
+        .transact(principal.tenantId)(
+          assignments.forUser(principal.userId) <*> groups.groupsOf(principal.userId)
+        )
         .mapError(DocumentApi.toResponse)
-      views = active
+      (held, memberOf) = loaded
+      active           = held.filter(_.isActiveAt(now)).toList
+      views            = active
         .map(a =>
           RoleAssignmentView(
             a.role.toString,
@@ -159,5 +167,6 @@ object MeApi:
       principal.tenantId.value.toString,
       views.map(_.role).distinct,
       views,
-      principal.roles.toList.sorted
+      principal.roles.toList.sorted,
+      memberOf.toList.sorted
     )

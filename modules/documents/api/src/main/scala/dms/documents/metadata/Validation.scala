@@ -60,8 +60,9 @@ object Validation:
   def isCurrencyCode(code: String): Boolean = CurrencyCode.matches(code)
 
   /** Validates `values` for a document that is to be in `targetStatus`: every field required in that status
-    * must have a value, and every value must satisfy its definition. Issues follow the profile's field order,
-    * unknown fields come last.
+    * (including fields required because of other values, [[CoreFields.requiredByValues]]) must have a value,
+    * and every value must satisfy its definition. Issues follow the profile's field order, unknown fields
+    * come last.
     *
     * @param includeSystemFields
     *   `false` skips fields set by the platform (document id, status, checksum, ...), e.g. for checking an
@@ -73,12 +74,13 @@ object Validation:
       targetStatus: DocumentStatus,
       includeSystemFields: Boolean = true
   ): List[FieldIssue] =
-    val fields = profile.fields.filter(f => includeSystemFields || f.definition.editable)
-    val known  = fields.flatMap { field =>
-      val value = values.get(field.key.value)
-      val kinds =
-        if isEmpty(value) then
-          Option.when(field.isRequiredIn(targetStatus))(IssueKind.MissingRequired(targetStatus)).toList
+    val fields      = profile.fields.filter(f => includeSystemFields || f.definition.editable)
+    val conditional = CoreFields.requiredByValues(values, targetStatus)
+    val known       = fields.flatMap { field =>
+      val value    = values.get(field.key.value)
+      val required = field.isRequiredIn(targetStatus) || conditional.contains(field.key.value)
+      val kinds    =
+        if isEmpty(value) then Option.when(required)(IssueKind.MissingRequired(targetStatus)).toList
         else value.toList.flatMap(checkField(field.definition, _))
       kinds.map(FieldIssue(field.key.value, field.definition.label, _))
     }

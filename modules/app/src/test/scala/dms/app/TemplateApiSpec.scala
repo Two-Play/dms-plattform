@@ -10,7 +10,7 @@ import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jose.{JOSEObjectType, JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
 import dms.audit.*
-import dms.authz.{Authorizer, Role, RoleAssignment, RoleAssignments}
+import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
 import dms.db.{Db, DbConfig, DbError, Migrations}
 import dms.documents.core.{ClassDraft, DocumentClassService, FieldDraft}
 import dms.documents.metadata.*
@@ -129,6 +129,7 @@ object TemplateApiSpec extends ZIOSpecDefault:
       database,
       authenticator,
       RoleAssignments.postgres,
+      Groups.postgres,
       Authorizer.layer,
       ZLayer.succeed(audit),
       DocumentClassService.layer,

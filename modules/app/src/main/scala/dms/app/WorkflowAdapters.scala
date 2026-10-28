@@ -1,9 +1,9 @@
 package dms.app
 
-import dms.authz.{Policy, Resource, Role, RoleAssignments, Subject}
+import dms.authz.{DocumentResource, Groups, Policy, Resource, Role, RoleAssignments, Subject}
 import dms.documents.core.DocumentJson.given
 import dms.documents.core.{DocumentDetails, DocumentError, DocumentService}
-import dms.documents.metadata.MetadataValue
+import dms.documents.metadata.{CoreFields, MetadataValue}
 import dms.documents.{DocumentVersion, LifecycleEvent}
 import dms.kernel.{DocumentId, TenantId, UserId}
 import dms.templates.core.ContentJson
@@ -55,7 +55,8 @@ object WorkflowDocuments:
       v.createdBy,
       details.document.ownerId,
       contentSha256(v),
-      v.changeKind
+      v.changeKind,
+      Option.when(CoreFields.isRestricted(v.metadata))(DocumentResource.allowedGroups(v.metadata))
     )
 
   /** SHA-256 (lowercase hex) over the canonical JSON of the content and the field values with their origin
@@ -86,9 +87,11 @@ object WorkflowDocuments:
       case _                         => WorkflowError.Document(body.code, body.message)
 
 /** Participants from role assignments (business concept 2.3, 6.1): holders of a role whose assignment is
-  * active and whose scope (organizational unit, document class subtree) covers the document.
+  * active and whose scope (organizational unit, document class subtree) covers the document. For a
+  * confidential version only those who may see it under [[Policy]] take part: author, owner and current
+  * members of its access groups (DMS-101, ADR 0032).
   */
-final class RoleDirectory(assignments: RoleAssignments) extends ParticipantDirectory:
+final class RoleDirectory(assignments: RoleAssignments, groups: Groups) extends ParticipantDirectory:
 
   def holders(role: String, subject: ReviewSubject): IO[WorkflowError, List[UserId]] =
     for
@@ -103,13 +106,26 @@ final class RoleDirectory(assignments: RoleAssignments) extends ParticipantDirec
         organizationalUnit = subject.organizationalUnit,
         documentClassPath = subject.classPath
       )
-    yield all
-      .filter((user, a) =>
-        Policy.rolesInScope(Subject(user, RoleDirectory.AnyTenant, Set(a)), resource, now)(r)
-      )
-      .map(_._1)
-      .distinct
-      .sortBy(_.value)
+      inScope = all
+        .filter((user, a) =>
+          Policy.rolesInScope(Subject(user, RoleDirectory.AnyTenant, Set(a)), resource, now)(r)
+        )
+        .map(_._1)
+        .distinct
+      allowed <- cleared(inScope.toSet, subject)
+    yield inScope.filter(allowed.contains).sortBy(_.value)
+
+  def cleared(users: Set[UserId], subject: ReviewSubject): IO[WorkflowError, Set[UserId]] =
+    subject.accessGroups match
+      case None          => ZIO.succeed(users)
+      case Some(allowed) =>
+        groups
+          .membersOfAny(allowed)
+          .mapBoth(
+            WorkflowError.Database(_),
+            members =>
+              users.filter(u => u == subject.author || subject.owner.contains(u) || members.contains(u))
+          )
 
   def tenantAdmins: IO[WorkflowError, List[UserId]] =
     for
@@ -132,7 +148,8 @@ final class RoleDirectory(assignments: RoleAssignments) extends ParticipantDirec
 object RoleDirectory:
   private val AnyTenant = TenantId(UUID(0L, 0L))
 
-  val layer: URLayer[RoleAssignments, ParticipantDirectory] = ZLayer.fromFunction(RoleDirectory(_))
+  val layer: URLayer[RoleAssignments & Groups, ParticipantDirectory] =
+    ZLayer.fromFunction(RoleDirectory(_, _))
 
 /** Whether a version needs the extra review step of its class (deviations from locked standard text, business
   * concept 4.1). Reads the deviation report of the documents module (DMS-79).

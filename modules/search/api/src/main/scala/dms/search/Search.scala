@@ -14,7 +14,7 @@ import java.util.UUID
   * @param confidentiality
   *   the confidentiality level, e.g. `Internal`
   * @param allowedGroups
-  *   groups (ZITADEL project roles) allowed to see a confidential or strictly confidential version
+  *   keys of the access groups (ADR 0032) allowed to see a confidential or strictly confidential version
   */
 final case class AccessAttributes(
     organizationalUnit: Option[String],

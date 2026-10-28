@@ -1,6 +1,6 @@
 package dms.authz
 
-import dms.documents.metadata.MetadataValue
+import dms.documents.metadata.{CoreFields, MetadataValue}
 import dms.documents.{Document, DocumentVersion}
 import dms.kernel.{TenantId, UserId}
 
@@ -16,13 +16,12 @@ object DocumentResource:
   val OrganizationalUnitField = "organizationalUnit"
 
   /** Field holding the confidentiality level (core field); missing or unknown values count as `Internal`. */
-  val ConfidentialityField = "confidentiality"
+  val ConfidentialityField = CoreFields.Confidentiality
 
-  /** Optional tenant field listing the groups (ZITADEL project roles) allowed to see a confidential or
-    * strictly confidential version besides its author and owner (DMS-51). A class adds it as a text or
-    * selection field, usually with `multiple = true`.
+  /** Core field listing the keys of the access groups (ADR 0032) allowed to see a confidential or strictly
+    * confidential version besides its author and owner (DMS-51, DMS-101).
     */
-  val AllowedGroupsField = "allowedGroups"
+  val AllowedGroupsField = CoreFields.AllowedGroups
 
   /** @param classPath
     *   class keys from the root to the document's class (the profile of its class version)

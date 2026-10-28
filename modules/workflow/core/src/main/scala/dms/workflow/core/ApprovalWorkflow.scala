@@ -523,7 +523,9 @@ final class ApprovalWorkflow(
         "lane"           -> Json.Str(task.laneKey),
         "role"           -> Json.Str(task.role),
         "authorExcluded" -> Json.Bool(row.fourEyes && holders.contains(subject.author)),
-        "recipients"     -> Json.Arr(admins.map(a => Json.Str(a.value))*)
+        // Role holders outside the access groups of a confidential version do not count (DMS-101).
+        "confidential" -> Json.Bool(subject.accessGroups.isDefined),
+        "recipients"   -> Json.Arr(admins.map(a => Json.Str(a.value))*)
       )
       _ <- Outbox
         .publish("workflow", row.id, "workflow.participant-missing", Jsonb(payload.toJson))
@@ -739,9 +741,11 @@ final class ApprovalWorkflow(
         if deputyships.isEmpty then ZIO.succeed(Map.empty[String, List[TaskDeputy]])
         else
           for
-            subject     <- documents.subject(DocumentId(row.documentId), row.versionId)
+            subject <- documents.subject(DocumentId(row.documentId), row.versionId)
+            // A deputy who may not see a confidential version holds no role for it (DMS-101).
+            cleared     <- directory.cleared(deputyships.map(_.deputy).toSet, subject)
             deputyRoles <- ZIO
-              .foreach(deputyships.map(_.deputy).distinct)(d =>
+              .foreach(deputyships.map(_.deputy).distinct.filter(cleared.contains))(d =>
                 directory.heldRoles(d).map(held => d -> held.filter(_.isActiveAt(now)).map(_.role).toSet)
               )
               .map(_.toMap)

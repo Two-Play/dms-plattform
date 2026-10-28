@@ -11,10 +11,9 @@ import com.nimbusds.jose.{JOSEObjectType, JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
 import dms.audit.AuditTrail
 import dms.audit.core.{AuditTrailLive, TsaTrust}
-import dms.authz.{Authorizer, Role, RoleAssignment, RoleAssignments}
+import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
 import dms.db.{Db, DbConfig, DbError, Migrations}
 import dms.documents.core.*
-import dms.documents.metadata.{FieldBinding, FieldType}
 import dms.identity.*
 import dms.integration.{JobRunner, OutboxRelay, WorkerConfig}
 import dms.kernel.{TemplateId, TenantId, UserId}
@@ -120,18 +119,12 @@ object SearchApiSpec extends ZIOSpecDefault:
             _ <- RoleAssignments.Postgres.grant(approver, RoleAssignment(Role.Approver), admin)
             _ <- RoleAssignments.Postgres.grant(reader, RoleAssignment(Role.Reader), admin)
             _ <- RoleAssignments.Postgres.grant(hrReader, RoleAssignment(Role.Reader, Some("HR")), admin)
-            // The optional class field naming the groups that may see a confidential version (DMS-51).
-            groups <- classes.createField(
-              "allowedGroups",
-              FieldDraft("Allowed groups", None, FieldType.Text(), multiple = true),
-              admin
-            )
-            cls <- classes.createClass(
-              "policy",
-              None,
-              ClassDraft("Policy", None, List(FieldBinding(groups.key, groups.version))),
-              admin
-            )
+            // Access groups (DMS-101): reviewer and approver may see the confidential test documents.
+            _   <- Groups.Postgres.create("board", "Board", admin)
+            _   <- Groups.Postgres.create("hr", "HR", admin)
+            _   <- Groups.Postgres.addMember("board", reviewer, admin)
+            _   <- Groups.Postgres.addMember("board", approver, admin)
+            cls <- classes.createClass("policy", None, ClassDraft("Policy", None, Nil), admin)
             draft = TemplateDraft("Code of conduct", None, cls.classId.value, 1, content)
             t <- templates.create(draft, designer)
             _ <- templates.changeStatus(t.templateId, 1, TemplateStatus.Testing, designer)
@@ -165,6 +158,7 @@ object SearchApiSpec extends ZIOSpecDefault:
       database,
       authenticator,
       RoleAssignments.postgres,
+      Groups.postgres,
       Authorizer.layer,
       ZLayer.succeed(TsaTrust(Nil)),
       AuditTrailLive.layer,
@@ -188,7 +182,7 @@ object SearchApiSpec extends ZIOSpecDefault:
       SearchIndex.layer
     )
 
-  private def token(user: UserId, signedInSecondsAgo: Long, groups: List[String]): String =
+  private def token(user: UserId, signedInSecondsAgo: Long): String =
     val now     = Instant.now()
     val builder = JWTClaimsSet
       .Builder()
@@ -199,10 +193,6 @@ object SearchApiSpec extends ZIOSpecDefault:
       .expirationTime(Date.from(now.plusSeconds(300)))
       .claim(TokenVerifier.OrganizationClaim, orgId)
       .claim("auth_time", now.minusSeconds(signedInSecondsAgo).getEpochSecond)
-    if groups.nonEmpty then
-      val roles = new java.util.HashMap[String, Object]()
-      groups.foreach(g => roles.put(g, java.util.Map.of(orgId, "localhost")))
-      val _ = builder.claim(TokenVerifier.RolesClaim, roles)
     val jwt = SignedJWT(
       JWSHeader.Builder(JWSAlgorithm.RS256).keyID(signingKey.getKeyID).`type`(JOSEObjectType.JWT).build(),
       builder.build()
@@ -220,12 +210,11 @@ object SearchApiSpec extends ZIOSpecDefault:
       method: String,
       path: String,
       body: Option[String] = None,
-      signedInSecondsAgo: Long = 3600,
-      groups: List[String] = Nil
+      signedInSecondsAgo: Long = 3600
   ) =
     val url     = URL.decode(path).toOption.get
     val headers = Headers(
-      Header.Authorization.Bearer(token(user, signedInSecondsAgo, groups)),
+      Header.Authorization.Bearer(token(user, signedInSecondsAgo)),
       Header.ContentType(MediaType.application.json)
     )
     val request = method match
@@ -236,11 +225,11 @@ object SearchApiSpec extends ZIOSpecDefault:
   private def as[A: JsonDecoder](response: (Status, String)): A =
     response._2.fromJson[A].fold(e => throw AssertionError(s"$e: ${response._1} ${response._2}"), identity)
 
-  private def search(user: UserId, params: String, groups: List[String] = Nil) =
-    call(user, "GET", s"/api/v1/search?$params", groups = groups)
+  private def search(user: UserId, params: String) =
+    call(user, "GET", s"/api/v1/search?$params")
 
-  private def results(user: UserId, params: String, groups: List[String] = Nil) =
-    search(user, params, groups).map(as[SearchResultView])
+  private def results(user: UserId, params: String) =
+    search(user, params).map(as[SearchResultView])
 
   private def values(unit: String, confidentiality: String, validFrom: LocalDate, groups: List[String]) =
     val allowed = groups.map(g => s"""{"type":"Text","value":"$g"}""").mkString(",")
@@ -258,16 +247,9 @@ object SearchApiSpec extends ZIOSpecDefault:
   private def cases(doc: UUID) =
     call(author, "GET", s"/api/v1/documents/$doc/workflow").map(as[List[WorkflowCaseView]])
 
-  /** Votes as a member of the group `board`, which may see the confidential test document. */
+  /** Reviewer and approver are members of the group `board`, which may see the confidential test document. */
   private def vote(user: UserId, task: TaskView) =
-    call(
-      user,
-      "POST",
-      s"/api/v1/workflow/tasks/${task.id}/votes",
-      Some(CastVote("Approve", None).toJson),
-      30,
-      List("board")
-    )
+    call(user, "POST", s"/api/v1/workflow/tasks/${task.id}/votes", Some(CastVote("Approve", None).toJson), 30)
 
   private def runPublicationJobs: ZIO[Env, Any, Int] =
     for
@@ -327,6 +309,14 @@ object SearchApiSpec extends ZIOSpecDefault:
       s.app.transact(tenantId)(RoleAssignments.Postgres.grant(user, assignment, admin))
     )
 
+  private def join(user: UserId, group: String) =
+    setup.await.flatMap(s => s.app.transact(tenantId)(Groups.Postgres.addMember(group, user, admin)))
+
+  private def leave(user: UserId, group: String) =
+    setup.await.flatMap(s =>
+      s.app.transact(tenantId)(Groups.Postgres.removeMember(group, user, admin, Instant.now()))
+    )
+
   private def revoke(id: UUID) =
     setup.await.flatMap(s => s.app.transact(tenantId)(RoleAssignments.Postgres.revoke(id, Instant.now())))
 
@@ -381,20 +371,26 @@ object SearchApiSpec extends ZIOSpecDefault:
         hrRevoked.total == 0L
       )
     },
-    test("confidential versions only for author, owner and allowed groups") {
+    test("confidential versions only for author, owner and members of allowed groups, at query time") {
       for
         _          <- validDocument("Vorstandsbeschluss", "Compliance", "Confidential", List("board"))
         byReader   <- results(reader, "q=Vorstandsbeschluss")
         byOwner    <- results(owner, "q=Vorstandsbeschluss")
         byAuthor   <- results(author, "q=Vorstandsbeschluss")
-        withGroups <- results(reader, "q=Vorstandsbeschluss", groups = List("board"))
-        otherGroup <- results(reader, "q=Vorstandsbeschluss", groups = List("hr"))
+        _          <- join(reader, "hr")
+        otherGroup <- results(reader, "q=Vorstandsbeschluss")
+        _          <- join(reader, "board")
+        withGroups <- results(reader, "q=Vorstandsbeschluss")
+        _          <- leave(reader, "board")
+        afterLeave <- results(reader, "q=Vorstandsbeschluss")
+        _          <- leave(reader, "hr")
       yield assertTrue(
         byReader.total == 0L,
         byOwner.total == 1L,
         byAuthor.total == 1L,
+        otherGroup.total == 0L,
         withGroups.total == 1L,
-        otherGroup.total == 0L
+        afterLeave.total == 0L
       )
     },
     test("a new version supersedes the old one in the index; the history stays searchable") {

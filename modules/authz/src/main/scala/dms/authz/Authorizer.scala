@@ -68,13 +68,16 @@ object RoleAssignments:
   val postgres: ULayer[RoleAssignments] = ZLayer.succeed(Postgres)
 
 /** Applies [[Policy]] for the signed-in caller and logs every denial with its reason. */
-final class Authorizer(assignments: RoleAssignments):
+final class Authorizer(assignments: RoleAssignments, val groups: Groups):
 
-  /** Builds the subject from the principal and its role assignments. Runs inside the caller's transaction. */
+  /** Builds the subject from the principal, its role assignments and its current access group memberships
+    * (ADR 0032). Runs inside the caller's transaction.
+    */
   def subject(principal: Principal): IO[DbError, Subject] =
-    assignments
-      .forUser(principal.userId)
-      .map(Subject(principal.userId, principal.tenantId, _, principal.roles))
+    for
+      held     <- assignments.forUser(principal.userId)
+      memberOf <- groups.groupsOf(principal.userId)
+    yield Subject(principal.userId, principal.tenantId, held, memberOf)
 
   /** `subject` acting as deputy of `principal` (DMS-49, ADR 0028): extended by the principal's assignments of
     * `roles`, so the deputy acts within the principal's scope. Callers use it only for the document of a task
@@ -101,4 +104,4 @@ final class Authorizer(assignments: RoleAssignments):
     }
 
 object Authorizer:
-  val layer: URLayer[RoleAssignments, Authorizer] = ZLayer.fromFunction(Authorizer(_))
+  val layer: URLayer[RoleAssignments & Groups, Authorizer] = ZLayer.fromFunction(Authorizer(_, _))

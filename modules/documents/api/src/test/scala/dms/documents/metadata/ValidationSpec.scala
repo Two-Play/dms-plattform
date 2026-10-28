@@ -1,5 +1,6 @@
 package dms.documents.metadata
 
+import dms.documents.DocumentStatus
 import zio.test.*
 
 import java.time.LocalDate
@@ -131,6 +132,34 @@ object ValidationSpec extends ZIOSpecDefault:
           )
         )
         assertTrue(result.map(_.field) == List("renditionChecksum"))
+      },
+      test("confidential versions need allowed groups from review on; group keys are checked (DMS-101)") {
+        val profile = resolveOrFail(contract)
+        def groupIssues(confidentiality: String, groups: List[String], target: DocumentStatus) =
+          Validation
+            .validate(
+              profile,
+              Map(
+                "confidentiality" -> V.Selection(confidentiality),
+                "allowedGroups"   -> V.Many(groups.map(V.Text(_)))
+              ),
+              target
+            )
+            .filter(_.field == "allowedGroups")
+            .map(_.kind)
+        assertTrue(
+          groupIssues("Confidential", Nil, DocumentStatus.Draft).isEmpty,
+          groupIssues("Confidential", Nil, DocumentStatus.InReview) ==
+            List(IssueKind.MissingRequired(DocumentStatus.InReview)),
+          groupIssues("StrictlyConfidential", List(" "), DocumentStatus.Approved) ==
+            List(IssueKind.MissingRequired(DocumentStatus.Approved)),
+          groupIssues("Confidential", List("board"), DocumentStatus.InReview).isEmpty,
+          groupIssues("Internal", Nil, DocumentStatus.Published).isEmpty,
+          groupIssues("Confidential", List("Board Members"), DocumentStatus.Draft) ==
+            List(IssueKind.PatternMismatch(CoreFields.GroupKeyPattern)),
+          CoreFields.isRestricted(Map("confidentiality" -> V.Selection("StrictlyConfidential"))),
+          !CoreFields.isRestricted(Map("confidentiality" -> V.Selection("Public")))
+        )
       }
     )
   )

@@ -51,6 +51,10 @@ object WorkflowError:
   * @param changeKind
   *   minor (editorial) versions take the shortened path [[dms.workflow.WorkflowDefinition.editorial]]
   *   (DMS-46)
+  * @param accessGroups
+  *   `None` for a version everyone with a role in scope may see; for a confidential version (DMS-101, ADR
+  *   0032) the access groups whose members may see it besides author and owner. Only those people take part
+  *   in its workflow, see [[ParticipantDirectory.cleared]].
   */
 final case class ReviewSubject(
     documentId: DocumentId,
@@ -62,7 +66,8 @@ final case class ReviewSubject(
     author: UserId,
     owner: Option[UserId],
     contentSha256: String,
-    changeKind: ChangeKind = ChangeKind.Major
+    changeKind: ChangeKind = ChangeKind.Major,
+    accessGroups: Option[Set[String]] = None
 )
 
 /** Port to the documents module, implemented by the application (module rule: `workflow-core` depends on
@@ -96,9 +101,15 @@ final case class HeldRole(
 
 /** Resolves participants from role assignments (business concept 6.1: from roles, not from named persons). */
 trait ParticipantDirectory:
-  /** People who hold `role` with a scope covering the subject (organizational unit, document class), sorted.
+  /** People who hold `role` with a scope covering the subject (organizational unit, document class) and who
+    * may see it ([[cleared]]), sorted.
     */
   def holders(role: String, subject: ReviewSubject): IO[WorkflowError, List[UserId]]
+
+  /** Those of `users` who may see the subject: everyone for a version that is not confidential; for a
+    * confidential one its author, its owner and the current members of its access groups (DMS-101).
+    */
+  def cleared(users: Set[UserId], subject: ReviewSubject): IO[WorkflowError, Set[UserId]]
 
   /** Tenant administrators to notify when a step has no eligible participant. */
   def tenantAdmins: IO[WorkflowError, List[UserId]]

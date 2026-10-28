@@ -35,16 +35,21 @@ object Policy:
         a.role
     }
 
-  private def confidentialityDenial(subject: Subject, resource: Resource): Option[Decision] =
+  /** Whether the confidentiality of the resource lets the subject see it at all, whatever their roles: always
+    * below `Confidential`; from `Confidential` on only for author, owner and members of an allowed group
+    * (business concept 2.3).
+    */
+  def clearedFor(subject: Subject, resource: Resource): Boolean =
     resource.confidentiality match
       case Confidentiality.Confidential | Confidentiality.StrictlyConfidential if resource.isDocument =>
-        val personallyInvolved =
-          resource.authorId.contains(subject.userId) || resource.ownerId.contains(subject.userId)
-        val inAllowedGroup = subject.groups.exists(resource.allowedGroups.contains)
-        Option.unless(personallyInvolved || inAllowedGroup)(
-          Decision.Deny(s"${resource.confidentiality} document: caller is not in an allowed group")
-        )
-      case _ => None
+        resource.authorId.contains(subject.userId) || resource.ownerId.contains(subject.userId) ||
+        subject.groups.exists(resource.allowedGroups.contains)
+      case _ => true
+
+  private def confidentialityDenial(subject: Subject, resource: Resource): Option[Decision] =
+    Option.unless(clearedFor(subject, resource))(
+      Decision.Deny(s"${resource.confidentiality} document: caller is not in an allowed group")
+    )
 
   private def permissions(subject: Subject, roles: Set[Role], action: Action, resource: Resource): Decision =
     def has(role: Role): Boolean     = roles.contains(role)

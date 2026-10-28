@@ -32,6 +32,34 @@ object CoreFields:
   private def selection(codes: String*): FieldType.Selection =
     FieldType.Selection(codes.map(c => SelectOption(c, c)).toList)
 
+  /** Key of the confidentiality level field. */
+  val Confidentiality = "confidentiality"
+
+  /** Key of the field naming the access groups of a confidential version (DMS-101, ADR 0032). */
+  val AllowedGroups = "allowedGroups"
+
+  /** Format of access group keys (lowercase letters, digits and hyphens). */
+  val GroupKeyPattern = "[a-z0-9][a-z0-9-]{0,62}"
+
+  /** Confidentiality levels from which access is restricted to named groups (business concept 2.3). */
+  val RestrictedLevels: Set[String] = Set("Confidential", "StrictlyConfidential")
+
+  /** Whether `values` restrict access to named groups, i.e. the confidentiality is at least `Confidential`.
+    */
+  def isRestricted(values: Map[String, MetadataValue]): Boolean =
+    values.get(Confidentiality).exists {
+      case MetadataValue.Selection(code) => RestrictedLevels.contains(code)
+      case MetadataValue.Text(text)      => RestrictedLevels.contains(text)
+      case _                             => false
+    }
+
+  /** Fields that are required because of other values: [[AllowedGroups]] for a restricted version from the
+    * status on in which the confidentiality itself is required (review), so that a confidential version
+    * cannot enter the workflow without anyone besides author and owner being allowed to see it.
+    */
+  def requiredByValues(values: Map[String, MetadataValue], status: DocumentStatus): Set[String] =
+    if isRestricted(values) && fromReview.contains(status) then Set(AllowedGroups) else Set.empty
+
   private val fromDraft  = Requiredness.always
   private val fromReview = Requiredness.from(InReview)
 
@@ -75,6 +103,18 @@ object CoreFields:
       selection("Public", "Internal", "Confidential", "StrictlyConfidential"),
       Core,
       fromReview
+    ),
+    field(
+      AllowedGroups,
+      "Allowed groups",
+      FieldType.Text(maxLength = Some(63), pattern = Some(GroupKeyPattern)),
+      Core,
+      Set.empty,
+      multiple = true,
+      description = Some(
+        "Access groups whose members may see a confidential version besides author and owner; required from " +
+          "review on when the confidentiality is Confidential or StrictlyConfidential"
+      )
     ),
     field(
       "language",

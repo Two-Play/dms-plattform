@@ -13,7 +13,9 @@ import zio.test.*
 import java.time.Instant
 import javax.sql.DataSource
 
-/** Role assignments in PostgreSQL (RLS, revocation) and denial logging, against a Testcontainers database. */
+/** Role assignments and access groups in PostgreSQL (RLS, revocation, membership history) and denial logging,
+  * against a Testcontainers database.
+  */
 object AuthorizerSpec extends ZIOSpecDefault:
 
   final case class Databases(app: Db, owner: Db)
@@ -103,7 +105,7 @@ object AuthorizerSpec extends ZIOSpecDefault:
         dbs <- ZIO.service[Databases]
         t   <- newTenant(dbs.owner)
         _   <- dbs.app.transact(t)(RoleAssignments.Postgres.grant(alice, RoleAssignment(Role.Reader), admin))
-        authorizer = Authorizer(RoleAssignments.Postgres)
+        authorizer = Authorizer(RoleAssignments.Postgres, Groups.Postgres)
         principal  = Principal(alice, t, Set.empty, None)
         subject <- dbs.app.transact(t)(authorizer.subject(principal))
         draft = Resource(t, status = Some(DocumentStatus.Draft), authorId = Some(admin))
@@ -114,6 +116,54 @@ object AuthorizerSpec extends ZIOSpecDefault:
         logs.exists(e =>
           e.message().startsWith("Access denied") && e.annotations.get("action").contains("EditDraft")
         )
+      )
+    },
+    test("access groups: members join and leave, the subject carries the current groups (DMS-101)") {
+      val bob = UserId("bob")
+      val g   = Groups.Postgres
+      for
+        dbs   <- ZIO.service[Databases]
+        t     <- newTenant(dbs.owner)
+        other <- newTenant(dbs.owner)
+        authorizer = Authorizer(RoleAssignments.Postgres, g)
+        created   <- dbs.app.transact(t)(g.create("board", "Board", admin))
+        again     <- dbs.app.transact(t)(g.create("board", "Board again", admin))
+        _         <- dbs.app.transact(t)(g.create("hr", "HR", admin))
+        added     <- dbs.app.transact(t)(g.addMember("board", alice, admin))
+        twice     <- dbs.app.transact(t)(g.addMember("board", alice, admin))
+        _         <- dbs.app.transact(t)(g.addMember("hr", bob, admin))
+        subject   <- dbs.app.transact(t)(authorizer.subject(Principal(alice, t, Set("zitadel-role"), None)))
+        known     <- dbs.app.transact(t)(g.existing(Set("board", "nope")))
+        members   <- dbs.app.transact(t)(g.membersOfAny(Set("board", "hr")))
+        removed   <- dbs.app.transact(t)(g.removeMember("board", alice, admin, Instant.now()))
+        gone      <- dbs.app.transact(t)(g.removeMember("board", alice, admin, Instant.now()))
+        after     <- dbs.app.transact(t)(authorizer.subject(Principal(alice, t, Set.empty, None)))
+        history   <- dbs.app.transact(t)(g.members("board"))
+        _         <- dbs.app.transact(t)(g.addMember("board", alice, admin))
+        rejoined  <- dbs.app.transact(t)(g.members("board"))
+        elsewhere <- dbs.app.transact(other)(g.list)
+        rewrite   <- dbs.app
+          .transact(t)(Db.sql(sql"update dms.access_group_member set user_id = 'mallory'".update.run()))
+          .either
+        delete <- dbs.app
+          .transact(t)(Db.sql(sql"delete from dms.access_group_member".update.run()))
+          .either
+      yield assertTrue(
+        created,
+        !again,
+        added,
+        !twice,
+        subject.groups == Set("board"),
+        known == Set("board"),
+        members == Set(alice, bob),
+        removed,
+        !gone,
+        after.groups.isEmpty,
+        history.map(m => (m.user, m.isCurrent)) == List((alice, false)),
+        rejoined.map(m => (m.user, m.isCurrent)) == List((alice, true), (alice, false)),
+        elsewhere.isEmpty,
+        rewrite.left.exists(_.isInstanceOf[DbError.PermissionDenied]),
+        delete.left.exists(_.isInstanceOf[DbError.PermissionDenied])
       )
     }
   ).provideShared(databases) @@ TestAspect.sequential @@ TestAspect.withLiveClock

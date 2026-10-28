@@ -29,10 +29,11 @@ enum Action:
     ManageRetention, Destroy, ViewHistory, Configure
 
 /** Areas of tenant configuration (matrix row "Configuration"). `Search` is the operation of the tenant's
-  * search index, e.g. rebuilding it (DMS-51, ADR 0029).
+  * search index, e.g. rebuilding it (DMS-51, ADR 0029). `Groups` is the administration of access groups and
+  * their members (DMS-101, ADR 0032).
   */
 enum ConfigurationArea:
-  case DocumentClasses, Workflows, Taxonomies, Retention, Search
+  case DocumentClasses, Workflows, Taxonomies, Retention, Search, Groups
 
 enum Confidentiality:
   case Public, Internal, Confidential, StrictlyConfidential
@@ -49,7 +50,9 @@ final case class RoleAssignment(
 ):
   def isActiveAt(now: Instant): Boolean = !validFrom.isAfter(now) && validUntil.forall(now.isBefore)
 
-/** Who acts. `groups` are the caller's ZITADEL project roles, used for confidential documents. */
+/** Who acts. `groups` are the keys of the access groups the caller currently belongs to (ADR 0032), used for
+  * confidential documents.
+  */
 final case class Subject(
     userId: UserId,
     tenantId: TenantId,

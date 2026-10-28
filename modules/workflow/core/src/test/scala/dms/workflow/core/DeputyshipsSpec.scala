@@ -36,7 +36,9 @@ object DeputyshipsSpec extends ZIOSpecDefault:
 
   /** Anna and Ben approve everywhere; Clara approves contracts of the legal department; Erik only reviews. */
   private object Directory extends ParticipantDirectory:
-    def holders(role: String, subject: ReviewSubject): IO[WorkflowError, List[UserId]] = ZIO.succeed(Nil)
+    def holders(role: String, subject: ReviewSubject): IO[WorkflowError, List[UserId]]      = ZIO.succeed(Nil)
+    def cleared(users: Set[UserId], subject: ReviewSubject): IO[WorkflowError, Set[UserId]] =
+      ZIO.succeed(users)
     def tenantAdmins: IO[WorkflowError, List[UserId]]              = ZIO.succeed(List(admin))
     def heldRoles(user: UserId): IO[WorkflowError, List[HeldRole]] =
       ZIO.succeed(user.value match

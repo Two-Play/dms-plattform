@@ -1,7 +1,7 @@
 package dms.app
 
 import dms.audit.core.{AuditTrailLive, TsaTrust}
-import dms.authz.{Authorizer, RoleAssignments}
+import dms.authz.{Authorizer, Groups, RoleAssignments}
 import dms.db.Db
 import dms.documents.core.{AcknowledgementService, DocumentClassService, DocumentService}
 import dms.identity.{Authenticator, TenantDirectory, TokenVerifier}
@@ -27,7 +27,8 @@ object Main extends ZIOAppDefault:
       Runtime.setConfigProvider(TypesafeConfigProvider.fromResourcePath())
 
   private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
-    PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env & SearchApi.Env
+    PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env &
+    SearchApi.Env & GroupApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -45,7 +46,8 @@ object Main extends ZIOAppDefault:
       WorkflowApi.endpoints.map(_.widen[Env]) ++
       DeputyshipApi.endpoints.map(_.widen[Env]) ++
       PartnerApi.endpoints.map(_.widen[Env]) ++
-      SearchApi.endpoints.map(_.widen[Env])
+      SearchApi.endpoints.map(_.widen[Env]) ++
+      GroupApi.endpoints.map(_.widen[Env])
 
   private val docs =
     SwaggerInterpreter()
@@ -71,6 +73,7 @@ object Main extends ZIOAppDefault:
           ObjectStore.client,
           ObjectStore.live,
           RoleAssignments.postgres,
+          Groups.postgres,
           Authorizer.layer,
           // Recording does not verify timestamps, so no TSA trust anchors are needed here; verification and
           // anchoring run with their own configuration (ADR 0017).
