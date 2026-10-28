@@ -9,10 +9,15 @@ import java.time.Instant
 enum Role:
   case Reader, Author, Owner, Reviewer, Approver, TemplateDesigner, RecordsManager, Auditor, TenantAdmin
 
-/** Functions of the permission matrix (business concept 2.3). */
+/** Functions of the permission matrix (business concept 2.3).
+  *
+  * `ReleaseTemplate` and `ReadTemplateCatalog` refine the matrix row "Edit templates" (business concept 4.1):
+  * releasing a template version needs a second template designer, and every business role may see the catalog
+  * of released templates.
+  */
 enum Action:
   case ReadPublished, CreateFromTemplate, EditDraft, CommentInReview, Approve, Publish, Withdraw,
-    EditTemplates,
+    EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
     ManageRetention, Destroy, ViewHistory, Configure
 
 /** Areas of tenant configuration (matrix row "Configuration"). */
@@ -63,7 +68,11 @@ final case class Resource(
     /** Whether the document class lets owners approve (matrix: Owner ◐ for approval). */
     ownerMayApprove: Boolean = false,
     /** Set for configuration resources instead of documents. */
-    configurationArea: Option[ConfigurationArea] = None
+    configurationArea: Option[ConfigurationArea] = None,
+    /** Users who changed the resource besides its author, e.g. editors of a template version (segregation of
+      * duties).
+      */
+    contributors: Set[UserId] = Set.empty
 ):
   def isDocument: Boolean = status.isDefined
 

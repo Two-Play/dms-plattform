@@ -27,7 +27,8 @@ object Main extends ZIOAppDefault:
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
       DocumentClassApi.endpoints.map(_.widen[Env]) ++
-      TemplateApi.endpoints.map(_.widen[Env])
+      TemplateApi.endpoints.map(_.widen[Env]) ++
+      TemplateLifecycleApi.endpoints.map(_.widen[Env])
 
   private val docs =
     SwaggerInterpreter()

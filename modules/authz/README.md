@@ -4,4 +4,6 @@ Authorization (ADR 0018, business concept 2.3): `Policy.decide` is a pure, deny-
 
 `PolicySpec` contains one test per cell of the permission matrix.
 
+Templates (business concept 4.1): `EditTemplates` covers creating and changing templates; `ReleaseTemplate` additionally requires that the template designer neither created (`Resource.authorId`) nor changed (`Resource.contributors`) the version (four-eyes principle); `ReadTemplateCatalog` lets every business role see released templates.
+
 Single module without an `api`/`core` split.

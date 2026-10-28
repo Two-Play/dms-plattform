@@ -24,18 +24,20 @@ object PolicySpec extends ZIOSpecDefault:
 
   /** Resource on which the action is meaningful, with the caller in no special relation to it. */
   private def base(action: Action): Resource = action match
-    case ReadPublished      => document(Published)
-    case CreateFromTemplate => Resource(tenant, documentClassPath = List("policy"))
-    case EditDraft          => document(Draft)
-    case CommentInReview    => document(InReview)
-    case Approve            => document(InApproval)
-    case Publish            => document(Approved)
-    case Withdraw           => document(Published)
-    case EditTemplates      => Resource(tenant, documentClassPath = List("policy"))
-    case ManageRetention    => document(Archived)
-    case Destroy            => document(Archived)
-    case ViewHistory        => document(Published)
-    case Configure          => Resource(tenant, configurationArea = Some(ConfigurationArea.DocumentClasses))
+    case ReadPublished       => document(Published)
+    case CreateFromTemplate  => Resource(tenant, documentClassPath = List("policy"))
+    case EditDraft           => document(Draft)
+    case CommentInReview     => document(InReview)
+    case Approve             => document(InApproval)
+    case Publish             => document(Approved)
+    case Withdraw            => document(Published)
+    case EditTemplates       => Resource(tenant, documentClassPath = List("policy"))
+    case ReleaseTemplate     => Resource(tenant, authorId = Some(other))
+    case ReadTemplateCatalog => Resource(tenant)
+    case ManageRetention     => document(Archived)
+    case Destroy             => document(Archived)
+    case ViewHistory         => document(Published)
+    case Configure           => Resource(tenant, configurationArea = Some(ConfigurationArea.DocumentClasses))
 
   /** The condition that turns a ◐ cell of the matrix into a permission. */
   private def favorable(action: Action, role: Role): Resource =
@@ -62,17 +64,19 @@ object PolicySpec extends ZIOSpecDefault:
     */
   private val matrix: List[(Action, List[Mark])] = List(
     //                     Reader  Author   Owner    Reviewer Approver Designer Records  Auditor  Admin
-    ReadPublished      -> List(Full, Full, Full, Full, Full, Full, Full, Full, Partial),
-    CreateFromTemplate -> List(Never, Full, Full, Never, Never, Never, Never, Never, Never),
-    EditDraft          -> List(Never, Full, Full, Partial, Never, Never, Never, Never, Never),
-    CommentInReview    -> List(Never, Full, Full, Full, Full, Never, Never, Never, Never),
-    Approve            -> List(Never, Never, Partial, Never, Full, Never, Never, Never, Never),
-    Publish            -> List(Never, Never, Full, Never, Partial, Never, Never, Never, Never),
-    Withdraw           -> List(Never, Never, Full, Never, Full, Never, Never, Never, Never),
-    EditTemplates      -> List(Never, Never, Never, Never, Never, Full, Never, Never, Never),
-    ManageRetention    -> List(Never, Never, Never, Never, Never, Never, Full, Never, Never),
-    ViewHistory        -> List(Never, Partial, Full, Partial, Partial, Never, Full, Full, Partial),
-    Configure          -> List(Never, Never, Never, Never, Never, Never, Partial, Never, Full)
+    ReadPublished       -> List(Full, Full, Full, Full, Full, Full, Full, Full, Partial),
+    CreateFromTemplate  -> List(Never, Full, Full, Never, Never, Never, Never, Never, Never),
+    EditDraft           -> List(Never, Full, Full, Partial, Never, Never, Never, Never, Never),
+    CommentInReview     -> List(Never, Full, Full, Full, Full, Never, Never, Never, Never),
+    Approve             -> List(Never, Never, Partial, Never, Full, Never, Never, Never, Never),
+    Publish             -> List(Never, Never, Full, Never, Partial, Never, Never, Never, Never),
+    Withdraw            -> List(Never, Never, Full, Never, Full, Never, Never, Never, Never),
+    EditTemplates       -> List(Never, Never, Never, Never, Never, Full, Never, Never, Never),
+    ReleaseTemplate     -> List(Never, Never, Never, Never, Never, Full, Never, Never, Never),
+    ReadTemplateCatalog -> List(Full, Full, Full, Full, Full, Full, Full, Full, Never),
+    ManageRetention     -> List(Never, Never, Never, Never, Never, Never, Full, Never, Never),
+    ViewHistory         -> List(Never, Partial, Full, Partial, Partial, Never, Full, Full, Partial),
+    Configure           -> List(Never, Never, Never, Never, Never, Never, Partial, Never, Full)
   )
 
   private def permitted(roles: Seq[Role], action: Action, resource: Resource): Boolean =
@@ -155,6 +159,23 @@ object PolicySpec extends ZIOSpecDefault:
         !Policy.decide(reader, ReadPublished, confidential, now).isPermitted,
         Policy.decide(reader.copy(groups = Set("legal")), ReadPublished, confidential, now).isPermitted,
         Policy.decide(reader, ReadPublished, confidential.copy(ownerId = Some(user)), now).isPermitted
+      )
+    },
+    test("a template designer cannot release a template version they created or changed") {
+      val designer = subjectWith(TemplateDesigner)
+      val version  = base(ReleaseTemplate)
+      assertTrue(
+        Policy.decide(designer, ReleaseTemplate, version, now).isPermitted,
+        !Policy.decide(designer, ReleaseTemplate, version.copy(authorId = Some(user)), now).isPermitted,
+        !Policy.decide(designer, ReleaseTemplate, version.copy(contributors = Set(user)), now).isPermitted,
+        !Policy
+          .decide(
+            subjectWith(TemplateDesigner, Approver),
+            ReleaseTemplate,
+            version.copy(authorId = Some(user)),
+            now
+          )
+          .isPermitted
       )
     },
     test("every denial carries a reason") {
