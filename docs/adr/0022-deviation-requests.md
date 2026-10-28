@@ -49,7 +49,7 @@ Deviation requests are rows in `dms.document_deviation_request`, one per request
 ## Follow-ups
 
 - Must be done: the workflow (DMS-40) adds the extra review step when `DocumentVersion.requiresExtraReview` is true; the frontend shows requests and the report (location, change, reasons).
-- To decide: whether carried-over deviations of an already approved version need the extra review again (today: yes).
+- Decided (2026-10-28, product owner): carried-over deviations of an already approved version need the extra review again in the new version; an approval covers only the version it was given for (consistent with US-04.1).
 - Ruled out: requests that approve a change by themselves (approval stays with the extra review step).
 
 ## Reversibility
