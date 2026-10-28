@@ -9,10 +9,10 @@ import com.nimbusds.jose.jwk.{JWKSet, RSAKey}
 import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jose.{JOSEObjectType, JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
+import dms.audit.AuditTrail
 import dms.audit.core.{AuditTrailLive, TsaTrust}
 import dms.authz.{Authorizer, Role, RoleAssignment, RoleAssignments}
 import dms.db.{Db, DbConfig, DbError, Migrations}
-import dms.documents.Rendition
 import dms.documents.core.*
 import dms.identity.*
 import dms.integration.{JobRunner, WorkerConfig}
@@ -20,6 +20,7 @@ import dms.kernel.{TemplateId, TenantId, UserId}
 import dms.templates.*
 import dms.templates.core.ContentJson.given
 import dms.templates.core.{TemplateDraft, TemplateService}
+import dms.rendering.core.RenditionSource
 import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
@@ -140,7 +141,7 @@ object PublicationApiSpec extends ZIOSpecDefault:
     Authenticator(verifier, tenants)
   }
 
-  private type Env = DocumentApi.Env & WorkflowApi.Env
+  private type Env = DocumentApi.Env & WorkflowApi.Env & RenditionSource & AuditTrail
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -160,7 +161,9 @@ object PublicationApiSpec extends ZIOSpecDefault:
       RoleDirectory.layer,
       WorkflowExtraReview.layer,
       ZLayer.succeed(WorkflowConfig.default),
-      ApprovalWorkflow.layer
+      WorkflowRendition.layer,
+      ApprovalWorkflow.layer,
+      DocumentRenditions.layer
     )
 
   /** `signedInSecondsAgo` sets `auth_time`; by default the sign-in is one hour old. */
@@ -219,15 +222,10 @@ object PublicationApiSpec extends ZIOSpecDefault:
 
   private val past = LocalDate.of(2026, 1, 1)
 
-  /** A rendition is required for approval until rendering fills it (DMS-44). */
-  private def attachRendition(versionId: UUID): ZIO[Env, Nothing, Unit] =
-    for
-      s       <- setup.await
-      service <- ZIO.service[DocumentService]
-      _       <- s.app
-        .transact(tenantId)(service.attachRendition(versionId, Rendition("r/key", None, "c" * 64), author))
-        .orDieWith(e => RuntimeException(e.toString))
-    yield ()
+  /** The last approval vote requests the rendition (DMS-44); stand-ins render it and complete the approval.
+    */
+  private def renderPending: ZIO[Env, DbError, Int] =
+    setup.await.flatMap(s => StubRendering.runPending(s.app))
 
   private def cases(doc: UUID) =
     call(author, "GET", s"/api/v1/documents/$doc/workflow").map(as[List[WorkflowCaseView]])
@@ -258,6 +256,7 @@ object PublicationApiSpec extends ZIOSpecDefault:
       review      <- cases(doc).map(_.last.tasks.find(_.status == "Open").get)
       afterReview <- vote(reviewer, review).map(as[WorkflowCaseView])
       _           <- vote(approver, afterReview.tasks.find(_.status == "Open").get)
+      _           <- renderPending
     yield ()
 
   /** A document by the author whose version 1.0 is valid. */
@@ -273,7 +272,6 @@ object PublicationApiSpec extends ZIOSpecDefault:
              |"values":${values(ownerId, past)}}""".stripMargin
         )
       ).map(as[DocumentView])
-      _ <- attachRendition(created.current.id)
       _ <- approveDefault(created.id)
       _ <- runPublicationJobs
     yield created
@@ -342,13 +340,14 @@ object PublicationApiSpec extends ZIOSpecDefault:
           s"/api/v1/documents/${doc.id}/draft",
           Some(s"""{"values":${values(owner, past)},"content":${typo.toJson}}""")
         )
-        _         <- attachRendition(minor.id)
         submitted <- call(author, "POST", s"/api/v1/documents/${doc.id}/submit")
         started   <- cases(doc.id).map(_.last)
         task = started.tasks.head
         byReviewer <- vote(reviewer, task)
         stale      <- vote(owner, task, signedInSecondsAgo = 3600)
-        confirmed  <- vote(owner, task).map(as[WorkflowCaseView])
+        rendering  <- vote(owner, task).map(as[WorkflowCaseView])
+        _          <- renderPending
+        confirmed  <- cases(doc.id).map(_.last)
         published  <- runPublicationJobs
         after      <- versions(doc.id)
         events     <- outbox("document.status-changed")
@@ -368,6 +367,7 @@ object PublicationApiSpec extends ZIOSpecDefault:
         task.candidates == List(owner.value),
         byReviewer._1 == Status.Forbidden,
         stale._1 == Status.Unauthorized,
+        rendering.status == "Rendering",
         confirmed.status == "Approved",
         confirmed.approval.exists(_.approvedBy == owner.value),
         published == 1,
@@ -381,10 +381,9 @@ object PublicationApiSpec extends ZIOSpecDefault:
     },
     test("if the owner wrote the editorial correction, an approver confirms it") {
       for
-        doc   <- validDocument(author)
-        minor <- newVersion(doc.id, """{"changeKind":"Minor","reason":"Broken link"}""")
+        doc <- validDocument(author)
+        _   <- newVersion(doc.id, """{"changeKind":"Minor","reason":"Broken link"}""")
           .map(as[DocumentVersionView])
-        _       <- attachRendition(minor.id)
         _       <- call(author, "POST", s"/api/v1/documents/${doc.id}/submit")
         started <- cases(doc.id).map(_.last)
       yield assertTrue(
@@ -404,7 +403,6 @@ object PublicationApiSpec extends ZIOSpecDefault:
           s"/api/v1/documents/${doc.id}/draft",
           Some(s"""{"values":${values(owner, future)}}""")
         )
-        _         <- attachRendition(major.id)
         _         <- approveDefault(doc.id)
         published <- runPublicationJobs
         found     <- versions(doc.id, owner)

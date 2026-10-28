@@ -20,9 +20,7 @@ import dms.templates.*
 import dms.templates.core.ContentJson.given
 import dms.templates.core.{TemplateDraft, TemplateService}
 import dms.audit.AuditTrail
-import dms.integration.{JobRunner, WorkerConfig}
-import dms.rendering.{ArchiveStandard, RenditionRequest}
-import dms.rendering.core.*
+import dms.rendering.core.RenditionSource
 import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
@@ -260,26 +258,8 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       ).map(as[DocumentView])
     yield created
 
-  /** Runs the due rendering jobs (DMS-44) with stand-ins for the rendering worker, veraPDF and object
-    * storage; real rendering is covered by `RenditionApiSpec`.
-    */
   private def renderPending: ZIO[Env, DbError, Int] =
-    val renderer: PdfRenderer = job =>
-      ZIO.succeed(RenderedPdf(Chunk.fromArray(job.html.getBytes), Some(1), "stub"))
-    val validator: PdfValidator = (_, standard: ArchiveStandard) =>
-      ZIO.succeed(ValidationReport(standard, compliant = true, "stub", Nil))
-    for
-      s       <- setup.await
-      source  <- ZIO.service[RenditionSource]
-      audit   <- ZIO.service[AuditTrail]
-      archive <- RenditionArchive.inMemory
-      jobs = RenditionJobs(s.app, source, renderer, validator, archive, audit)
-      processed <- JobRunner(
-        s.app,
-        Map(RenditionRequest.JobKind -> jobs.handle),
-        WorkerConfig("workflow-test")
-      ).runOnce
-    yield processed
+    setup.await.flatMap(s => StubRendering.runPending(s.app))
 
   private def submit(doc: UUID) = call(author, "POST", s"/api/v1/documents/$doc/submit")
 
