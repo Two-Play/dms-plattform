@@ -9,6 +9,8 @@ import dms.templates.*
   *   needed before the document can be approved (the template's notion of required, [[ProfileSchema]])
   * @param usedInTemplate
   *   the template refers to the field in a placeholder, condition, repeat or computed field
+  * @param reference
+  *   the reference field that fills the field (ADR 0023); such a field is not entered by the author
   */
 final case class TemplateField(
     key: String,
@@ -17,8 +19,12 @@ final case class TemplateField(
     fieldType: FieldType,
     multiple: Boolean,
     required: Boolean,
-    usedInTemplate: Boolean
+    usedInTemplate: Boolean,
+    reference: Option[FieldReference] = None
 )
+
+/** The field takes over `attribute` of the entry picked for the reference field `reference`. */
+final case class FieldReference(reference: String, attribute: String)
 
 /** A required value the author has not filled in yet. */
 final case class MissingValue(field: String, label: String)
@@ -61,7 +67,10 @@ final case class PreviewTemplate(
         f.definition.fieldType,
         f.definition.multiple,
         f.isRequiredIn(ProfileSchema.RequiredFor),
-        used.contains(f.key.value)
+        used.contains(f.key.value),
+        TemplateContent
+          .referenceOf(compiled.content, f.key.value)
+          .map((r, m) => FieldReference(r.key, m.attribute))
       )
     }
     all.filter(_.usedInTemplate) ++ all.filterNot(_.usedInTemplate)

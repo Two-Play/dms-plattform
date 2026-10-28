@@ -60,6 +60,7 @@ lazy val searchApi         = apiModule("search")
 lazy val searchCore        = coreModule("search").dependsOn(searchApi, documentsApi, authz)
 lazy val auditApi          = apiModule("audit").dependsOn(db)
 lazy val auditCore         = coreModule("audit").dependsOn(auditApi).settings(auditCoreSettings)
+lazy val integrationApi    = apiModule("integration")
 lazy val notificationsApi  = apiModule("notifications")
 lazy val notificationsCore = coreModule("notifications").dependsOn(notificationsApi)
 
@@ -88,9 +89,15 @@ lazy val auditCoreSettings = Seq(
     Dependencies.logging.map(_ % Test)
 )
 
+/** Background processing (ADR 0010) and adapters to business systems (ADR 0023); the ports are in
+  * `integration-api`.
+  */
 lazy val integration = module("integration", "modules/integration")
-  .dependsOn(kernel, db, documentsApi)
-  .settings(libraryDependencies ++= Dependencies.integrationTest ++ Dependencies.logging.map(_ % Test))
+  .dependsOn(kernel, db, documentsApi, integrationApi)
+  .settings(
+    libraryDependencies ++= Dependencies.json ++ Dependencies.integrationTest ++
+      Dependencies.logging.map(_ % Test)
+  )
 
 lazy val app = module("app", "modules/app")
   .enablePlugins(JavaAppPackaging, DockerPlugin)
@@ -139,6 +146,7 @@ lazy val root = (project in file("."))
     identity,
     authz,
     integration,
+    integrationApi,
     app,
     templatesApi,
     templatesCore,

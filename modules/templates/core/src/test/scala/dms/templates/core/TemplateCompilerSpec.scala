@@ -107,6 +107,45 @@ object TemplateCompilerSpec extends ZIOSpecDefault:
         issues(oneSection(Repeat("services", "clientName", Nil), Repeat("services", "Bad-Name", Nil)))
       assertTrue(found.map(_.location.part) == List("itemName", "itemName"))
     },
+    test("reference fields take known attributes incl. the identifier into distinct single text fields") {
+      def reference(key: String, mappings: (String, String)*) =
+        ReferenceField(
+          key,
+          "Partner",
+          ReferenceSource.PartnerMaster,
+          mappings.map(ReferenceMapping(_, _)).toList
+        )
+      val valid = TemplateContent(
+        Nil,
+        references = List(reference("partner", "id" -> "noticePeriod", "name" -> "clientName"))
+      )
+      val found = issues(
+        TemplateContent(
+          Nil,
+          references = List(
+            reference("partner", "name" -> "clientName", "colour" -> "endDate", "name" -> "unknownField"),
+            reference("partner", "id"   -> "services", "city"     -> "clientName"),
+            reference("Bad-Key", "id"   -> "noticePeriod")
+          )
+        )
+      )
+      val compiled = TemplateCompiler.compile(valid, schema)
+      assertTrue(
+        compiled.isRight,
+        found.map(_.message) == List(
+          "reference field 'partner' is defined more than once",
+          "the identifier ('id') must be taken over into a field as source reference",
+          "attribute 'name' is taken over more than once",
+          "'colour' is not an attribute of partner-master; known: id, name, street, postalCode, city, country, address, vatId",
+          "field 'endDate' must be a single text field",
+          "unknown field 'unknownField'",
+          "field 'services' must be a single text field",
+          "'Bad-Key' is not a valid name (lower camel case)",
+          "field 'clientName' is filled by more than one reference"
+        ),
+        found.head.location.show.startsWith("reference fields, /references")
+      )
+    },
     test("expressions longer than the limit and too deep nesting are rejected") {
       val deep =
         (1 to 5).foldLeft(List[Block](Paragraph(Nil)))((inner, _) => List(Conditional("true", inner)))

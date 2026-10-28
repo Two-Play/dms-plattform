@@ -39,6 +39,28 @@ object ContentJsonSpec extends ZIOSpecDefault:
         )
       )
     },
+    test("reference fields name their source; older content without them reads as none") {
+      val json =
+        """{"format":1,"sections":[],"references":[{"key":"contractPartner","label":"Contract partner",
+          |"source":"partner-master","fields":[{"attribute":"id","field":"partnerId"}]}]}""".stripMargin
+      val expected = TemplateContent(
+        Nil,
+        references = List(
+          ReferenceField(
+            "contractPartner",
+            "Contract partner",
+            ReferenceSource.PartnerMaster,
+            List(ReferenceMapping("id", "partnerId"))
+          )
+        )
+      )
+      assertTrue(
+        ContentJson.decodeStored(json) == Right(expected),
+        ContentJson.decodeStored(ContentJson.encodeStored(expected)) == Right(expected),
+        ContentJson.decodeStored("""{"format":1,"sections":[]}""") == Right(TemplateContent(Nil)),
+        ContentJson.decodeStored(json.replace("partner-master", "crm")).isLeft
+      )
+    },
     test("unknown formats and malformed content are rejected") {
       assertTrue(
         ContentJson.decodeStored("""{"format":99,"sections":[]}""").isLeft,
