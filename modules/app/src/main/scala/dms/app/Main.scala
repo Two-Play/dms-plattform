@@ -6,6 +6,7 @@ import dms.db.Db
 import dms.documents.core.DocumentClassService
 import dms.identity.{Authenticator, TenantDirectory, TokenVerifier}
 import dms.storage.ObjectStore
+import dms.templates.core.TemplateService
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import sttp.tapir.swagger.bundle.SwaggerInterpreter
 import sttp.tapir.ztapir.*
@@ -21,9 +22,12 @@ object Main extends ZIOAppDefault:
     Runtime.removeDefaultLoggers >>> SLF4J.slf4j >+>
       Runtime.setConfigProvider(TypesafeConfigProvider.fromResourcePath())
 
-  private val apiEndpoints: List[ZServerEndpoint[DocumentClassApi.Env, Any]] =
-    List(HealthApi.health.widen[DocumentClassApi.Env], MeApi.me.widen[DocumentClassApi.Env]) ++
-      DocumentClassApi.endpoints
+  private type Env = DocumentClassApi.Env & TemplateApi.Env
+
+  private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
+    List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
+      DocumentClassApi.endpoints.map(_.widen[Env]) ++
+      TemplateApi.endpoints.map(_.widen[Env])
 
   private val docs =
     SwaggerInterpreter()
@@ -53,6 +57,8 @@ object Main extends ZIOAppDefault:
           // anchoring run with their own configuration (ADR 0017).
           ZLayer.succeed(TsaTrust(Nil)),
           AuditTrailLive.layer,
-          DocumentClassService.layer
+          DocumentClassService.layer,
+          DocumentClassProfiles.layer,
+          TemplateService.layer
         )
     yield ()
