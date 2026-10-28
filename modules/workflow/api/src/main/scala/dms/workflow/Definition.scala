@@ -49,6 +49,32 @@ final case class WorkflowDefinition(steps: List[Step], resetTo: Option[String] =
 object WorkflowDefinition:
   private val Key = "[a-z][a-z0-9-]{0,40}".r
 
+  /** Pseudo role of a lane whose participant is the owner of the document (the `owner` field), not the
+    * holders of a business role. Used by the editorial workflow path.
+    */
+  val DocumentOwner = "DocumentOwner"
+
+  /** Who confirms an editorial version when its owner cannot: the owner is its author (segregation of duties,
+    * business concept 2.4) or the document has no owner.
+    */
+  val OwnerDeputyRole = "Approver"
+
+  /** The shortened path of editorial (minor) versions (business concept 5.2, US-05.2, DMS-46): no review, one
+    * approval step in which the owner confirms the editorial classification and approves the version. Used
+    * for minor versions of every class instead of the class's workflow; the four-eyes rule and step-up apply
+    * as for any approval.
+    */
+  val editorial: WorkflowDefinition = WorkflowDefinition(
+    List(
+      Step(
+        "editorial-confirmation",
+        "Owner confirmation of the editorial change",
+        StepKind.Approval,
+        List(Lane("owner", DocumentOwner))
+      )
+    )
+  )
+
   /** Used for classes without a workflow of their own: one review by a reviewer, one approval by an approver.
     */
   val default: WorkflowDefinition = WorkflowDefinition(

@@ -9,7 +9,7 @@ import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
 import dms.templates.{DeviationReport, SectionId, TemplateContent}
 import zio.json.*
 
-import java.time.{Instant, OffsetDateTime, ZoneOffset}
+import java.time.{Instant, LocalDate, OffsetDateTime, ZoneId, ZoneOffset}
 import java.util.UUID
 
 /** Reads and writes the structured content and the deviation report in the stored formats of the templates
@@ -21,11 +21,16 @@ trait ContentCodec:
   def encodeReport(report: DeviationReport): String
   def decodeReport(json: String): Either[String, DeviationReport]
 
-/** SQL for documents, document versions (migration V9) and deviation requests (V10). Runs inside `Db.sql`
-  * within `Db.transact(tenant)`; row-level security limits all rows to the current tenant. The guard triggers
-  * reject changes to versions that are not drafts and status changes outside the lifecycle.
+/** SQL for documents, document versions (migrations V9, V12) and deviation requests (V10). Runs inside
+  * `Db.sql` within `Db.transact(tenant)`; row-level security limits all rows to the current tenant. The guard
+  * triggers reject changes to versions that are not drafts and status changes outside the lifecycle.
   */
 private[core] object DocumentStore:
+
+  /** PostgreSQL `date` columns (valid-from date, migration V12). */
+  private given DbCodec[LocalDate] =
+    // Null-safe: the Option codec reads the value first and checks for SQL NULL afterwards.
+    DbCodec[java.sql.Date].biMap(d => if d == null then null else d.toLocalDate, java.sql.Date.valueOf)
 
   private type DocumentRow = (UUID, UUID, Int, String, Option[String], String, UUID, Int, OffsetDateTime)
 
@@ -53,7 +58,10 @@ private[core] object DocumentStore:
       updatedAt: OffsetDateTime,
       releasedBy: Option[String],
       releasedAt: Option[OffsetDateTime],
-      deviationReport: Jsonb
+      deviationReport: Jsonb,
+      validFrom: Option[LocalDate],
+      supersededBy: Option[UUID],
+      requiresAcknowledgement: Boolean
   ) derives DbCodec
 
   final case class DeviationRequestRow(
@@ -101,7 +109,7 @@ private[core] object DocumentStore:
     sql"""select id, document_id, major, minor, working_state, status, change_kind, change_reason, scope,
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
-                 released_by, released_at, deviation_report
+                 released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement
           from dms.document_version where document_id = ${id.value} order by major, minor, created_at"""
       .query[VersionRow]
       .run()
@@ -113,7 +121,7 @@ private[core] object DocumentStore:
     sql"""select id, document_id, major, minor, working_state, status, change_kind, change_reason, scope,
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
-                 released_by, released_at, deviation_report
+                 released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement
           from dms.document_version where id = $id for update"""
       .query[VersionRow]
       .run()
@@ -125,7 +133,7 @@ private[core] object DocumentStore:
     sql"""select id, document_id, major, minor, working_state, status, change_kind, change_reason, scope,
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
-                 released_by, released_at, deviation_report
+                 released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement
           from dms.document_version
           where document_id = ${id.value} and status in ('Draft', 'InReview', 'InApproval') for update"""
       .query[VersionRow]
@@ -137,13 +145,14 @@ private[core] object DocumentStore:
     val _ = sql"""insert into dms.document_version
                     (id, tenant_id, document_id, major, minor, working_state, status, change_kind, change_reason,
                      scope, class_version, template_id, template_version, content, field_values, created_by,
-                     status_changed_by, deviation_report)
+                     status_changed_by, deviation_report, requires_acknowledgement)
                   values (${v.id}, dms.current_tenant(), ${v.documentId.value}, ${v.number.major},
                           ${v.number.minor}, ${v.workingState}, ${v.status.toString}, ${v.changeKind.toString},
                           ${v.changeReason}, ${v.scope}, ${v.classVersion}, ${v.templateId.value},
                           ${v.templateVersion}, ${Jsonb(codec.encode(v.content))}, ${Jsonb(v.values.toJson)},
                           ${v.createdBy.value}, ${v.createdBy.value},
-                          ${Jsonb(codec.encodeReport(v.deviations))})""".update.run()
+                          ${Jsonb(codec.encodeReport(v.deviations))},
+                          ${v.requiresAcknowledgement})""".update.run()
 
   /** Saves a changed draft with its next working state; a stale rendition is dropped. */
   def updateDraft(v: DocumentVersion, codec: ContentCodec)(using DbTx): Boolean =
@@ -197,13 +206,18 @@ private[core] object DocumentStore:
       .run()
       .toList
 
+  /** Changes the status of a version. On approval (`snapshot`) the metadata snapshot, the approval and the
+    * valid-from date are recorded; on supersession the successor (`supersededBy`).
+    */
   def changeStatus(
       id: UUID,
       from: DocumentStatus,
       to: DocumentStatus,
       actor: UserId,
       at: Instant,
-      snapshot: Option[MetadataSnapshot]
+      snapshot: Option[MetadataSnapshot],
+      validFrom: Option[LocalDate] = None,
+      supersededBy: Option[UUID] = None
   )(using DbTx): Boolean =
     val time = OffsetDateTime.ofInstant(at, ZoneOffset.UTC)
     snapshot match
@@ -211,13 +225,37 @@ private[core] object DocumentStore:
         sql"""update dms.document_version
               set status = ${to.toString}, status_changed_at = $time, status_changed_by = ${actor.value},
                   metadata_snapshot = ${Jsonb(s.toJson)}, released_by = ${actor.value}, released_at = $time,
-                  updated_at = $time
+                  valid_from = $validFrom, updated_at = $time
               where id = $id and status = ${from.toString}""".update.run() == 1
       case None =>
-        sql"""update dms.document_version
-              set status = ${to.toString}, status_changed_at = $time, status_changed_by = ${actor.value},
-                  updated_at = $time
-              where id = $id and status = ${from.toString}""".update.run() == 1
+        supersededBy match
+          case Some(successor) =>
+            sql"""update dms.document_version
+                  set status = ${to.toString}, status_changed_at = $time, status_changed_by = ${actor.value},
+                      superseded_by = $successor, updated_at = $time
+                  where id = $id and status = ${from.toString}""".update.run() == 1
+          case None =>
+            sql"""update dms.document_version
+                  set status = ${to.toString}, status_changed_at = $time, status_changed_by = ${actor.value},
+                      updated_at = $time
+                  where id = $id and status = ${from.toString}""".update.run() == 1
+
+  /** The time zone of the current tenant (migration V12); scheduled publications switch at 00:00 there. */
+  def tenantZone(using DbTx): ZoneId =
+    sql"select time_zone from dms.tenant where id = dms.current_tenant()"
+      .query[String]
+      .run()
+      .headOption
+      .map(ZoneId.of)
+      .getOrElse(Publication.DefaultZone)
+
+  /** Approved versions waiting for publication, with their document and valid-from date, earliest first. */
+  def scheduled(using DbTx): List[(UUID, UUID, Option[LocalDate])] =
+    sql"""select id, document_id, valid_from from dms.document_version
+          where status = 'Approved' order by valid_from nulls first, id"""
+      .query[(UUID, UUID, Option[LocalDate])]
+      .run()
+      .toList
 
   def attachRendition(id: UUID, r: Rendition)(using DbTx): Boolean =
     sql"""update dms.document_version
@@ -272,7 +310,10 @@ private[core] object DocumentStore:
         .fold(
           e => throw IllegalStateException(s"cannot read the deviation report of version ${r.id}: $e"),
           identity
-        )
+        ),
+      r.validFrom,
+      r.supersededBy,
+      r.requiresAcknowledgement
     )
 
   private def toDeviationRequest(r: DeviationRequestRow): RecordedDeviationRequest =

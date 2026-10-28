@@ -4,7 +4,7 @@ import com.augustnagro.magnum.*
 import dms.audit.*
 import dms.db.queue.Outbox
 import dms.db.{Db, DbError, Jsonb}
-import dms.documents.{DocumentStatus, LifecycleEvent}
+import dms.documents.{ChangeKind, DocumentStatus, LifecycleEvent}
 import dms.kernel.{DocumentId, UserId}
 import dms.workflow.*
 import dms.workflow.core.WorkflowJson.given
@@ -222,7 +222,7 @@ final class ApprovalWorkflow(
         ZIO.fail(WorkflowError.Conflict(s"task $taskId is ${task.status}"))
       )
       subject <- documents.subject(DocumentId(row.documentId), row.versionId)
-      holders <- directory.holders(task.role, subject)
+      holders <- holdersOf(task.role, subject)
       eligible = Rules.eligible(holders, subject.author, row.fourEyes)
       status   = if eligible.isEmpty then TaskStatus.Waiting else TaskStatus.Open
       _ <- sql(WorkflowStore.updateCandidates(task.id, eligible, status))
@@ -267,8 +267,7 @@ final class ApprovalWorkflow(
   private def open(subject: ReviewSubject, actor: UserId): IO[WorkflowError, UUID] =
     for
       stored <- effective(subject.classPath)
-      definition = stored.fold(WorkflowDefinition.default)(_.definition)
-      key        = Bpmn.processKey(stored.map(_.classKey))
+      (definition, key) = definitionFor(subject, stored)
       tenant              <- sql(sql"select dms.current_tenant()".query[UUID].run().head)
       processDefinitionId <- deploy(tenant, key, definition)
       row = CaseRow(
@@ -276,7 +275,7 @@ final class ApprovalWorkflow(
         subject.documentId.value,
         subject.versionId,
         stored.fold(subject.classPath.lastOption.getOrElse(""))(_.classKey),
-        stored.map(_.version),
+        stored.filter(_ => definition != WorkflowDefinition.editorial).map(_.version),
         WorkflowStore.json(definition),
         stored.forall(_.fourEyes),
         processDefinitionId,
@@ -345,6 +344,27 @@ final class ApprovalWorkflow(
       )
       _ <- advance(started, subject, actor, None)
     yield row.id
+
+  /** The workflow of a new case and its process key: minor (editorial) versions take the shortened path
+    * (DMS-46), all others the class's workflow or the built-in default.
+    */
+  private def definitionFor(
+      subject: ReviewSubject,
+      stored: Option[StoredDefinition]
+  ): (WorkflowDefinition, String) =
+    if subject.changeKind == ChangeKind.Minor then (WorkflowDefinition.editorial, Bpmn.EditorialKey)
+    else (stored.fold(WorkflowDefinition.default)(_.definition), Bpmn.processKey(stored.map(_.classKey)))
+
+  /** People who may take a lane: the document owner for [[WorkflowDefinition.DocumentOwner]] lanes (their
+    * deputies if the owner is the author or missing, see [[Rules.ownerConfirmation]]), otherwise the holders
+    * of the lane's role.
+    */
+  private def holdersOf(role: String, subject: ReviewSubject): IO[WorkflowError, List[UserId]] =
+    if role == WorkflowDefinition.DocumentOwner then
+      Rules.ownerConfirmation(subject.owner, subject.author) match
+        case Nil    => directory.holders(WorkflowDefinition.OwnerDeputyRole, subject)
+        case owners => ZIO.succeed(owners)
+    else directory.holders(role, subject)
 
   private def deploy(tenant: UUID, key: String, definition: WorkflowDefinition): IO[WorkflowError, String] =
     val xml = Bpmn.render(key, key, definition)
@@ -431,7 +451,7 @@ final class ApprovalWorkflow(
       lane <- ZIO
         .fromOption(Rules.parseTaskKey(key).flatMap((_, l) => step.lanes.find(_.key == l)))
         .orElseFail(WorkflowError.Engine(s"unknown task $key"))
-      holders <- directory.holders(lane.role, subject)
+      holders <- holdersOf(lane.role, subject)
       eligible = Rules.eligible(holders, subject.author, row.fourEyes)
       task     = TaskRow(
         taskId,

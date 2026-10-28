@@ -15,6 +15,13 @@ object Rules:
   def eligible(holders: List[UserId], author: UserId, fourEyes: Boolean): List[UserId] =
     holders.distinct.filterNot(u => fourEyes && u == author).sortBy(_.value)
 
+  /** Who confirms an editorial version (DMS-46): its owner, unless the owner is the author or there is none;
+    * then nobody, and the holders of [[WorkflowDefinition.OwnerDeputyRole]] take the task. The author never
+    * confirms their own version, whatever the four-eyes setting (the approval is segregated in any case).
+    */
+  def ownerConfirmation(owner: Option[UserId], author: UserId): List[UserId] =
+    owner.filterNot(_ == author).toList
+
   /** Where a resubmitted version continues and whether earlier votes became invalid: after a content change
     * at the reset step of the definition (DMS-41), otherwise at the step that returned it.
     */

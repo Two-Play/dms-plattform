@@ -129,3 +129,28 @@ US-03.1. Values a business system sets carry `ValueOrigin.System(source)` (e.g. 
 - `DocumentService.updateDraft` keeps them: a manual value for such a field is rejected as `not_editable` unless it equals the system value (then the system value and its origin are kept). Removing or replacing them is the job of the integration (`PartnerApi` passes the new values with their system origin).
 - Fields filled by a reference field of the template (`TemplateContent.references`) only accept values with the reference's source, on create and on change; the references of a document's content cannot be changed (like computed fields).
 - Taken-over values are a snapshot: they stay as picked, also when the partner master changes, and are frozen with the version on approval. The identifier is stored in a field as source reference.
+
+## Scheduled publication (DMS-45, ADR 0026)
+
+US-06.3. An approved version becomes valid at 00:00 of its valid-from date (core field `validFrom`) in the tenant's time zone; the valid version of the same scope ends at the same moment.
+
+- `api`, `Publication` (pure): `validFrom(values)`, `dueAt(date, zone)` (first moment of the date in the zone), `isDue`, `successor(version, versions)` (the version a superseded version was replaced by, or the approved version scheduled to replace a valid one). `DocumentVersion` gains `validFrom` (frozen on approval), `supersededBy` and `requiresAcknowledgement`.
+- `core`, `DocumentService`: approval records the valid-from date; `Publish` is rejected (409) before the due moment; publication supersedes the valid version of the same scope and names it as successor, in the same transaction. `scheduledPublications` lists approved versions with their due moment; `publishScheduled(versionId)` publishes a due approved version and does nothing otherwise (idempotent); actor `system:publication`, recorded as technical actor on channel automation. `newVersion` is rejected (409) while an approved version waits for its date. `DocumentDetails` carries the tenant's `zone`, `successor(v)` and `publicationDue(v)`.
+- `core`, `PublicationJobs`: `tick` enqueues per approved version a job `document.publish` with `run_at` = due moment and idempotency key `document.publish:<version>:<epoch second>`; `handlers` publishes. `app` (`Background`) runs the tick every `dms.documents.publicationCheckSeconds` and registers the handler with the job runner.
+- Migration V12: `dms.tenant.time_zone` (default `Europe/Berlin`, validated against `pg_timezone_names`); `dms.document_version.valid_from`, `superseded_by`, `requires_acknowledgement`; guard `document_version_publication_guard` (valid-from only on approval, successor only when superseding a valid version and required then, acknowledgement flag only on creation); deferred constraint trigger `document_version_successor_valid` (on commit the successor is valid in the same document and scope). With the unique index of V9 there is never a moment with two or with no valid version. `dms_app` may update `valid_from` and `superseded_by`.
+
+## Editorial (minor) versions (DMS-46, ADR 0026)
+
+US-05.2. `newVersion(id, Minor, reason, actor, requiresAcknowledgement)`: the reason is required (422). On submission the workflow takes the shortened editorial path (module `workflow`): the owner confirms the editorial classification in one approval step.
+
+- `api`, `EditorialCheck`: compares a minor version with the latest released version below its number using `dms.templates.TextChange` (word LCS per section; share = `1 - kept / max(words)`) and warns when the share exceeds the threshold. It does not block. On submission it is recorded in the audit trail (`document.editorial-check`).
+- `DocumentSettings(editorialChangeThreshold, minorVersionsRequireAcknowledgement)`, from `dms.documents.editorialChangeThresholdPercent` (10) and `dms.documents.minorVersionsRequireAcknowledgement` (false); `DocumentService.configured(settings)`.
+- `requiresAcknowledgement` per version: true for major versions, the setting for minor ones, overridable on creation; frozen afterwards. Document outbox events carry `changeKind`, `requiresAcknowledgement` and, once approved, `validFrom`.
+
+HTTP (module `app`, `DocumentApi`):
+
+| Method | Path | Purpose | Authorization |
+|---|---|---|---|
+| POST | `/api/v1/documents/{id}/versions` | Start the next version `{"changeKind":"Major"\|"Minor","reason","requiresAcknowledgement"}`; 201 | `EditDraft` on a draft of the caller |
+
+Version views additionally carry `validFrom`, `publicationDue` (approved versions), `successor` (`{versionId, version, status, validFrom, publicationDue}`), `requiresAcknowledgement` and `editorialCheck` (`{basedOn, changedRatio, threshold, exceedsThreshold}`, minor versions).

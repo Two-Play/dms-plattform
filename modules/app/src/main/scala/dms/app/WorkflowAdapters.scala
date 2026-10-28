@@ -54,7 +54,8 @@ object WorkflowDocuments:
       },
       v.createdBy,
       details.document.ownerId,
-      contentSha256(v)
+      contentSha256(v),
+      v.changeKind
     )
 
   /** SHA-256 (lowercase hex) over the canonical JSON of the content and the field values with their origin

@@ -1,7 +1,7 @@
 package dms.workflow.core
 
 import dms.db.DbError
-import dms.documents.{DocumentStatus, LifecycleEvent}
+import dms.documents.{ChangeKind, DocumentStatus, LifecycleEvent}
 import dms.kernel.{DocumentId, UserId}
 import zio.*
 
@@ -48,6 +48,9 @@ object WorkflowError:
   *   class keys from the root to the document's class; the nearest class with a workflow wins
   * @param contentSha256
   *   SHA-256 over the canonical content and field values of the version
+  * @param changeKind
+  *   minor (editorial) versions take the shortened path [[dms.workflow.WorkflowDefinition.editorial]]
+  *   (DMS-46)
   */
 final case class ReviewSubject(
     documentId: DocumentId,
@@ -58,7 +61,8 @@ final case class ReviewSubject(
     organizationalUnit: Option[String],
     author: UserId,
     owner: Option[UserId],
-    contentSha256: String
+    contentSha256: String,
+    changeKind: ChangeKind = ChangeKind.Major
 )
 
 /** Port to the documents module, implemented by the application (module rule: `workflow-core` depends on

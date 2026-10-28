@@ -12,12 +12,12 @@ import zio.test.*
 import java.util.UUID
 import javax.sql.DataSource
 
-/** The version model in PostgreSQL (migration V9), tested with plain SQL as the application role: the guards
-  * hold for every writer, not only for the service.
+/** The version model in PostgreSQL (migrations V9, V10, V12), tested with plain SQL as the application role:
+  * the guards hold for every writer, not only for the service.
   */
 object DocumentVersionSchemaSpec extends ZIOSpecDefault:
 
-  final case class Env(app: Db, owner: Db)
+  final case class Env(app: Db, owner: Db, appSource: DataSource)
 
   /** A tenant with a document class and a released template version. */
   final case class Fixture(tenant: TenantId, classId: UUID, templateId: UUID)
@@ -45,7 +45,7 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
       _     <- Migrations.migrate(c.jdbcUrl, c.username, c.password)
       app   <- dataSource(DbConfig(c.jdbcUrl, "dms_app_user", "dms-app-test", poolSize = 2))
       owner <- dataSource(DbConfig(c.jdbcUrl, c.username, c.password, poolSize = 2))
-    yield Env(Db(app), Db(owner))
+    yield Env(Db(app), Db(owner), app)
   )
 
   private def dataSource(config: DbConfig): ZIO[Scope, Throwable, DataSource] =
@@ -118,6 +118,48 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
 
   private def setStatus(version: UUID, status: String)(using DbTx): Int =
     sql"update dms.document_version set status = $status where id = $version".update.run()
+
+  /** Supersedes a valid version, naming its successor (migration V12). */
+  private def supersede(version: UUID, successor: UUID)(using DbTx): Int =
+    sql"""update dms.document_version set status = 'Superseded', superseded_by = $successor
+          where id = $version""".update.run()
+
+  /** The valid versions of a document as the transaction of `connection` sees them. */
+  private def validVersions(connection: java.sql.Connection, tenant: TenantId, document: UUID): List[UUID] =
+    useTenant(connection, tenant)
+    val statement = connection.prepareStatement(
+      "select id from dms.document_version where document_id = ? and status in ('Published', 'ReviewDue')"
+    )
+    try
+      statement.setObject(1, document)
+      val rows = statement.executeQuery()
+      Iterator.continually(rows).takeWhile(_.next()).map(_.getObject(1, classOf[UUID])).toList
+    finally statement.close()
+
+  /** Runs an update on `connection` for `tenant`. */
+  private def execute(connection: java.sql.Connection, tenant: TenantId, sql: String, params: Any*): Int =
+    useTenant(connection, tenant)
+    val statement = connection.prepareStatement(sql)
+    try
+      params.zipWithIndex.foreach((p, i) => statement.setObject(i + 1, p))
+      statement.executeUpdate()
+    finally statement.close()
+
+  /** Sets the tenant for the current transaction of `connection`, like [[Db.transact]] does. */
+  private def useTenant(connection: java.sql.Connection, tenant: TenantId): Unit =
+    val statement = connection.prepareStatement("select set_config('app.tenant_id', ?, true)")
+    try
+      statement.setString(1, tenant.value.toString)
+      statement.executeQuery().close()
+    finally statement.close()
+
+  /** A connection of the application role outside [[Db.transact]], to keep a transaction open while another
+    * one reads.
+    */
+  private def appConnection(source: DataSource): java.sql.Connection =
+    val connection = source.getConnection
+    connection.setAutoCommit(false)
+    connection
 
   /** Moves a draft through review and approval (with snapshot, rendition and a second person) to `Approved`.
     */
@@ -296,11 +338,186 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
         _        <- asApp(f.tenant)(approve(v2))
         twoValid <- asApp(f.tenant)(setStatus(v2, "Published")).either
         // Superseding the old version first makes room for the new one.
-        superseded <- asApp(f.tenant)(setStatus(v1, "Superseded") + setStatus(v2, "Published"))
+        superseded <- asApp(f.tenant)(supersede(v1, v2) + setStatus(v2, "Published"))
         v3         <- asApp(f.tenant)(insertVersion(f, doc, 3, scope = "AT"))
         _          <- asApp(f.tenant)(approve(v3))
         otherScope <- asApp(f.tenant)(setStatus(v3, "Published"))
       yield assertTrue(isUnique(twoValid, "document_version_one_valid"), superseded == 2, otherScope == 1)
+    },
+    test("a valid version is superseded only by naming a successor that is valid when the transaction ends") {
+      for
+        f   <- fixture
+        doc <- asApp(f.tenant)(insertDocument(f))
+        v1  <- asApp(f.tenant)(insertVersion(f, doc, 1))
+        _   <- asApp(f.tenant) { approve(v1); setStatus(v1, "Published") }
+        v2  <- asApp(f.tenant)(insertVersion(f, doc, 2))
+        _   <- asApp(f.tenant)(approve(v2))
+        // Never no valid version: superseding alone fails, with or without a successor.
+        unnamed  <- asApp(f.tenant)(setStatus(v1, "Superseded")).either
+        notValid <- asApp(f.tenant)(supersede(v1, v2)).either
+        // Never two valid versions: publishing before superseding fails.
+        twoValid <- asApp(f.tenant)(setStatus(v2, "Published")).either
+        // A version of another scope is no successor.
+        v3         <- asApp(f.tenant)(insertVersion(f, doc, 3, scope = "AT"))
+        _          <- asApp(f.tenant) { approve(v3); setStatus(v3, "Published") }
+        otherScope <- asApp(f.tenant)(supersede(v1, v3)).either
+        // Both in one transaction, in the order the unique index allows.
+        switched <- asApp(f.tenant)(supersede(v1, v2) + setStatus(v2, "Published"))
+        valid    <- ZIO.serviceWithZIO[Env](e =>
+          ZIO.attemptBlocking {
+            val c = appConnection(e.appSource)
+            try validVersions(c, f.tenant, doc).toSet
+            finally
+              c.rollback()
+              c.close()
+          }
+        )
+        renamed <- asApp(f.tenant)(
+          sql"update dms.document_version set superseded_by = $v3 where id = $v1".update.run()
+        ).either
+      yield assertTrue(
+        isGuardViolation(unnamed),
+        isGuardViolation(notValid),
+        isUnique(twoValid, "document_version_one_valid"),
+        isGuardViolation(otherScope),
+        switched == 2,
+        valid == Set(v2, v3),
+        isGuardViolation(renamed)
+      )
+    },
+    test("readers see exactly one valid version before, during and after the switch") {
+      for
+        f    <- fixture
+        doc  <- asApp(f.tenant)(insertDocument(f))
+        v1   <- asApp(f.tenant)(insertVersion(f, doc, 1))
+        _    <- asApp(f.tenant) { approve(v1); setStatus(v1, "Published") }
+        v2   <- asApp(f.tenant)(insertVersion(f, doc, 2))
+        _    <- asApp(f.tenant)(approve(v2))
+        seen <- ZIO.serviceWithZIO[Env](e =>
+          ZIO.attemptBlocking {
+            val writer = appConnection(e.appSource)
+            val reader = appConnection(e.appSource)
+            try
+              val before = validVersions(reader, f.tenant, doc)
+              reader.rollback()
+              val _ = execute(
+                writer,
+                f.tenant,
+                "update dms.document_version set status = 'Superseded', superseded_by = ? where id = ?",
+                v2,
+                v1
+              )
+              val _ = execute(
+                writer,
+                f.tenant,
+                "update dms.document_version set status = 'Published' where id = ?",
+                v2
+              )
+              // The switch is not finished: the reader still sees the old version, not none and not both.
+              val during = validVersions(reader, f.tenant, doc)
+              reader.rollback()
+              writer.commit()
+              val after = validVersions(reader, f.tenant, doc)
+              reader.rollback()
+              (before, during, after)
+            finally
+              writer.close()
+              reader.close()
+          }
+        )
+      yield assertTrue(seen == (List(v1), List(v1), List(v2)))
+    },
+    test(
+      "the valid-from date is recorded on approval, the acknowledgement flag on creation; both are frozen"
+    ) {
+      for
+        f         <- fixture
+        doc       <- asApp(f.tenant)(insertDocument(f))
+        v         <- asApp(f.tenant)(insertVersion(f, doc, 1))
+        draftDate <- asApp(f.tenant)(
+          sql"update dms.document_version set valid_from = '2027-01-01'::date where id = $v".update.run()
+        ).either
+        _ <- asApp(f.tenant)(setStatus(v, "InReview") + setStatus(v, "InApproval"))
+        _ <- asApp(f.tenant)(
+          sql"""update dms.document_version set rendition_key = ${"k"}, rendition_sha256 = $checksum
+                where id = $v""".update.run()
+        )
+        approved <- asApp(f.tenant)(
+          sql"""update dms.document_version
+                set status = 'Approved', metadata_snapshot = $snapshot, released_by = ${"approver"},
+                    released_at = now(), valid_from = '2027-01-01'::date
+                where id = $v""".update.run()
+        )
+        later <- asApp(f.tenant)(
+          sql"update dms.document_version set valid_from = '2026-01-01'::date where id = $v".update.run()
+        ).either
+        acknowledgement <- asApp(f.tenant)(
+          sql"update dms.document_version set requires_acknowledgement = false where id = $v".update.run()
+        ).either
+        ownerAcknowledgement <- ZIO.serviceWithZIO[Env](
+          _.owner
+            .transactSystem(
+              Db.sql(
+                sql"update dms.document_version set requires_acknowledgement = false where id = $v".update
+                  .run()
+              )
+            )
+            .either
+        )
+        stored <- asApp(f.tenant)(
+          sql"select valid_from::text from dms.document_version where id = $v".query[String].run().head
+        )
+        preset <- asApp(f.tenant)(
+          sql"""insert into dms.document_version (id, tenant_id, document_id, major, minor, class_version,
+                                                  template_id, template_version, content, created_by,
+                                                  status_changed_by, valid_from)
+                values (${UUID
+              .randomUUID()}, dms.current_tenant(), $doc, 2, 0, 1, ${f.templateId}, 1, $content,
+                        ${"author"}, ${"author"}, '2027-01-01'::date)""".update.run()
+        ).either
+      yield assertTrue(
+        isGuardViolation(draftDate),
+        approved == 1,
+        isGuardViolation(later),
+        acknowledgement.left.exists(_.isInstanceOf[DbError.PermissionDenied]),
+        isGuardViolation(ownerAcknowledgement),
+        stored == "2027-01-01",
+        isGuardViolation(preset)
+      )
+    },
+    test("tenants have a time zone, Europe/Berlin by default; unknown zones are rejected") {
+      for
+        f    <- fixture
+        zone <- asApp(f.tenant)(
+          sql"select time_zone from dms.tenant where id = dms.current_tenant()".query[String].run().head
+        )
+        changed <- ZIO.serviceWithZIO[Env](
+          _.owner.transactSystem(
+            Db.sql(
+              sql"update dms.tenant set time_zone = 'America/New_York' where id = ${f.tenant.value}".update
+                .run()
+            )
+          )
+        )
+        unknown <- ZIO.serviceWithZIO[Env](
+          _.owner
+            .transactSystem(
+              Db.sql(
+                sql"update dms.tenant set time_zone = 'Mars/Olympus' where id = ${f.tenant.value}".update
+                  .run()
+              )
+            )
+            .either
+        )
+        byApp <- asApp(f.tenant)(
+          sql"update dms.tenant set time_zone = 'UTC' where id = dms.current_tenant()".update.run()
+        ).either
+      yield assertTrue(
+        zone == "Europe/Berlin",
+        changed == 1,
+        unknown.left.exists(_.isInstanceOf[DbError.Other]),
+        byApp.left.exists(_.isInstanceOf[DbError.PermissionDenied])
+      )
     },
     test("tenants only see their own documents") {
       for

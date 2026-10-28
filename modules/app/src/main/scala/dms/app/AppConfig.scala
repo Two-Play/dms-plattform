@@ -1,6 +1,7 @@
 package dms.app
 
 import dms.db.DbConfig
+import dms.documents.core.DocumentSettings
 import dms.identity.AuthConfig
 import dms.integration.partners.PartnerDirectoryConfig
 import dms.storage.StorageConfig
@@ -36,6 +37,24 @@ final case class WorkerSettings(name: Option[String])
   */
 final case class WorkflowSettings(reauthenticationSeconds: Int)
 
+/** Documents: editorial versions (DMS-46) and scheduled publication (DMS-45, ADR 0026).
+  *
+  * @param editorialChangeThresholdPercent
+  *   the automatic comparison warns when an editorial (minor) version changes more than this share of the
+  *   text
+  * @param minorVersionsRequireAcknowledgement
+  *   whether publishing a minor version asks readers for a new acknowledgement by default
+  * @param publicationCheckSeconds
+  *   how often approved versions are looked up to schedule their publication jobs
+  */
+final case class DocumentsConfig(
+    editorialChangeThresholdPercent: Int,
+    minorVersionsRequireAcknowledgement: Boolean,
+    publicationCheckSeconds: Int
+):
+  def settings: DocumentSettings =
+    DocumentSettings(editorialChangeThresholdPercent / 100.0, minorVersionsRequireAcknowledgement)
+
 final case class AppConfig(
     http: HttpConfig,
     auth: AuthConfig,
@@ -45,6 +64,7 @@ final case class AppConfig(
     audit: AuditConfig,
     worker: WorkerSettings,
     workflow: WorkflowSettings,
+    documents: DocumentsConfig,
     partners: PartnerDirectoryConfig
 )
 

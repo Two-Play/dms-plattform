@@ -69,7 +69,7 @@ object Main extends ZIOAppDefault:
           DocumentClassProfiles.layer,
           TemplateService.layer,
           DocumentTemplates.layer,
-          DocumentService.layer,
+          DocumentService.configured(cfg.documents.settings),
           FlowableEngine.layer,
           WorkflowDocuments.layer,
           RoleDirectory.layer,

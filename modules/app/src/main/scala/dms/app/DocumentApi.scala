@@ -21,7 +21,7 @@ import sttp.tapir.ztapir.*
 import zio.*
 import zio.json.JsonCodec
 
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 import java.util.UUID
 import scala.util.Try
 
@@ -62,6 +62,45 @@ final case class RenditionView(objectKey: String, objectVersion: Option[String],
     derives JsonCodec,
       Schema
 
+/** The version readers of another version are pointed to (DMS-45): the one that replaced a superseded
+  * version, or the approved version that replaces a valid one on its valid-from date.
+  */
+final case class SuccessorView(
+    versionId: UUID,
+    version: String,
+    /** Published (or ReviewDue) if it is valid already, Approved if it is scheduled. */
+    status: String,
+    validFrom: Option[LocalDate],
+    /** For a scheduled successor: when it becomes valid (00:00 of its valid-from date, tenant time zone). */
+    publicationDue: Option[Instant]
+) derives JsonCodec,
+      Schema
+
+/** The automatic comparison of an editorial (minor) version with the version it is based on (DMS-46). */
+final case class EditorialCheckView(
+    /** The released version compared with. */
+    basedOn: String,
+    /** Share of the text that changed, 0 to 1. */
+    changedRatio: Double,
+    /** Configured threshold (`dms.documents.editorialChangeThresholdPercent`). */
+    threshold: Double,
+    /** True: more text changed than an editorial correction usually does; check the classification. */
+    exceedsThreshold: Boolean
+) derives JsonCodec,
+      Schema
+
+final case class NewVersion(
+    /** Major (change of content, full workflow) or Minor (editorial correction, shortened workflow). */
+    changeKind: String,
+    /** Required for Minor: why the change is editorial. */
+    reason: Option[String],
+    /** Whether publishing the version asks readers for a new acknowledgement. Default: yes for Major, the
+      * configured default (`dms.documents.minorVersionsRequireAcknowledgement`, normally no) for Minor.
+      */
+    requiresAcknowledgement: Option[Boolean]
+) derives JsonCodec,
+      Schema
+
 final case class DocumentVersionView(
     id: UUID,
     /** `1.1-draft.3` while open, `1.1` from approval on. */
@@ -92,7 +131,23 @@ final case class DocumentVersionView(
     /** True if the content has authorized deviations from locked template sections: the workflow adds the
       * additional review step. Details: `GET /api/v1/documents/{id}/versions/{versionId}/deviations`.
       */
-    requiresExtraReview: Boolean
+    requiresExtraReview: Boolean,
+    /** Valid-from date: of the field while the version is open, frozen on approval. */
+    validFrom: Option[LocalDate] = None,
+    /** For an approved version: when it is published automatically (00:00 of its valid-from date in the
+      * tenant's time zone).
+      */
+    publicationDue: Option[Instant] = None,
+    /** For a superseded version the version that replaced it; for a valid version the approved version that
+      * will replace it. Readers of the old version are pointed to the new one.
+      */
+    successor: Option[SuccessorView] = None,
+    /** Whether publishing this version asks readers for a new acknowledgement (minor versions: no by
+      * default).
+      */
+    requiresAcknowledgement: Boolean = true,
+    /** For minor versions: the automatic comparison with the version they are based on. */
+    editorialCheck: Option[EditorialCheckView] = None
 ) derives JsonCodec,
       Schema
 
@@ -229,7 +284,7 @@ object DocumentApi:
                 p.userId
               )
               (document, version) = created
-            yield documentView(document, profile, version)
+            yield documentView(document, profile, versionView(version))
           }
       )
 
@@ -282,7 +337,11 @@ object DocumentApi:
               details  <- ctx.service.get(DocumentId(id))
               readable <- ctx.readable(details)
               current = readable.find(v => Versioning.isOpen(v.status)).getOrElse(readable.last)
-            yield documentView(details.document, details.profile, current)
+            yield documentView(
+              details.document,
+              details.profile,
+              versionViewIn(details, ctx.service.settings)(current)
+            )
           }
       )
 
@@ -295,7 +354,10 @@ object DocumentApi:
       .serverLogic(p =>
         id =>
           inTransaction(p) { ctx =>
-            ctx.service.get(DocumentId(id)).flatMap(ctx.readable).map(_.map(versionView))
+            for
+              details  <- ctx.service.get(DocumentId(id))
+              readable <- ctx.readable(details)
+            yield readable.map(versionViewIn(details, ctx.service.settings))
           }
       )
 
@@ -324,7 +386,7 @@ object DocumentApi:
                 DraftChange(req.title, keepExternal(open) ++ entered, req.content),
                 p.userId
               )
-            yield versionView(updated)
+            yield versionViewIn(details, ctx.service.settings)(updated)
           }
       )
 
@@ -346,7 +408,49 @@ object DocumentApi:
               _         <- ctx.check(Action.EditDraft, resource(p, details, open))
               submitted <- ctx.service.submit(DocumentId(id), p.userId)
               _         <- ctx.workflow.start(DocumentId(id), submitted.id, p.userId)
-            yield versionView(submitted)
+            yield versionViewIn(details, ctx.service.settings)(submitted)
+          }
+      )
+
+  val newVersion: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.post
+      .in(documents / documentId / "versions")
+      .in(jsonBody[NewVersion])
+      .out(statusCode(StatusCode.Created).and(jsonBody[DocumentVersionView]))
+      .description(
+        "Starts the next version from the valid version as a draft: Major for a change of content (full " +
+          "workflow of the class), Minor for an editorial correction (reason required, 422; on submission the " +
+          "owner confirms it in a shortened workflow, and an automatic comparison warns in `editorialCheck` if " +
+          "more text changed than the configured threshold). 409 while a version is open or an approved version " +
+          "waits for its valid-from date."
+      )
+      .tag("Documents")
+      .serverLogic(p =>
+        (id, req) =>
+          inTransaction(p) { ctx =>
+            for
+              kind <- ZIO
+                .fromOption(ChangeKind.values.find(_.toString == req.changeKind))
+                .orElseFail(
+                  DocumentError.Invalid(List(s"unknown change kind ${req.changeKind}; Major or Minor"))
+                )
+              details <- ctx.service.get(DocumentId(id))
+              base    <- ZIO
+                .fromOption(details.versions.filter(v => Versioning.isValid(v.status)).lastOption)
+                .orElseFail(
+                  DocumentError.Conflict("only a document with a valid version can get a new version")
+                )
+              // The caller becomes the author of a draft of this document.
+              _ <- ctx.check(
+                Action.EditDraft,
+                resource(p, details, base)
+                  .copy(status = Some(DocumentStatus.Draft), authorId = Some(p.userId))
+              )
+              created <- ctx.service
+                .newVersion(DocumentId(id), kind, req.reason, p.userId, req.requiresAcknowledgement)
+            yield versionViewIn(details.copy(versions = details.versions :+ created), ctx.service.settings)(
+              created
+            )
           }
       )
 
@@ -431,7 +535,18 @@ object DocumentApi:
       )
 
   def endpoints: List[ZServerEndpoint[Env, Any]] =
-    List(create, list, get, versions, updateDraft, submit, requestDeviation, withdrawDeviation, deviations)
+    List(
+      create,
+      list,
+      get,
+      versions,
+      updateDraft,
+      submit,
+      newVersion,
+      requestDeviation,
+      withdrawDeviation,
+      deviations
+    )
 
   /** What a request may use inside its transaction. */
   private final class Context(
@@ -574,7 +689,11 @@ object DocumentApi:
       approvedBy = v.releasedBy.toSet
     )
 
-  private def documentView(d: Document, profile: MetadataProfile, current: DocumentVersion): DocumentView =
+  private def documentView(
+      d: Document,
+      profile: MetadataProfile,
+      current: DocumentVersionView
+  ): DocumentView =
     DocumentView(
       d.id.value,
       d.classId.value,
@@ -586,7 +705,7 @@ object DocumentApi:
       d.templateId.value,
       d.templateVersion,
       d.createdAt,
-      versionView(current)
+      current
     )
 
   private def summaryView(details: DocumentDetails, v: DocumentVersion, caller: UserId): DocumentSummaryView =
@@ -633,7 +752,26 @@ object DocumentApi:
       v.updatedAt,
       v.releasedBy.map(_.value),
       v.releasedAt,
-      v.requiresExtraReview
+      v.requiresExtraReview,
+      validFrom = v.validFrom.orElse(Publication.validFrom(v.metadata)),
+      requiresAcknowledgement = v.requiresAcknowledgement
+    )
+
+  /** The view of a version with what readers need from the other versions of its document: when an approved
+    * version is published, the successor of a superseded or valid version (DMS-45) and the editorial check of
+    * a minor version (DMS-46).
+    */
+  private[app] def versionViewIn(details: DocumentDetails, settings: DocumentSettings)(
+      v: DocumentVersion
+  ): DocumentVersionView =
+    versionView(v).copy(
+      publicationDue = details.publicationDue(v),
+      successor = details
+        .successor(v)
+        .map(s => SuccessorView(s.id, s.label, s.status.toString, s.validFrom, details.publicationDue(s))),
+      editorialCheck = details
+        .editorialCheck(v, settings.editorialChangeThreshold)
+        .map(c => EditorialCheckView(c.basedOn, c.changedRatio, c.threshold, c.exceedsThreshold))
     )
 
   private[app] def deviationsView(

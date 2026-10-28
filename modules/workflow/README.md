@@ -43,3 +43,7 @@ Layout: `api` holds public types, `core` the implementation. Other modules may o
 | POST | `/api/v1/admin/workflows/{classKey}` | Define the next version `{definition, fourEyes, reason}` | `Configure` Workflows |
 
 Tests: `RulesSpec` (pure), `SharedTransactionSpec` (engine, Testcontainers), `app/WorkflowApiSpec` (end to end over HTTP).
+
+## Editorial path of minor versions (DMS-46, ADR 0026)
+
+A submitted minor version (`ReviewSubject.changeKind == Minor`) does not run the class's workflow but `WorkflowDefinition.editorial` (process key `approval.editorial`): one approval step `editorial-confirmation` with a lane of the pseudo role `WorkflowDefinition.DocumentOwner`. `ApprovalWorkflow` resolves that lane to the document owner (`Rules.ownerConfirmation`); if the owner is the author or there is none, the holders of `Approver` in scope confirm instead (the approver must differ from the author). The vote needs step-up like any approval; `WorkflowApi` authorizes it with `ownerMayApprove` for owner lanes. The class's four-eyes setting applies; the editorial definition is pinned in the case like any other.
