@@ -189,6 +189,7 @@ interface State {
   saveReply: () => Reply
   submitReplies: (() => Reply)[]
   missing?: boolean
+  ack: { opened: boolean; acknowledgedAt?: string; openedReply?: () => Reply }
 }
 
 let state: State
@@ -202,6 +203,7 @@ beforeEach(() => {
     cases: [],
     saveReply: () => ok({ ...state.document.current, version: '1.0-draft.3' }),
     submitReplies: [],
+    ack: { opened: false },
   }
 })
 
@@ -218,6 +220,14 @@ function renderAt(path: string) {
         return ok(state.cases)
       case '/api/v1/workflow/tasks':
         return ok([])
+      case '/api/v1/documents/{id}/versions/{versionId}/acknowledgement':
+        return ok({
+          versionId: state.document.current.id,
+          versionLabel: state.document.current.version,
+          requested: true,
+          opened: state.ack.opened,
+          acknowledgedAt: state.ack.acknowledgedAt,
+        })
       case '/api/v1/me':
         return ok({ userId: 'author-1', tenantId: 'tenant-1', roles: ['Author'] })
       default:
@@ -231,6 +241,27 @@ function renderAt(path: string) {
       state.document = draftDocument({}, 'InReview')
       state.cases = [runningCase]
       return ok(state.document.current)
+    }
+    if (p === '/api/v1/documents/{id}/versions/{versionId}/opened') {
+      if (state.ack.openedReply) return state.ack.openedReply()
+      state.ack.opened = true
+      return ok(undefined, 204)
+    }
+    if (p === '/api/v1/documents/{id}/versions/{versionId}/acknowledgement') {
+      if (!state.ack.opened) {
+        return failed(409, { code: 'not_opened', message: 'version 1.0 has to be opened first' })
+      }
+      state.ack.acknowledgedAt = '2026-10-27T09:05:00Z'
+      return ok(
+        {
+          documentId,
+          versionId: state.document.current.id,
+          versionLabel: '1.0',
+          openedAt: '2026-10-27T09:00:00Z',
+          acknowledgedAt: state.ack.acknowledgedAt,
+        },
+        201,
+      )
     }
     return ok({ html: '<article class="dms-document"></article>', missingRequired: [], issues: [] })
   })
@@ -430,5 +461,69 @@ describe('Document page with a draft', () => {
     state.missing = true
     renderAt(`/documents/${documentId}`)
     expect(await screen.findByRole('alert')).toHaveTextContent('This document does not exist.')
+  })
+})
+
+describe('Document page with a published version', () => {
+  function published(requiresAcknowledgement = true): DocumentView {
+    const d = draftDocument({}, 'Published')
+    return {
+      ...d,
+      current: { ...d.current, version: '1.0', requiresAcknowledgement },
+    }
+  }
+
+  it('records the opening and lets the reader acknowledge the version', async () => {
+    state.document = published()
+    const { post, user } = renderAt(`/documents/${documentId}`)
+
+    const button = await screen.findByRole('button', { name: 'Acknowledge' })
+    await waitFor(() => {
+      expect(button).toBeEnabled()
+    })
+    expect(post).toHaveBeenCalledWith('/api/v1/documents/{id}/versions/{versionId}/opened', {
+      params: { path: { id: documentId, versionId: 'v1' } },
+    })
+    await user.click(button)
+
+    expect(await screen.findByTestId('acknowledged')).toHaveTextContent(
+      'You acknowledged version 1.0 on',
+    )
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/documents/{id}/versions/{versionId}/acknowledgement',
+      { params: { path: { id: documentId, versionId: 'v1' } } },
+    )
+    expect(screen.queryByRole('button', { name: 'Acknowledge' })).not.toBeInTheDocument()
+  })
+
+  it('keeps acknowledging disabled while the opening could not be recorded', async () => {
+    state.document = published()
+    state.ack.openedReply = () =>
+      failed(503, { code: 'database_error', message: 'The opening could not be recorded.' })
+    renderAt(`/documents/${documentId}`)
+
+    expect(await screen.findByText('The opening could not be recorded.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeDisabled()
+  })
+
+  it('shows an earlier acknowledgement', async () => {
+    state.document = published()
+    state.ack = { opened: true, acknowledgedAt: '2026-10-20T08:00:00Z' }
+    renderAt(`/documents/${documentId}`)
+
+    expect(await screen.findByTestId('acknowledged')).toHaveTextContent('version 1.0')
+    expect(screen.queryByRole('button', { name: 'Acknowledge' })).not.toBeInTheDocument()
+  })
+
+  it('does not ask for an acknowledgement when the version does not require it', async () => {
+    state.document = published(false)
+    const { post } = renderAt(`/documents/${documentId}`)
+
+    await screen.findByRole('heading', { name: 'Service contract ACME' })
+    expect(screen.queryByText('Acknowledgement')).not.toBeInTheDocument()
+    expect(post).not.toHaveBeenCalledWith(
+      '/api/v1/documents/{id}/versions/{versionId}/opened',
+      expect.anything(),
+    )
   })
 })

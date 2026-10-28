@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { useApiClient } from '@/api/context'
 import { documentQuery } from '@/api/documents'
 import { ApiRequestError } from '@/api/errors'
-import type { DocumentView } from '@/api/partners'
+import type { DocumentVersionView, DocumentView } from '@/api/partners'
 import { templateFieldsQuery, type DocumentLanguage } from '@/api/templates'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -14,6 +14,15 @@ import { LanguageSelect } from './document-workspace'
 import { DocumentEditor } from './new-document-page'
 import { StatusBadge } from './status-badge'
 import { WorkflowPanel } from './workflow-panel'
+import { AcknowledgementPanel } from './acknowledgement-panel'
+
+/** Whether the page shows the acknowledgement card for a version: valid and requiring it. */
+function asksForAcknowledgement(version: DocumentVersionView): boolean {
+  return (
+    (version.status === 'Published' || version.status === 'ReviewDue') &&
+    version.requiresAcknowledgement
+  )
+}
 
 /** The language of the document if it has one the preview supports. */
 function documentLanguage(document: DocumentView): DocumentLanguage {
@@ -123,6 +132,13 @@ export function DocumentPage({ documentId }: { documentId: string }) {
             />
           ) : (
             <VersionValues document={document.data} />
+          )}
+          {asksForAcknowledgement(document.data.current) && (
+            <AcknowledgementPanel
+              key={document.data.current.id}
+              documentId={document.data.id}
+              version={document.data.current}
+            />
           )}
           <WorkflowPanel
             documentId={document.data.id}

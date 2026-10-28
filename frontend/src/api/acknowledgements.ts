@@ -1,88 +1,28 @@
 import { queryOptions } from '@tanstack/react-query'
-import type { Client } from 'openapi-fetch'
 import type { ApiClient } from './client'
-import { ApiRequestError, requestError, type ApiErrorBody } from './errors'
+import { ApiRequestError, requestError } from './errors'
+import type { components } from './schema'
 
 /**
- * Read confirmations of published versions (DMS-47). The endpoints are not yet part of the generated
- * schema, so the types are written by hand after the agreed contract; once `schema.d.ts` contains
- * them, `AckPaths` and the cast in `ackClient` can be replaced by the generated `paths`.
+ * Acknowledgements (read confirmations) of published versions (DMS-47, ADR 0027). A reader opens
+ * the version first ({@link markOpened}, recorded once), then acknowledges it ({@link acknowledge}).
  */
-export interface Acknowledgement {
-  documentId: string
-  versionId: string
-  title: string
-  versionLabel: string
-  classPath?: string[]
-  /** Date (yyyy-mm-dd) from which the version is valid. */
-  validFrom?: string
-  publishedAt: string
-  /** Whether the caller has opened the version. */
-  opened: boolean
-  acknowledgedAt?: string
-}
+
+/** A version in the caller's acknowledgement overview, open or done. */
+export type Acknowledgement = components['schemas']['AcknowledgementItemView']
+/** A recorded acknowledgement with version and timestamp. */
+export type AcknowledgementView = components['schemas']['AcknowledgementView']
+/** What the caller did with one version: opened, acknowledged, and whether it asks for it. */
+export type AcknowledgementState = components['schemas']['AcknowledgementStateView']
 
 export type AcknowledgementStatus = 'open' | 'done'
-
-interface ErrorResponses {
-  default: { headers: Record<string, unknown>; content: { 'application/json': ApiErrorBody } }
-}
-
-interface VersionPath {
-  path: { id: string; versionId: string }
-  query?: never
-  header?: never
-  cookie?: never
-}
-
-interface AckPaths {
-  '/api/v1/acknowledgements': {
-    parameters: { query?: never; header?: never; path?: never; cookie?: never }
-    get: {
-      parameters: {
-        query?: { status?: AcknowledgementStatus }
-        header?: never
-        path?: never
-        cookie?: never
-      }
-      requestBody?: never
-      responses: {
-        200: {
-          headers: Record<string, unknown>
-          content: { 'application/json': Acknowledgement[] }
-        }
-      } & ErrorResponses
-    }
-  }
-  '/api/v1/documents/{id}/versions/{versionId}/opened': {
-    parameters: { query?: never; header?: never; path?: never; cookie?: never }
-    post: {
-      parameters: VersionPath
-      requestBody?: never
-      responses: { 204: { headers: Record<string, unknown>; content?: never } } & ErrorResponses
-    }
-  }
-  '/api/v1/documents/{id}/versions/{versionId}/acknowledgement': {
-    parameters: { query?: never; header?: never; path?: never; cookie?: never }
-    post: {
-      parameters: VersionPath
-      requestBody?: never
-      responses: { 201: { headers: Record<string, unknown>; content?: never } } & ErrorResponses
-    }
-  }
-}
-
-/** The same client (with its auth middleware), typed for the hand-written paths. */
-function ackClient(client: ApiClient): Client<AckPaths> {
-  return client as unknown as Client<AckPaths>
-}
 
 /** Read confirmations of the caller (GET /api/v1/acknowledgements?status=…). */
 export async function listAcknowledgements(
   client: ApiClient,
   status: AcknowledgementStatus = 'open',
 ): Promise<Acknowledgement[]> {
-  const { data, error, response } = await ackClient(client).GET('/api/v1/acknowledgements', {
+  const { data, error, response } = await client.GET('/api/v1/acknowledgements', {
     params: { query: { status } },
   })
   if (!response.ok || !data) {
@@ -95,13 +35,13 @@ export async function listAcknowledgements(
   return data
 }
 
-/** Records that the caller opened the version (POST …/versions/{versionId}/opened). */
+/** Records that the caller opened the version (POST …/versions/{versionId}/opened); idempotent. */
 export async function markOpened(
   client: ApiClient,
   documentId: string,
   versionId: string,
 ): Promise<void> {
-  const { error, response } = await ackClient(client).POST(
+  const { error, response } = await client.POST(
     '/api/v1/documents/{id}/versions/{versionId}/opened',
     { params: { path: { id: documentId, versionId } } },
   )
@@ -110,24 +50,28 @@ export async function markOpened(
   }
 }
 
-/** Confirms that the caller has read the version (POST …/versions/{versionId}/acknowledgement). */
+/**
+ * Confirms that the caller has read the version (POST …/versions/{versionId}/acknowledgement).
+ * Fails with code `not_opened` before {@link markOpened} and `already_acknowledged` the second time.
+ */
 export async function acknowledge(
   client: ApiClient,
   documentId: string,
   versionId: string,
-): Promise<void> {
-  const { error, response } = await ackClient(client).POST(
+): Promise<AcknowledgementView> {
+  const { data, error, response } = await client.POST(
     '/api/v1/documents/{id}/versions/{versionId}/acknowledgement',
     { params: { path: { id: documentId, versionId } } },
   )
-  if (!response.ok) {
+  if (!response.ok || !data) {
     throw requestError(response, error, `Confirming failed with HTTP ${response.status}`)
   }
+  return data
 }
 
 /**
- * Open read confirmations for the task inbox, or `null` when the backend does not offer them yet
- * (404: DMS-47 not deployed), so the inbox can leave them out.
+ * Open read confirmations for the task inbox, or `null` when the backend does not offer them
+ * (404), so the inbox can leave them out.
  */
 export function openAcknowledgementsQuery(client: ApiClient) {
   return queryOptions({
@@ -139,6 +83,32 @@ export function openAcknowledgementsQuery(client: ApiClient) {
         if (e instanceof ApiRequestError && e.status === 404) return null
         throw e
       }
+    },
+    retry: false,
+  })
+}
+
+/** The caller's state for one version (GET …/versions/{versionId}/acknowledgement). */
+export function acknowledgementStateQuery(
+  client: ApiClient,
+  documentId: string,
+  versionId: string,
+) {
+  return queryOptions({
+    queryKey: ['acknowledgements', 'state', versionId],
+    queryFn: async (): Promise<AcknowledgementState> => {
+      const { data, error, response } = await client.GET(
+        '/api/v1/documents/{id}/versions/{versionId}/acknowledgement',
+        { params: { path: { id: documentId, versionId } } },
+      )
+      if (!response.ok || !data) {
+        throw requestError(
+          response,
+          error,
+          `Loading the read confirmation failed with HTTP ${response.status}`,
+        )
+      }
+      return data
     },
     retry: false,
   })
