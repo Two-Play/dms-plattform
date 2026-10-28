@@ -835,7 +835,11 @@ final class DocumentService(
         releasedBy = if snapshot.isDefined then Some(actor) else current.releasedBy,
         releasedAt = if snapshot.isDefined then Some(now) else current.releasedAt,
         validFrom = validFrom.orElse(current.validFrom),
-        supersededBy = supersededBy.orElse(current.supersededBy)
+        supersededBy = supersededBy.orElse(current.supersededBy),
+        // The database records the same moment on Approved -> Published (migration V14).
+        publishedAt =
+          if current.status == DocumentStatus.Approved && target == DocumentStatus.Published then Some(now)
+          else current.publishedAt
       )
       details = Json.Obj(
         (List(

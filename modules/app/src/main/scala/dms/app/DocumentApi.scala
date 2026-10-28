@@ -147,7 +147,9 @@ final case class DocumentVersionView(
       */
     requiresAcknowledgement: Boolean = true,
     /** For minor versions: the automatic comparison with the version they are based on. */
-    editorialCheck: Option[EditorialCheckView] = None
+    editorialCheck: Option[EditorialCheckView] = None,
+    /** When the version became valid (DMS-47). */
+    publishedAt: Option[Instant] = None
 ) derives JsonCodec,
       Schema
 
@@ -558,6 +560,10 @@ object DocumentApi:
     def check(action: Action, resource: Resource): IO[AccessDenied, Unit] =
       authz.check(subject, action, resource).unit
 
+    /** Whether the caller may do `action` on `resource`, without logging a denial: for filtering lists. */
+    def allowed(action: Action, resource: Resource): UIO[Boolean] =
+      Clock.instant.map(now => Policy.decide(subject, action, resource, now).isPermitted)
+
     /** The versions the caller may read, possibly none. */
     def visible(details: DocumentDetails): IO[WorkflowError, List[DocumentVersion]] =
       visibleWith(details).map(_._1)
@@ -765,7 +771,8 @@ object DocumentApi:
       v.releasedAt,
       v.requiresExtraReview,
       validFrom = v.validFrom.orElse(Publication.validFrom(v.metadata)),
-      requiresAcknowledgement = v.requiresAcknowledgement
+      requiresAcknowledgement = v.requiresAcknowledgement,
+      publishedAt = v.publishedAt
     )
 
   /** The view of a version with what readers need from the other versions of its document: when an approved

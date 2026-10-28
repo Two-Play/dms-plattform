@@ -88,6 +88,8 @@ final case class Document(
   * @param requiresAcknowledgement
   *   whether publishing this version asks its readers for a new acknowledgement (business concept 6.3): by
   *   default for major versions only (DMS-46); decided when the version is created
+  * @param publishedAt
+  *   when the version became valid (Approved to Published), recorded by the database (DMS-47)
   */
 final case class DocumentVersion(
     id: UUID,
@@ -113,7 +115,8 @@ final case class DocumentVersion(
     deviations: DeviationReport = DeviationReport(Nil),
     validFrom: Option[LocalDate] = None,
     supersededBy: Option[UUID] = None,
-    requiresAcknowledgement: Boolean = true
+    requiresAcknowledgement: Boolean = true,
+    publishedAt: Option[Instant] = None
 ):
   def label: String = Versioning.label(number, status, workingState)
 
