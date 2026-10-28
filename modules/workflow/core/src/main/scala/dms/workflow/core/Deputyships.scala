@@ -10,6 +10,7 @@ import zio.*
 import zio.json.*
 import zio.json.ast.Json
 
+import java.time.Instant
 import java.util.UUID
 
 /** Deputies of workflow participants (business concept 6.1, US-10.1, DMS-49, ADR 0028): time-limited
@@ -97,6 +98,30 @@ final class Deputyships(audit: AuditTrail, directory: ParticipantDirectory):
   /** All deputyships of the tenant, latest period first. */
   def all: IO[WorkflowError, List[Deputyship]] = sql(DeputyStore.all)
 
+  /** Notices due at `now` (DMS-99): scheduled periods that have begun and periods that ran out. */
+  def dueNotices(now: Instant): IO[WorkflowError, List[(UUID, DeputyshipNotice)]] =
+    sql {
+      DeputyStore.startedWithoutNotice(now).map(_ -> DeputyshipNotice.Started) ++
+        DeputyStore.endedByPeriodWithoutNotice(now).map(_ -> DeputyshipNotice.EndedByPeriod)
+    }
+
+  /** Publishes the notice for a deputyship once: records it in `dms.deputyship_notice` and writes the outbox
+    * event (`workflow.deputyship-started` or `workflow.deputyship-ended-by-period`) to principal and deputy.
+    * `false` if the notice was published already or is not due (any more) at `now`.
+    */
+  def notice(id: UUID, kind: DeputyshipNotice, now: Instant): IO[WorkflowError, Boolean] =
+    for
+      d <- get(id)
+      due = kind match
+        case DeputyshipNotice.Started       => d.isActiveAt(now)
+        case DeputyshipNotice.EndedByPeriod => d.endedAt.isEmpty && !now.isBefore(d.validUntil)
+      published <-
+        if !due then ZIO.succeed(false)
+        else
+          sql(DeputyStore.insertNotice(id, kind.key))
+            .tap(inserted => ZIO.when(inserted)(publish(d, kind.eventType)))
+    yield published
+
   private def publish(d: Deputyship, eventType: String): IO[WorkflowError, Unit] =
     Outbox
       .publish(
@@ -131,6 +156,11 @@ final class Deputyships(audit: AuditTrail, directory: ParticipantDirectory):
       )
       .mapError(WorkflowError.Database(_))
       .unit
+
+/** Notices published by [[DeputyshipJobs]] when a period begins or runs out (DMS-99). */
+enum DeputyshipNotice(val key: String, val eventType: String):
+  case Started       extends DeputyshipNotice("started", "workflow.deputyship-started")
+  case EndedByPeriod extends DeputyshipNotice("ended-by-period", "workflow.deputyship-ended-by-period")
 
 object Deputyships:
   val layer: URLayer[AuditTrail & ParticipantDirectory, Deputyships] =

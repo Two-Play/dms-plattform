@@ -212,5 +212,66 @@ object DeputyshipsSpec extends ZIOSpecDefault:
         guarded.isLeft,
         noTenant.isLeft || noTenant.contains(0L)
       )
+    },
+    test("the deputyship check notifies once when a scheduled period begins and when it runs out (DMS-99)") {
+      // The job runs under a clock moved ahead instead of rewriting the guarded rows.
+      def at(now: Instant): Clock  = Clock.ClockJava(java.time.Clock.fixed(now, java.time.ZoneOffset.UTC))
+      def events(e: Env, id: UUID) =
+        e.owner.transactSystem(
+          Db.sql(
+            sql"select event_type, payload::text from dms.outbox_event where aggregate_id = $id order by id"
+              .query[(String, String)]
+              .run()
+              .toList
+          )
+        )
+      for
+        e   <- ZIO.service[Env]
+        now <- Clock.instant
+        s    = service(e.audit)
+        jobs = DeputyshipJobs(e.app, s, DeputyshipScheduleConfig())
+        scheduled <- run(e, e.tenant)(
+          s.create(
+            NewDeputyship(ben, anna, Some(now.plusSeconds(60)), now.plusSeconds(120), Nil, None, None),
+            ben
+          )
+        )
+        endedEarly <- run(e, e.tenant)(
+          s.create(
+            NewDeputyship(ben, clara, Some(now.plusSeconds(60)), now.plusSeconds(120), Nil, None, None),
+            ben
+          )
+        )
+        _          <- run(e, e.tenant)(s.end(endedEarly.id, ben))
+        before     <- jobs.check(e.tenant)
+        afterStart <- events(e, scheduled.id)
+        started    <- ZIO.withClock(at(now.plusSeconds(90)))(jobs.check(e.tenant))
+        again      <- ZIO.withClock(at(now.plusSeconds(95)))(jobs.check(e.tenant))
+        ended      <- ZIO.withClock(at(now.plusSeconds(180)))(jobs.check(e.tenant))
+        repeated   <- ZIO.withClock(at(now.plusSeconds(240)))(jobs.check(e.tenant))
+        all        <- events(e, scheduled.id)
+        early      <- events(e, endedEarly.id)
+        foreign    <- ZIO.withClock(at(now.plusSeconds(180)))(jobs.check(e.other))
+        enqueued   <- jobs.tick
+        twice      <- jobs.tick
+      yield assertTrue(
+        afterStart.map(_._1) == List("workflow.deputyship-created"),
+        started >= 1,
+        again == 0,
+        ended >= 1,
+        repeated == 0,
+        all.map(_._1) == List(
+          "workflow.deputyship-created",
+          "workflow.deputyship-started",
+          "workflow.deputyship-ended-by-period"
+        ),
+        all.drop(1).forall((_, payload) => payload.contains(anna.value) && payload.contains(ben.value)),
+        // ended before its period began: neither a start nor an end by period
+        early.map(_._1) == List("workflow.deputyship-created", "workflow.deputyship-ended"),
+        foreign == 0,
+        enqueued == 2,
+        twice == 0,
+        before >= 0
+      )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

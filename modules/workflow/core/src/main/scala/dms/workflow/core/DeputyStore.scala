@@ -139,6 +139,33 @@ private[core] object DeputyStore:
     sql"""update dms.deputyship set ended_at = ${offset(at)}, ended_by = ${by.value}
           where id = $id and ended_at is null""".update.run() > 0
 
+  /** Deputyships whose scheduled period has begun by `now` and is still running, without a `started` notice.
+    * Deputyships active from their creation on are left out: their creation was announced already.
+    */
+  def startedWithoutNotice(now: Instant)(using DbTx): List[UUID] =
+    val at = offset(now)
+    sql"""select d.id from dms.deputyship d
+          where d.valid_from <= $at and d.valid_from > d.created_at and d.valid_until > $at
+            and (d.ended_at is null or d.ended_at > $at)
+            and not exists (select 1 from dms.deputyship_notice n where n.deputyship_id = d.id and n.kind = 'started')
+          order by d.valid_from, d.id""".query[UUID].run().toList
+
+  /** Deputyships whose period ran out by `now` without being ended early, without an `ended-by-period`
+    * notice.
+    */
+  def endedByPeriodWithoutNotice(now: Instant)(using DbTx): List[UUID] =
+    sql"""select d.id from dms.deputyship d
+          where d.valid_until <= ${offset(now)} and d.ended_at is null
+            and not exists (select 1 from dms.deputyship_notice n
+                            where n.deputyship_id = d.id and n.kind = 'ended-by-period')
+          order by d.valid_until, d.id""".query[UUID].run().toList
+
+  /** Records a notice; `false` if it was recorded already (by another worker). */
+  def insertNotice(id: UUID, kind: String)(using DbTx): Boolean =
+    sql"""insert into dms.deputyship_notice (tenant_id, deputyship_id, kind)
+          values (dms.current_tenant(), $id, $kind)
+          on conflict (deputyship_id, kind) do nothing""".update.run() > 0
+
   private def ids(users: List[UserId]): Jsonb = Jsonb(users.map(_.value).distinct.toJson)
 
   private def offset(i: Instant): OffsetDateTime = OffsetDateTime.ofInstant(i, ZoneOffset.UTC)

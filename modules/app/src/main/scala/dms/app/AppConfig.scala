@@ -37,8 +37,10 @@ final case class WorkerSettings(name: Option[String])
   *
   * @param reauthenticationSeconds
   *   step-up window for approval votes: the token's `auth_time` must not be older (DMS-41)
+  * @param deputyshipCheckSeconds
+  *   how often begun and expired deputyship periods are looked up to notify principal and deputy (DMS-99)
   */
-final case class WorkflowSettings(reauthenticationSeconds: Int)
+final case class WorkflowSettings(reauthenticationSeconds: Int, deputyshipCheckSeconds: Int)
 
 /** Documents: editorial versions (DMS-46), scheduled publication (DMS-45, ADR 0026) and periodic review
   * (DMS-55, ADR 0030).
