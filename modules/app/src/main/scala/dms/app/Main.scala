@@ -1,5 +1,6 @@
 package dms.app
 
+import dms.archive.core.LegalHoldService
 import dms.audit.core.{AuditTrailLive, TsaTrust}
 import dms.authz.{Authorizer, Groups, RoleAssignments}
 import dms.db.Db
@@ -28,7 +29,7 @@ object Main extends ZIOAppDefault:
 
   private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
     PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env &
-    SearchApi.Env & GroupApi.Env & ReviewApi.Env
+    SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -48,7 +49,8 @@ object Main extends ZIOAppDefault:
       DeputyshipApi.endpoints.map(_.widen[Env]) ++
       PartnerApi.endpoints.map(_.widen[Env]) ++
       SearchApi.endpoints.map(_.widen[Env]) ++
-      GroupApi.endpoints.map(_.widen[Env])
+      GroupApi.endpoints.map(_.widen[Env]) ++
+      LegalHoldApi.endpoints.map(_.widen[Env])
 
   private val docs =
     SwaggerInterpreter()
@@ -87,6 +89,7 @@ object Main extends ZIOAppDefault:
           DocumentService.configured(cfg.documents.settings),
           AcknowledgementService.layer,
           ReviewService.layer,
+          LegalHoldService.layer,
           FlowableEngine.layer,
           WorkflowDocuments.layer,
           RoleDirectory.layer,

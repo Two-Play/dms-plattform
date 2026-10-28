@@ -1,5 +1,6 @@
 package dms.app
 
+import dms.archive.core.LegalHoldStore
 import dms.authz.{AccessDenied, Action, Authorizer, DocumentResource, Groups, Policy, Resource, Subject}
 import dms.db.{Db, DbError}
 import dms.documents.*
@@ -224,7 +225,11 @@ final case class DocumentView(
     templateVersion: Int,
     createdAt: Instant,
     /** The open version if the caller may read it, otherwise the latest readable version. */
-    current: DocumentVersionView
+    current: DocumentVersionView,
+    /** True while an active legal hold covers the document (DMS-56): it cannot be destroyed. */
+    legalHold: Boolean = false,
+    /** The active legal holds covering the document; only for callers who may manage legal holds of it. */
+    legalHolds: Option[List[LegalHoldRefView]] = None
 ) derives JsonCodec,
       Schema
 
@@ -257,7 +262,7 @@ final case class DocumentSummaryView(
   * changing and submitting a draft and requesting or withdrawing deviations require `EditDraft`; the
   * deviation report of a version requires `ReadDocument` on it. Submitting starts the review and approval
   * workflow of the document's class (module `workflow`); the participants of a version's workflow may read
-  * it.
+  * it. The document view shows whether a legal hold covers the document (DMS-56).
   */
 object DocumentApi:
   type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow
@@ -342,10 +347,15 @@ object DocumentApi:
               details  <- ctx.service.get(DocumentId(id))
               readable <- ctx.readable(details)
               current = readable.find(v => Versioning.isOpen(v.status)).getOrElse(readable.last)
+              holds  <- LegalHoldStore.activeHolds(details.document.id).mapError(DocumentError.Database(_))
+              manage <- ctx.allowed(Action.ManageRetention, resource(p, details, current))
             yield documentView(
               details.document,
               details.profile,
               versionViewIn(details, ctx.service.settings)(current)
+            ).copy(
+              legalHold = holds.nonEmpty,
+              legalHolds = Option.when(manage)(holds.map(LegalHoldApi.refView))
             )
           }
       )
