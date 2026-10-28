@@ -52,6 +52,9 @@ final case class StoredWorkflowView(
 ) derives JsonCodec,
       Schema
 
+/** A deputy who may complete an open task in place of `principal`, one of its candidates (DMS-49). */
+final case class TaskDeputyView(deputy: String, principal: String) derives JsonCodec, Schema
+
 final case class TaskView(
     id: String,
     caseId: UUID,
@@ -69,7 +72,13 @@ final case class TaskView(
     status: String,
     createdAt: Instant,
     completedAt: Option[Instant],
-    completedBy: Option[String]
+    completedBy: Option[String],
+    /** Deputies of candidates who may complete the open task now (active deputyship, DMS-49). */
+    deputies: List[TaskDeputyView] = Nil,
+    /** In the caller's task inbox: the candidate the caller stands in for as deputy (UI: "X i. V. für Y");
+      * empty if the caller is a candidate.
+      */
+    actingFor: Option[String] = None
 ) derives JsonCodec,
       Schema
 
@@ -86,7 +95,9 @@ final case class VoteView(
     authenticatedAt: Option[Instant],
     votedAt: Instant,
     /** Set when the content changed after the vote (DMS-41). */
-    invalidatedAt: Option[Instant]
+    invalidatedAt: Option[Instant],
+    /** The participant the voter stood in for as deputy: "voter on behalf of actingFor" (DMS-49). */
+    actingFor: Option[String] = None
 ) derives JsonCodec,
       Schema
 
@@ -96,7 +107,9 @@ final case class ApprovalView(
     contentSha256: String,
     approvedBy: String,
     authenticatedAt: Instant,
-    approvedAt: Instant
+    approvedAt: Instant,
+    /** The approver the deputy `approvedBy` stood in for (DMS-49). */
+    actingFor: Option[String] = None
 ) derives JsonCodec,
       Schema
 
@@ -130,6 +143,24 @@ final case class CastVote(
 ) derives JsonCodec,
       Schema
 
+/** The caller's subject for the document of workflow tasks they may complete as deputy (DMS-49, ADR 0028):
+  * extended by the principals' assignments of the tasks' roles, so the deputy reads and votes within the
+  * principal's scope. Unchanged for everyone else; never used beyond the document of `tasks`.
+  */
+private[app] object Delegation:
+  def subject(authz: Authorizer, subject: Subject, tasks: List[WorkflowTask]): IO[WorkflowError, Subject] =
+    val delegated = tasks
+      .flatMap(t => t.deputies.filter(_.deputy == subject.userId).map(d => (d.principal, t.role)))
+      .flatMap((principal, role) => scala.util.Try(Role.valueOf(role)).toOption.map(principal -> _))
+      .groupMap(_._1)(_._2)
+      .toList
+      .sortBy(_._1.value)
+    ZIO
+      .foldLeft(delegated)(subject) { case (s, (principal, roles)) =>
+        authz.onBehalfOf(s, principal, roles.toSet)
+      }
+      .mapError(WorkflowError.Database(_))
+
 /** Review and approval workflows (business concept 6.1; DMS-40 to DMS-42).
   *
   * Task inbox and votes for participants (authorization: `Review` for review steps, `Approve` for approval
@@ -148,7 +179,10 @@ object WorkflowApi:
     SecuredApi.base.get
       .in(tasks)
       .out(jsonBody[List[TaskView]])
-      .description("The open review and approval tasks of the caller, oldest first")
+      .description(
+        "The open review and approval tasks of the caller, oldest first, including the tasks of people the " +
+          "caller currently stands in for as deputy (actingFor names them)"
+      )
       .tag("Workflow")
       .serverLogic(p => _ => inTransaction(p)(ctx => ctx.workflow.myTasks(p.userId).map(_.map(taskView))))
 
@@ -178,12 +212,14 @@ object WorkflowApi:
                 .fromOption(details.versions.find(_.id == task.versionId))
                 .orElseFail(WorkflowError.NotFound(s"document version ${task.versionId} does not exist"))
               action = if task.kind == StepKind.Approval then Action.Approve else Action.Review
-              _ <- ctx.check(
+              _ <- ctx.checkFor(
+                List(task),
                 action,
                 DocumentApi
                   .resource(p.tenantId, details, version)
                   .copy(
-                    assignedParticipants = task.candidates.toSet,
+                    // Deputies of candidates during an active deputyship (DMS-49).
+                    assignedParticipants = task.candidates.toSet ++ task.deputies.map(_.deputy),
                     // The owner confirms editorial (minor) versions in the shortened path (DMS-46).
                     ownerMayApprove = task.role == WorkflowDefinition.DocumentOwner
                   )
@@ -279,18 +315,30 @@ object WorkflowApi:
     def check(action: Action, resource: Resource): IO[AccessDenied, Unit] =
       authz.check(subject, action, resource).unit
 
+    /** Checks as deputy where the caller may complete one of `tasks` as such (DMS-49). */
+    def checkFor(
+        tasks: List[WorkflowTask],
+        action: Action,
+        resource: Resource
+    ): IO[WorkflowError | AccessDenied, Unit] =
+      Delegation.subject(authz, subject, tasks).flatMap(s => authz.check(s, action, resource).unit)
+
     def configure(p: Principal): IO[AccessDenied, Unit] =
       check(Action.Configure, Resource(p.tenantId, configurationArea = Some(ConfigurationArea.Workflows)))
 
     /** Ids of the versions the caller may read; denied if there is none. */
-    def readableVersions(details: DocumentDetails, cases: List[CaseDetails]): IO[AccessDenied, Set[UUID]] =
+    def readableVersions(
+        details: DocumentDetails,
+        cases: List[CaseDetails]
+    ): IO[WorkflowError | AccessDenied, Set[UUID]] =
       val participants = DocumentApi.participantsOf(cases)
       for
-        now <- Clock.instant
+        now   <- Clock.instant
+        actor <- Delegation.subject(authz, subject, cases.flatMap(_.tasks))
         visible = details.versions.filter(v =>
           Policy
             .decide(
-              subject,
+              actor,
               Action.ReadDocument,
               DocumentApi.resource(subject.tenantId, details, v, participants),
               now
@@ -299,7 +347,13 @@ object WorkflowApi:
         )
         _ <- ZIO.when(visible.isEmpty)(
           details.versions.lastOption.fold(ZIO.unit)(v =>
-            check(Action.ReadDocument, DocumentApi.resource(subject.tenantId, details, v, participants))
+            authz
+              .check(
+                actor,
+                Action.ReadDocument,
+                DocumentApi.resource(subject.tenantId, details, v, participants)
+              )
+              .unit
           )
         )
       yield visible.map(_.id).toSet
@@ -389,7 +443,9 @@ object WorkflowApi:
       t.status.toString,
       t.createdAt,
       t.completedAt,
-      t.completedBy.map(_.value)
+      t.completedBy.map(_.value),
+      t.deputies.map(d => TaskDeputyView(d.deputy.value, d.principal.value)),
+      t.actingFor.map(_.value)
     )
 
   def caseView(d: CaseDetails): WorkflowCaseView =
@@ -420,7 +476,8 @@ object WorkflowApi:
           v.contentSha256,
           v.authenticatedAt,
           v.votedAt,
-          v.invalidatedAt
+          v.invalidatedAt,
+          v.actingFor.map(_.value)
         )
       ),
       d.approval.map(a =>
@@ -430,7 +487,8 @@ object WorkflowApi:
           a.contentSha256,
           a.approvedBy.value,
           a.authenticatedAt,
-          a.approvedAt
+          a.approvedAt,
+          a.actingFor.map(_.value)
         )
       )
     )

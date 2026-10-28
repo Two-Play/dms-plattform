@@ -31,12 +31,13 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0015](0015-frontend-react-tailwind-shadcn.md) | Frontend with React, Tailwind CSS and shadcn/ui | Accepted | medium |
 | [0016](0016-object-storage.md) | Object storage: S3 API with Object Lock, SeaweedFS for local development and CI | Accepted | high |
 | [0017](0017-audit-hash-chain.md) | Audit trail as hash chain per tenant with RFC 3161 anchoring | Accepted | medium |
-| [0018](0018-authorization-policy.md) | Authorization as an in-app policy (RBAC + ABAC) | Accepted | medium |
+| [0018](0018-authorization-policy.md) | Authorization as an in-app policy (RBAC + ABAC) | Accepted (addendum DMS-49) | medium |
 | [0019](0019-metadata-model.md) | Metadata as JSONB values validated against versioned profiles | Accepted | medium |
 | [0020](0020-template-expressions-cel.md) | Template expressions in CEL (Common Expression Language) | Accepted | medium |
 | [0021](0021-document-versions.md) | Document versions as full version packages, frozen by database guards | Accepted | medium |
 | [0022](0022-deviation-requests.md) | Deviation requests as rows per version, deviation report stored with the version | Accepted | high |
 | [0023](0023-partner-master-integration.md) | Partner master: live lookup through a port, snapshot into field values | Accepted | high |
-| [0024](0024-approval-workflow-integration.md) | Approval workflows: Flowable routes the steps, our tables hold the business truth | Accepted (addenda DMS-44, DMS-86) | medium |
+| [0024](0024-approval-workflow-integration.md) | Approval workflows: Flowable routes the steps, our tables hold the business truth | Accepted (addenda DMS-44, DMS-86, DMS-49) | medium |
 | [0025](0025-archive-renditions.md) | Archive renditions: WeasyPrint as HTTP sidecar, PDF/A-2b checked with veraPDF, rendered between the last vote and the approval | Accepted | medium |
 | [0026](0026-scheduled-publication-and-editorial-versions.md) | Scheduled publication by a job at tenant midnight; editorial versions through an owner-confirmation path | Accepted | medium |
+| [0028](0028-deputies-for-workflow-participants.md) | Deputies for workflow participants: time-limited deputyships resolved when tasks are read | Accepted | medium |

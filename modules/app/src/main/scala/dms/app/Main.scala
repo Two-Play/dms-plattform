@@ -9,7 +9,7 @@ import dms.integration.partners.PartnerDirectories
 import dms.rendering.core.{VeraPdfValidator, WeasyPrintRenderer}
 import dms.storage.ObjectStore
 import dms.templates.core.TemplateService
-import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
+import dms.workflow.core.{ApprovalWorkflow, Deputyships, FlowableEngine, WorkflowConfig}
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import sttp.tapir.swagger.bundle.SwaggerInterpreter
 import sttp.tapir.ztapir.*
@@ -26,7 +26,7 @@ object Main extends ZIOAppDefault:
       Runtime.setConfigProvider(TypesafeConfigProvider.fromResourcePath())
 
   private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
-    PartnerApi.Env & RenditionApi.Env & MeApi.Env
+    PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -38,6 +38,7 @@ object Main extends ZIOAppDefault:
       DocumentApi.endpoints.map(_.widen[Env]) ++
       RenditionApi.endpoints.map(_.widen[Env]) ++
       WorkflowApi.endpoints.map(_.widen[Env]) ++
+      DeputyshipApi.endpoints.map(_.widen[Env]) ++
       PartnerApi.endpoints.map(_.widen[Env])
 
   private val docs =
@@ -83,6 +84,7 @@ object Main extends ZIOAppDefault:
           ),
           WorkflowRendition.layer,
           ApprovalWorkflow.layer,
+          Deputyships.layer,
           PartnerDirectories.layer(cfg.partners),
           ZLayer.succeed(cfg.rendering),
           WeasyPrintRenderer.layer,

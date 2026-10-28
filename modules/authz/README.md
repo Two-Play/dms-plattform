@@ -10,4 +10,6 @@ Documents (business concept 5.1, DMS-37): `ReadDocument` reads a version in any 
 
 Workflows (business concept 6.1, DMS-40): `Review` (casting a review vote) is granted in status `InReview` to participants the workflow assigned to the task (`Resource.assignedParticipants`) who hold the author, owner, reviewer or approver role; approval votes use `Approve`. `RoleAssignments.holders` lists the holders of a role, from which the workflow resolves participants.
 
+Deputies (DMS-49, ADR 0028 and addendum to ADR 0018): `Authorizer.onBehalfOf(subject, principal, roles)` extends a deputy's subject by the principal's assignments of the given roles. The application uses it only for the document of a workflow task the deputy may complete during an active deputyship; `Policy` itself is unchanged.
+
 Single module without an `api`/`core` split.

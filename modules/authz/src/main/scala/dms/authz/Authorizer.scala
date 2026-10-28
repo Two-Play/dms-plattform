@@ -76,6 +76,18 @@ final class Authorizer(assignments: RoleAssignments):
       .forUser(principal.userId)
       .map(Subject(principal.userId, principal.tenantId, _, principal.roles))
 
+  /** `subject` acting as deputy of `principal` (DMS-49, ADR 0028): extended by the principal's assignments of
+    * `roles`, so the deputy acts within the principal's scope. Callers use it only for the document of a task
+    * the deputy may complete during an active deputyship; [[Policy]] still checks validity and scope of each
+    * assignment.
+    */
+  def onBehalfOf(subject: Subject, principal: UserId, roles: Set[Role]): IO[DbError, Subject] =
+    assignments
+      .forUser(principal)
+      .map(held =>
+        subject.copy(assignments = subject.assignments ++ held.filter(a => roles.contains(a.role)))
+      )
+
   def check(subject: Subject, action: Action, resource: Resource): IO[AccessDenied, Set[Condition]] =
     Clock.instant.flatMap { now =>
       Policy.decide(subject, action, resource, now) match

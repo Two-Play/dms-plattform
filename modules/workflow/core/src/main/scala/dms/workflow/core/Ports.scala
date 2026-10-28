@@ -81,6 +81,19 @@ trait DocumentGateway:
       actor: UserId
   ): IO[WorkflowError, ReviewSubject]
 
+/** A role assignment of a person as the workflow sees it: role name, scope (organizational unit, document
+  * class subtree; empty means the whole tenant) and validity. Used to check that a deputy has the same
+  * authority as the principal (DMS-49).
+  */
+final case class HeldRole(
+    role: String,
+    organizationalUnit: Option[String],
+    documentClass: Option[String],
+    validFrom: Instant,
+    validUntil: Option[Instant]
+):
+  def isActiveAt(now: Instant): Boolean = !validFrom.isAfter(now) && validUntil.forall(now.isBefore)
+
 /** Resolves participants from role assignments (business concept 6.1: from roles, not from named persons). */
 trait ParticipantDirectory:
   /** People who hold `role` with a scope covering the subject (organizational unit, document class), sorted.
@@ -90,18 +103,25 @@ trait ParticipantDirectory:
   /** Tenant administrators to notify when a step has no eligible participant. */
   def tenantAdmins: IO[WorkflowError, List[UserId]]
 
+  /** All role assignments of `user`, including expired and future ones (callers check the validity). */
+  def heldRoles(user: UserId): IO[WorkflowError, List[HeldRole]]
+
 /** Produces the archive rendition before a version is approved (DMS-44, ADR 0025): the database requires a
   * rendition for `Approved` (ADR 0021). Called inside the transaction of the last approving vote; the
   * application enqueues an idempotent rendering job, which stores the rendition, attaches it and then calls
   * [[ApprovalWorkflow.completeApproval]]. A failure rolls back the vote.
   */
 trait ApprovalRendition:
+  /** @param onBehalfOf
+    *   the approver the deputy `approver` stood in for (DMS-49), shown in the approval note
+    */
   def request(
       caseId: UUID,
       subject: ReviewSubject,
       approver: UserId,
       approvedAt: Instant,
-      authenticatedAt: Instant
+      authenticatedAt: Instant,
+      onBehalfOf: Option[UserId]
   ): IO[WorkflowError, Unit]
 
 /** Whether a version needs the extra review step (deviations from locked standard text, DMS-79). */

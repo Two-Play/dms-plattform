@@ -200,6 +200,19 @@ private[core] object WorkflowStore:
       .run()
       .toList
 
+  /** Open tasks any of `users` may complete (the principals of a deputy, DMS-49). */
+  def openTasksOfAny(users: List[UserId])(using DbTx): List[TaskRow] =
+    sql"""select id, case_id, round, step_key, step_kind, lane_key, role, candidates, status, created_at,
+                 completed_at, completed_by
+          from dms.workflow_task t
+          where status = 'Open'
+            and exists (select 1 from jsonb_array_elements_text(${candidatesJson(users.distinct)}) p (id)
+                        where t.candidates @> jsonb_build_array(p.id))
+          order by created_at, id"""
+      .query[TaskRow]
+      .run()
+      .toList
+
   def insertTask(t: TaskRow)(using DbTx): Unit =
     val _ = sql"""insert into dms.workflow_task
                     (id, tenant_id, case_id, round, step_key, step_kind, lane_key, role, candidates, status)
@@ -231,7 +244,8 @@ private[core] object WorkflowStore:
       contentSha256: String,
       authenticatedAt: Option[OffsetDateTime],
       votedAt: OffsetDateTime,
-      invalidatedAt: Option[OffsetDateTime]
+      invalidatedAt: Option[OffsetDateTime],
+      actingFor: Option[String]
   ) derives DbCodec:
     def toVote: Vote = Vote(
       id,
@@ -247,22 +261,22 @@ private[core] object WorkflowStore:
       contentSha256,
       authenticatedAt.map(_.toInstant),
       votedAt.toInstant,
-      invalidatedAt.map(_.toInstant)
+      invalidatedAt.map(_.toInstant),
+      actingFor.map(UserId(_))
     )
 
   def insertVote(v: Vote)(using DbTx): Unit =
     val _ = sql"""insert into dms.workflow_vote
                     (id, tenant_id, case_id, task_id, version_id, round, step_key, lane_key, voter, decision, reason,
-                     content_sha256, authenticated_at, voted_at)
+                     content_sha256, authenticated_at, voted_at, acting_for)
                   values (${v.id}, dms.current_tenant(), ${v.caseId}, ${v.taskId}, ${v.versionId}, ${v.round},
                           ${v.step}, ${v.lane}, ${v.voter.value}, ${v.decision.toString}, ${v.reason},
-                          ${v.contentSha256}, ${v.authenticatedAt.map(offset)}, ${offset(
-        v.votedAt
-      )})""".update.run()
+                          ${v.contentSha256}, ${v.authenticatedAt.map(offset)}, ${offset(v.votedAt)},
+                          ${v.actingFor.map(_.value)})""".update.run()
 
   def votesOfCase(caseId: UUID)(using DbTx): List[Vote] =
     sql"""select id, case_id, task_id, version_id, round, step_key, lane_key, voter, decision, reason,
-                 content_sha256, authenticated_at, voted_at, invalidated_at
+                 content_sha256, authenticated_at, voted_at, invalidated_at, acting_for
           from dms.workflow_vote where case_id = $caseId order by voted_at, id"""
       .query[VoteRow]
       .run()
@@ -275,26 +289,38 @@ private[core] object WorkflowStore:
           where case_id = $caseId and invalidated_at is null and content_sha256 <> $currentChecksum""".update
       .run()
 
-  private type ApprovalRow = (UUID, UUID, UUID, String, String, String, OffsetDateTime, OffsetDateTime)
+  private type ApprovalRow =
+    (UUID, UUID, UUID, String, String, String, OffsetDateTime, OffsetDateTime, Option[String])
 
   def insertApproval(a: Approval, author: UserId)(using DbTx): Unit =
     val _ = sql"""insert into dms.workflow_approval
                     (id, tenant_id, case_id, version_id, version_label, content_sha256, author_id, approved_by,
-                     authenticated_at, approved_at)
+                     authenticated_at, approved_at, acting_for)
                   values (${a.id}, dms.current_tenant(), ${a.caseId}, ${a.versionId}, ${a.versionLabel},
                           ${a.contentSha256}, ${author.value}, ${a.approvedBy.value}, ${offset(
         a.authenticatedAt
       )},
-                          ${offset(a.approvedAt)})""".update.run()
+                          ${offset(a.approvedAt)}, ${a.actingFor.map(_.value)})""".update.run()
 
   def approvalOfCase(caseId: UUID)(using DbTx): Option[Approval] =
-    sql"""select id, case_id, version_id, version_label, content_sha256, approved_by, authenticated_at, approved_at
+    sql"""select id, case_id, version_id, version_label, content_sha256, approved_by, authenticated_at, approved_at,
+                 acting_for
           from dms.workflow_approval where case_id = $caseId"""
       .query[ApprovalRow]
       .run()
       .headOption
-      .map((id, caseId, versionId, label, sha, by, authAt, at) =>
-        Approval(id, caseId, versionId, label, sha, UserId(by), authAt.toInstant, at.toInstant)
+      .map((id, caseId, versionId, label, sha, by, authAt, at, actingFor) =>
+        Approval(
+          id,
+          caseId,
+          versionId,
+          label,
+          sha,
+          UserId(by),
+          authAt.toInstant,
+          at.toInstant,
+          actingFor.map(UserId(_))
+        )
       )
 
   def json(d: WorkflowDefinition): Jsonb = Jsonb(d.toJson)

@@ -566,37 +566,44 @@ object DocumentApi:
     def readable(details: DocumentDetails): IO[AccessDenied | WorkflowError, List[DocumentVersion]] =
       for
         result <- visibleWith(details)
-        (visible, participants) = result
+        (visible, participants, actor) = result
         _ <- ZIO.when(visible.isEmpty)(
           details.versions.lastOption.fold(ZIO.unit)(v =>
-            check(Action.ReadDocument, resource(subject, details, v, participants))
+            authz.check(actor, Action.ReadDocument, resource(actor, details, v, participants)).unit
           )
         )
       yield visible
 
+    /** The readable versions, the workflow participants and the subject they were decided for: the caller, as
+      * deputy with the principal's scope where they may complete a task of the document (DMS-49).
+      */
     private def visibleWith(
         details: DocumentDetails
-    ): IO[WorkflowError, (List[DocumentVersion], Map[UUID, Set[UserId]])] =
+    ): IO[WorkflowError, (List[DocumentVersion], Map[UUID, Set[UserId]], Subject)] =
       for
         cases <- workflow.cases(details.document.id)
         participants = participantsOf(cases)
-        now <- Clock.instant
+        actor <- Delegation.subject(authz, subject, cases.flatMap(_.tasks))
+        now   <- Clock.instant
       yield (
         details.versions.filter(v =>
           Policy
-            .decide(subject, Action.ReadDocument, resource(subject, details, v, participants), now)
+            .decide(actor, Action.ReadDocument, resource(actor, details, v, participants), now)
             .isPermitted
         ),
-        participants
+        participants,
+        actor
       )
 
-    /** `ReadDocument` on one version; the participants of its workflow (e.g. the extra review step) may read
-      * it.
+    /** `ReadDocument` on one version; the participants of its workflow (e.g. the extra review step) and their
+      * deputies (DMS-49) may read it.
       */
     def checkRead(details: DocumentDetails, v: DocumentVersion): IO[AccessDenied | WorkflowError, Unit] =
-      workflow
-        .cases(details.document.id)
-        .flatMap(cases => check(Action.ReadDocument, resource(subject, details, v, participantsOf(cases))))
+      for
+        cases <- workflow.cases(details.document.id)
+        actor <- Delegation.subject(authz, subject, cases.flatMap(_.tasks))
+        _     <- authz.check(actor, Action.ReadDocument, resource(actor, details, v, participantsOf(cases)))
+      yield ()
 
     private def resource(
         s: Subject,
@@ -668,7 +675,11 @@ object DocumentApi:
 
   /** Everyone the workflow of a version assigned to one of its tasks, by version id. */
   private[app] def participantsOf(cases: List[CaseDetails]): Map[UUID, Set[UserId]] =
-    cases.map(c => c.workflowCase.versionId -> c.tasks.flatMap(_.candidates).toSet).toMap
+    cases
+      .map(c =>
+        c.workflowCase.versionId -> c.tasks.flatMap(t => t.candidates ++ t.deputies.map(_.deputy)).toSet
+      )
+      .toMap
 
   private[app] def resource(
       tenant: dms.kernel.TenantId,

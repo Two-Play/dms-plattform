@@ -19,6 +19,8 @@ import java.util.HexFormat
   *   when the last approving vote was cast; every date in the PDF is derived from it
   * @param approvedBy
   *   who approved, as shown in the approval note
+  * @param onBehalfOf
+  *   the approver a deputy approved for (DMS-49): "by deputy on behalf of approver"
   * @param language
   *   `de` or `en`; other languages fall back to English labels
   */
@@ -29,7 +31,8 @@ final case class RenditionFacts(
     validFrom: Option[LocalDate],
     approvedAt: Instant,
     approvedBy: String,
-    language: String
+    language: String,
+    onBehalfOf: Option[String] = None
 )
 
 /** The running header and footer and the document metadata of a rendition (DMS-44), added to the stand-alone
@@ -44,7 +47,7 @@ object RenditionLayout:
   /** Version of the layout below; part of the renderer identity recorded with each rendition. Bump it when
     * the output changes.
     */
-  val Version: String = "rendition-layout-1"
+  val Version: String = "rendition-layout-2"
 
   private final case class Labels(
       documentId: String,
@@ -53,6 +56,7 @@ object RenditionLayout:
       notSet: String,
       approved: String,
       by: String,
+      onBehalfOf: String,
       page: String,
       of: String,
       date: DateTimeFormatter
@@ -65,6 +69,7 @@ object RenditionLayout:
     "nicht festgelegt",
     "Freigegeben am",
     "von",
+    "i. V. für",
     "Seite",
     "von",
     DateTimeFormatter.ofPattern("dd.MM.yyyy")
@@ -77,6 +82,7 @@ object RenditionLayout:
     "not set",
     "Approved on",
     "by",
+    "on behalf of",
     "Page",
     "of",
     DateTimeFormatter.ISO_LOCAL_DATE
@@ -97,11 +103,14 @@ object RenditionLayout:
     val l = labels(facts.language)
     s"${l.validFrom} ${facts.validFrom.fold(l.notSet)(l.date.format)}"
 
-  /** The approval note of the footer (business concept 5.1: "Freigabevermerk"), in UTC. */
+  /** The approval note of the footer (business concept 5.1: "Freigabevermerk"), in UTC; a deputy's approval
+    * names the approver they stood in for (DMS-49).
+    */
   def approvalNote(facts: RenditionFacts): String =
-    val l    = labels(facts.language)
-    val when = facts.approvedAt.atOffset(ZoneOffset.UTC)
-    s"${l.approved} ${l.date.format(when)} ${time.format(when)} UTC ${l.by} ${facts.approvedBy}"
+    val l      = labels(facts.language)
+    val when   = facts.approvedAt.atOffset(ZoneOffset.UTC)
+    val behalf = facts.onBehalfOf.fold("")(p => s" ${l.onBehalfOf} $p")
+    s"${l.approved} ${l.date.format(when)} ${time.format(when)} UTC ${l.by} ${facts.approvedBy}$behalf"
 
   /** The release timestamp written as creation and modification date: UTC, second precision. */
   def timestamp(facts: RenditionFacts): String =

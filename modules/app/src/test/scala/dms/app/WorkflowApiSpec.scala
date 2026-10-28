@@ -21,7 +21,7 @@ import dms.templates.core.ContentJson.given
 import dms.templates.core.{TemplateDraft, TemplateService}
 import dms.audit.AuditTrail
 import dms.rendering.core.RenditionSource
-import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
+import dms.workflow.core.{ApprovalWorkflow, Deputyships, FlowableEngine, WorkflowConfig}
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import sttp.tapir.ztapir.RichZServerEndpoint
@@ -53,6 +53,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
   private val reader    = UserId("reader-1")
   private val designer  = UserId("designer-1")
   private val designer2 = UserId("designer-2")
+  private val deputy    = UserId("deputy-1")
 
   private val signingKey: RSAKey = RSAKeyGenerator(2048).keyID("key-1").generate()
 
@@ -158,7 +159,8 @@ object WorkflowApiSpec extends ZIOSpecDefault:
     Authenticator(verifier, tenants)
   }
 
-  private type Env = DocumentApi.Env & WorkflowApi.Env & RoleAssignments & RenditionSource & AuditTrail
+  private type Env =
+    DocumentApi.Env & WorkflowApi.Env & Deputyships & RoleAssignments & RenditionSource & AuditTrail
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -180,6 +182,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       ZLayer.succeed(WorkflowConfig.default),
       WorkflowRendition.layer,
       ApprovalWorkflow.layer,
+      Deputyships.layer,
       DocumentRenditions.layer
     )
 
@@ -235,8 +238,8 @@ object WorkflowApiSpec extends ZIOSpecDefault:
 
   private val routes =
     ZioHttpInterpreter().toHttp(
-      DocumentApi.endpoints.map(_.widen[Env]) ++ WorkflowApi.endpoints.map(_.widen[Env]) :+ MeApi.me
-        .widen[Env]
+      DocumentApi.endpoints.map(_.widen[Env]) ++ WorkflowApi.endpoints.map(_.widen[Env]) ++
+        DeputyshipApi.endpoints.map(_.widen[Env]) :+ MeApi.me.widen[Env]
     )
 
   private def call(
@@ -254,9 +257,10 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       Header.ContentType(MediaType.application.json)
     ) ++ Headers(idTokenFor.map(f => Header.Custom(SecuredApi.IdTokenHeader, f(access))).toList)
     val request = method match
-      case "POST" => Request.post(url, Body.fromString(body.getOrElse("{}"))).addHeaders(headers)
-      case "PUT"  => Request.put(url, Body.fromString(body.getOrElse("{}"))).addHeaders(headers)
-      case _      => Request.get(url).addHeaders(headers)
+      case "POST"   => Request.post(url, Body.fromString(body.getOrElse("{}"))).addHeaders(headers)
+      case "PUT"    => Request.put(url, Body.fromString(body.getOrElse("{}"))).addHeaders(headers)
+      case "DELETE" => Request.delete(url).addHeaders(headers)
+      case _        => Request.get(url).addHeaders(headers)
     ZIO.scoped(routes.runZIO(request)).flatMap(r => r.body.asString.map(b => (r.status, b)).orDie)
 
   private def as[A: JsonDecoder](response: (Status, String)): A =
@@ -345,6 +349,36 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         )
       )
     )
+
+  /** Actor, on-behalf-of and reason of the latest audit entry of `action`. */
+  private def lastAudit(action: String): ZIO[Any, DbError, Option[(String, Option[String], Option[String])]] =
+    setup.await.flatMap(s =>
+      s.owner.transactSystem(
+        Db.sql(
+          sql"""select actor_id, on_behalf_of, reason from dms.audit_event where action = $action
+                order by seq desc limit 1"""
+            .query[(String, Option[String], Option[String])]
+            .run()
+            .headOption
+        )
+      )
+    )
+
+  /** A submitted document whose review is done: its approval task is open. */
+  private def awaitingApproval(partner: String): ZIO[Env, Nothing, (UUID, TaskView)] =
+    for
+      doc     <- draftDocument(partner)
+      _       <- submit(doc.id)
+      started <- cases(doc.id).map(_.head)
+      // the class's latest workflow (from earlier tests) has a department lane and possibly a compliance lane
+      first  <- vote(reviewer1, openTask(started, "department"), "Approve").map(as[WorkflowCaseView])
+      review <- first.tasks.find(t => t.lane == "compliance" && t.status == "Open") match
+        case Some(t) => vote(reviewer2, t, "Approve").map(as[WorkflowCaseView])
+        case None    => ZIO.succeed(first)
+    yield (doc.id, openTask(review, "approver"))
+
+  private def deputyships(user: UserId, query: String = "") =
+    call(user, "GET", s"/api/v1/deputyships$query")
 
   /** The locked section changed: needs a deviation request and then the extra review step. */
   private val deviating = content.copy(sections =
@@ -688,6 +722,131 @@ object WorkflowApiSpec extends ZIOSpecDefault:
           List(("Approver", Some("policy"), None), ("Reader", None, None)),
         me.assignments.forall(_.validUntil.isEmpty),
         me.projectRoles.isEmpty
+      )
+    },
+    test("deputyships need the same authority and a limited period; others' only for admins (DMS-49)") {
+      def create(user: UserId, json: String) = call(user, "POST", "/api/v1/deputyships", Some(json))
+      val now                                = Instant.now()
+      val until                              = now.plusSeconds(10 * 86400)
+      for
+        s <- setup.await
+        _ <- s.app
+          .transact(tenantId)(
+            // An approver of another document class: not a participant of contracts unless as deputy.
+            RoleAssignments.Postgres
+              .grant(deputy, RoleAssignment(Role.Approver, documentClass = Some("policy")), admin)
+          )
+          .orDieWith(e => RuntimeException(e.toString))
+        byOther <- create(
+          reader,
+          s"""{"principal":"${approver.value}","deputy":"${deputy.value}","validUntil":"$until"}"""
+        )
+        self   <- create(approver, s"""{"deputy":"${approver.value}","validUntil":"$until"}""")
+        noRole <- create(approver, s"""{"deputy":"${reviewer1.value}","validUntil":"$until"}""")
+        past   <- create(approver, s"""{"deputy":"${deputy.value}","validUntil":"${now.minusSeconds(60)}"}""")
+        noEnd  <- create(approver, s"""{"deputy":"${deputy.value}"}""")
+        created <- create(
+          approver,
+          s"""{"deputy":"${deputy.value}","validFrom":"${now.plusSeconds(86400)}","validUntil":"$until",
+             |"roles":["Approver"],"reason":"Vacation"}""".stripMargin
+        )
+        overlap <- create(
+          approver,
+          s"""{"deputy":"${deputy.value}","validFrom":"${now.plusSeconds(
+              2 * 86400
+            )}","validUntil":"$until"}"""
+        )
+        ofDeputy <- deputyships(deputy).map(as[List[DeputyshipView]])
+        allByApp <- deputyships(approver, "?all=true")
+        allByAdm <- deputyships(admin, "?all=true").map(as[List[DeputyshipView]])
+        audit    <- lastAudit("deputyship.created")
+      yield assertTrue(
+        byOther._1 == Status.Forbidden,
+        self._1 == Status.UnprocessableEntity,
+        error(self._2).exists(_.message.contains("cannot be their own deputy")),
+        noRole._1 == Status.UnprocessableEntity,
+        error(noRole._2).exists(_.message.contains("reviewer-1 does not hold role Approver")),
+        past._1 == Status.UnprocessableEntity,
+        noEnd._1 == Status.BadRequest,
+        created._1 == Status.Created,
+        as[DeputyshipView](created).status == "Scheduled",
+        as[DeputyshipView](created).roles == List("Approver"),
+        overlap._1 == Status.Conflict,
+        ofDeputy.map(d => (d.principal, d.deputy, d.status)) == List(
+          (approver.value, deputy.value, "Scheduled")
+        ),
+        allByApp._1 == Status.Forbidden,
+        allByAdm.map(_.id) == ofDeputy.map(_.id),
+        audit.contains((approver.value, None, Some("Vacation")))
+      )
+    },
+    test("during the period the deputy approves on behalf of the approver; afterwards the task returns") {
+      for
+        s    <- setup.await
+        pair <- awaitingApproval("Umbrella")
+        (doc, task) = pair
+        scheduled <- deputyships(deputy).map(as[List[DeputyshipView]]).map(_.head)
+        before    <- call(deputy, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
+        early     <- vote(deputy, task, "Approve", signedInSecondsAgo = 10)
+        // the period starts (the history guard is bypassed only to move the test into the period)
+        _ <- s.owner
+          .transactSystem(Db.sql {
+            val _ = sql"set local session_replication_role = replica".update.run()
+            sql"""update dms.deputyship set valid_from = now() - interval '1 minute'
+                  where id = ${scheduled.id}""".update.run()
+          })
+          .orDieWith(e => RuntimeException(e.toString))
+        inbox     <- call(deputy, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
+        ownInbox  <- call(approver, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
+        running   <- cases(doc).map(_.head)
+        read      <- call(deputy, "GET", s"/api/v1/documents/$doc")
+        stale     <- vote(deputy, task, "Approve", signedInSecondsAgo = 3600)
+        rendering <- vote(deputy, task, "Approve", signedInSecondsAgo = 30).map(as[WorkflowCaseView])
+        _         <- renderPending
+        approved  <- cases(doc).map(_.head)
+        version   <- call(author, "GET", s"/api/v1/documents/$doc").map(as[DocumentView])
+        voted     <- lastAudit("workflow.voted")
+        approval  <- lastAudit("workflow.approved")
+        events    <- outbox("workflow.approved")
+        // a second document; the approver ends the deputyship before the deputy acts
+        pair2 <- awaitingApproval("Soylent")
+        (doc2, task2) = pair2
+        during   <- call(deputy, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
+        ended    <- call(approver, "DELETE", s"/api/v1/deputyships/${scheduled.id}")
+        again    <- call(approver, "DELETE", s"/api/v1/deputyships/${scheduled.id}")
+        after    <- call(deputy, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
+        late     <- vote(deputy, task2, "Approve", signedInSecondsAgo = 10)
+        back     <- call(approver, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
+        endAudit <- lastAudit("deputyship.ended")
+      yield assertTrue(
+        !before.exists(_.id == task.id),
+        early._1 == Status.Forbidden,
+        inbox.find(_.id == task.id).exists(_.actingFor.contains(approver.value)),
+        ownInbox.find(_.id == task.id).exists(_.actingFor.isEmpty),
+        openTask(running, "approver").deputies == List(TaskDeputyView(deputy.value, approver.value)),
+        openTask(running, "approver").candidates == List(approver.value),
+        read._1 == Status.Ok,
+        stale._1 == Status.Unauthorized,
+        rendering.status == "Rendering",
+        rendering.votes.last.voter == deputy.value,
+        rendering.votes.last.actingFor.contains(approver.value),
+        approved.status == "Approved",
+        approved.approval.exists(a => a.approvedBy == deputy.value && a.actingFor.contains(approver.value)),
+        version.current.releasedBy.contains(deputy.value),
+        voted.exists(v => v._1 == deputy.value && v._2.contains(approver.value)),
+        approval.exists(v => v._1 == deputy.value && v._2.contains(approver.value)),
+        events.lastOption.exists(e =>
+          e.contains(doc.toString) && e.contains(s""""actingFor": "${approver.value}"""")
+        ),
+        during.find(_.id == task2.id).exists(_.actingFor.contains(approver.value)),
+        ended._1 == Status.Ok,
+        as[DeputyshipView](ended).status == "Ended",
+        again._1 == Status.Conflict,
+        !after.exists(_.id == task2.id),
+        late._1 == Status.Forbidden,
+        back.exists(_.id == task2.id),
+        endAudit.exists(_._1 == approver.value),
+        doc2 != doc
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock
