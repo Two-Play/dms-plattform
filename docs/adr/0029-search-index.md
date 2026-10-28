@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted |
+| Status | Accepted (addendum DMS-101) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -87,3 +87,7 @@ Other choices considered: indexing only the current valid versions (history not 
 ## Reversibility
 
 **low**: The index is derived. Changing layout, analyzers or the tenant model means a code change and a rebuild per tenant. Replacing OpenSearch touches only module `search` (`OpenSearch`, `IndexLayout`, `SearchRequest`); the API contract and the permission model stay.
+
+## Addendum (DMS-101, 2026-10-28): allowed groups from the core field and platform groups
+
+Item 5 of the decision changes: allowed groups come from the core field `allowedGroups` (ADR 0032), and the caller's groups are their current memberships in the tenant's access groups instead of ZITADEL project roles. The index layout and the filter are unchanged: the indexer takes the groups of a version through `DocumentResource` as before, so new groups only reach the index with a new version (the field is frozen with the version), while membership changes take effect at query time.
