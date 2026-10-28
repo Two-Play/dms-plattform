@@ -64,8 +64,10 @@ function DocumentWorkspace({
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <div className="space-y-4">
+    // Stacked on narrow screens; side by side from lg, the preview wider than the form. There the preview
+    // stays in view and scrolls on its own, so a twelve-page document does not push the form away.
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+      <div className="min-w-0 space-y-4">
         <DocumentForm
           fields={fields}
           inputs={inputs}
@@ -83,7 +85,7 @@ function DocumentWorkspace({
           </p>
         </div>
       </div>
-      <div className="lg:sticky lg:top-20 lg:self-start">
+      <div className="min-w-0 lg:sticky lg:top-20 lg:max-h-[calc(100svh-6rem)] lg:self-start lg:overflow-y-auto">
         <DocumentPreview
           preview={preview.data}
           updating={preview.isFetching}
