@@ -55,8 +55,28 @@ Administration requires `EditTemplates` (template designer); `TemplateApi`, `Tem
 | POST | `/api/v1/admin/templates/{id}/versions/{version}/test` | Test mode with given values or generated sample data, with branch coverage |
 | POST | `/api/v1/admin/templates/{id}/versions/{version}/status` | Status change (DMS-35); `Released` requires `ReleaseTemplate`: a template designer other than the creator and editors |
 | GET | `/api/v1/templates` | Catalog: released versions only; every business role (`ReadTemplateCatalog`) |
+| GET | `/api/v1/templates/{id}/versions/{version}/impact` | Impact analysis before release (DMS-50, see below): documents per status on earlier versions, open drafts by title and author; `EditTemplates` |
 
 Releasing a version does not deprecate older released versions; deprecating is an explicit status change.
+
+## Impact analysis before release (DMS-50)
+
+US-01.2: before releasing a new version, a template designer sees which documents use the earlier versions of the template.
+
+**Where it lives.** The analysis reads documents, and `templates-core` must not depend on `documents-core` (module rule). `DocumentService.templateUsage(templateId, version)` (module `documents`, types `TemplateUsage`, `StatusUsage`, `VersionUsage`, `OpenTemplateUse` in `documents-api`) answers the document side; `app` (`TemplateImpactApi`) combines it with `TemplateService.version` in one transaction of the caller's tenant. Not an architecture decision: it follows the existing pattern of `app` wiring the modules together (like `DocumentTemplates`).
+
+**What it shows** (`GET /api/v1/templates/{id}/versions/{version}/impact`, any status of the version):
+
+- `documents`: distinct documents with a version on an earlier version of the template;
+- `byStatus`: per document status, the number of document versions and of distinct documents on earlier template versions; `byVersion`: the same per earlier template version (`templateVersion`, `documents`, `byStatus`), oldest first. A document with a published version and a new draft counts once under `Published` and once under `Draft`;
+- `openDrafts`: open document versions (Draft, InReview, InApproval) on earlier template versions, most recently changed first, each with `documentId`, `versionId`, `title`, `author` (author of the open version), `version` label (`2.0-draft.1`), `status`, `templateVersion`, `updatedAt`;
+- `existingDocumentsUnchanged: true` and `explanation`: documents stay bound to the template version they were created from, and new versions of a document keep the template version of the version they are based on (`DocumentService.newVersion`). Releasing a version therefore changes no existing document; approved and valid versions are frozen anyway (V9 guard), and open drafts continue on their template version. Only documents created from the catalog afterwards use the new version. `TemplateImpactApiSpec` proves this: every `dms.document` and `dms.document_version` row is identical before and after a release, a new version of a published document stays on the old template version, and a new document gets the released one.
+
+**Who may see it.** `EditTemplates` (template designer): every possible releaser holds it, and so does the creator of the version, who prepares the release. Authors, readers and tenant administrators get 403.
+
+**Drafts of other users.** Open drafts are normally visible only to their authors and owners (`ReadDocument`). The analysis lists them for template designers anyway, because judging a release needs to know who is working on what; it shows only title, author, version label, status, template version and time of the last change, never content or field values. The counts and the list are limited to the tenant by row-level security, not by the caller's document permissions (a template designer needs the whole picture of the template's use).
+
+**Release stays independent of the analysis.** The status change to `Released` neither requires an acknowledgement (`acknowledgedImpact`) nor returns the analysis. Because a release changes no existing document, an acknowledgement would add a mandatory step without protecting anything, and it would change the existing status endpoint for every client. The frontend shows the analysis before it offers the release.
 
 ## Locked sections and deviations (DMS-36)
 

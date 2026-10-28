@@ -90,6 +90,60 @@ private[core] object DocumentStore:
                    desc, d.id
           limit $limit""".query[DocumentRow].run().map(toDocument).toList
 
+  /** Document versions on the versions of `template` before `before`, per template version and status and per
+    * status alone (template version `None`): the number of versions and of distinct documents.
+    */
+  def templateUsageCounts(template: TemplateId, before: Int)(using
+      DbTx
+  ): List[(Option[Int], String, Long, Long)] =
+    sql"""select template_version, status, count(*), count(distinct document_id)
+          from dms.document_version
+          where template_id = ${template.value} and template_version < $before
+          group by grouping sets ((template_version, status), (status))"""
+      .query[(Option[Int], String, Long, Long)]
+      .run()
+      .toList
+
+  /** Distinct documents with a version on a version of `template` before `before`, per template version and
+    * in total (template version `None`).
+    */
+  def templateUsageDocuments(template: TemplateId, before: Int)(using DbTx): List[(Option[Int], Long)] =
+    sql"""select template_version, count(distinct document_id) from dms.document_version
+          where template_id = ${template.value} and template_version < $before
+          group by grouping sets ((template_version), ())"""
+      .query[(Option[Int], Long)]
+      .run()
+      .toList
+
+  private type OpenUseRow = (UUID, UUID, String, String, Int, Int, Int, String, Int, OffsetDateTime)
+
+  /** Open versions on a version of `template` before `before` with the document title, the most recently
+    * changed first.
+    */
+  def openTemplateUses(template: TemplateId, before: Int)(using DbTx): List[OpenTemplateUse] =
+    sql"""select v.document_id, v.id, d.title, v.created_by, v.major, v.minor, v.working_state, v.status,
+                 v.template_version, v.updated_at
+          from dms.document_version v join dms.document d on d.id = v.document_id
+          where v.template_id = ${template.value} and v.template_version < $before
+            and v.status in ('Draft', 'InReview', 'InApproval')
+          order by v.updated_at desc, v.id"""
+      .query[OpenUseRow]
+      .run()
+      .map { case (documentId, id, title, author, major, minor, workingState, status, templateVersion, at) =>
+        val s = DocumentStatus.valueOf(status)
+        OpenTemplateUse(
+          DocumentId(documentId),
+          id,
+          title,
+          UserId(author),
+          Versioning.label(VersionNo(major, minor), s, workingState),
+          s,
+          templateVersion,
+          at.toInstant
+        )
+      }
+      .toList
+
   def insertDocument(d: Document)(using DbTx): Unit =
     val _ =
       sql"""insert into dms.document (id, tenant_id, class_id, class_version, title, owner_id, author_id,
