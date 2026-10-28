@@ -52,6 +52,10 @@ Conditions, repeat collections and computed fields are CEL expressions, using th
 - Must be done: tune limits with real templates and bulk generation (DMS-37ff.).
 - Ruled out: executing JavaScript, Groovy or other general-purpose languages from templates.
 
+## Addendum (DMS-77, 2026-10-28): exact amounts
+
+CEL has no decimal type; expressions keep calculating with doubles. Input amounts are exact `BigDecimal`s. A computed amount (a map with `amount` and `currency`) is converted back via the shortest decimal representation of the double and rounded **half up** (commercial rounding) to the minor unit of its currency (`Money.round`, ISO 4217 digits as used for printing). This makes the typical cases exact (`0.10 + 0.20 = 0.30`, `3 × 33.33 = 99.99`, `19 % of 100.05 = 19.01`, `1.005 → 1.01`). Remaining limit: intermediate results carry about 15–16 significant digits, which is ample for contract amounts below 10^12; rounding to the cent happens once, at the end of each computed field. Alternative rejected for now: a custom decimal type with CEL extension functions (more code, non-standard expressions for template designers).
+
 ## Reversibility
 
 **medium**: Expressions are stored as text in the template content; compilation and evaluation are confined to `TemplateCompiler` and `Resolver` in `templates-core`. Replacing CEL means a new compiler/evaluator and migrating stored expressions of released template versions (which must stay renderable), e.g. by keeping CEL for content format 1.

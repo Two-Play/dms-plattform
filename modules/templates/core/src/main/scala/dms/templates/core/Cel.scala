@@ -128,7 +128,7 @@ private[core] object Cel:
       val keys    = entries.map(_._1).toSet
       (keys, m.get("amount"), m.get("currency")) match
         case (ks, amount: java.lang.Number, currency: String) if ks == Set("amount", "currency") =>
-          Right(FieldValue.Amount(BigDecimal(amount.toString), currency))
+          Right(FieldValue.Amount(Money.round(BigDecimal(amount.toString), currency), currency))
         case _ =>
           entries
             .foldRight[Either[String, List[(String, FieldValue)]]](Right(Nil))((kv, acc) =>
