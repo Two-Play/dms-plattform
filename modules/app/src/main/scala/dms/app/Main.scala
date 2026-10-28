@@ -1,6 +1,9 @@
 package dms.app
 
+import dms.audit.core.{AuditTrailLive, TsaTrust}
+import dms.authz.{Authorizer, RoleAssignments}
 import dms.db.Db
+import dms.documents.core.DocumentClassService
 import dms.identity.{Authenticator, TenantDirectory, TokenVerifier}
 import dms.storage.ObjectStore
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
@@ -18,8 +21,9 @@ object Main extends ZIOAppDefault:
     Runtime.removeDefaultLoggers >>> SLF4J.slf4j >+>
       Runtime.setConfigProvider(TypesafeConfigProvider.fromResourcePath())
 
-  private val apiEndpoints: List[ZServerEndpoint[Authenticator, Any]] =
-    List(HealthApi.health.widen[Authenticator], MeApi.me)
+  private val apiEndpoints: List[ZServerEndpoint[DocumentClassApi.Env, Any]] =
+    List(HealthApi.health.widen[DocumentClassApi.Env], MeApi.me.widen[DocumentClassApi.Env]) ++
+      DocumentClassApi.endpoints
 
   private val docs =
     SwaggerInterpreter()
@@ -42,6 +46,13 @@ object Main extends ZIOAppDefault:
           TenantDirectory.layer,
           Authenticator.layer,
           ZLayer.succeed(cfg.storage),
-          ObjectStore.client
+          ObjectStore.client,
+          RoleAssignments.postgres,
+          Authorizer.layer,
+          // Recording does not verify timestamps, so no TSA trust anchors are needed here; verification and
+          // anchoring run with their own configuration (ADR 0017).
+          ZLayer.succeed(TsaTrust(Nil)),
+          AuditTrailLive.layer,
+          DocumentClassService.layer
         )
     yield ()
