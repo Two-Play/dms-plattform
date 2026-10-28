@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { useAuth } from 'react-oidc-context'
+import { hasRole, useMe, type BusinessRole } from '@/api/me'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -23,13 +24,19 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { currentTheme, setTheme, type Theme } from '@/lib/theme'
 
-const navItems = [
+/** Navigation entries; those with `role` are shown only to holders of that business role. */
+const navItems: readonly {
+  to: '/' | '/documents' | '/tasks' | '/templates' | '/admin'
+  label: string
+  icon: typeof LayoutDashboard
+  role?: BusinessRole
+}[] = [
   { to: '/', label: 'Home', icon: LayoutDashboard },
   { to: '/documents', label: 'Documents', icon: FileText },
-  { to: '/templates', label: 'Templates', icon: LayoutTemplate },
   { to: '/tasks', label: 'Tasks', icon: CheckSquare },
-  { to: '/admin', label: 'Admin', icon: Settings },
-] as const
+  { to: '/templates', label: 'Templates', icon: LayoutTemplate, role: 'TemplateDesigner' },
+  { to: '/admin', label: 'Admin', icon: Settings, role: 'TenantAdmin' },
+]
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
@@ -91,6 +98,8 @@ function UserMenu() {
 
 /** Layout for signed-in pages: header, sidebar navigation and the routed content. */
 export function AppShell() {
+  const me = useMe()
+  const visible = navItems.filter((item) => !item.role || hasRole(me.data, item.role))
   return (
     <div className="flex min-h-svh flex-col">
       <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b bg-background/95 px-4 backdrop-blur">
@@ -108,7 +117,7 @@ export function AppShell() {
           className="border-b bg-sidebar text-sidebar-foreground md:w-56 md:shrink-0 md:border-r md:border-b-0"
         >
           <ul className="flex gap-1 overflow-x-auto p-2 md:flex-col">
-            {navItems.map(({ to, label, icon: Icon }) => (
+            {visible.map(({ to, label, icon: Icon }) => (
               <li key={to}>
                 <Link
                   to={to}

@@ -52,7 +52,7 @@ npm run api:generate
 DMS_OPENAPI_URL=http://localhost:8091/docs/docs.yaml npm run api:generate
 ```
 
-`src/api/client.ts` wraps it with `openapi-fetch` and adds `Authorization: Bearer <access token>` to every request. Vote requests (`POST /api/v1/workflow/tasks/{taskId}/votes`) additionally carry the OIDC ID token in `X-DMS-Id-Token`: approval votes need a recent sign-in (step-up), and ZITADEL puts `auth_time` only into the ID token (ADR 0024, addendum DMS-86). When a vote fails with `401 reauthentication_required` (`isReauthenticationRequired` in `src/auth/step-up.ts`), `reauthenticate(auth.signinRedirect)` signs in again with `prompt=login` and `max_age=0` and returns to the current page; the user then casts the vote again, it is not replayed. `castVote` in `src/api/workflow.ts` is the client helper for the vote UI (DMS-91). Components get the client from `useApiClient()`, which makes it easy to replace in tests.
+`src/api/client.ts` wraps it with `openapi-fetch` and adds `Authorization: Bearer <access token>` to every request. Vote requests (`POST /api/v1/workflow/tasks/{taskId}/votes`) additionally carry the OIDC ID token in `X-DMS-Id-Token`: approval votes need a recent sign-in (step-up), and ZITADEL puts `auth_time` only into the ID token (ADR 0024, addendum DMS-86). When a vote fails with `401 reauthentication_required` (`isReauthenticationRequired` in `src/auth/step-up.ts`), `reauthenticate(auth.signinRedirect)` signs in again with `prompt=login` and `max_age=0` and returns to the current page. The vote is not replayed automatically: the vote dialog remembers it (task, decision, reason) in `sessionStorage` (`src/auth/pending-vote.ts`, dropped after 30 minutes), and the inbox and the document page offer "Repeat vote", which opens the dialog prefilled; the user confirms it. `castVote` in `src/api/workflow.ts` is the client helper for the vote UI (DMS-91). Components get the client from `useApiClient()`, which makes it easy to replace in tests.
 
 ## Dev proxy
 
@@ -69,6 +69,7 @@ TanStack Router with **file-based routing**: the Vite plugin generates `src/rout
 | `/`, `/documents`, `/templates`, `/tasks`, `/admin` | `routes/_app/*`                         | signed in; `_app.tsx` is the pathless protected layout (app shell)          |
 | `/documents/new`                                    | `routes/_app/documents/new.tsx`         | signed in; "New document" with live preview (DMS-39)                        |
 | `/documents/$documentId`                            | `routes/_app/documents/$documentId.tsx` | signed in; a document: continue and submit a draft, workflow state (DMS-90) |
+| `/tasks`                                            | `routes/_app/tasks.tsx`                 | signed in; task inbox with votes and read confirmations (DMS-48)            |
 | anything else                                       | `components/not-found-page.tsx`         | 404 page                                                                    |
 
 The protected layout checks `context.auth.isAuthenticated` in `beforeLoad` and redirects to `/sign-in?redirect=<path>`. After sign-in the original path is carried through the OIDC `state` and restored on `/callback` (only same-origin paths are accepted).
@@ -78,9 +79,12 @@ The protected layout checks `context.auth.isAuthenticated` in `beforeLoad` and r
 ```
 src/
   api/           generated schema, typed client, query definitions (templates.ts: catalog, fields, preview;
-                 documents.ts: list, document, workflow, save and submit; errors.ts: ApiError with field issues)
+                 documents.ts: list, document, workflow, save and submit; workflow.ts: my tasks, votes;
+                 me.ts: user and business roles; acknowledgements.ts: read confirmations;
+                 errors.ts: ApiError with field issues)
   auth/          oidc-client-ts UserManager, scopes, return-path check
-  components/    app shell, pages and cards; ui/ holds shadcn/ui components; documents/ the document pages
+  components/    app shell, pages and cards; ui/ holds shadcn/ui components; documents/ the document pages;
+                 tasks/ the task inbox and the vote dialog
   lib/           utilities, theme switch
   routes/        file-based routes (files starting with "-" are ignored by the router)
   test/          Vitest setup
@@ -123,6 +127,15 @@ For templates with reference fields (`references` in the fields response), the p
 - `/documents/$documentId` (`document-page.tsx`) loads the document (`GET /api/v1/documents/{id}`). A draft opens in the same workspace as "New document" (`document-workspace.tsx`: generated form, partner pickers, debounced preview, save); `draft-values.ts` turns the saved entered values back into form input and rebuilds the taken-over partner from the values it filled. Platform, computed and partner master values are not sent again; an unchanged partner is not taken over again. Other statuses show the version's metadata read-only.
 - "Submit for review" (both pages) saves the draft, then `POST /api/v1/documents/{id}/submit` starts the workflow; "New document" then opens the document page. The "Review and approval" card shows the cases from `GET /api/v1/documents/{id}/workflow` (status, round, current step, tasks with their assignees, votes).
 - Errors: issues of a 422 (`invalid_values`, `not_editable`, `incomplete`) are shown at their fields while the field keeps the rejected value; `incomplete` at submission also lists the missing values (click focuses the field); a 409 tells the user to reload; `invalid` at submission (e.g. a changed locked section without an authorized deviation request) is shown with a generic hint.
+
+## Task inbox and votes (DMS-48, DMS-91)
+
+- `/tasks` (`components/tasks/task-inbox-page.tsx`) lists everything waiting for the user in one list: open review and approval tasks (`GET /api/v1/workflow/tasks`) and open read confirmations (`GET /api/v1/acknowledgements?status=open`, DMS-47). Workflow tasks carry only ids, so the inbox loads each document (`GET /api/v1/documents/{id}`, shared cache with the document page) for title, class path and version. Assignees are shown as user ids until a source of display names exists.
+- Order (`inbox-items.ts`): overdue tasks first, then tasks with a deadline (earliest first), then tasks without one (oldest first). A task shows its deadline if it has one (`dueAt`; workflow deadlines follow with DMS-87), otherwise since when it is open; overdue tasks get a red border, an "Overdue" badge and "Overdue since …". The kind `ReviewDate` (periodic review) is typed but has no source yet.
+- Actions in the list: "Vote…" opens the vote dialog (`vote-dialog.tsx`); a read confirmation offers "Open document" (`POST …/versions/{versionId}/opened`, then the document page) and, once opened, "Confirm read" (`POST …/versions/{versionId}/acknowledgement`). If the backend has no acknowledgement endpoint yet (404), read confirmations are left out without an error. The endpoint types in `api/acknowledgements.ts` are written by hand until the generated schema contains them.
+- Vote dialog: decisions Approve, Approve with conditions and Request changes (review steps) or Reject (approval steps); a reason is required for everything except a plain approval (checked before sending; the backend answers 422 too). On `401 reauthentication_required` the dialog explains why, remembers the vote and offers "Sign in again" (see API client above). After a vote the task list, the document and its workflow are reloaded.
+- The document page's "Review and approval" card shows the caller's open tasks on the document with the same "Vote…" button.
+- Navigation by role (`GET /api/v1/me`, `useMe` in `api/me.ts`): Home, Documents and Tasks for everyone, Templates for template designers, Admin for tenant administrators (both still placeholders). Hiding entries is a convenience; the API enforces the permissions.
 
 ## Notes
 

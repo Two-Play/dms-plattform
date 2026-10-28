@@ -216,6 +216,10 @@ function renderAt(path: string) {
           : ok(state.document)
       case '/api/v1/documents/{id}/workflow':
         return ok(state.cases)
+      case '/api/v1/workflow/tasks':
+        return ok([])
+      case '/api/v1/me':
+        return ok({ userId: 'author-1', tenantId: 'tenant-1', roles: ['Author'] })
       default:
         return ok(fields)
     }

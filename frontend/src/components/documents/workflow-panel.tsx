@@ -1,6 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
 import { useApiClient } from '@/api/context'
 import { documentWorkflowQuery, type WorkflowCase } from '@/api/documents'
+import { decisionLabels, myTasksQuery, type WorkflowTask } from '@/api/workflow'
+import { PendingVoteNotice } from '@/components/tasks/pending-vote-notice'
+import { VoteDialog, type VoteDraft } from '@/components/tasks/vote-dialog'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from './status-badge'
@@ -98,12 +103,68 @@ function CaseDetails({ workflowCase, version }: { workflowCase: WorkflowCase; ve
   )
 }
 
+/** The caller's open tasks on this document with a button to vote on each (DMS-91). */
+function MyOpenTasks({ documentId, title }: { documentId: string; title: string | undefined }) {
+  const client = useApiClient()
+  const myTasks = useQuery(myTasksQuery(client))
+  const [voting, setVoting] = useState<{ task: WorkflowTask; initial?: VoteDraft }>()
+  const [message, setMessage] = useState('')
+  const open = (myTasks.data ?? []).filter((t) => t.documentId === documentId)
+  return (
+    <>
+      <PendingVoteNotice
+        tasks={open}
+        titleOf={() => title}
+        onRepeat={(task, pending) => {
+          setVoting({ task, initial: { decision: pending.decision, reason: pending.reason } })
+        }}
+      />
+      {open.map((t) => (
+        <div
+          key={t.id}
+          className="flex flex-col gap-2 rounded-lg border border-primary/40 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+        >
+          <span>
+            Your task: <strong>{t.stepName}</strong> ({t.role})
+          </span>
+          <Button
+            size="sm"
+            onClick={() => {
+              setVoting({ task: t })
+            }}
+          >
+            Vote…
+          </Button>
+        </div>
+      ))}
+      <p role="status" className="text-sm empty:hidden">
+        {message}
+      </p>
+      <VoteDialog
+        task={voting?.task}
+        documentTitle={title}
+        initial={voting?.initial}
+        onClose={() => {
+          setVoting(undefined)
+        }}
+        onVoted={(_task, decision) => {
+          setVoting(undefined)
+          setMessage(`Vote recorded: ${decisionLabels[decision]}.`)
+        }}
+      />
+    </>
+  )
+}
+
 /** Review and approval state of a document (GET /api/v1/documents/{id}/workflow), newest case first. */
 export function WorkflowPanel({
   documentId,
+  title,
   versions,
 }: {
   documentId: string
+  /** Document title, shown in the vote dialog. */
+  title?: string
   /** Version labels by version id. */
   versions: Record<string, string>
 }) {
@@ -116,6 +177,7 @@ export function WorkflowPanel({
         <CardDescription>The workflow started when the document was submitted.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        <MyOpenTasks documentId={documentId} title={title} />
         {workflow.isPending && <Skeleton className="h-16 w-full" />}
         {workflow.isError && (
           <p role="alert" className="text-sm text-destructive">
