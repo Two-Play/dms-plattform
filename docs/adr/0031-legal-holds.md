@@ -73,7 +73,7 @@ Enforcement:
 
 - Must be done (DMS-82): destruction proposals filter with `LegalHoldLookup.heldAmong` / `dms.document_under_legal_hold`; the destruction path relies on the guard and reports its error.
 - Must be done (DMS-93): Object Lock retention on renditions from the retention rule; check that it composes with the object legal hold.
-- Should be done: frontend: "Legal holds" section for records managers (list, create from a document or the search page with the confirmation count, release) and the legal hold badge on the document page; regenerate `frontend/src/api/schema.d.ts`.
+- Should be done: frontend: "Legal holds" section for records managers (list, create from a document or the search page with the confirmation count, release) and the legal hold badge on the document page (the API types in `frontend/src/api/schema.d.ts` are generated already).
 - Later: removing a single document from a hold with reason, if the legal department needs it; step-up authentication for releasing.
 - Ruled out: dynamic holds that follow a stored search.
 
