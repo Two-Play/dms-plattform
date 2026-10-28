@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed |
+| Status | Accepted (2026-10-28, implemented in DMS-25) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -56,8 +56,9 @@ Proposed: one shared database; every tenant-specific table carries `tenant_id`, 
 
 **high**: Switching to schema or DB per tenant affects connection management, migrations, workers and data migration of all existing tenants. The hybrid route (moving individual tenants out) remains possible with medium effort if the `tenant_id` column is kept.
 
-## Open questions from spike DMS-21 (2026-10-28)
+## Findings from spike DMS-21 and implementation DMS-25 (2026-10-28)
 
-- Without a tenant set, the policy `current_setting('app.tenant_id')::uuid` raises an error instead of returning zero rows. Decide whether that fail-closed behaviour is wanted (recommended: yes, it surfaces missing tenant context as a bug) or whether `current_setting('app.tenant_id', true)` should yield zero rows.
+- **Decided 2026-10-28 (Philippe): fail closed.** Policies call `dms.current_tenant()`, which raises SQLSTATE `DMS01` when `app.tenant_id` is missing or empty; the application maps it to `DbError.TenantContextMissing`. Alternative rejected: returning zero rows, because a forgotten tenant context would go unnoticed. Consequence: background jobs must set a tenant explicitly or use `Db.transactSystem` only for tables without RLS.
 - `SET LOCAL` cannot take bind parameters; use `set_config('app.tenant_id', ?, true)`.
 - RLS violations and missing grants share SQLSTATE 42501.
+- Roles: the migration user owns all objects (owners are not subject to RLS); the application connects as a member of the `NOLOGIN` role `dms_app` without `BYPASSRLS`. Locally `dms_app_user` (`docker/postgres-init/01-app-user.sql`).

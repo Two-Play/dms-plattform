@@ -17,9 +17,17 @@ def module(id: String, dir: String): Project =
 
 /** Business module with a public interface (`api`) and an implementation (`core`). */
 def apiModule(name: String): Project  = module(s"$name-api", s"modules/$name/api").dependsOn(kernel)
-def coreModule(name: String): Project = module(s"$name-core", s"modules/$name/core").dependsOn(kernel)
+def coreModule(name: String): Project = module(s"$name-core", s"modules/$name/core").dependsOn(kernel, db)
 
 lazy val kernel = module("kernel", "modules/kernel")
+
+/** Shared database infrastructure: transactions, tenant context, migrations (ADR 0012, 0014). */
+lazy val db = module("db", "modules/db")
+  .dependsOn(kernel)
+  .settings(
+    libraryDependencies ++= Dependencies.database ++ Dependencies.magnum ++ Dependencies.integrationTest ++
+      Dependencies.logging.map(_ % Test)
+  )
 
 lazy val identity = module("identity", "modules/identity")
   .dependsOn(kernel)
@@ -50,6 +58,7 @@ lazy val integration = module("integration", "modules/integration")
 lazy val app = module("app", "modules/app")
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .dependsOn(
+    db,
     identity,
     authz,
     integration,
@@ -63,8 +72,7 @@ lazy val app = module("app", "modules/app")
     notificationsCore
   )
   .settings(
-    libraryDependencies ++= Dependencies.http ++ Dependencies.config ++
-      Dependencies.logging ++ Dependencies.database ++ Dependencies.integrationTest,
+    libraryDependencies ++= Dependencies.http ++ Dependencies.config ++ Dependencies.logging,
     Compile / mainClass := Some("dms.app.Main"),
     Compile / sourceGenerators += Def.task {
       val file = (Compile / sourceManaged).value / "dms" / "app" / "AppBuildInfo.scala"
@@ -87,6 +95,7 @@ lazy val root = (project in file("."))
   .settings(name := "dms-plattform", publish / skip := true)
   .aggregate(
     kernel,
+    db,
     identity,
     authz,
     integration,

@@ -13,6 +13,7 @@ object Versions {
   val hikari        = "7.1.0"
   val nimbusJose    = "10.10"
   val testcontainer = "0.44.1"
+  val magnum        = "1.3.1"
 }
 
 object Dependencies {
@@ -51,6 +52,8 @@ object Dependencies {
     "org.flywaydb"   % "flyway-database-postgresql" % Versions.flyway,
     "com.zaxxer"     % "HikariCP"                   % Versions.hikari
   )
+
+  val magnum = Seq("com.augustnagro" %% "magnum" % Versions.magnum)
 
   val jwt = Seq("com.nimbusds" % "nimbus-jose-jwt" % Versions.nimbusJose)
 
