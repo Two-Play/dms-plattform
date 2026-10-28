@@ -136,3 +136,4 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | US-06.3 | DMS-92 | Task | Backlog (MVP) | – | DMS-45/46: publication failures, tenant time zone, withdraw, editorial path settings |
 | US-06.1 | DMS-93 | Task | Backlog (MVP) | – | DMS-44: retry failed rendering, Object Lock, worker image digest |
 | US-06.1 | DMS-94 | Task | Backlog (R2) | – | DMS-44: confidentiality watermark, PDF/A-3b, PDF/UA |
+| T-00 | DMS-95 | Task | Sprint 8 | – | One-command local development setup with demo users and data |

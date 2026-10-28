@@ -4,7 +4,7 @@ Web UI of the DMS platform: Vite, React 19 and TypeScript (strict), Tailwind CSS
 
 ## Setup
 
-Requires Node 24 and npm. ZITADEL must be running (`docker compose up -d`) and set up (`scripts/zitadel-setup.sh`).
+Requires Node 24 and npm. `scripts/dev-setup.sh` in the repository root sets up everything (services, ZITADEL, demo users and data), writes `.env.local` and starts the dev server; see the main README. By hand: ZITADEL must be running (`docker compose up -d`) and set up (`scripts/zitadel-setup.sh`).
 
 ```bash
 cd frontend
