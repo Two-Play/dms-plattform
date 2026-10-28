@@ -15,6 +15,7 @@ import { DocumentEditor } from './new-document-page'
 import { StatusBadge } from './status-badge'
 import { WorkflowPanel } from './workflow-panel'
 import { AcknowledgementPanel } from './acknowledgement-panel'
+import { VersionHistory } from './version-history'
 
 /** Whether the page shows the acknowledgement card for a version: valid and requiring it. */
 function asksForAcknowledgement(version: DocumentVersionView): boolean {
@@ -145,6 +146,7 @@ export function DocumentPage({ documentId }: { documentId: string }) {
             title={document.data.title}
             versions={{ [document.data.current.id]: document.data.current.version }}
           />
+          <VersionHistory documentId={document.data.id} />
         </>
       )}
     </div>

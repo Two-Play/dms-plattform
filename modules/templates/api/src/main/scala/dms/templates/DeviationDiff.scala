@@ -77,12 +77,27 @@ private[templates] object DeviationDiff:
     case Inserted(newIndex: Int)
 
   def align[A](before: IndexedSeq[A], after: IndexedSeq[A])(pairable: (A, A) => Boolean): List[Aligned] =
-    hunks(before, after).flatMap { h =>
-      script(before.slice(h.oldFrom, h.oldUntil), after.slice(h.newFrom, h.newUntil))(pairable).map {
-        case Op.Keep(o, n)   => Aligned.Paired(h.oldFrom + o, h.newFrom + n)
-        case Op.Delete(o, n) => Aligned.Deleted(h.oldFrom + o, h.newFrom + n)
-        case Op.Insert(_, n) => Aligned.Inserted(h.newFrom + n)
-      }
+    hunks(before, after).flatMap(alignHunk(before, after, _)(pairable))
+
+  /** Like [[align]], but with the equal elements outside the hunks as well (as `Paired`), so the result
+    * covers both sequences completely in document order (version comparison, DMS-54).
+    */
+  def alignAll[A](before: IndexedSeq[A], after: IndexedSeq[A])(pairable: (A, A) => Boolean): List[Aligned] =
+    // Between hunks, equal elements keep the offset between their old and new index.
+    val (rest, offset, out) = hunks(before, after).foldLeft((0, 0, List.empty[Aligned])) {
+      case ((from, _, acc), h) =>
+        val equal = (from until h.oldFrom).map(o => Aligned.Paired(o, o - h.oldFrom + h.newFrom))
+        (h.oldUntil, h.newUntil - h.oldUntil, acc ++ equal ++ alignHunk(before, after, h)(pairable))
+    }
+    out ++ (rest until before.length).map(o => Aligned.Paired(o, o + offset))
+
+  private def alignHunk[A](before: IndexedSeq[A], after: IndexedSeq[A], h: Hunk)(
+      pairable: (A, A) => Boolean
+  ): List[Aligned] =
+    script(before.slice(h.oldFrom, h.oldUntil), after.slice(h.newFrom, h.newUntil))(pairable).map {
+      case Op.Keep(o, n)   => Aligned.Paired(h.oldFrom + o, h.newFrom + n)
+      case Op.Delete(o, n) => Aligned.Deleted(h.oldFrom + o, h.newFrom + n)
+      case Op.Insert(_, n) => Aligned.Inserted(h.newFrom + n)
     }
 
   /** Word-level token of inline content. Whitespace separates words and is not significant. */
