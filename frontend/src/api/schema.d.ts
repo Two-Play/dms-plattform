@@ -1003,6 +1003,74 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/compliance/overview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Key figures for compliance officers: the number of overdue reviews (review date reached, not recertified) per organizational unit and owner, and the acknowledgement rate of the valid versions that require acknowledgement, in total and per unit. Only versions within the caller's scope. */
+    get: operations['getApiV1ComplianceOverview']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/compliance/overdue-reviews': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Valid versions whose review is overdue, the longest overdue first */
+    get: operations['getApiV1ComplianceOverdue-reviews']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/compliance/acknowledgements': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Acknowledgement rate of each valid version that requires acknowledgement, the most open first; superseded versions drop out. Figures only, no names. */
+    get: operations['getApiV1ComplianceAcknowledgements']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Who has not acknowledged the version yet (purpose limitation, ADR 0036): for compliance officers in scope and the document's owner, with a stated purpose and reason (403 purpose_required otherwise). Every access is recorded in the audit trail with purpose and reason. 422 if the version does not require acknowledgement. */
+    get: operations['getApiV1ComplianceAcknowledgementsDocumentidVersionidOpen']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -1313,6 +1381,17 @@ export interface components {
       createdAt: string
       /** Format: date-time */
       releasedAt?: string
+    }
+    /** ComplianceOverviewView */
+    ComplianceOverviewView: {
+      /** Format: date */
+      today: string
+      /** Format: int32 */
+      overdueReviews: number
+      overdueByUnit?: components['schemas']['UnitCountView'][]
+      overdueByOwner?: components['schemas']['OwnerCountView'][]
+      acknowledgements: components['schemas']['RateView']
+      acknowledgementsByUnit?: components['schemas']['UnitRateView'][]
     }
     /** ComputedField */
     ComputedField: {
@@ -1946,6 +2025,21 @@ export interface components {
        */
       type: 'Number'
     }
+    /** OpenAcknowledgementsView */
+    OpenAcknowledgementsView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title: string
+      versionLabel: string
+      purpose: string
+      /** Format: int32 */
+      audience: number
+      /** Format: int32 */
+      acknowledged: number
+      open?: string[]
+    }
     /** OpenDraftView */
     OpenDraftView: {
       /** Format: uuid */
@@ -1986,6 +2080,29 @@ export interface components {
        * @enum {string}
        */
       type: 'Otherwise'
+    }
+    /** OverdueReviewView */
+    OverdueReviewView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title: string
+      versionLabel: string
+      classPath?: string[]
+      unit?: string
+      owner?: string
+      status: string
+      /** Format: date */
+      dueOn: string
+      /** Format: int64 */
+      daysOverdue: number
+    }
+    /** OwnerCountView */
+    OwnerCountView: {
+      owner?: string
+      /** Format: int32 */
+      count: number
     }
     /** PageBreak */
     PageBreak: {
@@ -2134,6 +2251,19 @@ export interface components {
       version: number
       classPath?: string[]
       fields?: components['schemas']['ProfileFieldView'][]
+    }
+    /** RateView */
+    RateView: {
+      /** Format: int32 */
+      versions: number
+      /** Format: int32 */
+      audience: number
+      /** Format: int32 */
+      acknowledged: number
+      /** Format: int32 */
+      open: number
+      /** Format: double */
+      rate?: number
     }
     /** RecertifyVersion */
     RecertifyVersion: {
@@ -2716,6 +2846,17 @@ export interface components {
        */
       type: 'Then'
     }
+    /** UnitCountView */
+    UnitCountView: {
+      unit?: string
+      /** Format: int32 */
+      count: number
+    }
+    /** UnitRateView */
+    UnitRateView: {
+      unit?: string
+      rate: components['schemas']['RateView']
+    }
     /** UpdateDraft */
     UpdateDraft: {
       title?: string
@@ -2804,6 +2945,28 @@ export interface components {
       text: components['schemas']['TextComparisonView']
       fields?: components['schemas']['ValueChangeView'][]
       metadata?: components['schemas']['ValueChangeView'][]
+    }
+    /** VersionRateView */
+    VersionRateView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title: string
+      versionLabel: string
+      classPath?: string[]
+      unit?: string
+      owner?: string
+      /** Format: date-time */
+      publishedAt?: string
+      /** Format: int32 */
+      audience: number
+      /** Format: int32 */
+      acknowledged: number
+      /** Format: int32 */
+      open: number
+      /** Format: double */
+      rate?: number
     }
     /** VoteView */
     VoteView: {
@@ -5593,6 +5756,152 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1ComplianceOverview: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ComplianceOverviewView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1ComplianceOverdue-reviews': {
+    parameters: {
+      query?: {
+        /** @description Organizational unit; empty for versions without unit; absent for all */
+        unit?: string
+        /** @description Owner's user id; empty for documents without owner */
+        owner?: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['OverdueReviewView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1ComplianceAcknowledgements: {
+    parameters: {
+      query?: {
+        /** @description Organizational unit; empty for versions without unit; absent for all */
+        unit?: string
+        /** @description Document id */
+        document?: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['VersionRateView'][]
+        }
+      }
+      /** @description Invalid value for: query parameter document */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1ComplianceAcknowledgementsDocumentidVersionidOpen: {
+    parameters: {
+      query?: {
+        /** @description Required: escalation or reminder */
+        purpose?: string
+        /** @description Required: why the names are needed, up to 500 characters; recorded in the audit trail */
+        reason?: string
+      }
+      header?: never
+      path: {
+        /** @description Document id */
+        documentId: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['OpenAcknowledgementsView']
+        }
+      }
+      /** @description Invalid value for: path parameter documentId, Invalid value for: path parameter versionId */
       400: {
         headers: {
           [name: string]: unknown

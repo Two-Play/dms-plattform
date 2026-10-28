@@ -14,6 +14,7 @@ import { Route as CallbackRouteImport } from './routes/callback'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
+import { Route as AppComplianceRouteImport } from './routes/_app/compliance'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppTasksRouteImport } from './routes/_app/tasks'
 import { Route as AppTemplatesRouteImport } from './routes/_app/templates'
@@ -44,6 +45,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppAdminRoute = AppAdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppComplianceRoute = AppComplianceRouteImport.update({
+  id: '/compliance',
+  path: '/compliance',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSearchRoute = AppSearchRouteImport.update({
@@ -88,6 +94,7 @@ export interface FileRoutesByFullPath {
   '/callback': typeof CallbackRoute
   '/sign-in': typeof SignInRoute
   '/admin': typeof AppAdminRoute
+  '/compliance': typeof AppComplianceRoute
   '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
   '/templates': typeof AppTemplatesRoute
@@ -100,6 +107,7 @@ export interface FileRoutesByTo {
   '/callback': typeof CallbackRoute
   '/sign-in': typeof SignInRoute
   '/admin': typeof AppAdminRoute
+  '/compliance': typeof AppComplianceRoute
   '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
   '/templates': typeof AppTemplatesRoute
@@ -115,6 +123,7 @@ export interface FileRoutesById {
   '/callback': typeof CallbackRoute
   '/sign-in': typeof SignInRoute
   '/_app/admin': typeof AppAdminRoute
+  '/_app/compliance': typeof AppComplianceRoute
   '/_app/search': typeof AppSearchRoute
   '/_app/tasks': typeof AppTasksRoute
   '/_app/templates': typeof AppTemplatesRoute
@@ -131,6 +140,7 @@ export interface FileRouteTypes {
     | '/callback'
     | '/sign-in'
     | '/admin'
+    | '/compliance'
     | '/search'
     | '/tasks'
     | '/templates'
@@ -143,6 +153,7 @@ export interface FileRouteTypes {
     | '/callback'
     | '/sign-in'
     | '/admin'
+    | '/compliance'
     | '/search'
     | '/tasks'
     | '/templates'
@@ -157,6 +168,7 @@ export interface FileRouteTypes {
     | '/callback'
     | '/sign-in'
     | '/_app/admin'
+    | '/_app/compliance'
     | '/_app/search'
     | '/_app/tasks'
     | '/_app/templates'
@@ -208,6 +220,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AppAdminRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/compliance': {
+      id: '/_app/compliance'
+      path: '/compliance'
+      fullPath: '/compliance'
+      preLoaderRoute: typeof AppComplianceRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/search': {
@@ -264,6 +283,7 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
+  AppComplianceRoute: typeof AppComplianceRoute
   AppSearchRoute: typeof AppSearchRoute
   AppTasksRoute: typeof AppTasksRoute
   AppTemplatesRoute: typeof AppTemplatesRoute
@@ -276,6 +296,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
+  AppComplianceRoute: AppComplianceRoute,
   AppSearchRoute: AppSearchRoute,
   AppTasksRoute: AppTasksRoute,
   AppTemplatesRoute: AppTemplatesRoute,

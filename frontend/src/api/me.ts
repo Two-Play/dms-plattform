@@ -18,6 +18,7 @@ export type BusinessRole =
   | 'RecordsManager'
   | 'Auditor'
   | 'TenantAdmin'
+  | 'ComplianceOfficer'
 
 /** The signed-in user with the business roles of their active role assignments (GET /api/v1/me). */
 export function meQuery(client: ApiClient) {
