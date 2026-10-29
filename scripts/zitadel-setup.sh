@@ -2,7 +2,11 @@
 # Creates the ZITADEL project and the OIDC application for local development.
 # Idempotent: existing project and application are reused.
 # Requires: docker compose services running, curl, python3.
-# Output: .local/zitadel/dms.env with ZITADEL_ISSUER, DMS_ZITADEL_PROJECT_ID, DMS_ZITADEL_CLIENT_ID.
+# Also creates the machine user dms-directory that the backend uses to resolve user ids to display names
+# (DMS-110): read-only member of the organization (ORG_OWNER_VIEWER), personal access token in
+# .local/zitadel/directory.pat (mode 600, never committed).
+# Output: .local/zitadel/dms.env with ZITADEL_ISSUER, DMS_ZITADEL_PROJECT_ID, DMS_ZITADEL_CLIENT_ID and
+# DMS_USER_DIRECTORY_TOKEN_FILE.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,6 +15,8 @@ PAT_FILE="$ROOT/.local/zitadel/admin.pat"
 OUT_FILE="$ROOT/.local/zitadel/dms.env"
 PROJECT_NAME="dms-platform"
 APP_NAME="dms-web"
+DIRECTORY_USER="dms-directory"
+DIRECTORY_PAT_FILE="$ROOT/.local/zitadel/directory.pat"
 REDIRECT_URI="${DMS_WEB_REDIRECT_URI:-http://localhost:5173/callback}"
 LOGOUT_URI="${DMS_WEB_LOGOUT_URI:-http://localhost:5173/}"
 
@@ -62,9 +68,39 @@ else
   echo "Reusing OIDC application $APP_NAME ($CLIENT_ID)"
 fi
 
+# User directory (DMS-110): a machine user that may read the organization's users.
+DIRECTORY_USER_ID="$(api POST /management/v1/users/_search \
+  "{\"queries\":[{\"userNameQuery\":{\"userName\":\"$DIRECTORY_USER\",\"method\":\"TEXT_QUERY_METHOD_EQUALS\"}}]}" \
+  | json "(d.get('result') or [{}])[0].get('id','')")"
+if [[ -z "$DIRECTORY_USER_ID" ]]; then
+  DIRECTORY_USER_ID="$(api POST /management/v1/users/machine \
+    "{\"userName\":\"$DIRECTORY_USER\",\"name\":\"DMS user directory\",\"accessTokenType\":\"ACCESS_TOKEN_TYPE_BEARER\"}" \
+    | json "d['userId']")"
+  echo "Created machine user $DIRECTORY_USER ($DIRECTORY_USER_ID)"
+else
+  echo "Reusing machine user $DIRECTORY_USER ($DIRECTORY_USER_ID)"
+fi
+IS_MEMBER="$(api POST /management/v1/orgs/me/members/_search \
+  "{\"queries\":[{\"userIdQuery\":{\"userId\":\"$DIRECTORY_USER_ID\"}}]}" \
+  | json "len(d.get('result') or [])")"
+if [[ "$IS_MEMBER" == 0 ]]; then
+  api POST /management/v1/orgs/me/members \
+    "{\"userId\":\"$DIRECTORY_USER_ID\",\"roles\":[\"ORG_OWNER_VIEWER\"]}" > /dev/null
+  echo "Granted ORG_OWNER_VIEWER to $DIRECTORY_USER"
+fi
+if [[ ! -s "$DIRECTORY_PAT_FILE" ]]; then
+  (
+    umask 077
+    api POST "/management/v1/users/$DIRECTORY_USER_ID/pats" '{"expirationDate":"2030-01-01T00:00:00Z"}' \
+      | json "d['token']" > "$DIRECTORY_PAT_FILE"
+  )
+  echo "Wrote the access token of $DIRECTORY_USER to $DIRECTORY_PAT_FILE"
+fi
+
 cat > "$OUT_FILE" <<EOF
 ZITADEL_ISSUER=$ISSUER
 DMS_ZITADEL_PROJECT_ID=$PROJECT_ID
 DMS_ZITADEL_CLIENT_ID=$CLIENT_ID
+DMS_USER_DIRECTORY_TOKEN_FILE=$DIRECTORY_PAT_FILE
 EOF
 echo "Wrote $OUT_FILE"

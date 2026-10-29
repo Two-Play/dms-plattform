@@ -2,7 +2,7 @@ package dms.app
 
 import dms.db.DbConfig
 import dms.documents.core.DocumentSettings
-import dms.identity.AuthConfig
+import dms.identity.{AuthConfig, UserDirectoryConfig}
 import dms.integration.partners.PartnerDirectoryConfig
 import dms.integration.webhooks.WebhookSettings
 import dms.rendering.core.RendererConfig
@@ -122,7 +122,8 @@ final case class AppConfig(
     partners: PartnerDirectoryConfig,
     rendering: RendererConfig,
     search: SearchConfig,
-    webhooks: WebhooksConfig
+    webhooks: WebhooksConfig,
+    users: UserDirectoryConfig
 )
 
 object AppConfig:
