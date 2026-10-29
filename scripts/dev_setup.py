@@ -6,7 +6,10 @@ Subcommands:
   users           ensure the demo users in ZITADEL and their role assignments (idempotent)
   token USER      print an access token for a demo user (e.g. `author`)
   seed --api URL  create demo field definitions, classes, workflows, number ranges, templates, an access group
-                  and a draft through the API
+                  and a draft through the API; publish the demo central instructions through the approval
+                  workflow (approver signs in afresh for the step-up check) and add a Word template with a draft
+  check [--dump DIR]            check the demo content offline (no services needed); --dump writes the
+                                central instruction contents, values and the Word template to DIR
   approve-tasks USER --api URL  approve all open workflow tasks of a demo user (until the UI can vote, DMS-91)
   search-rebuild --api URL      rebuild the tenant's search index from the database (DMS-51, idempotent)
   intranet        ensure the intranet's technical user: a ZITADEL machine user with the platform role Reader
@@ -23,15 +26,19 @@ from __future__ import annotations
 import base64
 import datetime
 import hashlib
+import io
 import json
 import re
 import secrets
 import string
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ElementTree
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -108,12 +115,16 @@ class HttpError(Exception):
         self.body = body
 
 
-def http(method: str, url: str, body=None, token: str | None = None, headers=None, form=None):
+def http(method: str, url: str, body=None, token: str | None = None, headers=None, form=None,
+         raw: tuple[bytes, str] | None = None):
+    """JSON request (`body`), form post (`form`) or a raw body with its content type (`raw`)."""
     data = None
     hdrs = dict(headers or {})
     if token:
         hdrs["Authorization"] = f"Bearer {token}"
-    if form is not None:
+    if raw is not None:
+        data, hdrs["Content-Type"] = raw
+    elif form is not None:
         data = urllib.parse.urlencode(form).encode()
         hdrs["Content-Type"] = "application/x-www-form-urlencoded"
     elif body is not None:
@@ -434,6 +445,8 @@ FIELDS = [
         {"code": "compliance", "label": "Compliance", "active": True},
         {"code": "hr", "label": "Human resources", "active": True}]}},
     {"key": "appliesTo", "label": "Applies to", "fieldType": {"type": "Text", "maxLength": 200}},
+    # Short description shown in the library (DMS-119, ADR 0043: conventional key `summary`).
+    {"key": "summary", "label": "Kurzbeschreibung", "fieldType": {"type": "Text", "maxLength": 500}},
 ]
 
 # key -> (label, description, [(field, required from review)])
@@ -443,6 +456,10 @@ CLASSES = {
         ("termMonths", False), ("termType", True), ("startDate", True), ("endDate", False),
         ("noticePeriod", False), ("services", False), ("slaLevel", False)]),
     "policy": ("Policy", "Internal policies and guidelines", [("policyArea", True), ("appliesTo", False)]),
+    # Central instructions for the library (DMS-120); German like their content.
+    "central-instruction": ("Zentralanweisung",
+                            "Verbindliche Anweisungen der Geschäftsführung und der Zentralbereiche",
+                            [("summary", True), ("appliesTo", False)]),
 }
 
 WORKFLOWS = {
@@ -454,6 +471,9 @@ WORKFLOWS = {
         "resetTo": "review"}},
     "policy": {"definition": {"steps": [
         {"key": "approval", "name": "Approval", "kind": "Approval",
+         "lanes": [{"key": "approver", "role": "Approver"}]}]}},
+    "central-instruction": {"definition": {"steps": [
+        {"key": "approval", "name": "Freigabe", "kind": "Approval",
          "lanes": [{"key": "approver", "role": "Approver"}]}]}},
 }
 
@@ -557,6 +577,216 @@ POLICY = {
 }
 
 
+
+def bullets(*items: str) -> dict:
+    return {"type": "BulletList", "items": [[para(t(item))] for item in items]}
+
+
+# Central instructions (DMS-120): German demo content for the library (DMS-119). Locked sections carry the
+# identification and the entry into force; the three editable sections hold each instruction's rules.
+INSTRUCTION_LOCKED_HEADER = section(
+    "header", "Zentralanweisung", True,
+    {"type": "Heading", "level": 1, "content": [ph("title")]},
+    para(t("Zentralanweisung "), ph("documentNumber"), t(" · Herausgebende Stelle: "), ph("organizationalUnit"),
+         t(" · Gültig ab "), ph("validFrom", "date:long")),
+    para(t("Kurzbeschreibung: ", "Bold"), ph("summary")))
+INSTRUCTION_LOCKED_FINAL = section(
+    "final", "4. Inkrafttreten", True,
+    para(t("Diese Zentralanweisung tritt am "), ph("validFrom", "date:long"),
+         t(" in Kraft und ersetzt alle entgegenstehenden Regelungen. Verstöße können arbeitsrechtliche "
+           "Maßnahmen nach sich ziehen. Fragen beantwortet die herausgebende Stelle.")))
+
+
+def instruction_content(scope: list[dict], rules: list[dict], duties: list[dict]) -> dict:
+    return {"sections": [
+        INSTRUCTION_LOCKED_HEADER,
+        section("scope", "1. Geltungsbereich", False, *scope),
+        section("rules", "2. Regelungen", False, *rules),
+        section("duties", "3. Verantwortlichkeiten", False, *duties),
+        INSTRUCTION_LOCKED_FINAL,
+    ]}
+
+
+CENTRAL_INSTRUCTION = {
+    "name": "Zentralanweisung",
+    "description": "Verbindliche Anweisung mit Geltungsbereich, Regelungen und Verantwortlichkeiten",
+    "content": instruction_content(
+        [para(t("Diese Zentralanweisung gilt für alle Beschäftigten der Gesellschaft."))],
+        [para(t("Die Regelungen dieser Anweisung sind verbindlich."))],
+        [para(t("Die Führungskräfte sorgen für die Umsetzung in ihrem Bereich."))]),
+}
+
+# Published, currently valid central instructions: title -> metadata and the text of the editable sections.
+# `valid_from` is days before today, so the versions are valid at once and the library shows them.
+INSTRUCTIONS = [
+    {
+        "title": "Informationssicherheit am Arbeitsplatz",
+        "unit": "IT-Sicherheit",
+        "tags": ["Informationssicherheit", "IT", "Passwörter"],
+        "summary": "Regeln für Passwörter, Bildschirmsperre, mobile Datenträger und das Melden von "
+                   "Sicherheitsvorfällen.",
+        "applies_to": "Alle Beschäftigten, Auszubildenden und externen Dienstleister mit IT-Zugang",
+        "valid_from": 120,
+        "content": instruction_content(
+            [para(t("Diese Anweisung gilt für alle Beschäftigten, Auszubildenden und externen Dienstleister, die "
+                    "IT-Systeme oder Informationen der Gesellschaft nutzen, unabhängig vom Arbeitsort."))],
+            [para(t("Für den Umgang mit Informationen und IT-Systemen gilt:")),
+             bullets("Passwörter haben mindestens zwölf Zeichen, werden nicht weitergegeben und nicht für private "
+                     "Dienste wiederverwendet; wo möglich ist die Mehrfaktor-Anmeldung zu nutzen.",
+                     "Beim Verlassen des Arbeitsplatzes wird der Bildschirm gesperrt (Windows-Taste + L).",
+                     "Vertrauliche Informationen werden nur auf freigegebenen, verschlüsselten Datenträgern "
+                     "gespeichert; private USB-Sticks sind nicht zulässig.",
+                     "Verdächtige E-Mails werden nicht geöffnet, sondern über die Schaltfläche „Phishing "
+                     "melden“ weitergeleitet."),
+             para(t("Sicherheitsvorfälle, auch Verdachtsfälle, sind unverzüglich dem IT-Service-Desk "
+                    "(Durchwahl 4444) zu melden.", "Bold"))],
+            [para(t("Die Führungskräfte stellen sicher, dass ihre Beschäftigten jährlich an der "
+                    "Sicherheitsschulung teilnehmen. Die IT-Sicherheit überprüft die Einhaltung stichprobenartig "
+                    "und berichtet halbjährlich an die Geschäftsführung."))]),
+    },
+    {
+        "title": "Reisekostenrichtlinie",
+        "unit": "Finanzen",
+        "tags": ["Reisekosten", "Dienstreisen", "Abrechnung"],
+        "summary": "Genehmigung, Buchung und Abrechnung von Dienstreisen einschließlich Verkehrsmittel, "
+                   "Übernachtung und Verpflegungspauschalen.",
+        "applies_to": "Alle Beschäftigten, die Dienstreisen antreten",
+        "valid_from": 75,
+        "content": instruction_content(
+            [para(t("Diese Richtlinie regelt Dienstreisen im In- und Ausland aller Beschäftigten der "
+                    "Gesellschaft. Sie gilt nicht für Fahrten zwischen Wohnung und regelmäßiger Arbeitsstätte."))],
+            [para(t("Dienstreisen werden vor Antritt im Reiseportal beantragt und von der Führungskraft "
+                    "genehmigt.")),
+             bullets("Bahnreisen erfolgen in der 2. Klasse; ab einer Fahrzeit von vier Stunden ist die 1. Klasse "
+                     "erstattungsfähig.",
+                     "Flugreisen sind nur bei einer einfachen Bahnfahrzeit von mehr als sechs Stunden zulässig.",
+                     "Übernachtungskosten werden bis 120 EUR je Nacht erstattet, in Städten mit über einer Million "
+                     "Einwohnern bis 160 EUR.",
+                     "Verpflegungsmehraufwand wird nach den steuerlichen Pauschalen erstattet."),
+             para(t("Die Reisekostenabrechnung ist spätestens einen Monat nach Reiseende mit allen Belegen "
+                    "einzureichen."))],
+            [para(t("Die Führungskraft prüft die Notwendigkeit der Reise. Die Finanzbuchhaltung prüft die "
+                    "Abrechnung und zahlt erstattungsfähige Beträge mit der nächsten Gehaltsabrechnung aus."))]),
+    },
+    {
+        "title": "Umgang mit personenbezogenen Daten",
+        "unit": "Datenschutz",
+        "tags": ["Datenschutz", "DSGVO", "Personenbezogene Daten"],
+        "summary": "Grundsätze der DSGVO im Arbeitsalltag: Zweckbindung, Datensparsamkeit, Auskunftsersuchen "
+                   "und Meldung von Datenschutzverletzungen innerhalb von 24 Stunden.",
+        "applies_to": "Alle Beschäftigten, die personenbezogene Daten verarbeiten",
+        "valid_from": 40,
+        "content": instruction_content(
+            [para(t("Diese Anweisung gilt für jede Verarbeitung personenbezogener Daten von Kundinnen und "
+                    "Kunden, Beschäftigten, Bewerberinnen und Bewerbern sowie Geschäftspartnern."))],
+            [para(t("Personenbezogene Daten werden nur für festgelegte Zwecke und nur im erforderlichen Umfang "
+                    "verarbeitet.")),
+             bullets("Neue Verarbeitungen werden vor dem Start dem Datenschutz gemeldet und in das "
+                     "Verzeichnis der Verarbeitungstätigkeiten aufgenommen.",
+                     "Auskunfts- und Löschersuchen werden noch am Tag des Eingangs an den Datenschutz "
+                     "weitergeleitet.",
+                     "Daten werden nach Ablauf der Aufbewahrungsfrist gelöscht.",
+                     "Personenbezogene Daten werden nicht per unverschlüsselter E-Mail an Externe versandt."),
+             para(t("Datenschutzverletzungen sind innerhalb von 24 Stunden an datenschutz@example.com zu "
+                    "melden, damit die gesetzliche Meldefrist von 72 Stunden eingehalten werden kann.",
+                    "Bold"))],
+            [para(t("Die oder der Datenschutzbeauftragte berät, schult und überwacht die Einhaltung. Die "
+                    "Fachbereiche sind für die Rechtmäßigkeit ihrer Verarbeitungen verantwortlich."))]),
+    },
+    {
+        "title": "Mobiles Arbeiten und Homeoffice",
+        "unit": "Personal",
+        "tags": ["Homeoffice", "Mobiles Arbeiten", "Arbeitszeit"],
+        "summary": "Voraussetzungen, Umfang und Arbeitsschutz beim mobilen Arbeiten: bis zu drei Tage je Woche "
+                   "nach Absprache im Team.",
+        "applies_to": "Beschäftigte, deren Tätigkeit mobiles Arbeiten zulässt",
+        "valid_from": 10,
+        "content": instruction_content(
+            [para(t("Diese Anweisung gilt für alle Beschäftigten, deren Tätigkeit sich für mobiles Arbeiten "
+                    "eignet. Ausgenommen sind Tätigkeiten, die die Anwesenheit im Betrieb erfordern."))],
+            [bullets("Mobiles Arbeiten ist an bis zu drei Tagen je Woche möglich; die Tage werden im Team "
+                     "abgestimmt.",
+                     "Die Erreichbarkeit während der Kernarbeitszeit von 9 bis 15 Uhr ist sicherzustellen.",
+                     "Die Arbeitszeit wird wie im Büro erfasst; Ruhezeiten und Höchstarbeitszeiten gelten "
+                     "unverändert.",
+                     "Vertrauliche Unterlagen sind vor dem Zugriff Dritter zu schützen; Ausdrucke werden "
+                     "im Büro vernichtet."),
+             para(t("Für die Ausstattung stellt die Gesellschaft Notebook, Headset und auf Antrag einen zweiten "
+                    "Bildschirm bereit."))],
+            [para(t("Die Führungskraft entscheidet über den Umfang des mobilen Arbeitens und kann ihn aus "
+                    "betrieblichen Gründen einschränken. Der Bereich Personal berät zur Gefährdungsbeurteilung "
+                    "des häuslichen Arbeitsplatzes."))]),
+    },
+]
+
+
+# A Word template with content controls (DMS-115, ADR 0042) for central instructions, and a draft from it.
+WORD_TEMPLATE_NAME = "Zentralanweisung (Word)"
+WORD_TEMPLATE_FILE = "zentralanweisung.docx"
+WORD_DOCUMENT_TITLE = "Dienstwagenregelung (Word-Entwurf)"
+WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def word_control(tag: str, alias: str, placeholder: str) -> str:
+    """A plain text content control: tag `dms:<key>` is filled by the platform, any other tag is a manual
+    field; the alias (title) is the label in the form."""
+    return (f'<w:sdt><w:sdtPr><w:alias w:val="{alias}"/><w:tag w:val="{tag}"/><w:showingPlcHdr/></w:sdtPr>'
+            f'<w:sdtContent><w:r><w:rPr><w:rStyle w:val="PlaceholderText"/></w:rPr><w:t>{placeholder}</w:t>'
+            f'</w:r></w:sdtContent></w:sdt>')
+
+
+def word_paragraph(*parts: str, bold: bool = False) -> str:
+    def run(part: str) -> str:
+        if part.startswith("<w:sdt>"):
+            return part
+        props = "<w:rPr><w:b/></w:rPr>" if bold else ""
+        return f'<w:r>{props}<w:t xml:space="preserve">{part}</w:t></w:r>'
+    return "<w:p>" + "".join(run(p) for p in parts) + "</w:p>"
+
+
+def word_template_docx() -> bytes:
+    """A minimal DOCX (only the parts Word needs to open it) with automatic and manual content controls."""
+    body = "".join([
+        word_paragraph(word_control("dms:title", "Titel", "Titel der Anweisung"), bold=True),
+        word_paragraph("Zentralanweisung ", word_control("dms:documentNumber", "Dokumentnummer", "ZA-…"),
+                       " · Index ", word_control("dms:version", "Index", "1.0")),
+        word_paragraph("Herausgebende Stelle: ",
+                       word_control("dms:issuingUnit", "Herausgebende Stelle", "Bereich")),
+        word_paragraph("Gültig ab: ", word_control("dms:validFrom", "Gültig ab", "Datum")),
+        word_paragraph("Kurzbeschreibung: ", word_control("dms:summary", "Kurzbeschreibung", "Kurzbeschreibung")),
+        word_paragraph("1. Regelungen", bold=True),
+        word_paragraph("Dienstwagen stehen Beschäftigten zu, deren Tätigkeit regelmäßige Fahrten erfordert. "
+                       "Die Privatnutzung wird nach der Ein-Prozent-Regel versteuert."),
+        word_paragraph("Ansprechpartnerin oder Ansprechpartner: ",
+                       word_control("contact", "Ansprechpartner", "Name und Durchwahl")),
+        word_paragraph("Freigegeben am ", word_control("dms:approvedAt", "Freigabedatum", "Datum"),
+                       " durch ", word_control("dms:approvedBy", "Freigegeben durch", "Name")),
+    ])
+    document = (f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                f'<w:document xmlns:w="{WORD_NAMESPACE}"><w:body>{body}</w:body></w:document>')
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/word/document.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        '</Types>')
+    rels = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="word/document.xml"/></Relationships>')
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as z:
+        # Fixed timestamps: the same bytes on every run.
+        for name, text in [("[Content_Types].xml", content_types), ("_rels/.rels", rels),
+                           ("word/document.xml", document)]:
+            z.writestr(zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0)), text)
+    return buffer.getvalue()
+
+
 # Header with the OIDC ID token for step-up-protected requests (approval votes, DMS-86).
 ID_TOKEN_HEADER = "X-DMS-Id-Token"
 
@@ -624,6 +854,7 @@ def ensure_groups(admin: Api, users: dict[str, str]) -> None:
 NUMBER_RANGES = {
     "contracts": ("Contracts", "VTR-{YYYY}-{NNNN}", 1, True, ["contract"]),
     "policies": ("Policies", "RL-{NNN}", 1, False, ["policy"]),
+    "central-instructions": ("Zentralanweisungen", "ZA-{YYYY}-{NNN}", 1, True, ["central-instruction"]),
 }
 
 
@@ -699,6 +930,162 @@ def ensure_sample_draft(author: Api, author_id: str, template: dict) -> None:
     print(f"  document '{title}': draft created by author")
 
 
+def instruction_values(spec: dict, author_id: str, today: datetime.date) -> dict:
+    """Field values of a central instruction: the core fields needed from review on, tags and the class fields."""
+    return {
+        "owner": {"type": "PersonRef", "userId": author_id},
+        "organizationalUnit": {"type": "Text", "value": spec["unit"]},
+        "validFrom": {"type": "Date", "value": (today - datetime.timedelta(days=spec["valid_from"])).isoformat()},
+        "confidentiality": {"type": "Selection", "code": "Internal"},
+        "language": {"type": "Text", "value": "de"},
+        "retentionRule": {"type": "Text", "value": "policy-10y"},
+        "containsPersonalData": {"type": "YesNo", "value": False},
+        "tags": {"type": "Many", "values": [{"type": "Text", "value": tag} for tag in spec["tags"]]},
+        "summary": {"type": "Text", "value": spec["summary"]},
+        "appliesTo": {"type": "Text", "value": spec["applies_to"]},
+    }
+
+
+VALID = ("Published", "ReviewDue")
+
+
+def document_statuses(author: Api) -> dict[str, dict]:
+    """The author's documents by title (the latest change wins for equal titles)."""
+    documents: dict[str, dict] = {}
+    for d in reversed(author("GET", "/api/v1/documents?limit=200")):
+        documents[d["title"]] = d
+    return documents
+
+
+def ensure_instructions(z: Zitadel, api_base: str, author: Api, author_id: str, template: dict) -> None:
+    """Publishes the demo central instructions through the regular workflow: `author` creates, fills and
+    submits each one, `approver` approves it with a fresh sign-in (step-up, as `approve-tasks` does), the
+    rendering job seals the rendition and the publication job publishes it (its valid-from date has come).
+    Idempotent: documents are found by title and continued from their current status."""
+    today = datetime.date.today()
+    existing = document_statuses(author)
+    waiting: dict[str, str] = {}
+    for spec in INSTRUCTIONS:
+        title = spec["title"]
+        doc = existing.get(title)
+        if doc and doc["status"] in VALID:
+            print(f"  instruction '{title}': published ({doc.get('documentNumber', 'no number')})")
+            continue
+        values = instruction_values(spec, author_id, today)
+        if doc is None:
+            doc = author("POST", "/api/v1/documents", {
+                "templateId": template["templateId"], "templateVersion": template["version"], "title": title,
+                "values": values})
+            doc["status"] = "Draft"
+            print(f"  instruction '{title}': created as {doc.get('documentNumber', 'draft without number')}")
+        if doc["status"] == "Draft":
+            author("PUT", f"/api/v1/documents/{doc['id']}/draft",
+                   {"title": title, "values": values, "content": spec["content"]})
+            author("POST", f"/api/v1/documents/{doc['id']}/submit")
+            print(f"  instruction '{title}': submitted")
+        waiting[doc["id"]] = title
+    if not waiting:
+        return
+    approve_documents(z, "approver", api_base, set(waiting))
+    wait_for_publication(author, waiting)
+
+
+def approve_documents(z: Zitadel, username: str, api_base: str, document_ids: set[str]) -> None:
+    """Approves the open tasks of `username` on the given documents with a fresh sign-in (ID token for the
+    step-up check). Tasks are created with the submission; a short retry covers a slow workflow start."""
+    tokens = z.tokens(username, user_password(username))
+    api = Api(api_base, tokens["access_token"], tokens.get("id_token"))
+    for _ in range(10):
+        tasks = [task for task in api("GET", "/api/v1/workflow/tasks")
+                 if task["status"] == "Open" and task["documentId"] in document_ids]
+        for task in tasks:
+            api("POST", f"/api/v1/workflow/tasks/{task['id']}/votes", {"decision": "Approve"})
+            print(f"  {username} approved '{task['stepName']}' of document {task['documentId']}")
+        if tasks:
+            return
+        time.sleep(1)
+    print(f"  no open tasks of {username} for the instructions (approved already?)")
+
+
+def wait_for_publication(author: Api, waiting: dict[str, str], seconds: int = 180) -> None:
+    """Waits until the instructions are published: the rendering job seals the approved versions (rendering
+    worker) and the publication job publishes them, as their valid-from date has come."""
+    print("  waiting for rendition and publication ...")
+    deadline = time.monotonic() + seconds
+    statuses: dict[str, str] = {}
+    while time.monotonic() < deadline:
+        current = document_statuses(author)
+        statuses = {title: current.get(title, {}).get("status", "?") for title in waiting.values()}
+        if all(s in VALID for s in statuses.values()):
+            break
+        time.sleep(3)
+    for title, status in statuses.items():
+        print(f"  instruction '{title}': {status}")
+    if not all(s in VALID for s in statuses.values()):
+        print("  not all instructions are published yet: the rendering worker and the background jobs must run "
+              "(see .local/logs/backend.log); run the seed again later to continue")
+
+
+def multipart_file(field: str, filename: str, content_type: str, data: bytes) -> tuple[bytes, str]:
+    boundary = "dms-dev-setup-" + secrets.token_hex(12)
+    head = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; filename=\"{filename}\"\r\n"
+            f"Content-Type: {content_type}\r\n\r\n").encode()
+    return head + data + f"\r\n--{boundary}--\r\n".encode(), f"multipart/form-data; boundary={boundary}"
+
+
+DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def ensure_word_example(designer: Api, designer2: Api, author: Api, author_id: str, cls: dict) -> None:
+    """A Word template for central instructions (DOCX with content controls) released with four eyes, and a
+    draft file document from it with its manual field filled (DMS-115). Idempotent by name and title."""
+    latest = {v["name"]: v for v in designer("GET", "/api/v1/admin/templates")}.get(WORD_TEMPLATE_NAME)
+    if latest is None:
+        latest = designer("POST", "/api/v1/admin/templates", {
+            "name": WORD_TEMPLATE_NAME,
+            "description": "Zentralanweisung als Word-Dokument mit Feldern für Nummer, Index und Freigabe",
+            "documentClassId": cls["id"], "documentClassVersion": cls["version"], "content": {"sections": []}})
+        print(f"  template {WORD_TEMPLATE_NAME}: created")
+    word = f"/api/v1/admin/templates/{latest['templateId']}/versions/{latest['version']}/word"
+    status_path = f"/api/v1/admin/templates/{latest['templateId']}/versions/{latest['version']}/status"
+    if latest["status"] == "Draft":
+        try:
+            designer("GET", word)
+        except HttpError as e:
+            if e.status != 404:
+                raise
+            body, content_type = multipart_file("file", WORD_TEMPLATE_FILE, DOCX_TYPE, word_template_docx())
+            uploaded = http("PUT", designer.base + word, token=designer.token, raw=(body, content_type))
+            print(f"  template {WORD_TEMPLATE_NAME}: Word file with fields "
+                  f"{', '.join(f['key'] for f in uploaded['fields'])}")
+        latest = designer("POST", status_path, {"status": "Testing"})
+    if latest["status"] == "Testing":
+        latest = designer2("POST", status_path, {"status": "Released"})
+        print(f"  template {WORD_TEMPLATE_NAME}: released by designer2")
+    if latest["status"] != "Released":
+        print(f"  template {WORD_TEMPLATE_NAME}: {latest['status']}; no Word document")
+        return
+    print(f"  template {WORD_TEMPLATE_NAME}: released (version {latest['version']})")
+    if WORD_DOCUMENT_TITLE in document_statuses(author):
+        print(f"  document '{WORD_DOCUMENT_TITLE}': exists")
+        return
+    spec = {"unit": "Einkauf", "valid_from": 0, "tags": ["Dienstwagen", "Fuhrpark"],
+            "summary": "Anspruch, Nutzung und Versteuerung von Dienstwagen.",
+            "applies_to": "Beschäftigte mit Dienstwagen"}
+    doc = author("POST", "/api/v1/documents/word", {
+        "templateId": latest["templateId"], "templateVersion": latest["version"], "title": WORD_DOCUMENT_TITLE,
+        "values": instruction_values(spec, author_id, datetime.date.today())})
+    author("PUT", f"/api/v1/documents/{doc['id']}/word-fields",
+           {"values": {"contact": "Fuhrparkmanagement, Durchwahl 2310"}})
+    print(f"  document '{WORD_DOCUMENT_TITLE}': Word draft created by author")
+
+
+def show_library(z: Zitadel, api_base: str) -> None:
+    reader = Api(api_base, user_token(z, "reader"))
+    library = reader("GET", "/api/v1/library?class=central-instruction")
+    print(f"  library: {library['total']} central instruction(s) valid for reader")
+
+
 def cmd_seed(api_base: str) -> None:
     z = Zitadel()
     users = read_env(USERS_ENV)
@@ -717,9 +1104,107 @@ def cmd_seed(api_base: str) -> None:
         ensure_template(designer, designer2, POLICY, classes["policy"])
         if contract["status"] == "Released":
             ensure_sample_draft(author, users[user_id_key("author")], contract)
+        instruction = ensure_template(designer, designer2, CENTRAL_INSTRUCTION, classes["central-instruction"])
+        if instruction["status"] == "Released":
+            ensure_instructions(z, api_base, author, users[user_id_key("author")], instruction)
+            show_library(z, api_base)
+        ensure_word_example(designer, designer2, author, users[user_id_key("author")],
+                            classes["central-instruction"])
     except HttpError as e:
         fail(str(e))
     print("Demo content ready.")
+
+
+# Keys the demo templates may print besides class fields and computed fields (core fields, ADR 0019).
+CORE_KEYS = {"documentId", "documentNumber", "title", "documentClass", "version", "status", "owner",
+             "organizationalUnit", "scope", "validFrom", "validUntil", "nextReview", "confidentiality",
+             "language", "retentionRule", "containsPersonalData", "tags", "template", "templateVersion"}
+
+
+def placeholders(node) -> set[str]:
+    """Paths of all placeholders in a content tree (repeat item names included)."""
+    found: set[str] = set()
+    if isinstance(node, dict):
+        if node.get("type") == "Placeholder":
+            found.add(node["path"].split(".")[0])
+        for value in node.values():
+            found |= placeholders(value)
+    elif isinstance(node, list):
+        for value in node:
+            found |= placeholders(value)
+    return found
+
+
+def check_demo_content(dump: Path | None) -> list[str]:
+    """Offline consistency checks of the demo content (no services needed); returns the problems."""
+    problems: list[str] = []
+    fields = {f["key"]: f for f in FIELDS}
+    for key, (_, _, bindings) in CLASSES.items():
+        problems += [f"class {key}: unknown field {f}" for f, _ in bindings if f not in fields]
+        if key not in WORKFLOWS:
+            problems.append(f"class {key}: no workflow")
+    for key, (_, pattern, _, yearly, class_keys) in NUMBER_RANGES.items():
+        if len(re.findall(r"\{N+\}", pattern)) != 1:
+            problems.append(f"number range {key}: needs exactly one counter")
+        if yearly and "{YY" not in pattern:
+            problems.append(f"number range {key}: a yearly reset needs the year")
+        problems += [f"number range {key}: unknown class {c}" for c in class_keys if c not in CLASSES]
+    templates = [(SERVICE_CONTRACT, "contract"), (POLICY, "policy"), (CENTRAL_INSTRUCTION, "central-instruction")]
+    for spec, cls in templates:
+        known = CORE_KEYS | {f for f, _ in CLASSES[cls][2]} | {c["key"] for c in spec["content"].get("computed", [])}
+        repeats = {b.get("itemName") for s in spec["content"]["sections"] for b in s["blocks"] if b.get("itemName")}
+        unknown = placeholders(spec["content"]) - known - repeats
+        problems += [f"template {spec['name']}: unknown placeholder {p}" for p in sorted(unknown)]
+    template_sections = CENTRAL_INSTRUCTION["content"]["sections"]
+    titles = set()
+    for spec in INSTRUCTIONS:
+        sections = spec["content"]["sections"]
+        if [s["id"] for s in sections] != [s["id"] for s in template_sections]:
+            problems.append(f"instruction {spec['title']}: sections differ from the template")
+        for mine, theirs in zip(sections, template_sections):
+            if theirs["locked"] and mine != theirs:
+                problems.append(f"instruction {spec['title']}: locked section {theirs['id']} changed")
+        if spec["title"] in titles:
+            problems.append(f"instruction {spec['title']}: title used twice")
+        titles.add(spec["title"])
+        if len(spec["summary"]) > fields["summary"]["fieldType"]["maxLength"]:
+            problems.append(f"instruction {spec['title']}: summary too long")
+        if len(spec["applies_to"]) > fields["appliesTo"]["fieldType"]["maxLength"]:
+            problems.append(f"instruction {spec['title']}: appliesTo too long")
+        problems += [f"instruction {spec['title']}: tag too long" for tag in spec["tags"] if len(tag) > 100]
+        if spec["valid_from"] < 0:
+            problems.append(f"instruction {spec['title']}: valid from in the future")
+    if len({spec["unit"] for spec in INSTRUCTIONS}) < 2:
+        problems.append("instructions: use different issuing units")
+    docx = word_template_docx()
+    if docx != word_template_docx():
+        problems.append("Word template: not reproducible")
+    with zipfile.ZipFile(io.BytesIO(docx)) as z:
+        root = ElementTree.fromstring(z.read("word/document.xml"))
+    tags = {e.get(f"{{{WORD_NAMESPACE}}}val") for e in root.iter(f"{{{WORD_NAMESPACE}}}tag")}
+    expected = {"dms:title", "dms:documentNumber", "dms:version", "dms:issuingUnit", "dms:validFrom",
+                "dms:summary", "contact", "dms:approvedAt", "dms:approvedBy"}
+    if tags != expected:
+        problems.append(f"Word template: content control tags {sorted(tags)}")
+    if dump is not None:
+        dump.mkdir(parents=True, exist_ok=True)
+        (dump / "central-instruction-template.json").write_text(json.dumps(CENTRAL_INSTRUCTION["content"]))
+        for i, spec in enumerate(INSTRUCTIONS):
+            (dump / f"instruction-{i}.json").write_text(json.dumps(spec["content"]))
+            (dump / f"instruction-{i}-values.json").write_text(
+                json.dumps(instruction_values(spec, "author-1", datetime.date.today())))
+        (dump / WORD_TEMPLATE_FILE).write_bytes(docx)
+    return problems
+
+
+def cmd_check(dump: Path | None) -> None:
+    problems = check_demo_content(dump)
+    for problem in problems:
+        print(f"problem: {problem}", file=sys.stderr)
+    if problems:
+        sys.exit(1)
+    print(f"Demo content consistent: {len(CLASSES)} classes, {len(INSTRUCTIONS)} central instructions and a "
+          f"Word template{f'; written to {dump}' if dump else ''}")
 
 
 def cmd_search_rebuild(api_base: str) -> None:
@@ -756,6 +1241,10 @@ def main(argv: list[str]) -> None:
         cmd_token(args[0])
     elif command == "seed" and len(args) == 2 and args[0] == "--api":
         cmd_seed(args[1])
+    elif command == "check" and not args:
+        cmd_check(None)
+    elif command == "check" and len(args) == 2 and args[0] == "--dump":
+        cmd_check(Path(args[1]))
     elif command == "intranet":
         cmd_intranet()
     elif command == "search-rebuild" and len(args) == 2 and args[0] == "--api":
