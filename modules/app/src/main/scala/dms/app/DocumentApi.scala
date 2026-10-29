@@ -133,6 +133,14 @@ final case class NewVersion(
 ) derives JsonCodec,
       Schema
 
+final case class UpdateChangeSummary(
+    /** The author's change summary of the draft (DMS-103): what changed and why. Required for Minor; empty or
+      * missing removes it from a Major version.
+      */
+    reason: Option[String]
+) derives JsonCodec,
+      Schema
+
 final case class DocumentVersionView(
     id: UUID,
     /** `1.1-draft.3` while open, `1.1` from approval on. */
@@ -268,7 +276,15 @@ final case class DocumentView(
     /** True if the caller may assign a number manually now (`POST /api/v1/documents/{id}/number`). */
     canAssignNumber: Boolean = false,
     /** `Structured` (content from the template) or `File` (an uploaded original per version, DMS-115). */
-    kind: String = "Structured"
+    kind: String = "Structured",
+    /** True if the caller may start the next version now (`POST /api/v1/documents/{id}/versions`, DMS-103).
+      */
+    canStartVersion: Boolean = false,
+    /** For a caller who may start versions of this document: why a new version cannot be started now.
+      * `OpenVersion`: a version is in progress (draft, review or approval); `ScheduledVersion`: an approved
+      * version waits for its valid-from date. Empty if `canStartVersion` or if the caller may not start one.
+      */
+    startVersionBlocked: Option[String] = None
 ) derives JsonCodec,
       Schema
 
@@ -415,6 +431,7 @@ object DocumentApi:
               holds  <- LegalHoldStore.activeHolds(details.document.id).mapError(DocumentError.Database(_))
               manage <- ctx.allowed(Action.ManageRetention, resource(p, details, current))
               number <- ctx.allowed(Action.AssignDocumentNumber, resource(p, details, current))
+              start  <- startVersion(ctx, p, details)
             yield documentView(
               details.document,
               details.profile,
@@ -422,7 +439,9 @@ object DocumentApi:
             ).copy(
               legalHold = holds.nonEmpty,
               legalHolds = Option.when(manage)(holds.map(LegalHoldApi.refView)),
-              canAssignNumber = number && details.numberAssignable
+              canAssignNumber = number && details.numberAssignable,
+              canStartVersion = start.contains(None),
+              startVersionBlocked = start.flatten
             )
           }
       )
@@ -563,6 +582,35 @@ object DocumentApi:
           }
       )
 
+  val updateChangeSummary: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.put
+      .in(documents / documentId / "draft" / "change-summary")
+      .in(jsonBody[UpdateChangeSummary])
+      .out(jsonBody[DocumentVersionView])
+      .description(
+        "Changes the author's change summary of the open draft (DMS-103), shown in the version history and above " +
+          "version comparisons. Requires EditDraft; only while the version is a draft (409 from submission on). " +
+          "An editorial (Minor) version needs a summary (422); at most 4000 characters (422). Content and values " +
+          "are unchanged, so no working state is added. Recorded in the audit trail."
+      )
+      .tag("Documents")
+      .serverLogic(p =>
+        (id, req) =>
+          inTransaction(p) { ctx =>
+            for
+              details <- ctx.service.get(DocumentId(id))
+              open    <- openVersion(details)
+              // In review, EditDraft means suggestions by reviewers; the summary stays the author's: readers of
+              // a submitted version learn that it can no longer change (409).
+              _ <-
+                if Versioning.isEditable(open.status) then
+                  ctx.check(Action.EditDraft, resource(p, details, open))
+                else ctx.checkRead(details, open)
+              updated <- ctx.service.updateChangeReason(DocumentId(id), req.reason, p.userId)
+            yield versionViewIn(details, ctx.service.settings)(updated)
+          }
+      )
+
   private val deviationRequests = documents / documentId / "deviation-requests"
 
   val requestDeviation: ZServerEndpoint[Env, Any] =
@@ -652,6 +700,7 @@ object DocumentApi:
       updateDraft,
       submit,
       newVersion,
+      updateChangeSummary,
       requestDeviation,
       withdrawDeviation,
       deviations,
@@ -756,6 +805,33 @@ object DocumentApi:
       case e: DbError       => toResponse(e)
       case e: DocumentError => toResponse(e)
     }
+
+  /** Whether the caller may start the next version of the document (DMS-103): `None` if not (no valid version
+    * to start from, or not permitted: the caller would become the author of a draft), `Some(None)` if now,
+    * `Some(Some(reason))` if permitted but blocked by the state of the document. Mirrors the checks of
+    * `newVersion`, which decides again.
+    */
+  private def startVersion(
+      ctx: Context,
+      p: Principal,
+      details: DocumentDetails
+  ): UIO[Option[Option[String]]] =
+    details.versions.filter(v => Versioning.isValid(v.status)).lastOption match
+      case None       => ZIO.none
+      case Some(base) =>
+        ctx
+          .allowed(
+            Action.EditDraft,
+            resource(p, details, base).copy(status = Some(DocumentStatus.Draft), authorId = Some(p.userId))
+          )
+          .map(allowed =>
+            Option.when(allowed)(
+              if details.open.isDefined then Some("OpenVersion")
+              else if details.versions.exists(_.status == DocumentStatus.Approved) then
+                Some("ScheduledVersion")
+              else None
+            )
+          )
 
   private def openVersion(details: DocumentDetails): IO[DocumentError, DocumentVersion] =
     ZIO

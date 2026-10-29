@@ -31,6 +31,8 @@ import { PdfDownload } from './pdf-download'
 import { VersionContent } from './version-content'
 import { VersionMetadata } from './version-metadata'
 import { FileContentPanel } from './file-content-panel'
+import { NewVersionAction } from './new-version-action'
+import { ChangeSummaryPanel } from './change-summary-panel'
 
 /** Whether the page shows the acknowledgement card for a version: valid and requiring it. */
 function asksForAcknowledgement(version: DocumentVersionView): boolean {
@@ -38,6 +40,15 @@ function asksForAcknowledgement(version: DocumentVersionView): boolean {
     (version.status === 'Published' || version.status === 'ReviewDue') &&
     version.requiresAcknowledgement
   )
+}
+
+/**
+ * Whether the page shows the change summary card (DMS-103): for a draft of a later version (to write it), or
+ * for any version that has one. A first draft (1.0) has nothing to compare with.
+ */
+function showsChangeSummary(version: DocumentVersionView, editing: boolean): boolean {
+  if (version.changeReason) return true
+  return editing && !version.version.startsWith('1.0')
 }
 
 /** The language of the document if it has one the preview supports. */
@@ -131,6 +142,7 @@ export function DocumentPage({
                 documentNumber={document.data.documentNumber}
                 canAssign={document.data.canAssignNumber}
               />
+              <NewVersionAction document={document.data} />
               <EvidenceReportAction documentId={document.data.id} />
             </>
           )
@@ -177,6 +189,14 @@ export function DocumentPage({
                 {t('docs.view.toCurrent')}
               </Link>
             </p>
+          )}
+          {showsChangeSummary(shown, editing) && (
+            <ChangeSummaryPanel
+              key={`summary-${shown.id}`}
+              documentId={document.data.id}
+              version={shown}
+              editable={editing}
+            />
           )}
           {editing ? (
             <>

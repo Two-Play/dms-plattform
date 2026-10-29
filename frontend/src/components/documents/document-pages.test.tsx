@@ -92,6 +92,7 @@ function draftDocument(values: Record<string, FieldValue>, status = 'Draft'): Do
     createdAt: '2026-10-20T10:00:00Z',
     legalHold: false,
     canAssignNumber: false,
+    canStartVersion: false,
     kind: 'Structured',
     current: {
       id: 'v1',
