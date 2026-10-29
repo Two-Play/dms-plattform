@@ -160,3 +160,8 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | – | DMS-116 | Story | Backlog (MVP) | – | DMS-113: number existing documents, number in search hits and list |
 | – | DMS-117 | Story | Backlog (MVP) | – | DMS-114: ClamAV virus scan for production |
 | – | DMS-118 | Story | Backlog (MVP) | – | DMS-112: limits and a plain PDF variant for on-demand PDFs |
+| – | DMS-119 | Story | Sprint 11 | – | Library of currently valid documents |
+| – | DMS-120 | Task | Backlog (MVP) | – | DMS-119: demo data with published instructions, short description field |
+| – | DMS-121 | Task | Backlog (MVP) | – | DMS-115: file documents in comparison and search, preview cache, Word export button |
+| – | DMS-122 | Task | Backlog (MVP) | – | DMS-115: more Word field types, repeating sections, Excel/PowerPoint |
+| – | DMS-123 | Bug | Backlog (MVP) | – | Frontend tests time out under load |

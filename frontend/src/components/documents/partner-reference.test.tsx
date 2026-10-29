@@ -98,6 +98,7 @@ function setup({ partnerMasterDown = false } = {}) {
         },
       ])
     }
+    if (path === '/api/v1/word-templates') return ok([])
     if (path === '/api/v1/partners') {
       return partnerMasterDown
         ? failed(503, 'partner_directory_unavailable', unavailable)

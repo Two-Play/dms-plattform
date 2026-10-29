@@ -196,6 +196,18 @@ export async function changeTemplateStatus(
 }
 
 /** The request body that keeps a version's name, class and content. */
+/** Creates a template with version 1 as a draft (POST /api/v1/admin/templates). */
+export async function createTemplate(
+  client: ApiClient,
+  body: TemplateRequest,
+): Promise<TemplateVersion> {
+  const { data, error, response } = await client.POST('/api/v1/admin/templates', { body })
+  if (!response.ok || !data) {
+    throw requestError(response, error, `Creating the template failed with HTTP ${response.status}`)
+  }
+  return data
+}
+
 export function requestOf(
   v: TemplateVersion,
   content: TemplateContent = v.content,

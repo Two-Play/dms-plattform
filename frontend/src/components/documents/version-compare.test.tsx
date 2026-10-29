@@ -72,6 +72,7 @@ const document: DocumentView = {
   createdAt: '2026-10-20T10:00:00Z',
   legalHold: false,
   canAssignNumber: false,
+  kind: 'Structured',
   current: published,
 }
 

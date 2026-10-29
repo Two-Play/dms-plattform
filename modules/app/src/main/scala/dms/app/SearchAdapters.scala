@@ -68,6 +68,11 @@ final class SearchDocuments(documents: DocumentService, templates: TemplateServi
     * resolved (the version is indexed anyway).
     */
   private def text(details: DocumentDetails, v: DocumentVersion): UIO[String] =
+    // A file document's content is its uploaded original (DMS-115): its name is indexed, not the template text.
+    if details.document.kind == dms.documents.DocumentKind.File then ZIO.succeed(v.file.fold("")(_.name))
+    else structuredText(details, v)
+
+  private def structuredText(details: DocumentDetails, v: DocumentVersion): UIO[String] =
     val values   = v.metadata
     val language = SearchDocuments.text(values, "language").getOrElse(Language.default.code)
     val resolved =

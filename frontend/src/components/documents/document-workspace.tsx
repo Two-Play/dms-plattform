@@ -1,7 +1,8 @@
 import { toast } from '@/lib/toast'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useApiClient } from '@/api/context'
+import { createWordDocument } from '@/api/word'
 import {
   applyReference,
   createDocument,
@@ -115,6 +116,15 @@ export interface DocumentWorkspaceProps {
   draft?: SavedDraft
   /** Called after the draft was submitted for review. */
   onSubmitted?: (documentId: string, version: DocumentVersionView) => void
+  /**
+   * What the content is (DMS-115): `structured` (default) with the live preview; `file` (an uploaded file) or
+   * `word` (a copy of the Word template's file) without preview: `aside` is shown instead.
+   */
+  kind?: 'structured' | 'file' | 'word'
+  /** Shown next to the form instead of the live preview of structured content. */
+  aside?: ReactNode
+  /** Called once the first save created the document (file and Word documents continue on its page). */
+  onCreated?: (documentId: string) => void
 }
 
 function conflictMessage(e: ApiRequestError, action: 'saved' | 'submitted'): string {
@@ -136,6 +146,9 @@ export function DocumentWorkspace({
   references,
   draft,
   onSubmitted,
+  kind = 'structured',
+  aside,
+  onCreated,
 }: DocumentWorkspaceProps) {
   const client = useApiClient()
   const queryClient = useQueryClient()
@@ -184,6 +197,7 @@ export function DocumentWorkspace({
   const preview = useQuery({
     ...previewQuery(client, templateId, version, sent, language),
     placeholderData: keepPreviousData,
+    enabled: kind === 'structured',
   })
 
   // Backend issues apply to the values that were sent; show them while the field still has that value.
@@ -224,13 +238,13 @@ export function DocumentWorkspace({
         const updated = await updateDraft(client, current.documentId, { title, values: entered })
         current = { ...current, label: updated.version }
       } else {
-        const created = await createDocument(client, {
-          templateId,
-          templateVersion: version,
-          title,
-          values: entered,
-        })
+        const body = { templateId, templateVersion: version, title, values: entered }
+        const created =
+          kind === 'word'
+            ? await createWordDocument(client, body)
+            : await createDocument(client, kind === 'file' ? { ...body, kind: 'File' } : body)
         current = { documentId: created.id, label: created.current.version, applied: {} }
+        if (kind !== 'structured') onCreated?.(created.id)
       }
       setSaved(current)
     } catch (e) {
@@ -416,12 +430,16 @@ export function DocumentWorkspace({
         </div>
       </div>
       <div className="min-w-0 lg:sticky lg:top-20 lg:max-h-[calc(100svh-6rem)] lg:self-start lg:overflow-y-auto">
-        <DocumentPreview
-          preview={preview.data}
-          updating={preview.isFetching}
-          error={preview.error}
-          onFocusField={focusField}
-        />
+        {kind === 'structured' ? (
+          <DocumentPreview
+            preview={preview.data}
+            updating={preview.isFetching}
+            error={preview.error}
+            onFocusField={focusField}
+          />
+        ) : (
+          aside
+        )}
       </div>
     </div>
   )

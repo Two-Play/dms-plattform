@@ -303,20 +303,22 @@ object EvidenceReportApi:
   private def checkAttachments(
       versions: List[DocumentVersion]
   ): URIO[AttachmentUploads, Map[UUID, RenditionCheck]] =
-    ZIO.serviceWithZIO[AttachmentUploads](uploads =>
+    ZIO.serviceWithZIO[AttachmentUploads] { uploads =>
+      // Attachments and the originals of file documents (DMS-115) share the stored files, keyed by file id.
+      val files = versions.flatMap(_.attachments).map(a => a.fileId -> uploads.verify(a)) ++
+        versions.flatMap(_.file).map(f => f.fileId -> uploads.verify(f))
       ZIO
-        .foreach(versions.flatMap(_.attachments).distinctBy(_.fileId)) { a =>
-          uploads
-            .verify(a)
+        .foreach(files.distinctBy(_._1)) { (fileId, verification) =>
+          verification
             .as(RenditionCheck.Matches)
             .catchAll {
               case AttachmentError.Integrity(m) => ZIO.succeed(RenditionCheck.Mismatch(m))
               case other                        => ZIO.succeed(RenditionCheck.Unverified(other.describe))
             }
-            .map(a.fileId -> _)
+            .map(fileId -> _)
         }
         .map(_.toMap)
-    )
+    }
 
   private def register(
       p: Principal,

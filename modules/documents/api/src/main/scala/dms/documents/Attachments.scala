@@ -42,6 +42,39 @@ final case class VersionAttachment(
     basedOn: Option[UUID]
 )
 
+/** The uploaded original of a version of a file document (DMS-115, ADR 0042): a stored file (the same storage
+  * as attachments, one object per document and SHA-256) linked to the version under its file name. The bytes
+  * are kept unchanged; `sha256` is the checksum the approval binds.
+  *
+  * @param basedOn
+  *   the version whose file was taken over when this version was started; `None` once a file was uploaded
+  *   into this version
+  * @param fields
+  *   for a Word original: the fields found in it (content controls, `{{key}}` placeholders) with their
+  *   definitions, in document order; empty for other files
+  * @param values
+  *   the values of the manual fields by key, entered while the version is a draft
+  */
+final case class VersionFile(
+    versionId: UUID,
+    fileId: UUID,
+    name: String,
+    contentType: String,
+    size: Long,
+    sha256: String,
+    objectKey: String,
+    objectVersion: String,
+    scanStatus: ScanStatus,
+    scanner: String,
+    setBy: UserId,
+    setAt: Instant,
+    basedOn: Option[UUID],
+    fields: List[dms.templates.WordField] = Nil,
+    values: Map[String, String] = Map.empty
+):
+  /** Whether the original is a Word document whose fields are filled (DOCX). */
+  def isWord: Boolean = name.toLowerCase(java.util.Locale.ROOT).endsWith(".docx")
+
 /** What a virus scanner says about a file. */
 enum ScanVerdict:
   case Clean
@@ -197,3 +230,21 @@ object AttachmentRules:
       .getOrElse(Octet)
 
   private val Octet = "application/octet-stream"
+
+/** The Word file of a Word template version (DMS-115, ADR 0042): a DOCX with fields (content controls or
+  * `{{key}}` placeholders) and their definitions. Documents created from the template start with a copy of it
+  * as their original. It changes only while the template version is a draft.
+  */
+final case class WordTemplateFile(
+    templateId: UUID,
+    version: Int,
+    name: String,
+    sha256: String,
+    size: Long,
+    objectKey: String,
+    objectVersion: String,
+    scanStatus: ScanStatus,
+    fields: List[dms.templates.WordField],
+    setBy: UserId,
+    setAt: Instant
+)

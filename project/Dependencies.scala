@@ -20,7 +20,7 @@ object Versions {
   val cel           = "0.15.0"
   val flowable      = "8.0.0"  // embedded workflow engine, see docs/adr/0006 and 0024
   val veraPdf       = "1.30.2" // PDF/A validation, same release as the CLI of spike DMS-23 (ADR 0008, 0025)
-  val pdfbox        = "3.0.8"  // tests only: text extraction from renditions
+  val pdfbox        = "3.0.8"  // on-demand PDFs of file documents (stamp, merge); text extraction in tests
 }
 
 object Dependencies {
@@ -85,6 +85,9 @@ object Dependencies {
 
   /** Text extraction from PDFs, to check the running header and footer of renditions in tests. */
   val pdfText = Seq("org.apache.pdfbox" % "pdfbox" % Versions.pdfbox % Test)
+
+  /** Marking and merging the on-demand PDFs of file documents (DMS-115, ADR 0042). */
+  val pdfCompose = Seq("org.apache.pdfbox" % "pdfbox" % Versions.pdfbox)
 
   val integrationTest = Seq(
     "com.dimafeng" %% "testcontainers-scala-postgresql" % Versions.testcontainer % Test

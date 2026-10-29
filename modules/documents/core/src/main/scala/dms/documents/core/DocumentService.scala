@@ -10,6 +10,9 @@ import dms.documents.core.MetadataJson.given
 import dms.documents.metadata.*
 import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
 import dms.templates.{
+  WordField,
+  WordFieldSource,
+  WordFields,
   DeviationReport,
   DeviationRequest,
   EditRules,
@@ -89,13 +92,15 @@ trait TemplateSource extends ContentCodec:
   ): IO[DocumentError, Map[String, List[String]]]
 
 /** Request to create a document. `values` are the entered field values with their origin (normally `Manual`;
-  * a business system filling master data uses `System(source)`).
+  * a business system filling master data uses `System(source)`). A file document (DMS-115) gets its content
+  * by an upload into its draft ([[DocumentService.setFile]]); the template supplies class and fields.
   */
 final case class NewDocument(
     templateId: TemplateId,
     templateVersion: Int,
     title: String,
-    values: Map[String, FieldEntry]
+    values: Map[String, FieldEntry],
+    kind: DocumentKind = DocumentKind.Structured
 )
 
 /** Change of a draft: the entered values replace the previous ones; content, if given, replaces the content.
@@ -278,7 +283,8 @@ final class DocumentService(
         template.templateId,
         template.version,
         now,
-        numbered.map(_._2)
+        numbered.map(_._2),
+        request.kind
       )
       version = DocumentVersion(
         UUID.randomUUID(),
@@ -315,6 +321,7 @@ final class DocumentService(
           "title"           -> Json.Str(document.title),
           "templateId"      -> Json.Str(template.templateId.value.toString),
           "templateVersion" -> Json.Num(template.version),
+          "kind"            -> Json.Str(request.kind.toString),
           "classId"         -> Json.Str(profile.classId.value.toString),
           "classVersion"    -> Json.Num(profile.version),
           "origins"         -> origins(values),
@@ -615,6 +622,13 @@ final class DocumentService(
       profile  <- profile(document.classId, current.classVersion)
       requests <- activeRequests(current.id)
       content = change.content.getOrElse(current.content)
+      _ <- ZIO.when(document.kind == DocumentKind.File && content != current.content)(
+        ZIO.fail(
+          DocumentError.Invalid(
+            List("the content of a file document is its uploaded file; upload a new file")
+          )
+        )
+      )
       _ <- ZIO.when(change.content.exists(_ != current.content))(checkContent(template, content, requests))
       title = change.title.getOrElse(titleOf(current).getOrElse(document.title))
       entered <- protectSystemValues(profile, current, change.values)
@@ -648,8 +662,16 @@ final class DocumentService(
     for
       document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
       current  <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
-      updated  <- transition(document, current, LifecycleEvent.Submit, actor)
-      _        <- ZIO.when(updated.changeKind == ChangeKind.Minor)(recordEditorialCheck(updated, actor))
+      _        <- ZIO.when(document.kind == DocumentKind.File)(
+        current.file match
+          case None =>
+            ZIO.fail(DocumentError.Invalid(List("upload the file of the document before submitting it")))
+          case Some(file) =>
+            val problems = WordFields.check(file.fields, file.values, complete = true)
+            ZIO.unless(problems.isEmpty)(ZIO.fail(DocumentError.Invalid(problems)))
+      )
+      updated <- transition(document, current, LifecycleEvent.Submit, actor)
+      _       <- ZIO.when(updated.changeKind == ChangeKind.Minor)(recordEditorialCheck(updated, actor))
     yield updated
 
   /** The automatic comparison of a submitted minor version with its basis (DMS-46), recorded in the audit
@@ -795,6 +817,8 @@ final class DocumentService(
       attachments = base.attachments.map(a =>
         a.copy(id = UUID.randomUUID(), versionId = versionId, basedOn = Some(a.id))
       )
+      // The original of a file document is taken over as well (DMS-115); a new upload replaces it in the draft.
+      file    = base.file.map(_.copy(versionId = versionId, basedOn = Some(base.id)))
       version = base.copy(
         id = versionId,
         number = number,
@@ -816,13 +840,15 @@ final class DocumentService(
         requiresAcknowledgement = requiresAcknowledgement.getOrElse(
           kind == ChangeKind.Major || settings.minorVersionsRequireAcknowledgement
         ),
-        attachments = attachments
+        attachments = attachments,
+        file = file
       )
       _ <- sql {
         DocumentStore.insertVersion(version, templates)
         DocumentStore.insertWorkingState(version, actor, templates)
         carried.foreach(DocumentStore.insertDeviationRequest)
         attachments.foreach(AttachmentStore.carryOver)
+        file.foreach(VersionFileStore.carryOver)
       }.mapError(conflict(s"document ${id.value} was changed concurrently"))
       _ <- record(
         actor,
@@ -834,11 +860,126 @@ final class DocumentService(
           "reason"                  -> changeReason.fold(Json.Null)(Json.Str(_)),
           "requiresAcknowledgement" -> Json.Bool(version.requiresAcknowledgement),
           "deviationRequests"       -> Json.Arr(carried.map(r => Json.Str(r.id.toString))*),
-          "attachments"             -> Json.Arr(attachments.map(a => Json.Str(a.id.toString))*)
+          "attachments"             -> Json.Arr(attachments.map(a => Json.Str(a.id.toString))*),
+          "fileSha256"              -> file.fold(Json.Null)(f => Json.Str(f.sha256))
         )
       )
       _ <- publish("document.version-created", document, version)
     yield version
+
+  /** The stored file of the document with this content, if any: an upload of the same bytes reuses it. */
+  def attachmentFile(document: DocumentId, sha256: String): IO[DocumentError, Option[AttachmentFile]] =
+    sql(AttachmentStore.file(document, sha256))
+
+  /** Sets the uploaded original of the draft of a file document (DMS-115, ADR 0042) as its next working
+    * state, replacing the previous file. The stored file is inserted unless the document already has a file
+    * with the same content, which is used instead (content addressing per document, shared with attachments).
+    *
+    * @return
+    *   the draft and whether `file` was inserted (if not, its object is not referenced and can be removed)
+    */
+  def setFile(
+      id: DocumentId,
+      file: AttachmentFile,
+      name: String,
+      fields: List[WordField],
+      actor: UserId
+  ): IO[DocumentError, (DocumentVersion, Boolean)] =
+    for
+      document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
+      _        <- ZIO.unless(document.kind == DocumentKind.File)(
+        ZIO.fail(DocumentError.Conflict(s"document ${id.value} is not a file document"))
+      )
+      current <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
+      _       <- ZIO.unless(Versioning.isEditable(current.status))(
+        ZIO.fail(
+          DocumentError.Conflict(
+            s"version ${current.label} is ${current.status}; the file only changes while the version is a draft"
+          )
+        )
+      )
+      inserted <- sql(AttachmentStore.insertFile(file))
+      stored   <-
+        if inserted then ZIO.succeed(file)
+        else
+          sql(AttachmentStore.file(id, file.sha256))
+            .someOrFail(DocumentError.Conflict("the stored file vanished"))
+      next = current.copy(workingState = current.workingState + 1, rendition = None)
+      _ <- sql(DocumentStore.updateDraft(next, templates)).filterOrFail(identity)(changedConcurrently(next))
+      // Values entered for fields that stay manual fields are kept.
+      manual = fields.filter(_.source == WordFieldSource.Manual).map(_.key).toSet
+      kept   = current.file.fold(Map.empty[String, String])(_.values.filter((k, _) => manual.contains(k)))
+      _ <- sql {
+        VersionFileStore.set(current.id, stored.id, name, fields, kept, actor, None)
+        DocumentStore.insertWorkingState(next, actor, templates)
+      }
+      updated <- sql(DocumentStore.lockVersion(current.id, templates)).someOrFail(versionNotFound(current.id))
+      _       <- record(
+        actor,
+        "document.file-uploaded",
+        updated,
+        Json.Obj(
+          "name"           -> Json.Str(name),
+          "sha256"         -> Json.Str(stored.sha256),
+          "size"           -> Json.Num(stored.size),
+          "contentType"    -> Json.Str(stored.contentType),
+          "scanStatus"     -> Json.Str(stored.scanStatus.toString),
+          "scanner"        -> Json.Str(stored.scanner),
+          "reused"         -> Json.Bool(!inserted),
+          "previousSha256" -> current.file.fold(Json.Null)(f => Json.Str(f.sha256)),
+          "fields"         -> Json.Arr(fields.map(f => Json.Str(f.key))*)
+        )
+      )
+    yield (updated, inserted)
+
+  /** Stores the values of the manual fields of the draft's Word file (DMS-115) as its next working state.
+    * Values are checked against the field definitions; required fields are checked on submission.
+    */
+  def setWordValues(
+      id: DocumentId,
+      values: Map[String, String],
+      actor: UserId
+  ): IO[DocumentError, DocumentVersion] =
+    for
+      current <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
+      _       <- ZIO.unless(Versioning.isEditable(current.status))(
+        ZIO.fail(
+          DocumentError.Conflict(
+            s"version ${current.label} is ${current.status}; field values only change while it is a draft"
+          )
+        )
+      )
+      file <- ZIO
+        .fromOption(current.file)
+        .orElseFail(DocumentError.Conflict(s"version ${current.label} has no file with fields"))
+      cleaned  = values.map((k, v) => k -> v.trim).filter(_._2.nonEmpty)
+      problems = WordFields.check(file.fields, cleaned, complete = false)
+      _ <- ZIO.unless(problems.isEmpty)(ZIO.fail(DocumentError.Invalid(problems)))
+      next = current.copy(workingState = current.workingState + 1, rendition = None)
+      _ <- sql(DocumentStore.updateDraft(next, templates)).filterOrFail(identity)(changedConcurrently(next))
+      _ <- sql {
+        val _ = VersionFileStore.setValues(current.id, cleaned)
+        DocumentStore.insertWorkingState(next, actor, templates)
+      }
+      updated <- sql(DocumentStore.lockVersion(current.id, templates)).someOrFail(versionNotFound(current.id))
+      changed = (file.values.keySet ++ cleaned.keySet).toList.sorted
+        .filter(k => file.values.get(k) != cleaned.get(k))
+      _ <- record(
+        actor,
+        "document.word-values-changed",
+        updated,
+        Json.Obj(
+          "fields" -> Json.Obj(
+            changed.map(k =>
+              k -> Json.Obj(
+                "before" -> file.values.get(k).fold(Json.Null)(Json.Str(_)),
+                "after"  -> cleaned.get(k).fold(Json.Null)(Json.Str(_))
+              )
+            )*
+          )
+        )
+      )
+    yield updated
 
   /** All deviation requests of a version, active and withdrawn, oldest first. */
   def deviationRequests(versionId: UUID): IO[DocumentError, List[RecordedDeviationRequest]] =

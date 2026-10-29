@@ -146,7 +146,9 @@ final case class EvidenceVersion(
     /** Present only for versions with attachments (DMS-114), so reports of documents without attachments keep
       * their layout.
       */
-    attachments: Option[List[EvidenceAttachment]] = None
+    attachments: Option[List[EvidenceAttachment]] = None,
+    /** The uploaded original of a file document version (DMS-115); absent for structured documents. */
+    original: Option[EvidenceAttachment] = None
 ) derives JsonCodec
 
 final case class EvidenceLegalHold(
@@ -440,6 +442,19 @@ object EvidenceReport:
             a.addedAt
           )
         )
+      ),
+      original = v.file.map(f =>
+        EvidenceAttachment(
+          f.name,
+          f.contentType,
+          f.size,
+          f.sha256,
+          f.objectKey,
+          f.objectVersion,
+          f.scanStatus.toString,
+          f.setBy.value,
+          f.setAt
+        )
       )
     )
 
@@ -597,4 +612,11 @@ object EvidenceReport:
         case Some(RenditionCheck.Unverified(d)) => (Unverified, Some(d))
         case None                               => (Unverified, Some("not checked"))
       EvidenceCheck(v.id, v.label, s"attachment checksum (${a.name})", status, Some(a.sha256), detail)
+    } ++ v.file.toList.map { f =>
+      val (status, detail) = results.get(f.fileId) match
+        case Some(RenditionCheck.Matches)       => (Match, None)
+        case Some(RenditionCheck.Mismatch(d))   => (Mismatch, Some(d))
+        case Some(RenditionCheck.Unverified(d)) => (Unverified, Some(d))
+        case None                               => (Unverified, Some("not checked"))
+      EvidenceCheck(v.id, v.label, s"original checksum (${f.name})", status, Some(f.sha256), detail)
     }

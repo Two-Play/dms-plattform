@@ -37,6 +37,15 @@ final case class Rendition(objectKey: String, objectVersion: Option[String], sha
   */
 final case class MetadataSnapshot(values: Map[String, MetadataValue], takenAt: Instant)
 
+/** What the content of a document is (DMS-115, ADR 0042); chosen at creation and never changed. */
+enum DocumentKind:
+  /** The structured content of the template, edited in the platform (ADR 0007). */
+  case Structured
+
+  /** A finished file uploaded by the author (e.g. a Word document); the template supplies class and fields.
+    */
+  case File
+
 /** A document: a stable identity whose content lives in versions.
   *
   * @param classVersion
@@ -48,6 +57,8 @@ final case class MetadataSnapshot(values: Map[String, MetadataValue], takenAt: I
   *   same in every version (core field `documentNumber`). Read with the document itself
   *   (`DocumentService.get` and `recent`); lists built from version rows leave it empty and carry it in the
   *   field values instead.
+  * @param kind
+  *   structured (content from the template) or file (an uploaded original per version, DMS-115)
   */
 final case class Document(
     id: DocumentId,
@@ -59,7 +70,8 @@ final case class Document(
     templateId: TemplateId,
     templateVersion: Int,
     createdAt: Instant,
-    number: Option[String] = None
+    number: Option[String] = None,
+    kind: DocumentKind = DocumentKind.Structured
 )
 
 /** One version of a document: a complete, self-contained version package (ADR 0021). Open versions (draft,
@@ -99,6 +111,9 @@ final case class Document(
   * @param attachments
   *   the files attached to the version (DMS-114), in the order they were added; they change only while the
   *   version is a draft
+  * @param file
+  *   the uploaded original of a version of a file document (DMS-115); replaced only while the version is a
+  *   draft, `None` for structured documents and for a file document before the first upload
   */
 final case class DocumentVersion(
     id: UUID,
@@ -126,7 +141,8 @@ final case class DocumentVersion(
     supersededBy: Option[UUID] = None,
     requiresAcknowledgement: Boolean = true,
     publishedAt: Option[Instant] = None,
-    attachments: List[VersionAttachment] = Nil
+    attachments: List[VersionAttachment] = Nil,
+    file: Option[VersionFile] = None
 ):
   def label: String = Versioning.label(number, status, workingState)
 

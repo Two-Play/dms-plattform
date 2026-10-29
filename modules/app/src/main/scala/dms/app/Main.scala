@@ -8,6 +8,7 @@ import dms.documents.core.{
   AcknowledgementService,
   AttachmentService,
   AttachmentUploads,
+  WordTemplateService,
   DocumentClassService,
   DocumentService,
   NumberRangeService,
@@ -15,7 +16,7 @@ import dms.documents.core.{
 }
 import dms.identity.{Authenticator, TenantDirectory, TenantOrganizations, TokenVerifier, UserDirectories}
 import dms.integration.partners.PartnerDirectories
-import dms.rendering.core.{VeraPdfValidator, WeasyPrintRenderer}
+import dms.rendering.core.{LibreOfficeConverter, VeraPdfValidator, WeasyPrintRenderer}
 import dms.search.core.{OpenSearch, SearchIndex}
 import dms.storage.ObjectStore
 import dms.templates.core.TemplateService
@@ -41,7 +42,7 @@ object Main extends ZIOAppDefault:
     PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env &
     SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env &
     EvidenceReportApi.Env & CurrentDocumentApi.Env & WebhookApi.Env & UserApi.Env & VersionViewApi.Env &
-    NumberRangeApi.Env & AttachmentApi.Env & LibraryApi.Env
+    NumberRangeApi.Env & AttachmentApi.Env & LibraryApi.Env & FileDocumentApi.Env & WordTemplateApi.Env
 
   private[app] val apiEndpoints: List[ZServerEndpoint[Env, ZioStreams]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -52,10 +53,12 @@ object Main extends ZIOAppDefault:
       TemplateLifecycleApi.endpoints.map(_.widen[Env]) ++
       TemplatePreviewApi.endpoints.map(_.widen[Env]) ++
       TemplateImpactApi.endpoints.map(_.widen[Env]) ++
+      WordTemplateApi.endpoints.map(_.widen[Env]) ++
       // Before the document endpoints: `/documents/valid-at` must not be read as a document id.
       ValidAtApi.endpoints.map(_.widen[Env]) ++
       DocumentApi.endpoints.map(_.widen[Env]) ++
       AttachmentApi.endpoints.map(_.widen[Env]) ++
+      FileDocumentApi.endpoints.map(_.widen[Env]) ++
       CurrentDocumentApi.endpoints.map(_.widen[Env]) ++
       LibraryApi.endpoints.map(_.widen[Env]) ++
       VersionCompareApi.endpoints.map(_.widen[Env]) ++
@@ -81,15 +84,18 @@ object Main extends ZIOAppDefault:
     (ZioHttpInterpreter().toHttp(apiEndpoints) ++ ZioHttpInterpreter().toHttp(docs))
       .transform(limitStreamedBodies)
 
-  /** Only attachment uploads may send a body larger than [[AggregatedBodyBytes]]: the server streams such
-    * bodies instead of aggregating them, and every other endpoint would collect them in memory. Refused with
-    * 413.
+  /** Only attachment uploads and uploads of file documents' originals may send a body larger than
+    * [[AggregatedBodyBytes]]: the server streams such bodies instead of aggregating them, and every other
+    * endpoint would collect them in memory. Refused with 413.
     */
   def limitStreamedBodies[R](
       handler: Handler[R, Response, Request, Response]
   ): Handler[R, Response, Request, Response] =
     Handler.fromFunctionHandler[Request] { request =>
-      if request.body.isComplete || AttachmentApi.isUpload(request.method, request.path) then handler
+      if request.body.isComplete || AttachmentApi.isUpload(request.method, request.path) ||
+        FileDocumentApi.isUpload(request.method, request.path) ||
+        WordTemplateApi.isUpload(request.method, request.path)
+      then handler
       else
         Handler.succeed(
           Response
@@ -153,9 +159,11 @@ object Main extends ZIOAppDefault:
           PartnerDirectories.layer(cfg.partners),
           ZLayer.succeed(cfg.rendering),
           WeasyPrintRenderer.layer,
+          ZLayer.succeed(cfg.conversion),
+          LibreOfficeConverter.layer,
           VeraPdfValidator.layer,
           RenditionWiring.archive,
-          DocumentRenditions.layer,
+          DocumentRenditions.withNames,
           RenditionWiring.jobs,
           ZLayer.succeed(cfg.search.openSearch),
           ZLayer.succeed(cfg.search.settings),
@@ -167,6 +175,8 @@ object Main extends ZIOAppDefault:
           ZLayer.succeed(scanner),
           AttachmentService.layer,
           AttachmentUploads.layer,
+          FileVersions.layer,
+          WordTemplateService.layer,
           EvidenceReportApi.auditEvidence(cfg.audit),
           EvidenceReportStore.layer
         )

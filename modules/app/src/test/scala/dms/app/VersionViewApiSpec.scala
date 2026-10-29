@@ -194,7 +194,9 @@ object VersionViewApiSpec extends ZIOSpecDefault:
       WorkflowRendition.layer,
       ApprovalWorkflow.layer,
       DocumentRenditions.layer,
-      ZLayer(RenditionArchive.inMemory)
+      ZLayer(RenditionArchive.inMemory),
+      ZLayer.succeed(DocumentConverter.unavailable),
+      FileVersions.layer
     )
 
   private def token(user: UserId): String =

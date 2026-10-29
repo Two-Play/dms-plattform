@@ -33,7 +33,7 @@ private[core] object DocumentStore:
     DbCodec[java.sql.Date].biMap(d => if d == null then null else d.toLocalDate, java.sql.Date.valueOf)
 
   private type DocumentRow =
-    (UUID, UUID, Int, String, Option[String], String, UUID, Int, OffsetDateTime, Option[String])
+    (UUID, UUID, Int, String, Option[String], String, UUID, Int, OffsetDateTime, Option[String], String)
 
   final case class VersionRow(
       id: UUID,
@@ -80,13 +80,13 @@ private[core] object DocumentStore:
 
   def document(id: DocumentId)(using DbTx): Option[Document] =
     sql"""select id, class_id, class_version, title, owner_id, author_id, template_id, template_version, created_at,
-                 document_number
+                 document_number, kind
           from dms.document where id = ${id.value}""".query[DocumentRow].run().headOption.map(toDocument)
 
   /** A document, locked for a change of its number (DMS-113). */
   def lockDocument(id: DocumentId)(using DbTx): Option[Document] =
     sql"""select id, class_id, class_version, title, owner_id, author_id, template_id, template_version, created_at,
-                 document_number
+                 document_number, kind
           from dms.document where id = ${id.value} for update"""
       .query[DocumentRow]
       .run()
@@ -96,7 +96,7 @@ private[core] object DocumentStore:
   /** The documents of the tenant, the most recently changed first (by their latest version). */
   def recentDocuments(limit: Int)(using DbTx): List[Document] =
     sql"""select d.id, d.class_id, d.class_version, d.title, d.owner_id, d.author_id, d.template_id,
-                 d.template_version, d.created_at, d.document_number
+                 d.template_version, d.created_at, d.document_number, d.kind
           from dms.document d
           order by greatest(d.updated_at,
                             (select max(v.updated_at) from dms.document_version v where v.document_id = d.id))
@@ -199,10 +199,10 @@ private[core] object DocumentStore:
   def insertDocument(d: Document)(using DbTx): Unit =
     val _ =
       sql"""insert into dms.document (id, tenant_id, class_id, class_version, title, owner_id, author_id,
-                                            template_id, template_version, document_number)
+                                            template_id, template_version, document_number, kind)
                   values (${d.id.value}, dms.current_tenant(), ${d.classId.value}, ${d.classVersion}, ${d.title},
                           ${d.ownerId.map(_.value)}, ${d.authorId.value}, ${d.templateId.value},
-                          ${d.templateVersion}, ${d.number})""".update.run()
+                          ${d.templateVersion}, ${d.number}, ${d.kind.toString})""".update.run()
 
   def updateDocument(id: DocumentId, title: String, owner: Option[UserId])(using DbTx): Unit =
     val _ = sql"""update dms.document set title = $title, owner_id = ${owner.map(_.value)}, updated_at = now()
@@ -225,7 +225,8 @@ private[core] object DocumentStore:
       case Nil      => Nil
       case versions =>
         val attachments = AttachmentStore.ofDocument(id)
-        versions.map(v => v.copy(attachments = attachments.getOrElse(v.id, Nil)))
+        val files       = VersionFileStore.ofDocument(id)
+        versions.map(v => v.copy(attachments = attachments.getOrElse(v.id, Nil), file = files.get(v.id)))
 
   /** A version, locked for a change. */
   def lockVersion(id: UUID, codec: ContentCodec)(using DbTx): Option[DocumentVersion] =
@@ -239,7 +240,9 @@ private[core] object DocumentStore:
       .run()
       .headOption
       .map(toVersion(_, codec))
-      .map(v => v.copy(attachments = AttachmentStore.ofVersion(v.id)))
+      .map(v =>
+        v.copy(attachments = AttachmentStore.ofVersion(v.id), file = VersionFileStore.ofVersion(v.id))
+      )
 
   /** The open version of a document, locked for a change. */
   def lockOpenVersion(id: DocumentId, codec: ContentCodec)(using DbTx): Option[DocumentVersion] =
@@ -254,7 +257,9 @@ private[core] object DocumentStore:
       .run()
       .headOption
       .map(toVersion(_, codec))
-      .map(v => v.copy(attachments = AttachmentStore.ofVersion(v.id)))
+      .map(v =>
+        v.copy(attachments = AttachmentStore.ofVersion(v.id), file = VersionFileStore.ofVersion(v.id))
+      )
 
   def insertVersion(v: DocumentVersion, codec: ContentCodec)(using DbTx): Unit =
     val _ = sql"""insert into dms.document_version
@@ -480,7 +485,19 @@ private[core] object DocumentStore:
           where id = $id and status in ('Draft', 'InReview', 'InApproval')""".update.run() == 1
 
   private def toDocument(row: DocumentRow): Document =
-    val (id, classId, classVersion, title, owner, author, templateId, templateVersion, createdAt, number) =
+    val (
+      id,
+      classId,
+      classVersion,
+      title,
+      owner,
+      author,
+      templateId,
+      templateVersion,
+      createdAt,
+      number,
+      kind
+    ) =
       row
     Document(
       DocumentId(id),
@@ -492,7 +509,8 @@ private[core] object DocumentStore:
       TemplateId(templateId),
       templateVersion,
       createdAt.toInstant,
-      number
+      number,
+      DocumentKind.valueOf(kind)
     )
 
   private def toVersion(r: VersionRow, codec: ContentCodec): DocumentVersion =

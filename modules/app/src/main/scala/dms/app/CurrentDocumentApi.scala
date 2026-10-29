@@ -296,15 +296,23 @@ object CurrentDocumentApi:
       details: DocumentDetails,
       v: DocumentVersion
   ): ZIO[Env, (StatusCode, ApiError), String] =
-    (for
-      db        <- ZIO.service[Db]
-      templates <- ZIO.service[TemplateService]
-      profiles  <- ZIO.service[ProfileSource]
-      page      <- db.transact(p.tenantId)(DocumentRenditions.html(templates, profiles, details, v))
-    yield page._1).mapError {
-      case e: RenderingError => (StatusCode.InternalServerError, ApiError("rendering_failed", e.describe))
-      case e: DbError        => DocumentApi.toResponse(e)
-    }
+    if details.document.kind == dms.documents.DocumentKind.File then
+      ZIO.fail(
+        (
+          StatusCode.Conflict,
+          ApiError("conflict", s"document ${details.document.id.value} is a file document; use current.pdf")
+        )
+      )
+    else
+      (for
+        db        <- ZIO.service[Db]
+        templates <- ZIO.service[TemplateService]
+        profiles  <- ZIO.service[ProfileSource]
+        page      <- db.transact(p.tenantId)(DocumentRenditions.html(templates, profiles, details, v))
+      yield page._1).mapError {
+        case e: RenderingError => (StatusCode.InternalServerError, ApiError("rendering_failed", e.describe))
+        case e: DbError        => DocumentApi.toResponse(e)
+      }
 
   private def viewOf(details: DocumentDetails, v: DocumentVersion): CurrentVersionView =
     val id    = details.document.id.value

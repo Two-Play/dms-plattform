@@ -94,14 +94,16 @@ def workflowCoreModule: Project = coreModule("workflow").settings(
     Dependencies.logging.map(_ % Test)
 )
 
-/** Archive renditions (ADR 0008, 0025): HTML → PDF/A through the rendering worker, validation with veraPDF.
-  * Tests start the worker image from `workers/rendering` and SeaweedFS with Testcontainers.
+/** Archive renditions (ADR 0008, 0025): HTML → PDF/A through the rendering worker, office files → PDF/A
+  * through the conversion worker (ADR 0042), validation with veraPDF. Tests start the worker images from
+  * `workers/rendering` and `workers/conversion` and SeaweedFS with Testcontainers.
   */
 def renderingCoreModule: Project = coreModule("rendering").settings(
   libraryDependencies ++= Dependencies.json ++ Dependencies.pdfValidation ++ Dependencies.integrationTest ++
     Dependencies.objectStorageTest ++ Dependencies.pdfText ++ Dependencies.logging.map(_ % Test),
   Test / javaOptions ++= Seq(
     renderingWorkerDirectory.value,
+    conversionWorkerDirectory.value,
     // Not logback-test.xml: the app tests depend on these test classes and have their own logback-test.xml.
     "-Dlogback.configurationFile=logback-rendering-test.xml"
   )
@@ -110,6 +112,11 @@ def renderingCoreModule: Project = coreModule("rendering").settings(
 /** Where tests find the Dockerfile of the rendering worker (ADR 0025). */
 lazy val renderingWorkerDirectory = Def.setting(
   s"-Ddms.rendering.workerDirectory=${((ThisBuild / baseDirectory).value / "workers" / "rendering").getAbsolutePath}"
+)
+
+/** Where tests find the Dockerfile of the conversion worker (ADR 0042). */
+lazy val conversionWorkerDirectory = Def.setting(
+  s"-Ddms.conversion.workerDirectory=${((ThisBuild / baseDirectory).value / "workers" / "conversion").getAbsolutePath}"
 )
 
 /** Templates (ADR 0007, 0020): CEL expressions, JSON content in jsonb; integration tests against PostgreSQL.
@@ -156,8 +163,8 @@ lazy val app = module("app", "modules/app")
   )
   .settings(
     libraryDependencies ++= Dependencies.http ++ Dependencies.config ++ Dependencies.logging ++
-      Dependencies.integrationTest ++ Dependencies.objectStorageTest ++ Dependencies.pdfText,
-    Test / javaOptions += renderingWorkerDirectory.value,
+      Dependencies.integrationTest ++ Dependencies.objectStorageTest ++ Dependencies.pdfCompose,
+    Test / javaOptions ++= Seq(renderingWorkerDirectory.value, conversionWorkerDirectory.value),
     Compile / mainClass := Some("dms.app.Main"),
     Compile / sourceGenerators += Def.task {
       val file = (Compile / sourceManaged).value / "dms" / "app" / "AppBuildInfo.scala"

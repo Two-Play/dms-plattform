@@ -23,6 +23,10 @@ function NewDocumentRoute() {
           <BreadcrumbCurrent>{t('docs.new.title')}</BreadcrumbCurrent>
         </Breadcrumbs>
       }
+      onCreated={(documentId) => {
+        // File and Word documents continue on their page: upload, fields, preview (DMS-115).
+        void navigate({ to: '/documents/$documentId', params: { documentId } })
+      }}
       onSubmitted={(documentId) => {
         // After submission the document page shows its review state.
         void navigate({ to: '/documents/$documentId', params: { documentId } })

@@ -75,7 +75,7 @@ object AttachmentApi:
   private val attachmentId = path[UUID]("attachmentId").description("Attachment id")
 
   /** Bytes a multipart request may carry beyond the file itself (boundaries, part headers). */
-  private val MultipartOverhead: Long = 64L * 1024
+  private[app] val MultipartOverhead: Long = 64L * 1024
 
   val upload: ZServerEndpoint[Env, ZioStreams] =
     SecuredApi.base.post
@@ -288,21 +288,8 @@ object AttachmentApi:
       uploads <- ZIO.service[AttachmentUploads]
       // Authorize before reading the body.
       _        <- DocumentApi.inTransaction(p)(ctx => editableDraft(ctx, p, id))
-      boundary <- ZIO
-        .fromOption(
-          contentType
-            .flatMap(v => zio.http.Header.ContentType.parse(v).toOption)
-            .filter(_.mediaType.fullType == "multipart/form-data")
-            .flatMap(_.boundary)
-            .map(_.id)
-        )
-        .orElseFail(
-          (
-            StatusCode.UnsupportedMediaType,
-            ApiError("multipart_required", "send the file as multipart/form-data")
-          )
-        )
-      view <- ZIO.scoped(
+      boundary <- multipartBoundary(contentType)
+      view     <- ZIO.scoped(
         for
           received <- receive(uploads, boundary, body).mapError(toResponse)
           (rawName, declared, spooled) = received
@@ -348,16 +335,33 @@ object AttachmentApi:
       )
     yield view
 
+  /** The boundary of a `multipart/form-data` request (415 otherwise). */
+  private[app] def multipartBoundary(contentType: Option[String]): IO[(StatusCode, ApiError), String] =
+    ZIO
+      .fromOption(
+        contentType
+          .flatMap(v => zio.http.Header.ContentType.parse(v).toOption)
+          .filter(_.mediaType.fullType == "multipart/form-data")
+          .flatMap(_.boundary)
+          .map(_.id)
+      )
+      .orElseFail(
+        (
+          StatusCode.UnsupportedMediaType,
+          ApiError("multipart_required", "send the file as multipart/form-data")
+        )
+      )
+
   /** Removes an object stored by this request that is not referenced (failed link, concurrent same upload).
     */
-  private def discard(uploads: AttachmentUploads, stored: Option[ObjectVersion]): UIO[Unit] =
+  private[app] def discard(uploads: AttachmentUploads, stored: Option[ObjectVersion]): UIO[Unit] =
     ZIO.foreachDiscard(stored)(uploads.discard)
 
   /** Reads the multipart body up to the part `file` and spools that part; parts before it are skipped. The
     * whole body is limited to the size limit plus some overhead, so oversized requests fail while they
     * stream.
     */
-  private def receive(
+  private[app] def receive(
       uploads: AttachmentUploads,
       boundary: String,
       body: ZStream[Any, Throwable, Byte]

@@ -13,18 +13,39 @@ import zio.json.ast.Json
 import java.time.Instant
 import java.util.UUID
 
+/** What the rendition of a version is produced from. */
+sealed trait RenditionInput:
+  def facts: RenditionFacts
+
 /** A version ready to print: the stand-alone HTML page of its content and what the header and footer show. */
-final case class RenditionPage(html: String, facts: RenditionFacts)
+final case class RenditionPage(html: String, facts: RenditionFacts) extends RenditionInput
+
+/** The uploaded original of a version of a file document (DMS-115, ADR 0042), converted into the archive
+  * standard by the conversion worker; a PDF that already conforms to it is archived unchanged.
+  *
+  * @param original
+  *   where the original is stored, with its SHA-256; read back and checked before it is converted
+  * @param prepare
+  *   applied to the checked original before conversion, e.g. filling the fields of a Word document with the
+  *   approval (DMS-115); the original in storage stays unchanged
+  */
+final case class RenditionOriginal(
+    name: String,
+    original: Rendition,
+    facts: RenditionFacts,
+    prepare: Chunk[Byte] => IO[RenderingError, Chunk[Byte]] = ZIO.succeed(_)
+) extends RenditionInput
 
 /** What rendering needs from the documents and workflow modules, implemented by the application (module rule:
   * `rendering-core` depends on other modules' `*-api` only). Both methods run inside `Db.transact(tenant)`.
   */
 trait RenditionSource:
 
-  /** The page of the version of `request`, or `None` if the version is already approved with its rendition (a
-    * repeated job). Fails with [[RenderingError.Invalid]] if the version does not wait for its rendition.
+  /** The page (or, for a file document, the original) of the version of `request`, or `None` if the version
+    * is already approved with its rendition (a repeated job). Fails with [[RenderingError.Invalid]] if the
+    * version does not wait for its rendition.
     */
-  def load(request: RenditionRequest): IO[RenderingError, Option[RenditionPage]]
+  def load(request: RenditionRequest): IO[RenderingError, Option[RenditionInput]]
 
   /** Attaches the stored rendition to the version and completes the approval of the request's case. */
   def complete(request: RenditionRequest, rendition: Rendition): IO[RenderingError, Unit]
@@ -40,10 +61,11 @@ final case class RenditionResult(
 /** Renders the archive rendition of an approved version (DMS-44, ADR 0025): the job of kind
   * [[RenditionRequest.JobKind]], enqueued by the last approving vote.
   *
-  * Steps: load the page (own transaction) → print it with the rendering worker → validate it against the
-  * archive standard with veraPDF → store it in object storage with its SHA-256 → attach it and complete the
-  * approval, with an audit entry of renderer and validation (own transaction). Nothing changes the version
-  * before the last step, so a failure leaves it in approval.
+  * Steps: load the page (own transaction) → print it with the rendering worker (for a file document: convert
+  * its original with the conversion worker, or take a PDF original that conforms already) → validate it
+  * against the archive standard with veraPDF → store it in object storage with its SHA-256 → attach it and
+  * complete the approval, with an audit entry of renderer and validation (own transaction). Nothing changes
+  * the version before the last step, so a failure leaves it in approval.
   *
   * Failures are retried by the job queue with backoff (ADR 0010). The owner is notified with the outbox event
   * [[RenditionEvents.Failed]] on the first failed attempt and again when no retry follows. Every step is
@@ -57,7 +79,8 @@ final class RenditionJobs(
     validator: PdfValidator,
     archive: RenditionArchive,
     audit: AuditTrail,
-    standard: ArchiveStandard = ArchiveStandard.default
+    standard: ArchiveStandard = ArchiveStandard.default,
+    converter: DocumentConverter = DocumentConverter.unavailable
 ):
   import RenditionJobs.*
 
@@ -78,8 +101,27 @@ final class RenditionJobs(
   /** Produces, stores and attaches the rendition. `None` if the version was approved already. */
   def render(tenant: TenantId, request: RenditionRequest): IO[RenderingError, Option[RenditionResult]] =
     transact(tenant)(source.load(request)).flatMap {
-      case None       => ZIO.logInfo(s"Version ${request.versionId} already has its rendition").as(None)
-      case Some(page) =>
+      case None        => ZIO.logInfo(s"Version ${request.versionId} already has its rendition").as(None)
+      case Some(input) =>
+        for
+          produced <- produce(tenant, input)
+          (pdf, report) = produced
+          stored <- archive.store(
+            RenditionArchive.key(tenant, request.documentId, request.versionId),
+            pdf.bytes
+          )
+          result = RenditionResult(stored, pdf.pages, pdf.renderer, report)
+          _ <- transact(tenant)(source.complete(request, stored) *> recordCreated(request, result, input))
+        yield Some(result)
+    }
+
+  /** The validated PDF of a version: printed from its page, or converted from its original (DMS-115). */
+  private def produce(
+      tenant: TenantId,
+      input: RenditionInput
+  ): IO[RenderingError, (RenderedPdf, ValidationReport)] =
+    input match
+      case page: RenditionPage =>
         for
           html <- ZIO
             .fromEither(RenditionLayout.compose(page.html, page.facts))
@@ -92,29 +134,52 @@ final class RenditionJobs(
               RenditionLayout.xmp(page.facts)
             )
           )
-          report <- validator.validate(pdf.bytes, standard)
-          _      <- ZIO.unless(report.compliant)(ZIO.fail(RenderingError.NotArchivable(report)))
-          stored <- archive.store(
-            RenditionArchive.key(tenant, request.documentId, request.versionId),
-            pdf.bytes
-          )
-          result = RenditionResult(stored, pdf.pages, s"${pdf.renderer}; ${RenditionLayout.Version}", report)
-          _ <- transact(tenant)(source.complete(request, stored) *> recordCreated(request, result))
-        yield Some(result)
-    }
+          report <- validated(pdf.bytes)
+        yield (pdf.copy(renderer = s"${pdf.renderer}; ${RenditionLayout.Version}"), report)
+      case file: RenditionOriginal =>
+        for
+          original <- archive.read(file.original).flatMap(file.prepare)
+          // A PDF original that already conforms to the archive standard is archived unchanged.
+          asIs <-
+            if DocumentConverter.isPdf(original) then validator.validate(original, standard).map(Some(_))
+            else ZIO.none
+          result <- asIs match
+            case Some(report) if report.compliant =>
+              ZIO.succeed((RenderedPdf(original, None, OriginalRenderer), report))
+            case _ =>
+              for
+                converted <- converter.convert(original, file.name, ConversionTarget.pdf(standard))
+                report    <- validated(converted.bytes)
+              yield (RenderedPdf(converted.bytes, None, converted.converter), report)
+        yield result
 
-  private def recordCreated(request: RenditionRequest, result: RenditionResult): IO[RenderingError, Unit] =
+  private def validated(pdf: Chunk[Byte]): IO[RenderingError, ValidationReport] =
+    validator
+      .validate(pdf, standard)
+      .tap(report => ZIO.unless(report.compliant)(ZIO.fail(RenderingError.NotArchivable(report))))
+
+  private def recordCreated(
+      request: RenditionRequest,
+      result: RenditionResult,
+      input: RenditionInput
+  ): IO[RenderingError, Unit] =
+    val origin = input match
+      case _: RenditionPage        => Json.Obj()
+      case file: RenditionOriginal =>
+        Json.Obj("originalName" -> Json.Str(file.name), "originalSha256" -> Json.Str(file.original.sha256))
     record(
       "document.rendition-created",
       request,
-      Json.Obj(
-        "objectKey"     -> Json.Str(result.rendition.objectKey),
-        "objectVersion" -> result.rendition.objectVersion.fold(Json.Null)(Json.Str(_)),
-        "sha256"        -> Json.Str(result.rendition.sha256),
-        "pages"         -> result.pages.fold(Json.Null)(Json.Num(_)),
-        "standard"      -> Json.Str(result.report.standard.label),
-        "validator"     -> Json.Str(result.report.validator),
-        "renderer"      -> Json.Str(result.renderer)
+      origin.merge(
+        Json.Obj(
+          "objectKey"     -> Json.Str(result.rendition.objectKey),
+          "objectVersion" -> result.rendition.objectVersion.fold(Json.Null)(Json.Str(_)),
+          "sha256"        -> Json.Str(result.rendition.sha256),
+          "pages"         -> result.pages.fold(Json.Null)(Json.Num(_)),
+          "standard"      -> Json.Str(result.report.standard.label),
+          "validator"     -> Json.Str(result.report.validator),
+          "renderer"      -> Json.Str(result.renderer)
+        )
       )
     )
 
@@ -171,6 +236,9 @@ object RenditionJobs:
 
   /** The technical actor of rendering in the audit trail. */
   val RenderingActor: String = "dms-rendering"
+
+  /** Recorded as renderer when a PDF original that conforms to the archive standard is archived unchanged. */
+  val OriginalRenderer: String = "original PDF/A, unchanged"
 
   /** Enqueues the rendering job of a version for the tenant of the current transaction (ADR 0010). Requesting
     * the same version again is a no-op.

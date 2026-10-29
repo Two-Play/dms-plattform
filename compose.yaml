@@ -1,6 +1,7 @@
 # Local development environment. Development only: all credentials are test values.
 # Sprint 0 state: PostgreSQL is verified; ZITADEL is set up and verified with T-00.3 (DMS-19);
-# object storage (SeaweedFS with Object Lock) with DMS-30; rendering worker (WeasyPrint) with DMS-44;
+# object storage (SeaweedFS with Object Lock) with DMS-30; rendering worker (WeasyPrint) with DMS-44; conversion
+# worker (LibreOffice) with DMS-115;
 # search index (OpenSearch) with DMS-51.
 
 services:
@@ -112,6 +113,24 @@ services:
     tmpfs:
       - /tmp
     mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 10s
+      retries: 5
+
+  # Conversion worker (DMS-115, ADR 0042): LibreOffice converts the originals of file documents (Word, Excel,
+  # PowerPoint, …) into PDF/A and structured documents into Word. Built from workers/conversion; stateless, no
+  # credentials, read-only file system, no outbound network. The application calls it at dms.conversion.url
+  # (default http://localhost:9181).
+  conversion:
+    build: ./workers/conversion
+    image: dms-conversion-worker:local
+    ports:
+      - "9181:8080"  # next to the rendering worker
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 1g
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
       interval: 10s

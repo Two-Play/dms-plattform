@@ -6,7 +6,7 @@ import dms.documents.core.DocumentSettings
 import dms.identity.{AuthConfig, UserDirectoryConfig}
 import dms.integration.partners.PartnerDirectoryConfig
 import dms.integration.webhooks.WebhookSettings
-import dms.rendering.core.RendererConfig
+import dms.rendering.core.{ConverterConfig, RendererConfig}
 import dms.search.core.{OpenSearchConfig, SearchSettings}
 import dms.storage.StorageConfig
 import zio.Config
@@ -149,6 +149,7 @@ final case class AppConfig(
     documents: DocumentsConfig,
     partners: PartnerDirectoryConfig,
     rendering: RendererConfig,
+    conversion: ConverterConfig,
     search: SearchConfig,
     webhooks: WebhooksConfig,
     users: UserDirectoryConfig,

@@ -165,6 +165,7 @@ export const docs: Translation<typeof en.docs> = {
     downloadWithHistory: 'PDF mit Änderungshistorie herunterladen',
     downloading: 'PDF wird erzeugt …',
     changelog: 'Änderungshistorie anhängen',
+    attachmentList: 'Anlagenverzeichnis anhängen',
     draftHint:
       'Entwurf – nicht gültig: aus dem zuletzt gespeicherten Stand erzeugt, nicht archiviert.',
     archivedHint: 'Die archivierte PDF/A-Fassung der freigegebenen Version.',
