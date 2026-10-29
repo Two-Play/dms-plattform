@@ -376,7 +376,7 @@ object AcknowledgementApiSpec extends ZIOSpecDefault:
         _   <- opened(reader, doc.id, v1.id)
         _   <- acknowledge(reader, doc.id, v1.id)
         _   <- opened(approver, doc.id, v1.id)
-        _   <- newVersion(doc.id, """{"changeKind":"Major"}""")
+        _   <- newVersion(doc.id, """{"changeKind":"Major","reason":"Content revised"}""")
         _   <- approveDefault(doc.id)
         _   <- runPublicationJobs
         all <- versions(doc.id)

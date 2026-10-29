@@ -234,7 +234,7 @@ object AcknowledgementServiceSpec extends ZIOSpecDefault:
   /** Version 2.0 of `doc`, approved and valid from `validFrom`. */
   private def scheduled(f: Fixture, doc: DocumentId, validFrom: LocalDate) =
     for
-      _ <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, None, author))
+      _ <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Content revised"), author))
       _ <- as(f.tenant)(_.updateDraft(doc, DraftChange(None, values(validFrom), None), author))
       a <- approveOpen(f, doc)
     yield a

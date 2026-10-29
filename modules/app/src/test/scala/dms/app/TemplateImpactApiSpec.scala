@@ -392,7 +392,9 @@ object TemplateImpactApiSpec extends ZIOSpecDefault:
         analysisAfter <- impact(designer2)
         // A new version of the published document keeps the template version of its basis ...
         next <- s.app.transact(tenantId)(
-          ZIO.serviceWithZIO[DocumentService](_.newVersion(s.published, ChangeKind.Major, None, author))
+          ZIO.serviceWithZIO[DocumentService](
+            _.newVersion(s.published, ChangeKind.Major, Some("Content revised"), author)
+          )
         )
         // ... while new documents can use the released version.
         created <- s.app.transact(tenantId)(

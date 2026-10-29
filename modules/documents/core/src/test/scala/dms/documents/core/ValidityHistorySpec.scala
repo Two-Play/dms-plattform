@@ -244,7 +244,7 @@ object ValidityHistorySpec extends ZIOSpecDefault:
   ) =
     for
       _ <- TestClock.setTime(approvedAt)
-      _ <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, None, author))
+      _ <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Content revised"), author))
       _ <- as(f.tenant)(_.updateDraft(doc, DraftChange(None, values(validFrom, scope), None), author))
       a <- approveOpen(f, doc)
     yield a

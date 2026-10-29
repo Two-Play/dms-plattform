@@ -1,7 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { useId, useState, type SyntheticEvent } from 'react'
 import { useApiClient } from '@/api/context'
-import { invalidateAfterReview, recertify, withdraw, type ReviewTask } from '@/api/reviews'
+import { invalidateAfterReview, recertify, revise, withdraw, type ReviewTask } from '@/api/reviews'
+import { MAX_CHANGE_SUMMARY } from '@/api/versions'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -115,6 +117,83 @@ function RecertifyForm({ task, onDone, onCancel }: FormProps) {
   )
 }
 
+/**
+ * Revision required: starts the next version with the change summary every new version needs (DMS-126), or
+ * links the draft already in progress, and opens the document.
+ */
+function ReviseForm({ task, onDone, onCancel }: FormProps) {
+  const client = useApiClient()
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const id = useId()
+  const [summary, setSummary] = useState('')
+  const [attempted, setAttempted] = useState(false)
+  const trimmed = summary.trim()
+  const problem =
+    trimmed === ''
+      ? t('tasks.reviewDialog.summaryMissing')
+      : trimmed.length > MAX_CHANGE_SUMMARY
+        ? t('newVersion.summaryTooLong', { max: MAX_CHANGE_SUMMARY, count: trimmed.length })
+        : undefined
+
+  const mutation = useMutation({
+    mutationFn: () => revise(client, task.id, { reason: trimmed }),
+    onSuccess: async (decided) => {
+      await invalidateAfterReview(queryClient, task.documentId)
+      onDone(decided)
+      await navigate({ to: '/documents/$documentId', params: { documentId: task.documentId } })
+    },
+  })
+
+  function submit(e: SyntheticEvent) {
+    e.preventDefault()
+    setAttempted(true)
+    if (problem) return
+    mutation.mutate()
+  }
+
+  const error = attempted ? problem : undefined
+  const hintId = `${id}-summary-hint`
+  return (
+    <form onSubmit={submit} className="grid gap-4" noValidate>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${id}-summary`}>{t('tasks.reviewDialog.summary')}</Label>
+        <Textarea
+          id={`${id}-summary`}
+          value={summary}
+          rows={4}
+          onChange={(e) => {
+            setSummary(e.target.value)
+          }}
+          aria-invalid={error ? true : undefined}
+          aria-required
+          aria-describedby={hintId}
+        />
+        <p
+          id={hintId}
+          role={error ? 'alert' : undefined}
+          className={error ? 'text-sm text-destructive' : 'text-xs text-muted-foreground'}
+        >
+          {error ?? t('tasks.reviewDialog.summaryHint')}
+        </p>
+      </div>
+      {mutation.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          {mutation.error.message}
+        </p>
+      )}
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          {t('common.cancel')}
+        </Button>
+        <Button type="submit" disabled={mutation.isPending}>
+          {mutation.isPending ? t('tasks.reviewDialog.revising') : t('tasks.reviewDialog.revise')}
+        </Button>
+      </DialogFooter>
+    </form>
+  )
+}
+
 function WithdrawForm({ task, onDone, onCancel }: FormProps) {
   const client = useApiClient()
   const queryClient = useQueryClient()
@@ -181,7 +260,7 @@ function WithdrawForm({ task, onDone, onCancel }: FormProps) {
   )
 }
 
-/** Dialog for the decisions of a review task that need input: recertify or withdraw (DMS-55). */
+/** Dialog for the decisions of a review task that need input: recertify, revise or withdraw (DMS-55). */
 export function ReviewDialog({
   task,
   decision,
@@ -208,18 +287,24 @@ export function ReviewDialog({
               {t(
                 decision === 'recertify'
                   ? 'tasks.reviewDialog.recertifyTitle'
-                  : 'tasks.reviewDialog.withdrawTitle',
+                  : decision === 'revise'
+                    ? 'tasks.reviewDialog.reviseTitle'
+                    : 'tasks.reviewDialog.withdrawTitle',
                 { title: task.title, version: task.versionLabel },
               )}
             </DialogTitle>
             <DialogDescription>
               {decision === 'recertify'
                 ? t('tasks.reviewDialog.recertifyText', { date: formatPlainDate(task.dueOn) })
-                : t('tasks.reviewDialog.withdrawText')}
+                : decision === 'revise'
+                  ? t('tasks.reviewDialog.reviseText')
+                  : t('tasks.reviewDialog.withdrawText')}
             </DialogDescription>
           </DialogHeader>
           {decision === 'recertify' ? (
             <RecertifyForm task={task} onDone={onDone} onCancel={onClose} />
+          ) : decision === 'revise' ? (
+            <ReviseForm task={task} onDone={onDone} onCancel={onClose} />
           ) : (
             <WithdrawForm task={task} onDone={onDone} onCancel={onClose} />
           )}

@@ -235,7 +235,7 @@ object ReviewServiceSpec extends ZIOSpecDefault:
   /** Version 2.0 of `doc`, approved and valid from `validFrom`. */
   private def scheduled(f: Fixture, doc: DocumentId, validFrom: LocalDate) =
     for
-      _ <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, None, author))
+      _ <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Content revised"), author))
       _ <- as(f.tenant)(_.updateDraft(doc, DraftChange(None, values(validFrom), None), author))
       a <- approveOpen(f, doc)
     yield a
@@ -396,7 +396,7 @@ object ReviewServiceSpec extends ZIOSpecDefault:
         f     <- fixture()
         one   <- valid(f)
         two   <- valid(f)
-        open  <- as(f.tenant)(_.newVersion(two._1, ChangeKind.Major, None, author))
+        open  <- as(f.tenant)(_.newVersion(two._1, ChangeKind.Major, Some("Content revised"), author))
         _     <- at("2026-11-10T09:00:00Z")
         _     <- check(f.tenant)
         tasks <- openTasks(f.tenant)
@@ -462,7 +462,7 @@ object ReviewServiceSpec extends ZIOSpecDefault:
         (doc, v1) = created
         _      <- at("2026-11-10T09:00:00Z")
         _      <- check(f.tenant)
-        _      <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, None, author))
+        _      <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Content revised"), author))
         v2     <- approveOpen(f, doc)
         _      <- as(f.tenant)(_.changeStatus(v2.id, Publish, approver))
         result <- check(f.tenant)
@@ -507,7 +507,7 @@ object ReviewServiceSpec extends ZIOSpecDefault:
         _         <- at("2026-11-10T09:00:00Z")
         _         <- check(f.tenant)
         task      <- openTasks(f.tenant).map(_.head)
-        draft     <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, None, author))
+        draft     <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Content revised"), author))
         e         <- ZIO.service[Env]
         draftDate <- e.app
           .transact(f.tenant)(

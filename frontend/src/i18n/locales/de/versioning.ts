@@ -16,11 +16,10 @@ export const newVersion: Translation<typeof en.newVersion> = {
     'Z. B. Tippfehler, Formulierungen oder defekte Links ohne Änderung der Bedeutung; der Verantwortliche bestätigt sie in einem verkürzten Ablauf.',
   becomes: 'wird Version {label}',
   summary: 'Änderungsübersicht *',
-  summaryOptional: 'Änderungsübersicht (empfohlen)',
   summaryHint:
     'Was sich ändert und warum, in verständlichen Worten für Lesende. Erscheint in der Versionshistorie und über Versionsvergleichen; bis zum Einreichen des Entwurfs änderbar.',
   summaryMissing:
-    'Bitte beschreiben, was sich ändert und warum: Eine redaktionelle Korrektur braucht eine Änderungsübersicht.',
+    'Bitte beschreiben, was sich ändert und warum: Jede neue Version braucht eine Änderungsübersicht.',
   summaryTooLong: 'Höchstens {max} Zeichen ({count} eingegeben).',
   submit: 'Version starten',
   submitting: 'Wird gestartet …',
@@ -45,7 +44,7 @@ export const changeSummary: Translation<typeof en.changeSummary> = {
   label: 'Änderungsübersicht',
   labelRequired: 'Änderungsübersicht *',
   hint: 'Die Übersicht lässt sich bis zum Einreichen des Entwurfs ändern.',
-  missing: 'Eine redaktionelle Korrektur braucht eine Änderungsübersicht.',
+  missing: 'Jede neue Version braucht eine Änderungsübersicht.',
   save: 'Übersicht speichern',
   saving: 'Wird gespeichert …',
   saved: 'Änderungsübersicht gespeichert.',

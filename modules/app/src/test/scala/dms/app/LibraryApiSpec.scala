@@ -207,7 +207,7 @@ object LibraryApiSpec extends ZIOSpecDefault:
               "IT security",
               values("Finance", today.minusDays(60), List("security"))
             )
-            _ <- documents.newVersion(sec._1, ChangeKind.Major, None, author)
+            _ <- documents.newVersion(sec._1, ChangeKind.Major, Some("Content revised"), author)
             _ <- documents.updateDraft(
               sec._1,
               DraftChange(Some("IT security policy"), values("Finance", today, List("security")), None),

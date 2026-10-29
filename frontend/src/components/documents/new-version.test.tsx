@@ -221,7 +221,11 @@ describe('New version on the document page (DMS-103)', () => {
     expect(within(dialog).getByText('(becomes version 2.0)')).toBeInTheDocument()
     expect(within(dialog).getByText('(becomes version 1.2)')).toBeInTheDocument()
     expect(within(dialog).getByRole('radio', { name: /Change of content/ })).toBeChecked()
-    expect(within(dialog).getByLabelText('Change summary (recommended)')).not.toBeRequired()
+    // Required for both kinds of change (DMS-126).
+    expect(within(dialog).getByLabelText('Change summary *')).toHaveAttribute(
+      'aria-required',
+      'true',
+    )
 
     await user.click(within(dialog).getByRole('radio', { name: /Editorial correction/ }))
     const summary = within(dialog).getByLabelText('Change summary *')
@@ -251,9 +255,22 @@ describe('New version on the document page (DMS-103)', () => {
     expect(screen.queryByRole('button', { name: /New version/ })).not.toBeInTheDocument()
   })
 
-  it('sends no summary for a major version without one and explains a conflict', async () => {
+  it('requires a summary for a major version too and explains a conflict (DMS-126)', async () => {
     const { post, user } = renderAt(page)
     await user.click(await screen.findByRole('button', { name: /New version/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Start a new version' })
+    const summary = within(dialog).getByLabelText('Change summary *')
+    await user.type(summary, '   ')
+    await user.click(within(dialog).getByRole('button', { name: 'Start version' }))
+    expect(
+      within(dialog).getByText(
+        'Describe what changes and why: every new version needs a change summary.',
+      ),
+    ).toHaveAttribute('role', 'alert')
+    expect(summary).toHaveAttribute('aria-invalid', 'true')
+    expect(post).not.toHaveBeenCalledWith('/api/v1/documents/{id}/versions', expect.anything())
+
+    await user.type(summary, 'Rule 7 rewritten')
     post.mockImplementationOnce(() =>
       failed(409, {
         code: 'conflict',
@@ -266,7 +283,7 @@ describe('New version on the document page (DMS-103)', () => {
     ).toHaveAttribute('role', 'alert')
     expect(post).toHaveBeenCalledWith('/api/v1/documents/{id}/versions', {
       params: { path: { id: documentId } },
-      body: { changeKind: 'Major' },
+      body: { changeKind: 'Major', reason: 'Rule 7 rewritten' },
     })
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
@@ -294,9 +311,17 @@ describe('Change summary of a draft (DMS-103)', () => {
     expect(within(card).getByText('Rule 7 rewritten')).toBeInTheDocument()
 
     await user.click(within(card).getByRole('button', { name: 'Edit change summary' }))
-    const field = within(card).getByLabelText('Change summary')
+    // A major version with a predecessor keeps a summary as well (DMS-126).
+    const field = within(card).getByLabelText('Change summary *')
+    expect(field).toHaveAttribute('aria-required', 'true')
     expect(field).toHaveValue('Rule 7 rewritten')
     await user.clear(field)
+    await user.click(within(card).getByRole('button', { name: 'Save summary' }))
+    expect(within(card).getByText('Every new version needs a change summary.')).toHaveAttribute(
+      'role',
+      'alert',
+    )
+    expect(put).not.toHaveBeenCalled()
     await user.type(field, 'Rule 7 rewritten: new reporting channel')
     await user.click(within(card).getByRole('button', { name: 'Save summary' }))
     await waitFor(() => {
@@ -329,7 +354,7 @@ describe('Change summary of a draft (DMS-103)', () => {
     const field = within(card).getByLabelText('Change summary *')
     await user.clear(field)
     await user.click(within(card).getByRole('button', { name: 'Save summary' }))
-    expect(within(card).getByText(/editorial correction needs/)).toHaveAttribute('role', 'alert')
+    expect(within(card).getByText(/Every new version needs/)).toHaveAttribute('role', 'alert')
     expect(put).not.toHaveBeenCalledWith(
       '/api/v1/documents/{id}/draft/change-summary',
       expect.anything(),
@@ -341,6 +366,25 @@ describe('Change summary of a draft (DMS-103)', () => {
       await within(card).findByText(/Not saved: version 1\.2-draft\.1 is InReview/),
     ).toHaveAttribute('role', 'alert')
     expect(within(card).getByLabelText('Change summary *')).toBeInTheDocument()
+  })
+
+  it('may be removed from the first version 1.0 (DMS-126)', async () => {
+    const first = version('v1', '1.0-draft.2', 'Draft', { changeReason: 'Initial issue' })
+    state.document = documentWith(first, { canStartVersion: false })
+    state.versions = [first]
+    const { put, user } = renderAt(page)
+    const card = await screen.findByTestId('change-summary')
+    await user.click(within(card).getByRole('button', { name: 'Edit change summary' }))
+    const field = within(card).getByLabelText('Change summary')
+    expect(field).toHaveAttribute('aria-required', 'false')
+    await user.clear(field)
+    await user.click(within(card).getByRole('button', { name: 'Save summary' }))
+    await waitFor(() => {
+      expect(put).toHaveBeenCalledWith('/api/v1/documents/{id}/draft/change-summary', {
+        params: { path: { id: documentId } },
+        body: {},
+      })
+    })
   })
 
   it('is not offered on a first draft without a summary', async () => {
@@ -359,7 +403,18 @@ describe('New version in German (DMS-103)', () => {
     await user.click(await screen.findByRole('button', { name: /Neue Version/ }))
     const dialog = screen.getByRole('dialog', { name: 'Neue Version starten' })
     expect(within(dialog).getByText('(wird Version 2.0)')).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('Änderungsübersicht (empfohlen)')).toBeInTheDocument()
+    // Required for an inhaltliche Änderung as well (DMS-126).
+    expect(within(dialog).getByRole('radio', { name: /Inhaltliche Änderung/ })).toBeChecked()
+    expect(within(dialog).getByLabelText('Änderungsübersicht *')).toHaveAttribute(
+      'aria-required',
+      'true',
+    )
+    await user.click(within(dialog).getByRole('button', { name: 'Version starten' }))
+    expect(
+      within(dialog).getByText(
+        'Bitte beschreiben, was sich ändert und warum: Jede neue Version braucht eine Änderungsübersicht.',
+      ),
+    ).toHaveAttribute('role', 'alert')
     await user.click(within(dialog).getByRole('radio', { name: /Redaktionelle Korrektur/ }))
     await user.type(within(dialog).getByLabelText('Änderungsübersicht *'), 'Tippfehler')
     await user.click(within(dialog).getByRole('button', { name: 'Version starten' }))

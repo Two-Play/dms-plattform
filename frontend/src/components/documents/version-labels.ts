@@ -18,6 +18,14 @@ export function nextLabels(label: string): Record<ChangeKind, string> | undefine
   return { Major: `${major + 1}.0`, Minor: `${major}.${minor + 1}` }
 }
 
+/**
+ * Whether the version `label` (e.g. `1.0`, `2.0-draft.1`) is the first version 1.0 of a document, the only
+ * one that may have no change summary (DMS-126): every later version has a predecessor.
+ */
+export function isFirstVersion(label: string): boolean {
+  return /^1\.0(?:-draft\.\d+)?$/.test(label)
+}
+
 /** A structural change in words, e.g. "Heading level 2 → 3". */
 export function describeChange(change: StructureChange): string {
   const fromTo = `${change.from ?? ''} → ${change.to ?? ''}`

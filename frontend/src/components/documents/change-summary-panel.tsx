@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
 import { toast } from '@/lib/toast'
-import { changeKindLabel } from './version-labels'
+import { changeKindLabel, isFirstVersion } from './version-labels'
 
 function failure(error: Error): string {
   if (error instanceof ApiRequestError && error.status === 403) return t('changeSummary.forbidden')
@@ -34,10 +34,11 @@ function SummaryForm({
   const id = useId()
   const [summary, setSummary] = useState(version.changeReason ?? '')
   const [attempted, setAttempted] = useState(false)
-  const minor = version.changeKind === 'Minor'
+  // Every version with a predecessor needs a change summary, major and minor (DMS-126).
+  const required = !isFirstVersion(version.version)
   const trimmed = summary.trim()
   const problem =
-    minor && trimmed === ''
+    required && trimmed === ''
       ? t('changeSummary.missing')
       : trimmed.length > MAX_CHANGE_SUMMARY
         ? t('newVersion.summaryTooLong', { max: MAX_CHANGE_SUMMARY, count: trimmed.length })
@@ -67,7 +68,7 @@ function SummaryForm({
     <form onSubmit={submit} className="grid gap-3" noValidate>
       <div className="grid gap-1.5">
         <Label htmlFor={fieldId}>
-          {minor ? t('changeSummary.labelRequired') : t('changeSummary.label')}
+          {required ? t('changeSummary.labelRequired') : t('changeSummary.label')}
         </Label>
         <Textarea
           id={fieldId}
@@ -77,7 +78,7 @@ function SummaryForm({
           onChange={(e) => {
             setSummary(e.target.value)
           }}
-          aria-required={minor}
+          aria-required={required}
           aria-invalid={error ? true : undefined}
           aria-describedby={hintId}
         />

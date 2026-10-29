@@ -62,8 +62,11 @@ export function acknowledgementItem(ack: Acknowledgement): InboxItem {
   }
 }
 
-/** The decisions of a review task that need input: recertify (date, note) or withdraw (reason). */
-export type ReviewDecision = 'recertify' | 'withdraw'
+/**
+ * The decisions of a review task that need input: recertify (date, note), revise (change summary of the new
+ * draft, DMS-126) or withdraw (reason).
+ */
+export type ReviewDecision = 'recertify' | 'revise' | 'withdraw'
 
 /** An inbox item for a review task; its deadline is the review date (00:00 UTC of that day). */
 export function reviewItem(review: ReviewTask): InboxItem {

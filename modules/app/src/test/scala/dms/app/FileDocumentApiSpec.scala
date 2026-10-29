@@ -450,7 +450,12 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
     yield ()
 
   private def newVersion(doc: UUID) =
-    call(author, "POST", s"/api/v1/documents/$doc/versions", Some("""{"changeKind":"Major"}"""))
+    call(
+      author,
+      "POST",
+      s"/api/v1/documents/$doc/versions",
+      Some("""{"changeKind":"Major","reason":"Content revised"}""")
+    )
       .map(as[DocumentVersionView])
 
   def spec = suite("File documents and Word templates")(
@@ -679,7 +684,7 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
           author,
           "POST",
           s"/api/v1/documents/${doc.id}/versions",
-          Some("""{"changeKind":"Major"}""")
+          Some("""{"changeKind":"Major","reason":"Content revised"}""")
         ).map(as[DocumentVersionView])
         carried <- call(author, "GET", s"/api/v1/documents/${doc.id}/versions/${next.id}/word-fields")
           .map(as[WordFieldsView])

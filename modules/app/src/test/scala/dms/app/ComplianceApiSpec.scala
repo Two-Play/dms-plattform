@@ -223,7 +223,7 @@ object ComplianceApiSpec extends ZIOSpecDefault:
             _ <- ZIO.foreachDiscard(List(readerFin, readerAll))(r =>
               acks.markOpened(fin._2, r) *> acks.acknowledge(fin._2, r)
             )
-            _ <- documents.newVersion(fin._1, ChangeKind.Major, None, author)
+            _ <- documents.newVersion(fin._1, ChangeKind.Major, Some("Content revised"), author)
             _ <- documents.updateDraft(
               fin._1,
               DraftChange(None, values(ownerB, "Finance", today.minusDays(1), today.plusDays(30)), None),

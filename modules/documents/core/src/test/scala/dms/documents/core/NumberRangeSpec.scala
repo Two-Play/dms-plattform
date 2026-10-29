@@ -381,7 +381,7 @@ object NumberRangeSpec extends ZIOSpecDefault:
         doc = created._1.id
         published <- approveAndPublish(f, doc)
         s         <- documents
-        next      <- inTenant(f.tenant)(s.newVersion(doc, ChangeKind.Major, None, author))
+        next      <- inTenant(f.tenant)(s.newVersion(doc, ChangeKind.Major, Some("Content revised"), author))
         replace   <- inTenant(f.tenant)(s.assignNumber(doc, "POL-OLD-1", "correction", records)).either
       yield assertTrue(
         published._1.metadataSnapshot.exists(
@@ -447,7 +447,7 @@ object NumberRangeSpec extends ZIOSpecDefault:
         _        <- approveAndPublish(f, doc)
         s        <- documents
         assigned <- inTenant(f.tenant)(s.assignNumber(doc, "RL-007", "numbering introduced", records))
-        next     <- inTenant(f.tenant)(s.newVersion(doc, ChangeKind.Major, None, author))
+        next     <- inTenant(f.tenant)(s.newVersion(doc, ChangeKind.Major, Some("Content revised"), author))
         found    <- inTenant(f.tenant)(s.findByNumber("RL-007"))
         unknown  <- inTenant(f.tenant)(s.findByNumber("RL-008"))
         other    <- fixture

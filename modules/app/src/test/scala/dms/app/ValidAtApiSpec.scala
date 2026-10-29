@@ -335,8 +335,13 @@ object ValidAtApiSpec extends ZIOSpecDefault:
             )
           )
         )
-      _ <- call(author, "POST", s"/api/v1/documents/${code.id}/versions", Some("""{"changeKind":"Major"}"""))
-      _ <- approveAndPublish(code.id, deputy)
+      _ <- call(
+        author,
+        "POST",
+        s"/api/v1/documents/${code.id}/versions",
+        Some("""{"changeKind":"Major","reason":"Content revised"}""")
+      )
+      _       <- approveAndPublish(code.id, deputy)
       formula <- create(formulaTitle)
       // Confidential from the start: reviewed and approved by members of its access group (DMS-101).
       board <- create("Board rules", confidentialValues)
