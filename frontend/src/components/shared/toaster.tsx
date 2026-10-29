@@ -2,11 +2,7 @@ import { CircleAlert, CircleCheck, X } from 'lucide-react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { cn } from 'cn'
 import { dismissToast, getToasts, subscribeToasts, type Toast } from '@/lib/toast'
-
-const texts = {
-  region: 'Notifications',
-  dismiss: 'Dismiss notification',
-}
+import { t } from '@/i18n'
 
 /** How long a toast stays; paused while the pointer or focus is on it. */
 const DURATION_MS = 6000
@@ -57,7 +53,7 @@ function ToastItem({ toast }: { toast: Toast }) {
       <p className="min-w-0 flex-1 break-words">{toast.message}</p>
       <button
         type="button"
-        aria-label={texts.dismiss}
+        aria-label={t('shared.dismiss')}
         className="-m-1 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
         onClick={() => {
           dismissToast(toast.id)
@@ -74,7 +70,7 @@ export function Toaster() {
   const toasts = useSyncExternalStore(subscribeToasts, getToasts, getToasts)
   return (
     <section
-      aria-label={texts.region}
+      aria-label={t('shared.notifications')}
       className="pointer-events-none fixed inset-x-4 bottom-4 z-50 flex flex-col items-end gap-2 sm:left-auto sm:w-96"
     >
       <div role="status" aria-live="polite" className="flex w-full flex-col gap-2">

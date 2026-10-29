@@ -8,15 +8,10 @@ import {
   type EvidenceReportFormat,
 } from '@/api/evidence-reports'
 import { hasRole, useMe } from '@/api/me'
+import { UserName } from '@/components/shared/user-name'
 import { Button } from '@/components/ui/button'
-
-const dateTimeFormat = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
-
-const statusText: Record<string, string> = {
-  Intact: 'Integrity intact',
-  Violated: 'Integrity violated',
-  Incomplete: 'Integrity not fully checked',
-}
+import { t, tOptional } from '@/i18n'
+import { formatDateTime } from '@/i18n/format'
 
 /**
  * "Evidence report" for internal audit and records managers (DMS-57): creates the report of the
@@ -53,7 +48,7 @@ export function EvidenceReportAction({ documentId }: { documentId: string }) {
         }}
       >
         <FileCheck2 className="size-4" aria-hidden />
-        {create.isPending ? 'Creating evidence report…' : 'Evidence report'}
+        {create.isPending ? t('docPanels.evidence.creating') : t('docPanels.evidence.create')}
       </Button>
       {report && (
         <div className="space-y-1 rounded-md border p-3">
@@ -63,11 +58,15 @@ export function EvidenceReportAction({ documentId }: { documentId: string }) {
                 report.integrityStatus === 'Intact' ? 'font-medium' : 'font-medium text-destructive'
               }
             >
-              {statusText[report.integrityStatus] ?? report.integrityStatus}
+              {tOptional(`docPanels.evidence.status.${report.integrityStatus}`) ??
+                report.integrityStatus}
             </span>{' '}
-            · created {dateTimeFormat.format(new Date(report.createdAt))} by {report.createdBy}
+            {t('docPanels.evidence.created', { date: formatDateTime(report.createdAt) })}{' '}
+            <UserName id={report.createdBy} />
           </p>
-          <p className="break-all text-muted-foreground">SHA-256 {report.sha256}</p>
+          <p className="break-all text-muted-foreground">
+            {t('docPanels.evidence.checksum', { sha: report.sha256 })}
+          </p>
           {report.findings && report.findings.length > 0 && (
             <ul className="list-disc pl-5 text-muted-foreground">
               {report.findings.map((finding) => (
@@ -84,7 +83,7 @@ export function EvidenceReportAction({ documentId }: { documentId: string }) {
                 download.mutate({ report, format: 'pdf' })
               }}
             >
-              Download PDF
+              {t('docPanels.evidence.downloadPdf')}
             </Button>
             <Button
               size="sm"
@@ -94,7 +93,7 @@ export function EvidenceReportAction({ documentId }: { documentId: string }) {
                 download.mutate({ report, format: 'json' })
               }}
             >
-              Download JSON
+              {t('docPanels.evidence.downloadJson')}
             </Button>
           </div>
         </div>

@@ -5,15 +5,7 @@ import { ErrorState } from '@/components/shared/error-state'
 import { LoadingState } from '@/components/shared/states'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-
-const texts = {
-  title: 'System status',
-  description: 'Backend health check',
-  loading: 'Loading system status',
-  unavailable: 'The backend is unavailable',
-  status: 'Status',
-  version: 'Version',
-}
+import { t } from '@/i18n'
 
 /** Shows the backend's `GET /health` result (tenant administrators). */
 export function SystemStatusCard() {
@@ -24,28 +16,28 @@ export function SystemStatusCard() {
     <Card>
       <CardHeader>
         <CardTitle>
-          <h2>{texts.title}</h2>
+          <h2>{t('system.title')}</h2>
         </CardTitle>
-        <CardDescription>{texts.description}</CardDescription>
+        <CardDescription>{t('system.description')}</CardDescription>
       </CardHeader>
       <CardContent>
         {isPending ? (
-          <LoadingState label={texts.loading} rows={1} />
+          <LoadingState label={t('system.loading')} rows={1} />
         ) : error ? (
           <ErrorState
             error={error}
-            titles={{ server: texts.unavailable, unknown: texts.unavailable }}
+            titles={{ server: t('system.unavailable'), unknown: t('system.unavailable') }}
             onRetry={() => void refetch()}
           />
         ) : (
           <dl className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-sm">
-            <dt className="text-muted-foreground">{texts.status}</dt>
+            <dt className="text-muted-foreground">{t('system.status')}</dt>
             <dd>
               <Badge variant={data.status === 'ok' ? 'default' : 'destructive'}>
                 {data.status}
               </Badge>
             </dd>
-            <dt className="text-muted-foreground">{texts.version}</dt>
+            <dt className="text-muted-foreground">{t('system.version')}</dt>
             <dd className="font-mono">{data.version}</dd>
           </dl>
         )}

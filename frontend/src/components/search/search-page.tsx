@@ -20,16 +20,20 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ErrorState, InlineError } from '@/components/shared/error-state'
 import { PageHeader } from '@/components/shared/page-header'
+import { UserName } from '@/components/shared/user-name'
+import { intlLocale, t } from '@/i18n'
+import { formatDateTime, formatPlainDate as formatDate } from '@/i18n/format'
 import { EmptyState, LoadingState } from '@/components/shared/states'
 import type { SearchPageSearch } from './search-params'
 import { snippetParts } from './snippet'
 
-const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-const dateOnly = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' })
-
-/** A YYYY-MM-DD date without shifting it into the browser's time zone. */
-function formatDate(date: string): string {
-  return dateOnly.format(new Date(`${date}T00:00:00Z`))
+/** A document language code as a name in the active language, e.g. `de` → "German". */
+function languageName(code: string): string {
+  try {
+    return new Intl.DisplayNames([intlLocale()], { type: 'language' }).of(code) ?? code
+  } catch {
+    return code
+  }
 }
 
 type Filter = 'class' | 'status' | 'lang'
@@ -70,19 +74,19 @@ function SearchForm({
   return (
     <form role="search" onSubmit={submit} className="flex flex-wrap items-end gap-3">
       <div className="grid min-w-60 flex-1 gap-1.5">
-        <Label htmlFor="search-text">Search text</Label>
+        <Label htmlFor="search-text">{t('search.text')}</Label>
         <Input
           id="search-text"
           type="search"
           value={q}
-          placeholder="Title, content, metadata"
+          placeholder={t('search.placeholder')}
           onChange={(e) => {
             setQ(e.target.value)
           }}
         />
       </div>
       <div className="grid gap-1.5">
-        <Label htmlFor="search-valid-on">Valid on</Label>
+        <Label htmlFor="search-valid-on">{t('search.validOn')}</Label>
         <Input
           id="search-valid-on"
           type="date"
@@ -96,11 +100,10 @@ function SearchForm({
       </div>
       <Button type="submit">
         <Search />
-        Search
+        {t('search.submit')}
       </Button>
       <p id="search-valid-on-note" className="w-full text-xs text-muted-foreground">
-        With a “valid on” date the page lists, per document, the version that was in force on that
-        day (in the organization’s time zone) and offers it as CSV export.
+        {t('search.validOnNote')}
       </p>
     </form>
   )
@@ -164,7 +167,7 @@ function HitItem({ hit }: { hit: SearchHit }) {
       </div>
       <p className="text-xs text-muted-foreground">
         {hit.classPath.join(' › ')}
-        {hit.validFrom && <> · valid from {formatDate(hit.validFrom)}</>}
+        {hit.validFrom && <> {t('search.validFrom', { date: formatDate(hit.validFrom) })}</>}
       </p>
       {hit.snippet && <Snippet snippet={hit.snippet} />}
     </li>
@@ -199,12 +202,12 @@ function SearchResults({
     return (
       <EmptyState
         icon={Search}
-        title="Search the documents you may read"
-        description="Enter a search text, or choose a “valid on” date to see the versions in force on that day."
+        title={t('search.startTitle')}
+        description={t('search.startText')}
       />
     )
   }
-  if (result.isPending) return <LoadingState label="Searching" rows={4} />
+  if (result.isPending) return <LoadingState label={t('search.searching')} rows={4} />
   if (result.isError) {
     return <ErrorState error={result.error} onRetry={() => void result.refetch()} />
   }
@@ -212,11 +215,8 @@ function SearchResults({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Search is not available yet</CardTitle>
-          <CardDescription>
-            The full-text search is not offered by this server yet. Documents are listed under
-            “Documents”, and the “valid on” date already works.
-          </CardDescription>
+          <CardTitle>{t('search.unavailableTitle')}</CardTitle>
+          <CardDescription>{t('search.unavailableText')}</CardDescription>
         </CardHeader>
       </Card>
     )
@@ -228,42 +228,43 @@ function SearchResults({
   }
   return (
     <div className="grid gap-6 md:grid-cols-[14rem_1fr]">
-      <aside aria-label="Filters" className="space-y-4">
+      <aside aria-label={t('search.filters')} className="space-y-4">
         <FacetGroup
-          title="Class"
+          title={t('search.class')}
           values={facets.class}
           selected={search.class}
           onToggle={toggle('class', search.class)}
         />
         <FacetGroup
-          title="Status"
+          title={t('search.status')}
           values={facets.status}
           selected={search.status}
           label={statusLabel}
           onToggle={toggle('status', search.status)}
         />
         <FacetGroup
-          title="Language"
+          title={t('search.language')}
           values={facets.language}
           selected={search.lang}
+          label={languageName}
           onToggle={toggle('lang', search.lang)}
         />
       </aside>
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground" aria-live="polite">
-          {total === 1 ? '1 result' : `${total} results`}
+          {t('search.results', { count: total })}
         </p>
         {hits.length > 0 ? (
-          <ol aria-label="Search results">
+          <ol aria-label={t('search.resultList')}>
             {hits.map((hit) => (
               <HitItem key={hit.versionId} hit={hit} />
             ))}
           </ol>
         ) : (
-          <p className="text-sm text-muted-foreground">No documents match.</p>
+          <p className="text-sm text-muted-foreground">{t('search.noMatch')}</p>
         )}
         {pages > 1 && (
-          <nav aria-label="Result pages" className="flex items-center gap-2">
+          <nav aria-label={t('search.pages')} className="flex items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -272,10 +273,10 @@ function SearchResults({
                 setPage(page - 1)
               }}
             >
-              Previous
+              {t('search.previous')}
             </Button>
             <span className="text-sm text-muted-foreground">
-              Page {page} of {pages}
+              {t('search.pageOf', { page, pages })}
             </span>
             <Button
               variant="outline"
@@ -285,7 +286,7 @@ function SearchResults({
                 setPage(page + 1)
               }}
             >
-              Next
+              {t('search.next')}
             </Button>
           </nav>
         )}
@@ -322,9 +323,9 @@ function ValidAtResults({
 
   return (
     <div className="grid gap-6 md:grid-cols-[14rem_1fr]">
-      <aside aria-label="Filters" className="space-y-4">
+      <aside aria-label={t('search.filters')} className="space-y-4">
         <FacetGroup
-          title="Class"
+          title={t('search.class')}
           values={result.data ? classFacet(result.data.items ?? []) : []}
           selected={search.class}
           onToggle={(value) => {
@@ -335,10 +336,11 @@ function ValidAtResults({
       <Card>
         <CardHeader className="flex flex-wrap items-start justify-between gap-2">
           <div className="space-y-1">
-            <CardTitle>Valid on {formatDate(validOn)}</CardTitle>
+            <CardTitle>{t('search.validOnTitle', { date: formatDate(validOn) })}</CardTitle>
             <CardDescription>
-              Per document and validity scope the version in force at the end of that day
-              {result.data && ` (${result.data.timeZone})`}, with its approval.
+              {result.data
+                ? t('search.validOnTextZone', { zone: result.data.timeZone })
+                : t('search.validOnText')}
             </CardDescription>
           </div>
           <Button
@@ -349,17 +351,13 @@ function ValidAtResults({
             }}
           >
             <Download />
-            Export CSV
+            {t('search.exportCsv')}
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
-          {search.q && (
-            <p className="text-xs text-muted-foreground">
-              The search text is not applied to this list; it shows every document you may read.
-            </p>
-          )}
+          {search.q && <p className="text-xs text-muted-foreground">{t('search.textIgnored')}</p>}
           {exportCsv.isError && <InlineError error={exportCsv.error} />}
-          {result.isPending && <LoadingState label="Loading the valid versions" rows={4} />}
+          {result.isPending && <LoadingState label={t('search.loadingValid')} rows={4} />}
           {result.isError && (
             <ErrorState error={result.error} onRetry={() => void result.refetch()} />
           )}
@@ -367,9 +365,7 @@ function ValidAtResults({
             ((result.data.items ?? []).length > 0 ? (
               <ValidAtTable items={result.data.items ?? []} date={validOn} />
             ) : (
-              <p className="text-sm text-muted-foreground">
-                No document version you may read was valid on that day.
-              </p>
+              <p className="text-sm text-muted-foreground">{t('search.noneValid')}</p>
             ))}
         </CardContent>
       </Card>
@@ -381,26 +377,28 @@ function ValidAtTable({ items, date }: { items: ValidVersion[]; date: string }) 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
-        <caption className="sr-only">Versions valid on {date}</caption>
+        <caption className="sr-only">
+          {t('search.tableCaption', { date: formatDate(date) })}
+        </caption>
         <thead className="text-left text-xs text-muted-foreground">
           <tr className="border-b">
             <th scope="col" className="py-2 pr-4 font-medium">
-              Title
+              {t('search.colTitle')}
             </th>
             <th scope="col" className="py-2 pr-4 font-medium">
-              Version
+              {t('search.colVersion')}
             </th>
             <th scope="col" className="py-2 pr-4 font-medium">
-              Status now
+              {t('search.colStatus')}
             </th>
             <th scope="col" className="hidden py-2 pr-4 font-medium lg:table-cell">
-              Scope
+              {t('search.colScope')}
             </th>
             <th scope="col" className="py-2 pr-4 font-medium">
-              Valid
+              {t('search.colValid')}
             </th>
             <th scope="col" className="hidden py-2 font-medium md:table-cell">
-              Approved by
+              {t('search.colApprovedBy')}
             </th>
           </tr>
         </thead>
@@ -422,16 +420,18 @@ function ValidAtTable({ items, date }: { items: ValidVersion[]; date: string }) 
                 <StatusBadge status={item.status} />
               </td>
               <td className="hidden py-2 pr-4 text-muted-foreground lg:table-cell">
-                {item.scope || 'All'}
+                {item.scope || t('search.allScopes')}
               </td>
               <td className="py-2 pr-4 text-xs whitespace-nowrap">
-                {dateTime.format(new Date(item.validSince))} –{' '}
-                {item.validUntil ? dateTime.format(new Date(item.validUntil)) : 'today'}
+                {formatDateTime(item.validSince)} –{' '}
+                {item.validUntil ? formatDateTime(item.validUntil) : t('search.today')}
               </td>
               <td className="hidden py-2 text-xs md:table-cell">
-                {item.approvedBy ?? '—'}
+                {item.approvedBy ? <UserName id={item.approvedBy} /> : '—'}
                 {item.actingFor && (
-                  <div className="text-muted-foreground">on behalf of {item.actingFor}</div>
+                  <div className="text-muted-foreground">
+                    {t('search.onBehalfOf')} <UserName id={item.actingFor} />
+                  </div>
                 )}
               </td>
             </tr>
@@ -456,7 +456,7 @@ export function SearchPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Search" />
+      <PageHeader title={t('search.title')} />
       <SearchForm
         key={`${search.q ?? ''}|${search.validOn ?? ''}`}
         search={search}
@@ -467,9 +467,7 @@ export function SearchPage() {
       {search.validOn && (
         <div className="flex items-center gap-2 text-sm">
           <CalendarClock className="size-4 text-muted-foreground" />
-          <span>
-            Showing the versions valid on <strong>{formatDate(search.validOn)}</strong>.
-          </span>
+          <span>{t('search.showing', { date: formatDate(search.validOn) })}</span>
           <Button
             variant="ghost"
             size="sm"
@@ -478,7 +476,7 @@ export function SearchPage() {
             }}
           >
             <X />
-            Back to search
+            {t('search.back')}
           </Button>
         </div>
       )}

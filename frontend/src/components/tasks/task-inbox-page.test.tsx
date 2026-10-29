@@ -238,11 +238,10 @@ describe('task inbox', () => {
 
     expect(second).toHaveAccessibleName('Review: Service contract ACME')
     expect(second).not.toHaveAttribute('data-overdue')
-    expect(
-      within(must(second)).getByText(
-        'policy / hr · Legal review (Reviewer) · assigned to reviewer-1, reviewer-2',
-      ),
-    ).toBeInTheDocument()
+    // Assignees are user names (ids until the user directory answers), so the line spans elements.
+    expect(within(must(second)).getByText(/Legal review \(Reviewer\)/)).toHaveTextContent(
+      'policy / hr · Legal review (Reviewer) · assigned to reviewer-1, reviewer-2',
+    )
     expect(within(must(second)).getByText(/^Since /)).toBeInTheDocument()
     expect(screen.getByText('2 open, 1 overdue')).toBeInTheDocument()
   })
@@ -254,7 +253,9 @@ describe('task inbox', () => {
     renderAt('/tasks')
 
     const [first, second] = await rows()
-    expect(within(must(first)).getByText('On behalf of approver-1')).toBeInTheDocument()
+    expect(within(must(first)).getByText(/On behalf of/)).toHaveTextContent(
+      'On behalf of approver-1',
+    )
     expect(within(must(second)).queryByText(/On behalf of/)).not.toBeInTheDocument()
   })
 

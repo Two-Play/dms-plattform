@@ -11,7 +11,10 @@ import {
 } from '@/api/template-admin'
 import { StatusBadge } from '@/components/documents/status-badge'
 import { statusLabel } from '@/components/documents/status-label'
+import { UserName } from '@/components/shared/user-name'
 import { Button } from '@/components/ui/button'
+import { t } from '@/i18n'
+import { formatDateTime } from '@/i18n/format'
 import {
   Dialog,
   DialogContent,
@@ -21,8 +24,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
-const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-
 function StatusCounts({ counts, caption }: { counts: StatusCount[]; caption: string }) {
   return (
     <table className="w-full text-sm">
@@ -30,13 +31,13 @@ function StatusCounts({ counts, caption }: { counts: StatusCount[]; caption: str
       <thead className="text-left text-xs text-muted-foreground">
         <tr className="border-b">
           <th scope="col" className="py-1 pr-4 font-medium">
-            Document status
+            {t('templates.release.documentStatus')}
           </th>
           <th scope="col" className="py-1 pr-4 text-right font-medium">
-            Documents
+            {t('templates.release.documents')}
           </th>
           <th scope="col" className="py-1 text-right font-medium">
-            Versions
+            {t('templates.release.versions')}
           </th>
         </tr>
       </thead>
@@ -61,19 +62,19 @@ function Impact({ impact }: { impact: TemplateImpact }) {
       <p className="rounded-lg border bg-muted/50 p-3 text-sm">{impact.explanation}</p>
       <section aria-labelledby="impact-documents" className="space-y-2">
         <h3 id="impact-documents" className="font-medium">
-          {impact.documents === 1
-            ? '1 document uses an earlier version'
-            : `${String(impact.documents)} documents use an earlier version`}
+          {t('templates.release.usage', { count: impact.documents })}
         </h3>
         {byStatus.length > 0 && (
-          <StatusCounts counts={byStatus} caption="Documents on earlier versions by status" />
+          <StatusCounts counts={byStatus} caption={t('templates.release.byStatus')} />
         )}
         {(impact.byVersion ?? []).length > 1 && (
           <ul className="space-y-1 text-xs text-muted-foreground">
             {(impact.byVersion ?? []).map((v) => (
               <li key={v.templateVersion}>
-                Version {v.templateVersion}: {v.documents}{' '}
-                {v.documents === 1 ? 'document' : 'documents'}
+                {t('templates.release.perVersion', {
+                  version: v.templateVersion,
+                  count: v.documents,
+                })}
               </li>
             ))}
           </ul>
@@ -81,28 +82,28 @@ function Impact({ impact }: { impact: TemplateImpact }) {
       </section>
       <section aria-labelledby="impact-drafts" className="space-y-2">
         <h3 id="impact-drafts" className="font-medium">
-          Open drafts on earlier versions ({drafts.length})
+          {t('templates.release.drafts', { count: drafts.length })}
         </h3>
         {drafts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nobody is working on such a document.</p>
+          <p className="text-sm text-muted-foreground">{t('templates.release.noDrafts')}</p>
         ) : (
           <>
             <div className="max-h-56 overflow-auto">
               <table className="w-full text-sm">
-                <caption className="sr-only">Open drafts on earlier versions</caption>
+                <caption className="sr-only">{t('templates.release.draftsCaption')}</caption>
                 <thead className="text-left text-xs text-muted-foreground">
                   <tr className="border-b">
                     <th scope="col" className="py-1 pr-3 font-medium">
-                      Title
+                      {t('templates.release.title')}
                     </th>
                     <th scope="col" className="py-1 pr-3 font-medium">
-                      Author
+                      {t('templates.release.author')}
                     </th>
                     <th scope="col" className="py-1 pr-3 font-medium">
-                      Status
+                      {t('templates.release.status')}
                     </th>
                     <th scope="col" className="hidden py-1 font-medium sm:table-cell">
-                      Changed
+                      {t('templates.release.changed')}
                     </th>
                   </tr>
                 </thead>
@@ -119,25 +120,27 @@ function Impact({ impact }: { impact: TemplateImpact }) {
                           d.title
                         )}
                         <span className="block font-mono text-xs text-muted-foreground">
-                          {d.version} · template version {d.templateVersion}
+                          {t('templates.release.draftVersion', {
+                            version: d.version,
+                            templateVersion: d.templateVersion,
+                          })}
                         </span>
                       </td>
-                      <td className="py-1 pr-3 font-mono text-xs">{d.author}</td>
+                      <td className="py-1 pr-3">
+                        <UserName id={d.author} />
+                      </td>
                       <td className="py-1 pr-3">
                         <StatusBadge status={d.status} />
                       </td>
                       <td className="hidden py-1 text-muted-foreground sm:table-cell">
-                        {dateTime.format(new Date(d.updatedAt))}
+                        {formatDateTime(d.updatedAt)}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Authors are shown by user id. Titles of confidential documents you may not read are
-              hidden.
-            </p>
+            <p className="text-xs text-muted-foreground">{t('templates.release.maskedNote')}</p>
           </>
         )}
       </section>
@@ -178,13 +181,11 @@ export function ReleaseDialog({
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
-            Release {version.name}, version {version.version}
+            {t('templates.release.dialogTitle', { name: version.name, version: version.version })}
           </DialogTitle>
-          <DialogDescription>
-            Check how documents use the earlier versions before you release this one.
-          </DialogDescription>
+          <DialogDescription>{t('templates.release.dialogText')}</DialogDescription>
         </DialogHeader>
-        {impact.isPending && <LoadingState label="Analysing the impact" rows={3} />}
+        {impact.isPending && <LoadingState label={t('templates.release.analysing')} rows={3} />}
         {impact.isError && (
           <ErrorState error={impact.error} onRetry={() => void impact.refetch()} />
         )}
@@ -201,10 +202,12 @@ export function ReleaseDialog({
               onOpenChange(false)
             }}
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button onClick={onRelease} disabled={!impact.data || releasing}>
-            {releasing ? 'Releasing…' : `Release version ${String(version.version)}`}
+            {releasing
+              ? t('templates.release.releasing')
+              : t('templates.release.release', { version: version.version })}
           </Button>
         </DialogFooter>
       </DialogContent>

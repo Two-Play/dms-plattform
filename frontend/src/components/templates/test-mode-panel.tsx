@@ -3,18 +3,20 @@ import { CheckCircle2, XCircle } from 'lucide-react'
 import { useId, useState } from 'react'
 import { useApiClient } from '@/api/context'
 import { runTest, type TemplateVersion, type TestRun } from '@/api/template-admin'
-import { DRAFT_LABEL } from '@/components/documents/document-preview'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { t } from '@/i18n'
 import { errorMessage, locationLabel } from './template-lifecycle'
 // The document stylesheet shared with the PDF rendering (modules/templates, DMS-39).
 import '@dms-document/document.css'
 
 function outcomes(values: boolean[] | undefined): string {
   const v = values ?? []
-  if (v.length === 0) return 'not reached'
-  return v.map((b) => (b ? 'true' : 'false')).join(' and ')
+  if (v.length === 0) return t('templates.test.notReached')
+  return v
+    .map((b) => (b ? t('templates.test.true') : t('templates.test.false')))
+    .join(t('templates.test.and'))
 }
 
 function Results({ run }: { run: TestRun }) {
@@ -30,23 +32,23 @@ function Results({ run }: { run: TestRun }) {
           <XCircle className="size-4 text-destructive" aria-hidden="true" />
         )}
         {run.allBranchesCovered
-          ? `All condition branches covered by ${String(cases.length)} test cases.`
-          : `Not every condition branch is covered by the ${String(cases.length)} test cases.`}
+          ? t('templates.test.covered', { count: cases.length })
+          : t('templates.test.notCovered', { count: cases.length })}
       </p>
       {(run.coverage ?? []).length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <caption className="sr-only">Branch coverage</caption>
+            <caption className="sr-only">{t('templates.test.coverage')}</caption>
             <thead className="text-left text-xs text-muted-foreground">
               <tr className="border-b">
                 <th scope="col" className="py-1 pr-3 font-medium">
-                  Condition
+                  {t('templates.test.condition')}
                 </th>
                 <th scope="col" className="py-1 pr-3 font-medium">
-                  Where
+                  {t('templates.test.where')}
                 </th>
                 <th scope="col" className="py-1 font-medium">
-                  Reached as
+                  {t('templates.test.reachedAs')}
                 </th>
               </tr>
             </thead>
@@ -65,7 +67,7 @@ function Results({ run }: { run: TestRun }) {
         </div>
       )}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
-        <ul aria-label="Test cases" className="space-y-1">
+        <ul aria-label={t('templates.test.cases')} className="space-y-1">
           {cases.map((c, i) => (
             <li key={c.name}>
               <button
@@ -78,10 +80,10 @@ function Results({ run }: { run: TestRun }) {
               >
                 <span className="block">{c.name}</span>
                 {c.error ? (
-                  <span className="text-xs text-destructive">Failed</span>
+                  <span className="text-xs text-destructive">{t('templates.test.failed')}</span>
                 ) : (c.missingRequired ?? []).length > 0 ? (
                   <span className="text-xs text-muted-foreground">
-                    {(c.missingRequired ?? []).length} required values missing
+                    {t('templates.test.missingCount', { count: (c.missingRequired ?? []).length })}
                   </span>
                 ) : null}
               </button>
@@ -89,10 +91,13 @@ function Results({ run }: { run: TestRun }) {
           ))}
         </ul>
         {current && (
-          <section aria-label={`Test case ${current.name}`} className="min-w-0 space-y-2">
+          <section
+            aria-label={t('templates.test.caseLabel', { name: current.name })}
+            className="min-w-0 space-y-2"
+          >
             <div className="flex items-center justify-between gap-2">
               <h3 className="font-medium">{current.name}</h3>
-              <Badge variant="destructive">{DRAFT_LABEL}</Badge>
+              <Badge variant="destructive">{t('docs.preview.draftLabel')}</Badge>
             </div>
             {current.error && (
               <p role="alert" className="text-sm text-destructive">
@@ -101,7 +106,7 @@ function Results({ run }: { run: TestRun }) {
             )}
             {(current.missingRequired ?? []).length > 0 && (
               <p className="text-xs text-muted-foreground">
-                Missing required values: {(current.missingRequired ?? []).join(', ')}
+                {t('templates.test.missing', { list: (current.missingRequired ?? []).join(', ') })}
               </p>
             )}
             {current.html && (
@@ -135,7 +140,7 @@ export function TestModePanel({ version }: { version: TemplateVersion }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-2">
         <div className="space-y-1.5">
-          <Label htmlFor={`${id}-language`}>Language</Label>
+          <Label htmlFor={`${id}-language`}>{t('templates.test.language')}</Label>
           <select
             id={`${id}-language`}
             value={language}
@@ -144,8 +149,8 @@ export function TestModePanel({ version }: { version: TemplateVersion }) {
             }}
             className="h-8 rounded-md border bg-background px-2 text-sm"
           >
-            <option value="en">English</option>
-            <option value="de">German</option>
+            <option value="en">{t('templates.test.english')}</option>
+            <option value="de">{t('templates.test.german')}</option>
           </select>
         </div>
         <Button
@@ -154,7 +159,7 @@ export function TestModePanel({ version }: { version: TemplateVersion }) {
           }}
           disabled={test.isPending}
         >
-          {test.isPending ? 'Running…' : 'Run test mode'}
+          {test.isPending ? t('templates.test.running') : t('templates.test.run')}
         </Button>
       </div>
       {test.isError && (

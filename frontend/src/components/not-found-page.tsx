@@ -1,13 +1,14 @@
 import { Link } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
+import { t } from '@/i18n'
 import { FullPageMessage } from './full-page-message'
 
 export function NotFoundPage() {
   return (
-    <FullPageMessage title="Page not found">
-      <p className="text-muted-foreground">The page you are looking for does not exist.</p>
+    <FullPageMessage title={t('notFound.title')}>
+      <p className="text-muted-foreground">{t('notFound.text')}</p>
       <Button asChild>
-        <Link to="/">Go to start page</Link>
+        <Link to="/">{t('notFound.home')}</Link>
       </Button>
     </FullPageMessage>
   )

@@ -38,6 +38,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/users': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Resolves user ids to display names and email addresses, in the order asked for and without duplicates. Only users of the caller's tenant (its ZITADEL organization) are resolved; other ids have no displayName. Answers 503 if the identity provider cannot be reached. */
+    get: operations['getApiV1Users']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/admin/field-definitions': {
     parameters: {
       query?: never
@@ -3135,6 +3152,12 @@ export interface components {
       values: components['schemas']['Map_MetadataValue']
       content?: components['schemas']['TemplateContent']
     }
+    /** UserView */
+    UserView: {
+      id: string
+      displayName?: string
+      email?: string
+    }
     /** ValidAtView */
     ValidAtView: {
       /** Format: date-time */
@@ -3402,6 +3425,45 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['Me']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1Users: {
+    parameters: {
+      query: {
+        /** @description Comma-separated user ids (ZITADEL `sub`), at most 200 */
+        ids: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['UserView'][]
+        }
+      }
+      /** @description Invalid value for: query parameter ids */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
         }
       }
       default: {

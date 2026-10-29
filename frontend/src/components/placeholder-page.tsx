@@ -1,4 +1,5 @@
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { t } from '@/i18n'
 
 /** Stand-in for screens that later issues will build. */
 export function PlaceholderPage({ title, description }: { title: string; description: string }) {
@@ -7,7 +8,7 @@ export function PlaceholderPage({ title, description }: { title: string; descrip
       <h1 className="font-heading text-2xl font-semibold">{title}</h1>
       <Card>
         <CardHeader>
-          <CardTitle>Coming soon</CardTitle>
+          <CardTitle>{t('common.comingSoon')}</CardTitle>
           <CardDescription>{description}</CardDescription>
         </CardHeader>
       </Card>

@@ -7,10 +7,11 @@ import { useApiClient } from '@/api/context'
 import { documentVersionsQuery } from '@/api/versions'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { UserName } from '@/components/shared/user-name'
+import { t } from '@/i18n'
+import { formatDate } from '@/i18n/format'
 import { StatusBadge } from './status-badge'
 import { changeKindLabel } from './version-labels'
-
-const dateFormat = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' })
 
 /**
  * The versions of a document the caller may read (US-05.1, DMS-54), newest first, with the authors' change
@@ -48,17 +49,17 @@ export function VersionHistory({ documentId }: { documentId: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Version history</CardTitle>
-        <CardDescription>Pick two versions to see what changed between them.</CardDescription>
+        <CardTitle>{t('docPanels.history.title')}</CardTitle>
+        <CardDescription>{t('docPanels.history.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {versions.isPending && <LoadingState label="Loading the versions" rows={2} />}
+        {versions.isPending && <LoadingState label={t('docPanels.history.loading')} rows={2} />}
         {versions.isError && (
           <ErrorState error={versions.error} onRetry={() => void versions.refetch()} />
         )}
         {versions.data && (
           <>
-            <ul aria-label="Versions" className="divide-y rounded-md border">
+            <ul aria-label={t('docPanels.history.list')} className="divide-y rounded-md border">
               {newestFirst.map((version) => {
                 const index = position.get(version.id) ?? 0
                 const previous = index > 0 ? all[index - 1] : undefined
@@ -76,12 +77,12 @@ export function VersionHistory({ documentId }: { documentId: string }) {
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <label htmlFor={`pick-${version.id}`} className="font-medium">
-                          Version {version.version}
+                          {t('docPanels.history.version', { label: version.version })}
                         </label>
                         <StatusBadge status={version.status} />
                         <span className="text-muted-foreground">
-                          {changeKindLabel(version.changeKind)} ·{' '}
-                          {dateFormat.format(new Date(version.createdAt))}
+                          {changeKindLabel(version.changeKind)} · {formatDate(version.createdAt)} ·{' '}
+                          {t('docPanels.history.by')} <UserName id={version.createdBy} />
                         </span>
                       </div>
                       {version.changeReason && (
@@ -94,9 +95,12 @@ export function VersionHistory({ documentId }: { documentId: string }) {
                         params={{ documentId }}
                         search={{ from: previous.id, to: version.id }}
                         className="text-sm text-primary underline-offset-4 hover:underline"
-                        aria-label={`Changes in ${version.version} since ${previous.version}`}
+                        aria-label={t('docPanels.history.changesSinceLabel', {
+                          version: version.version,
+                          previous: previous.version,
+                        })}
                       >
-                        Changes since {previous.version}
+                        {t('docPanels.history.changesSince', { previous: previous.version })}
                       </Link>
                     )}
                   </li>
@@ -104,7 +108,7 @@ export function VersionHistory({ documentId }: { documentId: string }) {
               })}
             </ul>
             <Button type="button" disabled={picked.length !== 2} onClick={compare}>
-              Compare selected versions
+              {t('docPanels.history.compare')}
             </Button>
           </>
         )}

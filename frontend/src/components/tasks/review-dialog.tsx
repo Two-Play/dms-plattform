@@ -14,7 +14,9 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { formatPlainDate, type ReviewDecision } from './inbox-items'
+import { t } from '@/i18n'
+import { formatPlainDate } from '@/i18n/format'
+import type { ReviewDecision } from './inbox-items'
 
 interface FormProps {
   task: ReviewTask
@@ -56,7 +58,11 @@ function RecertifyForm({ task, onDone, onCancel }: FormProps) {
   return (
     <form onSubmit={submit} className="grid gap-4" noValidate>
       <div className="grid gap-1.5">
-        <Label htmlFor={`${id}-date`}>Next review date{dateRequired ? ' *' : ' (optional)'}</Label>
+        <Label htmlFor={`${id}-date`}>
+          {dateRequired
+            ? t('tasks.reviewDialog.nextDateRequired')
+            : t('tasks.reviewDialog.nextDateOptional')}
+        </Label>
         <Input
           id={`${id}-date`}
           type="date"
@@ -74,14 +80,14 @@ function RecertifyForm({ task, onDone, onCancel }: FormProps) {
           className={dateError ? 'text-sm text-destructive' : 'text-xs text-muted-foreground'}
         >
           {dateError
-            ? 'Choose the next review date: the class has no review interval.'
+            ? t('tasks.reviewDialog.dateMissing')
             : task.reviewIntervalMonths !== undefined
-              ? `Default: today plus the class's review interval (${String(task.reviewIntervalMonths)} months).`
-              : 'The class has no review interval.'}
+              ? t('tasks.reviewDialog.defaultInterval', { count: task.reviewIntervalMonths })
+              : t('tasks.reviewDialog.noInterval')}
         </p>
       </div>
       <div className="grid gap-1.5">
-        <Label htmlFor={`${id}-comment`}>Note (optional)</Label>
+        <Label htmlFor={`${id}-comment`}>{t('tasks.reviewDialog.note')}</Label>
         <Textarea
           id={`${id}-comment`}
           value={comment}
@@ -97,10 +103,12 @@ function RecertifyForm({ task, onDone, onCancel }: FormProps) {
       )}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>
-          Cancel
+          {t('common.cancel')}
         </Button>
         <Button type="submit" disabled={mutation.isPending}>
-          {mutation.isPending ? 'Recertifying…' : 'Recertify'}
+          {mutation.isPending
+            ? t('tasks.reviewDialog.recertifying')
+            : t('tasks.reviewDialog.recertify')}
         </Button>
       </DialogFooter>
     </form>
@@ -135,7 +143,7 @@ function WithdrawForm({ task, onDone, onCancel }: FormProps) {
   return (
     <form onSubmit={submit} className="grid gap-4" noValidate>
       <div className="grid gap-1.5">
-        <Label htmlFor={`${id}-reason`}>Reason *</Label>
+        <Label htmlFor={`${id}-reason`}>{t('tasks.reviewDialog.reason')}</Label>
         <Textarea
           id={`${id}-reason`}
           value={reason}
@@ -151,9 +159,7 @@ function WithdrawForm({ task, onDone, onCancel }: FormProps) {
           role={reasonError ? 'alert' : undefined}
           className={reasonError ? 'text-sm text-destructive' : 'text-xs text-muted-foreground'}
         >
-          {reasonError
-            ? 'A reason is required.'
-            : 'Why the document is not needed any more; recorded in the audit trail.'}
+          {reasonError ? t('tasks.reviewDialog.reasonMissing') : t('tasks.reviewDialog.reasonHint')}
         </p>
       </div>
       {mutation.isError && (
@@ -163,10 +169,12 @@ function WithdrawForm({ task, onDone, onCancel }: FormProps) {
       )}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>
-          Cancel
+          {t('common.cancel')}
         </Button>
         <Button type="submit" variant="destructive" disabled={mutation.isPending}>
-          {mutation.isPending ? 'Withdrawing…' : 'Withdraw version'}
+          {mutation.isPending
+            ? t('tasks.reviewDialog.withdrawing')
+            : t('tasks.reviewDialog.withdrawVersion')}
         </Button>
       </DialogFooter>
     </form>
@@ -197,13 +205,17 @@ export function ReviewDialog({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {decision === 'recertify' ? 'Recertify' : 'Withdraw'}: {task.title}{' '}
-              {task.versionLabel}
+              {t(
+                decision === 'recertify'
+                  ? 'tasks.reviewDialog.recertifyTitle'
+                  : 'tasks.reviewDialog.withdrawTitle',
+                { title: task.title, version: task.versionLabel },
+              )}
             </DialogTitle>
             <DialogDescription>
               {decision === 'recertify'
-                ? `The version stays valid without a change and gets a new review date. Review date: ${formatPlainDate(task.dueOn)}.`
-                : 'The version goes out of force and readers no longer see it as valid. Other versions of the document are not affected.'}
+                ? t('tasks.reviewDialog.recertifyText', { date: formatPlainDate(task.dueOn) })
+                : t('tasks.reviewDialog.withdrawText')}
             </DialogDescription>
           </DialogHeader>
           {decision === 'recertify' ? (

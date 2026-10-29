@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router'
 import { ArrowRight } from 'lucide-react'
 import { useState } from 'react'
 import { useApiClient } from '@/api/context'
+import { t, tOptional } from '@/i18n'
 import {
   versionComparisonQuery,
   type BlockDiff,
@@ -43,7 +44,7 @@ function Spans({ spans }: { spans: Span[] }) {
               <span key={i}>
                 {space}
                 <ins className="rounded-sm bg-emerald-100 px-0.5 text-emerald-950 no-underline dark:bg-emerald-900/50 dark:text-emerald-50">
-                  <span className="sr-only">[inserted: </span>
+                  <span className="sr-only">{t('docs.compare.inserted')}</span>
                   {span.text}
                   <span className="sr-only">]</span>
                 </ins>
@@ -54,7 +55,7 @@ function Spans({ spans }: { spans: Span[] }) {
               <span key={i}>
                 {space}
                 <del className="rounded-sm bg-red-100 px-0.5 text-red-950 line-through dark:bg-red-900/50 dark:text-red-50">
-                  <span className="sr-only">[deleted: </span>
+                  <span className="sr-only">{t('docs.compare.deleted')}</span>
                   {span.text}
                   <span className="sr-only">]</span>
                 </del>
@@ -80,24 +81,16 @@ const blockBorder: Record<string, string> = {
   Unchanged: 'border-transparent',
 }
 
-const blockPrefix: Record<string, string> = {
-  ClauseRef: 'Clause',
-  Conditional: 'If',
-  Repeat: 'For each',
-  Table: 'Table',
-}
-
 function Block({ block }: { block: BlockDiff }) {
   const changes = block.changes ?? []
   const depth = Math.max(0, (block.path ?? []).length - 1)
+  const prefix = tOptional(`docs.compare.prefix.${block.kind}`)
   const text =
     block.kind === 'PageBreak' ? (
-      <span className="text-muted-foreground">Page break</span>
+      <span className="text-muted-foreground">{t('docs.compare.pageBreak')}</span>
     ) : (
       <>
-        {blockPrefix[block.kind] && (
-          <span className="mr-1 text-muted-foreground">{blockPrefix[block.kind]}</span>
-        )}
+        {prefix && <span className="mr-1 text-muted-foreground">{prefix}</span>}
         <Spans spans={block.spans ?? []} />
       </>
     )
@@ -107,7 +100,11 @@ function Block({ block }: { block: BlockDiff }) {
       className={`border-l-4 py-1 pl-3 ${blockBorder[block.status] ?? 'border-transparent'}`}
       style={{ marginLeft: `${String(depth)}rem` }}
     >
-      {block.status !== 'Unchanged' && <span className="sr-only">{block.status} block: </span>}
+      {block.status !== 'Unchanged' && (
+        <span className="sr-only">
+          {tOptional(`docs.compare.blockStatus.${block.status}`) ?? `${block.status}: `}
+        </span>
+      )}
       {block.kind === 'Heading' ? (
         <p className="font-semibold whitespace-pre-line">{text}</p>
       ) : (
@@ -138,16 +135,24 @@ function Section({ section, showUnchanged }: { section: SectionDiff; showUnchang
     <section aria-label={sectionTitle(section)} className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="font-heading font-semibold">{sectionTitle(section)}</h3>
-        {section.status === 'Inserted' && <Badge>New section</Badge>}
-        {section.status === 'Deleted' && <Badge variant="destructive">Removed section</Badge>}
-        {section.moved && <Badge variant="secondary">Moved</Badge>}
+        {section.status === 'Inserted' && <Badge>{t('docs.compare.newSection')}</Badge>}
+        {section.status === 'Deleted' && (
+          <Badge variant="destructive">{t('docs.compare.removedSection')}</Badge>
+        )}
+        {section.moved && <Badge variant="secondary">{t('docs.compare.moved')}</Badge>}
         {renamed && (
-          <Badge variant="outline">Renamed from “{section.titleBefore ?? 'untitled'}”</Badge>
+          <Badge variant="outline">
+            {t('docs.compare.renamedFrom', {
+              title: section.titleBefore ?? t('docs.compare.untitled'),
+            })}
+          </Badge>
         )}
         {section.lockedBefore !== undefined &&
           section.lockedAfter !== undefined &&
           section.lockedBefore !== section.lockedAfter && (
-            <Badge variant="outline">{section.lockedAfter ? 'Now locked' : 'Unlocked'}</Badge>
+            <Badge variant="outline">
+              {section.lockedAfter ? t('docs.compare.nowLocked') : t('docs.compare.unlocked')}
+            </Badge>
           )}
       </div>
       {blocks.map((block, i) => (
@@ -168,8 +173,11 @@ function TextChanges({ comparison }: { comparison: VersionComparison }) {
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <p className="text-muted-foreground">
           {text.changed
-            ? `${String(text.insertedWords)} words inserted, ${String(text.deletedWords)} deleted`
-            : 'The text is identical.'}
+            ? t('docs.compare.words', {
+                inserted: text.insertedWords,
+                deleted: text.deletedWords,
+              })
+            : t('docs.compare.identical')}
         </p>
         <label className="flex items-center gap-2">
           <input
@@ -180,7 +188,7 @@ function TextChanges({ comparison }: { comparison: VersionComparison }) {
               setShowUnchanged(e.target.checked)
             }}
           />
-          Show unchanged text
+          {t('docs.compare.showUnchanged')}
         </label>
       </div>
       {sections.map((section) => (
@@ -193,8 +201,8 @@ function TextChanges({ comparison }: { comparison: VersionComparison }) {
 function origin(change: ValueChange, side: 'before' | 'after'): string | undefined {
   const kind = side === 'before' ? change.originBefore : change.originAfter
   const source = side === 'before' ? change.sourceBefore : change.sourceAfter
-  if (kind === 'Computed') return 'computed'
-  if (kind === 'System' && source && source !== 'dms') return `from ${source}`
+  if (kind === 'Computed') return t('docs.compare.computed')
+  if (kind === 'System' && source && source !== 'dms') return t('docs.compare.from', { source })
   return undefined
 }
 
@@ -226,7 +234,7 @@ function ValueChanges({
       <table aria-label={label} className="w-full text-left text-sm">
         <thead className="text-muted-foreground">
           <tr>
-            <th className="py-2 pr-4 font-medium">Field</th>
+            <th className="py-2 pr-4 font-medium">{t('docs.compare.field')}</th>
             <th className="py-2 pr-4 font-medium">{comparison.from.version}</th>
             <th className="py-2 pr-4 font-medium">{comparison.to.version}</th>
           </tr>
@@ -251,13 +259,13 @@ function Summaries({ summaries }: { summaries: ChangeSummary[] }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Change summary</CardTitle>
+        <CardTitle>{t('docs.compare.summary')}</CardTitle>
       </CardHeader>
       <CardContent>
         {summaries.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No version lies between the two.</p>
+          <p className="text-sm text-muted-foreground">{t('docs.compare.noneBetween')}</p>
         ) : (
-          <ul aria-label="Change summaries" className="space-y-2 text-sm">
+          <ul aria-label={t('docs.compare.summaries')} className="space-y-2 text-sm">
             {summaries.map((s) => (
               <li key={s.versionId}>
                 <span className="font-medium">
@@ -265,7 +273,7 @@ function Summaries({ summaries }: { summaries: ChangeSummary[] }) {
                 </span>
                 {': '}
                 {s.summary ?? (
-                  <span className="text-muted-foreground">The author gave no summary.</span>
+                  <span className="text-muted-foreground">{t('docs.compare.noSummary')}</span>
                 )}
               </li>
             ))}
@@ -274,11 +282,6 @@ function Summaries({ summaries }: { summaries: ChangeSummary[] }) {
       </CardContent>
     </Card>
   )
-}
-
-const loadErrorTitles = {
-  forbidden: 'You are not allowed to read one of these versions.',
-  notFound: 'One of these versions does not exist.',
 }
 
 /**
@@ -305,46 +308,46 @@ export function VersionComparePage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Compare versions"
+        title={t('docs.compare.title')}
         description={data?.title}
         breadcrumbs={
           <Breadcrumbs>
             <Link to="/documents" className={breadcrumbLinkClass}>
-              Documents
+              {t('docs.page.breadcrumb')}
             </Link>
             <Link
               to="/documents/$documentId"
               params={{ documentId }}
               className={breadcrumbLinkClass}
             >
-              {data?.title ?? 'Document'}
+              {data?.title ?? t('common.document')}
             </Link>
-            <BreadcrumbCurrent>Compare</BreadcrumbCurrent>
+            <BreadcrumbCurrent>{t('docs.compare.breadcrumb')}</BreadcrumbCurrent>
           </Breadcrumbs>
         }
       >
         {data && (
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span>Version {data.from.version}</span>
+            <span>{t('docs.compare.version', { label: data.from.version })}</span>
             <StatusBadge status={data.from.status} />
-            <ArrowRight className="size-4" aria-label="to" />
-            <span>Version {data.to.version}</span>
+            <ArrowRight className="size-4" aria-label={t('docs.compare.to')} />
+            <span>{t('docs.compare.version', { label: data.to.version })}</span>
             <StatusBadge status={data.to.status} />
           </div>
         )}
       </PageHeader>
       {(!from || !to) && (
         <p role="alert" className="text-sm text-destructive">
-          Pick two versions in the version history of the document.
+          {t('docs.compare.pickTwo')}
         </p>
       )}
       {from && to && comparison.isPending && (
-        <LoadingState label="Loading the comparison" rows={6} />
+        <LoadingState label={t('docs.compare.loading')} rows={6} />
       )}
       {comparison.isError && (
         <ErrorState
           error={comparison.error}
-          titles={loadErrorTitles}
+          titles={{ forbidden: t('docs.compare.forbidden'), notFound: t('docs.compare.notFound') }}
           onRetry={() => void comparison.refetch()}
         />
       )}
@@ -353,9 +356,15 @@ export function VersionComparePage({
           <Summaries summaries={data.summaries ?? []} />
           <Tabs defaultValue="text">
             <TabsList>
-              <TabsTrigger value="text">Text ({changedSections})</TabsTrigger>
-              <TabsTrigger value="fields">Fields ({(data.fields ?? []).length})</TabsTrigger>
-              <TabsTrigger value="metadata">Metadata ({(data.metadata ?? []).length})</TabsTrigger>
+              <TabsTrigger value="text">
+                {t('docs.compare.tabText', { count: changedSections })}
+              </TabsTrigger>
+              <TabsTrigger value="fields">
+                {t('docs.compare.tabFields', { count: (data.fields ?? []).length })}
+              </TabsTrigger>
+              <TabsTrigger value="metadata">
+                {t('docs.compare.tabMetadata', { count: (data.metadata ?? []).length })}
+              </TabsTrigger>
             </TabsList>
             <TabsContent value="text" className="pt-2">
               <TextChanges comparison={data} />
@@ -363,16 +372,16 @@ export function VersionComparePage({
             <TabsContent value="fields" className="pt-2">
               <ValueChanges
                 changes={data.fields ?? []}
-                label="Changed field values"
-                empty="No field value changed."
+                label={t('docs.compare.changedFields')}
+                empty={t('docs.compare.noFields')}
                 comparison={data}
               />
             </TabsContent>
             <TabsContent value="metadata" className="pt-2">
               <ValueChanges
                 changes={data.metadata ?? []}
-                label="Changed metadata"
-                empty="No metadata changed."
+                label={t('docs.compare.changedMetadata')}
+                empty={t('docs.compare.noMetadata')}
                 comparison={data}
               />
             </TabsContent>

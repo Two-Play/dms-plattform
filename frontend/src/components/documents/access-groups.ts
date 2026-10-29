@@ -1,4 +1,5 @@
 import type { MetadataValue, TemplateField } from '@/api/templates'
+import { t } from '@/i18n'
 import type { FieldInput, FormInputs } from './field-values'
 
 /**
@@ -77,8 +78,7 @@ export function visibleFields(fields: TemplateField[], inputs: FormInputs): Temp
       {
         ...field,
         required: true,
-        description:
-          'Only the author, the owner and members of these groups can see the document, including in review and approval.',
+        description: t('docs.form.allowedGroupsHint'),
       },
     ]
   })

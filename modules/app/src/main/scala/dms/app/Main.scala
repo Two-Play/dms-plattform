@@ -5,7 +5,7 @@ import dms.audit.core.{AuditTrailLive, EvidenceReportStore, TsaTrust}
 import dms.authz.{Authorizer, Groups, RoleAssignments}
 import dms.db.Db
 import dms.documents.core.{AcknowledgementService, DocumentClassService, DocumentService, ReviewService}
-import dms.identity.{Authenticator, TenantDirectory, TokenVerifier}
+import dms.identity.{Authenticator, TenantDirectory, TenantOrganizations, TokenVerifier, UserDirectories}
 import dms.integration.partners.PartnerDirectories
 import dms.rendering.core.{VeraPdfValidator, WeasyPrintRenderer}
 import dms.search.core.{OpenSearch, SearchIndex}
@@ -30,10 +30,11 @@ object Main extends ZIOAppDefault:
   private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
     PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env &
     SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env &
-    EvidenceReportApi.Env & CurrentDocumentApi.Env & WebhookApi.Env
+    EvidenceReportApi.Env & CurrentDocumentApi.Env & WebhookApi.Env & UserApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
+      UserApi.endpoints.map(_.widen[Env]) ++
       DocumentClassApi.endpoints.map(_.widen[Env]) ++
       TemplateApi.endpoints.map(_.widen[Env]) ++
       TemplateLifecycleApi.endpoints.map(_.widen[Env]) ++
@@ -77,6 +78,8 @@ object Main extends ZIOAppDefault:
           Db.layer,
           TenantDirectory.layer,
           Authenticator.layer,
+          TenantOrganizations.layer,
+          UserDirectories.layer(cfg.users, cfg.auth.issuer),
           ZLayer.succeed(cfg.storage),
           ObjectStore.client,
           ObjectStore.live,

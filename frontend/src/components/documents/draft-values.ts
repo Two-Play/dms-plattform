@@ -1,6 +1,8 @@
 import type { FieldValue } from '@/api/documents'
 import type { Partner, ReferenceField } from '@/api/partners'
 import type { MetadataValue, TemplateField } from '@/api/templates'
+import { t } from '@/i18n'
+import { formatNumber, formatPlainDate } from '@/i18n/format'
 import { initialInput, initialInputs, type FieldInput, type FormInputs } from './field-values'
 
 /** The text of a single stored value as the form shows it (inverse of the form's conversion). */
@@ -46,9 +48,13 @@ export function inputFromValue(field: TemplateField, value: MetadataValue): Fiel
 export function displayValue(value: MetadataValue): string {
   switch (value.type) {
     case 'Amount':
-      return `${String(value.value)} ${value.currency}`
+      return `${formatNumber(value.value)} ${value.currency}`
+    case 'Number':
+      return formatNumber(value.value)
+    case 'Date':
+      return formatPlainDate(value.value)
     case 'YesNo':
-      return value.value ? 'Yes' : 'No'
+      return value.value ? t('common.yes') : t('common.no')
     case 'Many':
       return value.values.map(displayValue).join(', ')
     default:

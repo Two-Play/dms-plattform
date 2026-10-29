@@ -1,10 +1,7 @@
 import { ChevronRight } from 'lucide-react'
 import { Children, type ReactNode } from 'react'
 import { useDocumentTitle } from '@/lib/document-title'
-
-const texts = {
-  breadcrumb: 'Breadcrumb',
-}
+import { t } from '@/i18n'
 
 /**
  * Heading of a page: breadcrumbs, title, description and actions. Sets the browser tab title
@@ -53,7 +50,7 @@ export function PageHeader({
 export function Breadcrumbs({ children }: { children: ReactNode }) {
   const items = Children.toArray(children)
   return (
-    <nav aria-label={texts.breadcrumb}>
+    <nav aria-label={t('common.breadcrumb')}>
       <ol className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
         {items.map((item, i) => (
           <li key={i} className="inline-flex min-h-6 items-center gap-1">

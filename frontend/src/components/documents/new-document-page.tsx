@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { ErrorState } from '@/components/shared/error-state'
 import { PageHeader } from '@/components/shared/page-header'
 import { LoadingState } from '@/components/shared/states'
+import { t } from '@/i18n'
 import {
   DocumentWorkspace,
   LanguageSelect,
@@ -22,7 +23,7 @@ type EditorProps = Pick<
 export function DocumentEditor(props: EditorProps) {
   const client = useApiClient()
   const fields = useQuery(templateFieldsQuery(client, props.templateId, props.version))
-  if (fields.isPending) return <LoadingState label="Loading the template fields" rows={6} />
+  if (fields.isPending) return <LoadingState label={t('docs.new.loadingFields')} rows={6} />
   if (fields.isError) {
     return <ErrorState error={fields.error} onRetry={() => void fields.refetch()} />
   }
@@ -53,13 +54,13 @@ export function NewDocumentPage({ onSubmitted, breadcrumbs }: NewDocumentPagePro
   return (
     <div className="space-y-6">
       <PageHeader
-        title="New document"
-        description="Choose a template, fill in its fields and check the result in the live preview."
+        title={t('docs.new.title')}
+        description={t('docs.new.description')}
         breadcrumbs={breadcrumbs}
       />
       <div className="grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:max-w-3xl">
         <div className="space-y-1.5">
-          <Label htmlFor="template">Template</Label>
+          <Label htmlFor="template">{t('docs.new.template')}</Label>
           <select
             id="template"
             className={selectClass}
@@ -70,11 +71,11 @@ export function NewDocumentPage({ onSubmitted, breadcrumbs }: NewDocumentPagePro
             }}
           >
             <option value="">
-              {catalog.isPending ? 'Loading templates…' : 'Choose a template…'}
+              {catalog.isPending ? t('docs.new.loadingTemplates') : t('docs.new.chooseTemplate')}
             </option>
             {catalog.data?.map((e) => (
               <option key={`${e.templateId}:${e.version}`} value={`${e.templateId}:${e.version}`}>
-                {e.name} (version {e.version})
+                {t('docs.new.option', { name: e.name, version: e.version })}
               </option>
             ))}
           </select>
@@ -85,7 +86,7 @@ export function NewDocumentPage({ onSubmitted, breadcrumbs }: NewDocumentPagePro
             <ErrorState error={catalog.error} onRetry={() => void catalog.refetch()} />
           )}
           {catalog.data?.length === 0 && (
-            <p className="text-xs text-muted-foreground">No released templates yet.</p>
+            <p className="text-xs text-muted-foreground">{t('docs.new.noTemplates')}</p>
           )}
         </div>
         <LanguageSelect value={language} onChange={setLanguage} />

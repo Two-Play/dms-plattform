@@ -40,7 +40,7 @@ lazy val storage = module("storage", "modules/storage")
 
 lazy val identity = module("identity", "modules/identity")
   .dependsOn(kernel, db)
-  .settings(libraryDependencies ++= Dependencies.jwt)
+  .settings(libraryDependencies ++= Dependencies.jwt ++ Dependencies.json)
 
 lazy val authz = module("authz", "modules/authz")
   .dependsOn(kernel, db, identity, documentsApi)

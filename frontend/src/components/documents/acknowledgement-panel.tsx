@@ -9,8 +9,8 @@ import { useApiClient } from '@/api/context'
 import type { DocumentVersionView } from '@/api/partners'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-
-const dateTimeFormat = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+import { t } from '@/i18n'
+import { formatDateTime } from '@/i18n/format'
 
 /**
  * Acknowledgement of a published version (DMS-47, ADR 0027). Displaying the card records that the
@@ -36,7 +36,7 @@ export function AcknowledgementPanel({
   const confirm = useMutation({
     mutationFn: () => acknowledge(client, documentId, version.id),
     onSuccess: async () => {
-      toast('Read confirmed')
+      toast(t('docPanels.acknowledgement.confirmed'))
       await refresh()
     },
   })
@@ -57,21 +57,25 @@ export function AcknowledgementPanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Acknowledgement</CardTitle>
+        <CardTitle>{t('docPanels.acknowledgement.title')}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        {state.isPending && <LoadingState label="Loading the read confirmation" rows={1} />}
+        {state.isPending && (
+          <LoadingState label={t('docPanels.acknowledgement.loading')} rows={1} />
+        )}
         {acknowledgedAt ? (
           <p className="flex items-center gap-2" data-testid="acknowledged">
             <CheckCircle2 className="size-4 text-primary" aria-hidden />
-            You acknowledged version {version.version} on{' '}
-            {dateTimeFormat.format(new Date(acknowledgedAt))}.
+            {t('docPanels.acknowledgement.done', {
+              version: version.version,
+              date: formatDateTime(acknowledgedAt),
+            })}
           </p>
         ) : (
           state.data && (
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-muted-foreground">
-                Please confirm that you have read version {version.version}.
+                {t('docPanels.acknowledgement.pleaseConfirm', { version: version.version })}
               </p>
               <Button
                 size="sm"
@@ -80,7 +84,7 @@ export function AcknowledgementPanel({
                   confirm.mutate()
                 }}
               >
-                Acknowledge
+                {t('docPanels.acknowledgement.acknowledge')}
               </Button>
             </div>
           )

@@ -11,6 +11,7 @@ import {
 } from '@/api/partners'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { t } from '@/i18n'
 import { Label } from '@/components/ui/label'
 import { useDebouncedValue } from '@/lib/use-debounced-value'
 
@@ -42,7 +43,9 @@ export function PartnerPicker({ reference, selected, onSelect }: PartnerPickerPr
     search.error instanceof ApiRequestError && search.error.partnerDirectoryUnavailable
   const errorMessage = search.error
     ? unavailable
-      ? search.error.message || UNAVAILABLE_MESSAGE
+      ? search.error.message === UNAVAILABLE_MESSAGE || !search.error.message
+        ? t('errors.partnerUnavailable')
+        : search.error.message
       : search.error.message
     : undefined
 
@@ -64,7 +67,7 @@ export function PartnerPicker({ reference, selected, onSelect }: PartnerPickerPr
               setSearching(true)
             }}
           >
-            Change partner
+            {t('docs.partner.change')}
           </Button>
           <Button
             type="button"
@@ -76,7 +79,7 @@ export function PartnerPicker({ reference, selected, onSelect }: PartnerPickerPr
               setSearching(true)
             }}
           >
-            Remove partner
+            {t('docs.partner.remove')}
           </Button>
         </div>
       </div>
@@ -90,7 +93,7 @@ export function PartnerPicker({ reference, selected, onSelect }: PartnerPickerPr
       <Input
         id={id}
         type="search"
-        placeholder="Search the partner master by name or number"
+        placeholder={t('docs.partner.search')}
         value={text}
         aria-describedby={`${id}-hint`}
         onChange={(e) => {
@@ -98,19 +101,24 @@ export function PartnerPicker({ reference, selected, onSelect }: PartnerPickerPr
         }}
       />
       <p id={`${id}-hint`} className="text-xs text-muted-foreground">
-        Name and address are taken over from the partner master and cannot be edited here.
+        {t('docs.partner.hint')}
       </p>
       {errorMessage && (
         <p role="alert" className="text-xs text-destructive">
           {errorMessage}
         </p>
       )}
-      {search.isFetching && <p className="text-xs text-muted-foreground">Searching…</p>}
+      {search.isFetching && (
+        <p className="text-xs text-muted-foreground">{t('docs.partner.searching')}</p>
+      )}
       {search.isSuccess && hits.length === 0 && (
-        <p className="text-xs text-muted-foreground">No partner found.</p>
+        <p className="text-xs text-muted-foreground">{t('docs.partner.none')}</p>
       )}
       {hits.length > 0 && (
-        <ul className="divide-y rounded-md border" aria-label={`${reference.label} hits`}>
+        <ul
+          className="divide-y rounded-md border"
+          aria-label={t('docs.partner.hits', { label: reference.label })}
+        >
           {hits.map((partner) => (
             <li key={partner.id}>
               <button
@@ -138,7 +146,7 @@ export function PartnerPicker({ reference, selected, onSelect }: PartnerPickerPr
             setSearching(false)
           }}
         >
-          Keep {selected.name}
+          {t('docs.partner.keep', { name: selected.name })}
         </Button>
       )}
     </div>

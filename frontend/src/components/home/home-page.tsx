@@ -27,9 +27,8 @@ import { PageHeader } from '@/components/shared/page-header'
 import { EmptyState } from '@/components/shared/states'
 import { SystemStatusCard } from '@/components/system-status-card'
 import {
-  formatPlainDate,
   isOverdue,
-  kindLabels,
+  kindLabel,
   reviewItem,
   sortInbox,
   workflowItem,
@@ -38,90 +37,11 @@ import { TemplateStatusBadge } from '@/components/templates/template-status-badg
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardList, CardListItem, DashboardCard } from './dashboard-card'
-
-/** User-facing texts of the dashboard; one place so they can be translated later (DMS-110). */
-const texts = {
-  documentTitle: 'Home',
-  welcome: 'Welcome',
-  welcomeName: (name: string) => `Welcome, ${name}`,
-  intro: 'What needs your attention today.',
-  newDocument: 'New document',
-  search: 'Search',
-  untitled: 'Document',
-  overdue: 'Overdue',
-  version: (label: string) => `Version ${label}`,
-  changedOn: (date: string) => `Changed ${date}`,
-  publishedOn: (date: string) => `Published ${date}`,
-  reviewDue: (date: string) => `Review due ${date}`,
-  since: (date: string) => `Since ${date}`,
-  tasks: {
-    title: 'My open tasks',
-    description: 'Reviews, approvals and periodic reviews.',
-    count: (n: number) => (n === 1 ? '1 open task' : `${n} open tasks`),
-    loading: 'Loading your tasks',
-    list: 'Most urgent tasks',
-    emptyTitle: 'You are all caught up',
-    emptyText: 'New review and approval tasks will appear here and in the task inbox.',
-    viewAll: 'View all tasks',
-  },
-  acknowledgements: {
-    title: 'Read confirmations',
-    description: 'Published versions you are asked to read.',
-    count: (n: number) => (n === 1 ? '1 open read confirmation' : `${n} open read confirmations`),
-    loading: 'Loading your read confirmations',
-    list: 'Open read confirmations',
-    emptyTitle: 'No read confirmations pending',
-    emptyText: 'When a document you have to read is published, it appears here.',
-    viewAll: 'View all read confirmations',
-  },
-  drafts: {
-    title: 'My drafts',
-    description: 'Drafts you started; continue or submit them.',
-    count: (n: number) => (n === 1 ? '1 draft' : `${n} drafts`),
-    loading: 'Loading your drafts',
-    list: 'Recently changed drafts',
-    emptyTitle: 'No drafts',
-    emptyText: 'Start a new document from a template; it is saved as your draft.',
-    viewAll: 'View all documents',
-  },
-  published: {
-    title: 'Recently published',
-    description: 'The newest valid documents.',
-    loading: 'Loading recently published documents',
-    list: 'Recently published documents',
-    emptyTitle: 'Nothing published yet',
-    emptyText: 'Published documents appear here once their approval is complete.',
-    viewAll: 'Search all documents',
-  },
-  templates: {
-    title: 'Templates in testing',
-    description: 'Versions waiting for release by a second template designer.',
-    count: (n: number) => (n === 1 ? '1 template in testing' : `${n} templates in testing`),
-    loading: 'Loading templates',
-    list: 'Templates in testing',
-    emptyTitle: 'No templates awaiting release',
-    emptyText: 'Template versions moved to testing appear here.',
-    viewAll: 'View all templates',
-  },
-  compliance: {
-    title: 'Compliance',
-    description: 'Overdue periodic reviews and read confirmation rate.',
-    count: (n: number) => (n === 1 ? '1 overdue review' : `${n} overdue reviews`),
-    loading: 'Loading the compliance overview',
-    overdue: 'Overdue reviews',
-    rate: 'Read confirmation rate',
-    open: 'Open the compliance cockpit',
-  },
-}
+import { t } from '@/i18n'
+import { formatDate, formatPlainDate } from '@/i18n/format'
 
 /** How many items a card lists before "view all". */
 const TOP = 5
-
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
-
-function formatDate(iso: string): string {
-  return dateFormat.format(new Date(iso))
-}
 
 function DocumentLink({ id, title }: { id: string; title: string }) {
   return (
@@ -167,19 +87,19 @@ function TasksCard() {
   const titles = new Map((documents.data ?? []).map((d) => [d.id, d.title]))
   const items = sortInbox(
     [
-      ...(tasks.data ?? []).map((t) => workflowItem(t, undefined)),
+      ...(tasks.data ?? []).map((task) => workflowItem(task, undefined)),
       ...(reviews.data ?? []).map(reviewItem),
     ],
     now,
   )
   return (
     <DashboardCard
-      title={texts.tasks.title}
-      description={texts.tasks.description}
+      title={t('home.tasks.title')}
+      description={t('home.tasks.description')}
       icon={CheckSquare}
       count={items.length}
-      countLabel={texts.tasks.count(items.length)}
-      loadingLabel={texts.tasks.loading}
+      countLabel={t('home.tasks.count', { count: items.length })}
+      loadingLabel={t('home.tasks.loading')}
       query={{
         isPending: tasks.isPending || reviews.isPending,
         error: tasks.error ?? reviews.error,
@@ -192,13 +112,13 @@ function TasksCard() {
       empty={
         <EmptyState
           icon={CheckCircle2}
-          title={texts.tasks.emptyTitle}
-          description={texts.tasks.emptyText}
+          title={t('home.tasks.emptyTitle')}
+          description={t('home.tasks.emptyText')}
         />
       }
-      footer={<ViewAll to="/tasks" label={texts.tasks.viewAll} />}
+      footer={<ViewAll to="/tasks" label={t('home.tasks.viewAll')} />}
     >
-      <CardList label={texts.tasks.list}>
+      <CardList label={t('home.tasks.list')}>
         {items.slice(0, TOP).map((item) => {
           const overdue = isOverdue(item, now)
           return (
@@ -207,19 +127,19 @@ function TasksCard() {
               title={
                 <DocumentLink
                   id={item.documentId}
-                  title={item.title ?? titles.get(item.documentId) ?? texts.untitled}
+                  title={item.title ?? titles.get(item.documentId) ?? t('common.document')}
                 />
               }
               meta={
                 <>
                   <Badge variant={item.kind === 'Approval' ? 'default' : 'secondary'}>
-                    {kindLabels[item.kind]}
+                    {kindLabel(item.kind)}
                   </Badge>
-                  {overdue && <Badge variant="destructive">{texts.overdue}</Badge>}
+                  {overdue && <Badge variant="destructive">{t('common.overdue')}</Badge>}
                   <span>
                     {item.kind === 'ReviewDate'
-                      ? texts.reviewDue(formatPlainDate(item.review.dueOn))
-                      : texts.since(formatDate(item.createdAt))}
+                      ? t('home.reviewDue', { date: formatPlainDate(item.review.dueOn) })
+                      : t('home.since', { date: formatDate(item.createdAt) })}
                   </span>
                 </>
               }
@@ -240,12 +160,12 @@ function AcknowledgementsCard() {
   )
   return (
     <DashboardCard
-      title={texts.acknowledgements.title}
-      description={texts.acknowledgements.description}
+      title={t('home.acknowledgements.title')}
+      description={t('home.acknowledgements.description')}
       icon={BookCheck}
       count={items.length}
-      countLabel={texts.acknowledgements.count(items.length)}
-      loadingLabel={texts.acknowledgements.loading}
+      countLabel={t('home.acknowledgements.count', { count: items.length })}
+      loadingLabel={t('home.acknowledgements.loading')}
       query={{
         isPending: acknowledgements.isPending,
         error: acknowledgements.error,
@@ -255,21 +175,23 @@ function AcknowledgementsCard() {
       empty={
         <EmptyState
           icon={CheckCircle2}
-          title={texts.acknowledgements.emptyTitle}
-          description={texts.acknowledgements.emptyText}
+          title={t('home.acknowledgements.emptyTitle')}
+          description={t('home.acknowledgements.emptyText')}
         />
       }
-      footer={<ViewAll to="/tasks" label={texts.acknowledgements.viewAll} />}
+      footer={<ViewAll to="/tasks" label={t('home.acknowledgements.viewAll')} />}
     >
-      <CardList label={texts.acknowledgements.list}>
+      <CardList label={t('home.acknowledgements.list')}>
         {items.slice(0, TOP).map((a) => (
           <CardListItem
             key={`${a.documentId}:${a.versionId}`}
             title={<DocumentLink id={a.documentId} title={a.title} />}
             meta={
               <>
-                <span>{texts.version(a.versionLabel)}</span>
-                {a.publishedAt && <span>{texts.publishedOn(formatDate(a.publishedAt))}</span>}
+                <span>{t('common.version', { label: a.versionLabel })}</span>
+                {a.publishedAt && (
+                  <span>{t('home.publishedOn', { date: formatDate(a.publishedAt) })}</span>
+                )}
               </>
             }
           />
@@ -286,12 +208,12 @@ function DraftsCard() {
     .sort(newestFirst)
   return (
     <DashboardCard
-      title={texts.drafts.title}
-      description={texts.drafts.description}
+      title={t('home.drafts.title')}
+      description={t('home.drafts.description')}
       icon={FilePen}
       count={drafts.length}
-      countLabel={texts.drafts.count(drafts.length)}
-      loadingLabel={texts.drafts.loading}
+      countLabel={t('home.drafts.count', { count: drafts.length })}
+      loadingLabel={t('home.drafts.loading')}
       query={{
         isPending: documents.isPending,
         error: documents.error,
@@ -301,29 +223,29 @@ function DraftsCard() {
       empty={
         <EmptyState
           icon={FilePen}
-          title={texts.drafts.emptyTitle}
-          description={texts.drafts.emptyText}
+          title={t('home.drafts.emptyTitle')}
+          description={t('home.drafts.emptyText')}
           action={
             <Button asChild size="sm">
               <Link to="/documents/new">
                 <FilePlus />
-                {texts.newDocument}
+                {t('home.newDocument')}
               </Link>
             </Button>
           }
         />
       }
-      footer={<ViewAll to="/documents" label={texts.drafts.viewAll} />}
+      footer={<ViewAll to="/documents" label={t('home.drafts.viewAll')} />}
     >
-      <CardList label={texts.drafts.list}>
+      <CardList label={t('home.drafts.list')}>
         {drafts.slice(0, TOP).map((d) => (
           <CardListItem
             key={d.id}
             title={<DocumentLink id={d.id} title={d.title} />}
             meta={
               <>
-                <span>{texts.version(d.version)}</span>
-                <span>{texts.changedOn(formatDate(d.updatedAt))}</span>
+                <span>{t('common.version', { label: d.version })}</span>
+                <span>{t('home.changedOn', { date: formatDate(d.updatedAt) })}</span>
               </>
             }
           />
@@ -338,10 +260,10 @@ function PublishedCard() {
   const published = (documents.data ?? []).filter((d) => d.status === 'Published').sort(newestFirst)
   return (
     <DashboardCard
-      title={texts.published.title}
-      description={texts.published.description}
+      title={t('home.published.title')}
+      description={t('home.published.description')}
       icon={FileText}
-      loadingLabel={texts.published.loading}
+      loadingLabel={t('home.published.loading')}
       query={{
         isPending: documents.isPending,
         error: documents.error,
@@ -351,13 +273,13 @@ function PublishedCard() {
       empty={
         <EmptyState
           icon={FileText}
-          title={texts.published.emptyTitle}
-          description={texts.published.emptyText}
+          title={t('home.published.emptyTitle')}
+          description={t('home.published.emptyText')}
         />
       }
-      footer={<ViewAll to="/search" label={texts.published.viewAll} />}
+      footer={<ViewAll to="/search" label={t('home.published.viewAll')} />}
     >
-      <CardList label={texts.published.list}>
+      <CardList label={t('home.published.list')}>
         {published.slice(0, TOP).map((d) => (
           <CardListItem
             key={d.id}
@@ -365,8 +287,8 @@ function PublishedCard() {
             meta={
               <>
                 <StatusBadge status={d.status} />
-                <span>{texts.version(d.version)}</span>
-                <span>{texts.publishedOn(formatDate(d.updatedAt))}</span>
+                <span>{t('common.version', { label: d.version })}</span>
+                <span>{t('home.publishedOn', { date: formatDate(d.updatedAt) })}</span>
               </>
             }
           />
@@ -380,45 +302,45 @@ function TemplatesCard() {
   const client = useApiClient()
   const list = useQuery(templateAdminListQuery(client))
   const testing = (list.data ?? [])
-    .filter((t) => t.status === 'Testing')
+    .filter((tpl) => tpl.status === 'Testing')
     .sort((a, b) => a.name.localeCompare(b.name))
   return (
     <DashboardCard
-      title={texts.templates.title}
-      description={texts.templates.description}
+      title={t('home.templates.title')}
+      description={t('home.templates.description')}
       icon={LayoutTemplate}
       count={testing.length}
-      countLabel={texts.templates.count(testing.length)}
-      loadingLabel={texts.templates.loading}
+      countLabel={t('home.templates.count', { count: testing.length })}
+      loadingLabel={t('home.templates.loading')}
       query={{ isPending: list.isPending, error: list.error, refetch: () => void list.refetch() }}
       isEmpty={testing.length === 0}
       empty={
         <EmptyState
           icon={LayoutTemplate}
-          title={texts.templates.emptyTitle}
-          description={texts.templates.emptyText}
+          title={t('home.templates.emptyTitle')}
+          description={t('home.templates.emptyText')}
         />
       }
-      footer={<ViewAll to="/templates" label={texts.templates.viewAll} />}
+      footer={<ViewAll to="/templates" label={t('home.templates.viewAll')} />}
     >
-      <CardList label={texts.templates.list}>
-        {testing.slice(0, TOP).map((t) => (
+      <CardList label={t('home.templates.list')}>
+        {testing.slice(0, TOP).map((tpl) => (
           <CardListItem
-            key={t.templateId}
+            key={tpl.templateId}
             title={
               <Link
                 to="/templates/$templateId"
-                params={{ templateId: t.templateId }}
-                search={{ version: t.version }}
+                params={{ templateId: tpl.templateId }}
+                search={{ version: tpl.version }}
                 className="underline-offset-4 hover:underline"
               >
-                {t.name}
+                {tpl.name}
               </Link>
             }
             meta={
               <>
-                <TemplateStatusBadge status={t.status} />
-                <span>{texts.version(String(t.version))}</span>
+                <TemplateStatusBadge status={tpl.status} />
+                <span>{t('common.version', { label: String(tpl.version) })}</span>
               </>
             }
           />
@@ -434,12 +356,12 @@ function ComplianceCard() {
   const overdue = overview.data?.overdueReviews ?? 0
   return (
     <DashboardCard
-      title={texts.compliance.title}
-      description={texts.compliance.description}
+      title={t('home.compliance.title')}
+      description={t('home.compliance.description')}
       icon={ShieldCheck}
       count={overdue}
-      countLabel={texts.compliance.count(overdue)}
-      loadingLabel={texts.compliance.loading}
+      countLabel={t('home.compliance.count', { count: overdue })}
+      loadingLabel={t('home.compliance.loading')}
       query={{
         isPending: overview.isPending,
         error: overview.error,
@@ -449,15 +371,15 @@ function ComplianceCard() {
       empty={null}
       footer={
         <Button asChild variant="ghost" size="sm">
-          <Link to="/compliance">{texts.compliance.open}</Link>
+          <Link to="/compliance">{t('home.compliance.open')}</Link>
         </Button>
       }
     >
       {overview.data && (
         <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-2 text-sm">
-          <dt className="text-muted-foreground">{texts.compliance.overdue}</dt>
+          <dt className="text-muted-foreground">{t('home.compliance.overdue')}</dt>
           <dd className={overdue > 0 ? 'font-medium text-destructive' : undefined}>{overdue}</dd>
-          <dt className="text-muted-foreground">{texts.compliance.rate}</dt>
+          <dt className="text-muted-foreground">{t('home.compliance.rate')}</dt>
           <dd>{formatRate(overview.data.acknowledgements.rate)}</dd>
         </dl>
       )}
@@ -477,21 +399,21 @@ export function HomePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={name ? texts.welcomeName(name) : texts.welcome}
-        documentTitle={texts.documentTitle}
-        description={texts.intro}
+        title={name ? t('home.welcomeName', { name: name }) : t('home.welcome')}
+        documentTitle={t('home.documentTitle')}
+        description={t('home.intro')}
         actions={
           <>
             <Button asChild>
               <Link to="/documents/new">
                 <FilePlus />
-                {texts.newDocument}
+                {t('home.newDocument')}
               </Link>
             </Button>
             <Button asChild variant="outline">
               <Link to="/search">
                 <Search />
-                {texts.search}
+                {t('home.search')}
               </Link>
             </Button>
           </>

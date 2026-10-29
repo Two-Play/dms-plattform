@@ -1,6 +1,7 @@
 import { useGroups } from '@/api/groups'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import { t } from '@/i18n'
 
 interface GroupPickerProps {
   id: string
@@ -28,7 +29,7 @@ export function GroupPicker({ id, value, onChange, invalid, describedBy }: Group
           rows={3}
           aria-invalid={invalid || undefined}
           aria-describedby={describedBy}
-          placeholder="One group key per line"
+          placeholder={t('docs.groups.perLine')}
           value={value.join('\n')}
           onChange={(e) => {
             onChange(
@@ -40,7 +41,7 @@ export function GroupPicker({ id, value, onChange, invalid, describedBy }: Group
           }}
         />
         <p className="text-xs text-muted-foreground">
-          The list of groups could not be loaded ({groups.error.message}); enter the group keys.
+          {t('docs.groups.loadFailed', { message: groups.error.message })}
         </p>
       </div>
     )
@@ -54,7 +55,7 @@ export function GroupPicker({ id, value, onChange, invalid, describedBy }: Group
   if (entries.length === 0) {
     return (
       <p id={id} className="text-sm text-muted-foreground" aria-describedby={describedBy}>
-        There are no access groups yet. A tenant administrator creates them.
+        {t('docs.groups.none')}
       </p>
     )
   }
@@ -79,7 +80,9 @@ export function GroupPicker({ id, value, onChange, invalid, describedBy }: Group
             }}
           />
           {entry.name}
-          {entry.unknown && <span className="text-xs text-destructive">(unknown group)</span>}
+          {entry.unknown && (
+            <span className="text-xs text-destructive">{t('docs.groups.unknown')}</span>
+          )}
         </label>
       ))}
     </div>

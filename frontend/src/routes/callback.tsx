@@ -5,6 +5,7 @@ import type { SignInState } from '@/auth/oidc'
 import { safeReturnTo } from '@/auth/return-to'
 import { FullPageMessage } from '@/components/full-page-message'
 import { Button } from '@/components/ui/button'
+import { t } from '@/i18n'
 
 /**
  * Redirect target of the authorization code flow. AuthProvider exchanges the code for tokens
@@ -27,10 +28,10 @@ function CallbackPage() {
 
   if (auth.error) {
     return (
-      <FullPageMessage title="Sign-in failed">
+      <FullPageMessage title={t('auth.signInFailed')}>
         <p className="text-muted-foreground">{auth.error.message}</p>
         <Button asChild>
-          <Link to="/sign-in">Try again</Link>
+          <Link to="/sign-in">{t('common.retry')}</Link>
         </Button>
       </FullPageMessage>
     )
@@ -38,13 +39,13 @@ function CallbackPage() {
 
   if (!auth.isAuthenticated) {
     return (
-      <FullPageMessage title="No sign-in in progress">
+      <FullPageMessage title={t('auth.noSignIn')}>
         <Button asChild>
-          <Link to="/sign-in">Sign in</Link>
+          <Link to="/sign-in">{t('auth.signIn')}</Link>
         </Button>
       </FullPageMessage>
     )
   }
 
-  return <FullPageMessage title="Signing in…" />
+  return <FullPageMessage title={t('auth.signingIn')} />
 }

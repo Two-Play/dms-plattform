@@ -5,6 +5,7 @@ import {
   Breadcrumbs,
   breadcrumbLinkClass,
 } from '@/components/shared/page-header'
+import { t } from '@/i18n'
 
 export const Route = createFileRoute('/_app/documents/new')({
   component: NewDocumentRoute,
@@ -17,9 +18,9 @@ function NewDocumentRoute() {
       breadcrumbs={
         <Breadcrumbs>
           <Link to="/documents" className={breadcrumbLinkClass}>
-            Documents
+            {t('docs.page.breadcrumb')}
           </Link>
-          <BreadcrumbCurrent>New document</BreadcrumbCurrent>
+          <BreadcrumbCurrent>{t('docs.new.title')}</BreadcrumbCurrent>
         </Breadcrumbs>
       }
       onSubmitted={(documentId) => {

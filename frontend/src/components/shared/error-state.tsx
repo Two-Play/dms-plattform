@@ -9,10 +9,7 @@ import {
   isRetryable,
   type ErrorKind,
 } from './error-messages'
-
-const texts = {
-  retry: 'Try again',
-}
+import { t } from '@/i18n'
 
 /**
  * A failed load with a user-facing explanation, the backend's message if it sent one and "Try
@@ -31,7 +28,7 @@ export function ErrorState({
   className?: string
 }) {
   const kind = errorKind(error)
-  const text = errorTexts[kind]
+  const text = errorTexts(kind)
   const title = titles?.[kind] ?? text.title
   const detail = errorDetail(error)
   return (
@@ -52,7 +49,7 @@ export function ErrorState({
         {onRetry && isRetryable(kind) && (
           <Button size="sm" variant="outline" className="mt-2" onClick={onRetry}>
             <RotateCw aria-hidden="true" />
-            {texts.retry}
+            {t('common.retry')}
           </Button>
         )}
       </div>

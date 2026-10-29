@@ -1,4 +1,5 @@
 import type { NewDeputyship } from '@/api/deputyships'
+import { t } from '@/i18n'
 
 export interface DeputyshipInput {
   principal: string
@@ -26,18 +27,18 @@ export type Problems = Partial<Record<'deputy' | 'validFrom' | 'validUntil', str
 /** Client-side checks before sending; the backend checks authority and the maximum length too. */
 export function checkDeputyship(input: DeputyshipInput, now: Date = new Date()): Problems {
   const problems: Problems = {}
-  if (input.deputy.trim() === '') problems.deputy = 'Enter the user id of the deputy.'
+  if (input.deputy.trim() === '') problems.deputy = t('deputies.deputyMissing')
   else if (input.deputy.trim() === input.principal.trim()) {
-    problems.deputy = 'A person cannot be their own deputy.'
+    problems.deputy = t('deputies.ownDeputy')
   }
   const from = input.validFrom === '' ? now : new Date(input.validFrom)
-  if (Number.isNaN(from.getTime())) problems.validFrom = 'Enter a valid start.'
-  if (input.validUntil === '') problems.validUntil = 'Choose the end of the period.'
+  if (Number.isNaN(from.getTime())) problems.validFrom = t('deputies.invalidStart')
+  if (input.validUntil === '') problems.validUntil = t('deputies.endMissing')
   else {
     const until = new Date(input.validUntil)
-    if (Number.isNaN(until.getTime())) problems.validUntil = 'Enter a valid end.'
+    if (Number.isNaN(until.getTime())) problems.validUntil = t('deputies.invalidEnd')
     else if (until.getTime() <= Math.max(from.getTime(), now.getTime())) {
-      problems.validUntil = 'The period must end in the future and after it starts.'
+      problems.validUntil = t('deputies.endInPast')
     }
   }
   return problems

@@ -1,4 +1,5 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query'
+import { t } from '@/i18n'
 import type { ApiClient } from './client'
 import { requestError } from './errors'
 import type { components } from './schema'
@@ -35,11 +36,9 @@ export function decisionsFor(task: Pick<WorkflowTask, 'kind'>): VoteDecision[] {
     : ['Approve', 'ApproveWithConditions', 'RequestChanges']
 }
 
-export const decisionLabels: Record<VoteDecision, string> = {
-  Approve: 'Approve',
-  ApproveWithConditions: 'Approve with conditions',
-  RequestChanges: 'Request changes',
-  Reject: 'Reject',
+/** The label of a decision as the voter picks it, e.g. "Approve with conditions". */
+export function decisionLabel(decision: VoteDecision): string {
+  return t(`tasks.decisions.${decision}`)
 }
 
 /** The open review and approval tasks of the caller, oldest first (GET /api/v1/workflow/tasks). */

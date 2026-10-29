@@ -41,42 +41,54 @@ import {
   statusActions,
   type StatusAction,
 } from './template-lifecycle'
+import { UserName, UserNames } from '@/components/shared/user-name'
+import { t } from '@/i18n'
+import { formatDateTime } from '@/i18n/format'
+import { statusLabel } from '@/components/documents/status-label'
 import { TemplateStatusBadge } from './template-status-badge'
 import { TestModePanel } from './test-mode-panel'
-
-const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
 function History({ version }: { version: TemplateVersion }) {
   const edited = (version.editedBy ?? []).filter((u) => u !== version.createdBy)
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-      <dt className="text-muted-foreground">Status</dt>
+      <dt className="text-muted-foreground">{t('templates.page.status')}</dt>
       <dd>
         <TemplateStatusBadge status={version.status} />
       </dd>
-      <dt className="text-muted-foreground">Created</dt>
+      <dt className="text-muted-foreground">{t('templates.page.created')}</dt>
       <dd>
-        {dateTime.format(new Date(version.createdAt))} by{' '}
-        <span className="font-mono text-xs">{version.createdBy}</span>
+        {formatDateTime(version.createdAt)} {t('templates.page.by')}{' '}
+        <UserName id={version.createdBy} />
       </dd>
       {edited.length > 0 && (
         <>
-          <dt className="text-muted-foreground">Changed by</dt>
-          <dd className="font-mono text-xs">{edited.join(', ')}</dd>
+          <dt className="text-muted-foreground">{t('templates.page.changedBy')}</dt>
+          <dd>
+            <UserNames ids={edited} />
+          </dd>
         </>
       )}
       {version.releasedAt && (
         <>
-          <dt className="text-muted-foreground">Released</dt>
+          <dt className="text-muted-foreground">{t('templates.page.released')}</dt>
           <dd>
-            {dateTime.format(new Date(version.releasedAt))} by{' '}
-            <span className="font-mono text-xs">{version.releasedBy}</span>
+            {formatDateTime(version.releasedAt)}
+            {version.releasedBy && (
+              <>
+                {' '}
+                {t('templates.page.by')} <UserName id={version.releasedBy} />
+              </>
+            )}
           </dd>
         </>
       )}
-      <dt className="text-muted-foreground">Document class</dt>
+      <dt className="text-muted-foreground">{t('templates.page.documentClass')}</dt>
       <dd className="font-mono text-xs">
-        {version.documentClassId} · version {version.documentClassVersion}
+        {t('templates.page.classVersion', {
+          id: version.documentClassId,
+          version: version.documentClassVersion,
+        })}
       </dd>
     </dl>
   )
@@ -98,14 +110,19 @@ function StatusActions({ version, versions, userId }: StatusActionsProps) {
       changeTemplateStatus(client, version.templateId, version.version, to),
     onSuccess: async (updated) => {
       setDialog(undefined)
-      toast(`Version ${String(updated.version)} is now ${updated.status}.`)
+      toast(
+        t('templates.page.statusChanged', {
+          version: updated.version,
+          status: statusLabel(updated.status),
+        }),
+      )
       await queryClient.invalidateQueries({ queryKey: ['template-admin'] })
     },
   })
   const newVersion = useMutation({
     mutationFn: () => createVersion(client, version.templateId, requestOf(version)),
     onSuccess: async (created) => {
-      toast(`Version ${String(created.version)} was created as a draft.`)
+      toast(t('templates.page.versionCreated', { version: created.version }))
       await queryClient.invalidateQueries({ queryKey: ['template-admin'] })
     },
   })
@@ -145,15 +162,12 @@ function StatusActions({ version, versions, userId }: StatusActionsProps) {
               newVersion.mutate()
             }}
           >
-            New version
+            {t('templates.page.newVersion')}
           </Button>
         )}
       </div>
       {version.status === 'Testing' && isContributor && (
-        <p className="text-xs text-muted-foreground">
-          You created or changed this version. Four-eyes principle: another template designer has to
-          release it.
-        </p>
+        <p className="text-xs text-muted-foreground">{t('templates.page.fourEyes')}</p>
       )}
       {error && dialog === undefined && (
         <p role="alert" className="text-sm text-destructive">
@@ -185,11 +199,10 @@ function StatusActions({ version, versions, userId }: StatusActionsProps) {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Deprecate version {version.version}?</DialogTitle>
-            <DialogDescription>
-              The version leaves the catalog: no new documents can be created from it. Existing
-              documents keep it.
-            </DialogDescription>
+            <DialogTitle>
+              {t('templates.page.deprecateTitle', { version: version.version })}
+            </DialogTitle>
+            <DialogDescription>{t('templates.page.deprecateText')}</DialogDescription>
           </DialogHeader>
           {error && dialog === 'Deprecated' && (
             <p role="alert" className="text-sm text-destructive">
@@ -203,7 +216,7 @@ function StatusActions({ version, versions, userId }: StatusActionsProps) {
                 setDialog(undefined)
               }}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               variant="destructive"
@@ -212,7 +225,7 @@ function StatusActions({ version, versions, userId }: StatusActionsProps) {
                 change.mutate('Deprecated')
               }}
             >
-              Deprecate
+              {t('templates.page.deprecate')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -236,9 +249,9 @@ function VersionDetails({
       <Card>
         <CardHeader>
           <CardTitle role="heading" aria-level={2}>
-            Version {version.version}
+            {t('templates.page.version', { version: version.version })}
           </CardTitle>
-          <CardDescription>Status, history and status changes.</CardDescription>
+          <CardDescription>{t('templates.page.detailsText')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <History version={version} />
@@ -247,8 +260,8 @@ function VersionDetails({
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Fields</CardTitle>
-          <CardDescription>Fields of the document class the template can use.</CardDescription>
+          <CardTitle>{t('templates.page.fields')}</CardTitle>
+          <CardDescription>{t('templates.page.fieldsText')}</CardDescription>
         </CardHeader>
         <CardContent>
           <FieldsPanel key={contentText(version.content)} version={version} />
@@ -256,11 +269,9 @@ function VersionDetails({
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Content</CardTitle>
+          <CardTitle>{t('templates.page.content')}</CardTitle>
           <CardDescription>
-            {editable
-              ? 'Edit the content of this draft as JSON; the server checks it against the document class.'
-              : 'Only drafts can be changed. Create a new version to change a released template.'}
+            {editable ? t('templates.page.contentEditable') : t('templates.page.contentReadOnly')}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -275,11 +286,8 @@ function VersionDetails({
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Test mode</CardTitle>
-          <CardDescription>
-            Generated sample data reaching every condition branch, with empty optional fields and
-            long values; each case rendered like the preview.
-          </CardDescription>
+          <CardTitle>{t('templates.page.testMode')}</CardTitle>
+          <CardDescription>{t('templates.page.testModeText')}</CardDescription>
         </CardHeader>
         <CardContent>
           <TestModePanel key={contentText(version.content)} version={version} />
@@ -300,24 +308,24 @@ export function TemplatePage({ templateId, version }: { templateId: string; vers
   return (
     <div className="space-y-6">
       <PageHeader
-        title={selected?.name ?? 'Template'}
+        title={selected?.name ?? t('templates.page.template')}
         description={selected?.description}
         breadcrumbs={
           <Breadcrumbs>
             <Link to="/templates" className={breadcrumbLinkClass}>
-              Templates
+              {t('templates.page.breadcrumb')}
             </Link>
-            <BreadcrumbCurrent>{selected?.name ?? 'Template'}</BreadcrumbCurrent>
+            <BreadcrumbCurrent>{selected?.name ?? t('templates.page.template')}</BreadcrumbCurrent>
           </Breadcrumbs>
         }
       />
-      {versions.isPending && <LoadingState label="Loading the template" rows={5} />}
+      {versions.isPending && <LoadingState label={t('templates.page.loading')} rows={5} />}
       {versions.isError && (
         <ErrorState error={versions.error} onRetry={() => void versions.refetch()} />
       )}
       {selected && (
         <>
-          <nav aria-label="Versions" className="flex flex-wrap gap-2">
+          <nav aria-label={t('templates.page.versions')} className="flex flex-wrap gap-2">
             {[...all].reverse().map((v) => (
               <Link
                 key={v.version}
@@ -327,7 +335,7 @@ export function TemplatePage({ templateId, version }: { templateId: string; vers
                 aria-current={v.version === selected.version ? 'page' : undefined}
                 className="flex items-center gap-2 rounded-md border px-2 py-1 text-sm hover:bg-muted aria-[current=page]:border-primary aria-[current=page]:bg-muted"
               >
-                Version {v.version}
+                {t('templates.page.version', { version: v.version })}
                 <TemplateStatusBadge status={v.status} />
               </Link>
             ))}

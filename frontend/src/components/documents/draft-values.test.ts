@@ -117,7 +117,7 @@ describe('partnerFromDraft', () => {
 
 describe('displayValue', () => {
   it('formats stored values for reading', () => {
-    expect(displayValue(stored.fee as MetadataValue)).toBe('1250.5 CHF')
+    expect(displayValue(stored.fee as MetadataValue)).toBe('1,250.5 CHF')
     expect(displayValue(stored.international as MetadataValue)).toBe('No')
     expect(displayValue(stored.tags as MetadataValue)).toBe('one, two')
   })

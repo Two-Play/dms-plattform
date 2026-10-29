@@ -6,4 +6,6 @@ Step-up (DMS-86, ADR 0024 addendum): ZITADEL access tokens carry no `auth_time`.
 
 Tokens must be requested with the scopes `urn:zitadel:iam:org:project:id:<project id>:aud`, `urn:zitadel:iam:user:resourceowner` and `urn:zitadel:iam:org:project:roles`.
 
+User directory (DMS-110, ADR 0037): `UserDirectory` resolves user ids to display names and emails. `ZitadelUserDirectory` asks ZITADEL's user service v2 (`POST /v2/users`, filtered by ids and organization, at most 100 ids per request) with the personal access token of a read-only service user; `CachedUserDirectory` keeps answers per organization (`dms.users.cacheSeconds`, `dms.users.cacheSize`); `UserDirectories.layer` picks ZITADEL when `dms.users.tokenFile` or `dms.users.token` is set, otherwise `UserDirectory.none` (ids stay unresolved). `TenantOrganizations` reads the tenant's ZITADEL organization inside the tenant's transaction. The app exposes it as `GET /api/v1/users?ids=…` (`dms.app.UserApi`). For development, `scripts/zitadel-setup.sh` creates the machine user `dms-directory` (`ORG_OWNER_VIEWER`) and writes its token to `.local/zitadel/directory.pat`.
+
 Single module without an `api`/`core` split.

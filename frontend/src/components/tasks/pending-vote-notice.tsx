@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { decisionLabels, type WorkflowTask } from '@/api/workflow'
+import { decisionLabel, type WorkflowTask } from '@/api/workflow'
 import { clearPendingVote, loadPendingVote, type PendingVote } from '@/auth/pending-vote'
 import { Button } from '@/components/ui/button'
+import { t } from '@/i18n'
 
 /**
  * After the step-up sign-in: offers to repeat the vote that needed it, if its task is among `tasks`
@@ -17,7 +18,7 @@ export function PendingVoteNotice({
   onRepeat: (task: WorkflowTask, pending: PendingVote) => void
 }) {
   const [pending, setPending] = useState<PendingVote | undefined>(() => loadPendingVote())
-  const task = pending && tasks.find((t) => t.id === pending.taskId)
+  const task = pending && tasks.find((task) => task.id === pending.taskId)
   if (!pending || !task) return null
   return (
     <div
@@ -25,9 +26,11 @@ export function PendingVoteNotice({
       className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
     >
       <p>
-        Your vote “{decisionLabels[pending.decision]}” on {titleOf(task) ?? 'a document'} (
-        {task.stepName}) was not recorded because a fresh sign-in was needed. You are signed in
-        again and can repeat it now.
+        {t('tasks.pending.text', {
+          decision: decisionLabel(pending.decision),
+          title: titleOf(task) ?? t('tasks.aDocument'),
+          step: task.stepName,
+        })}
       </p>
       <div className="flex shrink-0 gap-2">
         <Button
@@ -37,7 +40,7 @@ export function PendingVoteNotice({
             setPending(undefined)
           }}
         >
-          Repeat vote
+          {t('tasks.pending.repeat')}
         </Button>
         <Button
           size="sm"
@@ -47,7 +50,7 @@ export function PendingVoteNotice({
             setPending(undefined)
           }}
         >
-          Discard
+          {t('tasks.pending.discard')}
         </Button>
       </div>
     </div>
