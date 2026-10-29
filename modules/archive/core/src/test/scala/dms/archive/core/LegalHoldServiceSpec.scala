@@ -426,5 +426,38 @@ object LegalHoldServiceSpec extends ZIOSpecDefault:
         bestEffort.exists(r => r.held && r.objects.isEmpty),
         badPayload.isLeft
       )
+    },
+    test("attachment files of a held document get the object legal hold like renditions (DMS-114)") {
+      for
+        e <- ZIO.service[Env]
+        t <- tenant
+        d <- document(t)
+        fileId = UUID.randomUUID()
+        key    = s"attachments/${t._1.value}/${d._1.value}/$fileId"
+        put <- e.objects.put(key, ObjectContent.Bytes(Chunk.fromArray("annex".getBytes(UTF_8))), "text/plain")
+        _   <- app(t._1)(
+          sql"""insert into dms.document_attachment_file
+                  (id, tenant_id, document_id, sha256, size_bytes, content_type, object_key, object_version,
+                   scan_status, scanner, scanned_at, created_by)
+                values ($fileId, dms.current_tenant(), ${d._1.value}, ${put.sha256.hex}, 5, ${"text/plain"}, $key,
+                        ${put.version.versionId}, ${"NotScanned"}, ${"none"}, now(), ${"author-1"})""".update
+            .run()
+        )
+        sync = LegalHoldSync(e.app, e.objects)
+        created <- holds(t._1)(_.create(hold("Annexes"), List(d._1), HoldSource.Document, manager))
+        on      <- sync.sync(t._1, d._1)
+        headOn  <- e.objects.head(key, Some(put.version.versionId))
+        locked  <- e.objects.delete(key, put.version.versionId).either
+        _       <- holds(t._1)(_.release(created.id, "Closed", manager))
+        off     <- sync.sync(t._1, d._1)
+        headOff <- e.objects.head(key, Some(put.version.versionId))
+      yield assertTrue(
+        on.held,
+        on.objects == List((key, put.version.versionId)),
+        headOn.legalHold,
+        locked.left.exists(_.isInstanceOf[StorageError.Locked]),
+        !off.held,
+        !headOff.legalHold
+      )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

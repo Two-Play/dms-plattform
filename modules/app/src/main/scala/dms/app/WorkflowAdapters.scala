@@ -60,15 +60,23 @@ object WorkflowDocuments:
     )
 
   /** SHA-256 (lowercase hex) over the canonical JSON of the content and the field values with their origin
-    * (DMS-41). Canonical: object keys sorted, no whitespace, so equal content gives an equal checksum.
+    * (DMS-41) and, if the version has attachments, their names and SHA-256 sorted by name (DMS-114): a vote
+    * and an approval cover the attachments too. Canonical: object keys sorted, no whitespace, so equal
+    * content gives an equal checksum; versions without attachments keep the checksum they had before
+    * attachments existed.
     */
   def contentSha256(v: DocumentVersion): String =
     val content =
       ContentJson.encodeStored(v.content).fromJson[Json].fold(e => throw IllegalStateException(e), identity)
-    val values = v.values.toJsonAST.fold(e => throw IllegalStateException(e), identity)
+    val values      = v.values.toJsonAST.fold(e => throw IllegalStateException(e), identity)
+    val attachments = v.attachments
+      .sortBy(a => (a.name, a.sha256))
+      .map(a => Json.Obj("name" -> Json.Str(a.name), "sha256" -> Json.Str(a.sha256)))
+    val fields = List("content" -> content, "values" -> values) ++
+      Option.when(attachments.nonEmpty)("attachments" -> Json.Arr(attachments*))
     val digest = MessageDigest
       .getInstance("SHA-256")
-      .digest(canonical(Json.Obj("content" -> content, "values" -> values)).getBytes(StandardCharsets.UTF_8))
+      .digest(canonical(Json.Obj(fields*)).getBytes(StandardCharsets.UTF_8))
     digest.map(b => f"$b%02x").mkString
 
   private def canonical(json: Json): String = json match

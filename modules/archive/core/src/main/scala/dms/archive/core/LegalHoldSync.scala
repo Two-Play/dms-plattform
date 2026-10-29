@@ -12,9 +12,10 @@ import zio.json.ast.Json
 
 import java.util.UUID
 
-/** Brings the object legal hold (S3 Object Lock, ADR 0016) of a document's renditions in line with its legal
-  * holds: on while an active hold covers the document, off otherwise. Defence in depth besides the database
-  * guard: a rendition object under legal hold cannot be deleted by anyone, not even with governance bypass.
+/** Brings the object legal hold (S3 Object Lock, ADR 0016) of a document's renditions and attachment files
+  * (DMS-114, ADR 0041) in line with its legal holds: on while an active hold covers the document, off
+  * otherwise. Defence in depth besides the database guard: an object under legal hold cannot be deleted by
+  * anyone, not even with governance bypass.
   *
   * Runs as job [[LegalHoldEvents.SyncJobKind]] after the transaction that changed the holds (the object store
   * is not transactional); the job is idempotent and reads the current state, so at-least-once delivery and
@@ -36,8 +37,8 @@ final class LegalHoldSync(db: Db, objects: ObjectStore):
       _        <- sync(tenant, document)
     yield ()
 
-  /** Sets or releases the object legal hold of every rendition of the document. Returns the objects changed
-    * or confirmed and whether they are now held.
+  /** Sets or releases the object legal hold of every rendition and attachment file of the document. Returns
+    * the objects changed or confirmed and whether they are now held.
     */
   def sync(tenant: TenantId, document: DocumentId): IO[String, SyncResult] =
     def round(attempt: Int): IO[String, SyncResult] =
@@ -61,7 +62,12 @@ final class LegalHoldSync(db: Db, objects: ObjectStore):
                 where document_id = ${document.value} and rendition_key is not null
                   and rendition_version is not null
                 order by major, minor, id""".query[(String, String)].run().toList
-        (held, renditions)
+        // Attachment files of the document (DMS-114, migration V26), whichever versions reference them.
+        val attachments =
+          sql"""select object_key, object_version from dms.document_attachment_file
+                where document_id = ${document.value}
+                order by created_at, id""".query[(String, String)].run().toList
+        (held, renditions ++ attachments)
       }
     ).mapError(e => s"legal holds of document ${document.value} could not be read: $e")
 
@@ -87,7 +93,7 @@ object LegalHoldSync:
   val MaxRounds: Int = 3
 
   /** @param objects
-    *   rendition objects whose legal hold now matches `held`
+    *   rendition and attachment objects whose legal hold now matches `held`
     */
   final case class SyncResult(held: Boolean, objects: List[(String, String)])
 

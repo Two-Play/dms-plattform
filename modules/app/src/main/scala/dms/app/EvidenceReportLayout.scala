@@ -159,6 +159,17 @@ object EvidenceReportLayout:
           "Superseded by"   -> v.supersededBy.fold("–")(_.toString)
         )
       )
+      v.attachments.filter(_.nonEmpty).foreach { attachments =>
+        add("<h3>Attachments</h3>\n")
+        table(
+          out,
+          List("Name", "Size (bytes)", "SHA-256", "Added", "Virus scan"),
+          attachments.map(a =>
+            List(a.name, a.size.toString, a.sha256, s"${at(a.addedAt)} by ${a.addedBy}", a.scanStatus)
+          ),
+          mono = Set(2)
+        )
+      }
       if v.deviationRequests.nonEmpty then
         add("<h3>Deviation requests</h3>\n")
         table(

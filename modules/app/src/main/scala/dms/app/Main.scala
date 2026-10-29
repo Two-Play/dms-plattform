@@ -6,6 +6,8 @@ import dms.authz.{Authorizer, Groups, RoleAssignments}
 import dms.db.Db
 import dms.documents.core.{
   AcknowledgementService,
+  AttachmentService,
+  AttachmentUploads,
   DocumentClassService,
   DocumentService,
   NumberRangeService,
@@ -18,12 +20,14 @@ import dms.search.core.{OpenSearch, SearchIndex}
 import dms.storage.ObjectStore
 import dms.templates.core.TemplateService
 import dms.workflow.core.{ApprovalWorkflow, Deputyships, FlowableEngine, WorkflowConfig}
+import sttp.capabilities.zio.ZioStreams
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import sttp.tapir.swagger.bundle.SwaggerInterpreter
 import sttp.tapir.ztapir.*
 import zio.*
 import zio.config.typesafe.TypesafeConfigProvider
-import zio.http.Server
+import zio.http.{Handler, Request, Response, Server, Status}
+import zio.json.*
 import zio.logging.backend.SLF4J
 
 /** API entry point. Database migrations run separately via [[Migrate]]. */
@@ -33,13 +37,13 @@ object Main extends ZIOAppDefault:
     Runtime.removeDefaultLoggers >>> SLF4J.slf4j >+>
       Runtime.setConfigProvider(TypesafeConfigProvider.fromResourcePath())
 
-  private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
+  private[app] type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
     PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env &
     SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env &
     EvidenceReportApi.Env & CurrentDocumentApi.Env & WebhookApi.Env & UserApi.Env & VersionViewApi.Env &
-    NumberRangeApi.Env
+    NumberRangeApi.Env & AttachmentApi.Env
 
-  private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
+  private[app] val apiEndpoints: List[ZServerEndpoint[Env, ZioStreams]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
       UserApi.endpoints.map(_.widen[Env]) ++
       DocumentClassApi.endpoints.map(_.widen[Env]) ++
@@ -51,6 +55,7 @@ object Main extends ZIOAppDefault:
       // Before the document endpoints: `/documents/valid-at` must not be read as a document id.
       ValidAtApi.endpoints.map(_.widen[Env]) ++
       DocumentApi.endpoints.map(_.widen[Env]) ++
+      AttachmentApi.endpoints.map(_.widen[Env]) ++
       CurrentDocumentApi.endpoints.map(_.widen[Env]) ++
       VersionCompareApi.endpoints.map(_.widen[Env]) ++
       RenditionApi.endpoints.map(_.widen[Env]) ++
@@ -72,15 +77,41 @@ object Main extends ZIOAppDefault:
       .fromEndpoints[Task](apiEndpoints.map(_.endpoint), "DMS Platform", AppBuildInfo.version)
 
   private val routes =
-    ZioHttpInterpreter().toHttp(apiEndpoints) ++ ZioHttpInterpreter().toHttp(docs)
+    (ZioHttpInterpreter().toHttp(apiEndpoints) ++ ZioHttpInterpreter().toHttp(docs))
+      .transform(limitStreamedBodies)
+
+  /** Only attachment uploads may send a body larger than [[AggregatedBodyBytes]]: the server streams such
+    * bodies instead of aggregating them, and every other endpoint would collect them in memory. Refused with
+    * 413.
+    */
+  def limitStreamedBodies[R](
+      handler: Handler[R, Response, Request, Response]
+  ): Handler[R, Response, Request, Response] =
+    Handler.fromFunctionHandler[Request] { request =>
+      if request.body.isComplete || AttachmentApi.isUpload(request.method, request.path) then handler
+      else
+        Handler.succeed(
+          Response
+            .json(
+              ApiError("body_too_large", s"request bodies are limited to $AggregatedBodyBytes bytes").toJson
+            )
+            .status(Status.RequestEntityTooLarge)
+        )
+    }
+
+  /** Request bodies up to this size are aggregated in memory; larger ones are streamed. */
+  val AggregatedBodyBytes: Int = 1024 * 1024
 
   override def run: ZIO[Any, Throwable, Unit] =
     for
-      cfg <- ZIO.config(AppConfig.config)
-      _   <- ZIO.logInfo(s"DMS platform ${AppBuildInfo.version} starting on port ${cfg.http.port}")
-      _   <- (Server.serve(routes) <&> Background.run(cfg))
+      cfg     <- ZIO.config(AppConfig.config)
+      scanner <- ZIO.fromEither(cfg.attachments.attachmentScanner).mapError(IllegalArgumentException(_))
+      _       <- ZIO.logInfo(s"DMS platform ${AppBuildInfo.version} starting on port ${cfg.http.port}")
+      _       <- (Server.serve(routes) <&> Background.run(cfg))
         .provide(
-          Server.defaultWithPort(cfg.http.port),
+          // Small bodies are aggregated as before; larger ones (attachment uploads) are streamed, so they are never
+          // held in memory as a whole (DMS-114).
+          Server.defaultWith(_.port(cfg.http.port).hybridRequestStreaming(Main.AggregatedBodyBytes)),
           ZLayer.succeed(cfg.auth),
           TokenVerifier.layer,
           Db.dataSource(cfg.database),
@@ -131,6 +162,10 @@ object Main extends ZIOAppDefault:
           OpenSearch.layer,
           SearchDocuments.layer,
           SearchIndex.layer,
+          ZLayer.succeed(cfg.attachments.settings),
+          ZLayer.succeed(scanner),
+          AttachmentService.layer,
+          AttachmentUploads.layer,
           EvidenceReportApi.auditEvidence(cfg.audit),
           EvidenceReportStore.layer
         )

@@ -216,7 +216,7 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
   private type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow &
     AcknowledgementService & ReviewService & LegalHoldService & RoleAssignments & AuditTrail & AuditEvidence &
     EvidenceReportRegistry & RenditionArchive & PdfRenderer & PdfValidator & Deputyships & RenditionSource &
-    ObjectStore & AuditCheckpoints
+    ObjectStore & AuditCheckpoints & AttachmentUploads
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -250,7 +250,10 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
       WorkflowRendition.layer,
       ApprovalWorkflow.layer,
       Deputyships.layer,
-      DocumentRenditions.layer
+      DocumentRenditions.layer,
+      ZLayer.succeed(dms.documents.AttachmentScanner.None),
+      ZLayer.succeed(dms.documents.AttachmentSettings.default),
+      AttachmentUploads.layer
     )
 
   private def token(user: UserId, signedInSecondsAgo: Long): String =
@@ -366,7 +369,10 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
   /** A published contract: reviewed with conditions, approved by a deputy on behalf of the approver,
     * rendered, published and acknowledged by one reader.
     */
-  private def publishedDocument(partner: String): ZIO[Env, Any, DocumentView] =
+  private def publishedDocument(
+      partner: String,
+      attachment: Option[(String, Array[Byte])] = None
+  ): ZIO[Env, Any, DocumentView] =
     for
       s       <- setup.await
       created <- call(
@@ -387,6 +393,7 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
           s"""{"deputy":"${deputy.value}","validUntil":"$until","roles":["Approver"],"reason":"Vacation"}"""
         )
       )
+      _        <- ZIO.foreachDiscard(attachment)((name, bytes) => attach(created, name, bytes))
       _        <- call(author, "POST", s"/api/v1/documents/${created.id}/submit")
       started  <- cases(created.id).map(_.head)
       reviewed <- vote(
@@ -404,6 +411,32 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
       _ <- call(reader, "POST", s"/api/v1/documents/${created.id}/versions/${v.current.id}/opened")
       _ <- call(reader, "POST", s"/api/v1/documents/${created.id}/versions/${v.current.id}/acknowledgement")
     yield v
+
+  /** Stores a file in object storage and attaches it to the draft (DMS-114), as the upload endpoint does. */
+  private def attach(doc: DocumentView, name: String, bytes: Array[Byte]): ZIO[Env, Any, Unit] =
+    for
+      s     <- setup.await
+      store <- ZIO.service[ObjectStore]
+      fileId = UUID.randomUUID()
+      put <- store.put(
+        s"attachments/${tenantId.value}/${doc.id}/$fileId",
+        ObjectContent.Bytes(Chunk.fromArray(bytes)),
+        "application/pdf"
+      )
+      _ <- s.app.transact(tenantId)(
+        Db.sql {
+          val _ = sql"""insert into dms.document_attachment_file
+                          (id, tenant_id, document_id, sha256, size_bytes, content_type, object_key, object_version,
+                           scan_status, scanner, scanned_at, created_by)
+                        values ($fileId, dms.current_tenant(), ${doc.id}, ${put.sha256.hex}, ${bytes.length.toLong},
+                                ${"application/pdf"}, ${put.version.key}, ${put.version.versionId}, ${"NotScanned"},
+                                ${"none"}, now(), ${author.value})""".update.run()
+          sql"""insert into dms.document_version_attachment (id, tenant_id, version_id, file_id, name, added_by)
+                values (${UUID.randomUUID()}, dms.current_tenant(), ${doc.current.id}, $fileId, $name,
+                        ${author.value})""".update.run()
+        }
+      )
+    yield ()
 
   private def createReport(user: UserId, doc: UUID, archive: Option[RenditionArchive] = None) =
     call(user, "POST", s"/api/v1/documents/$doc/evidence-report", archive = archive)
@@ -600,6 +633,35 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         check.expected.contains(doc.current.rendition.get.sha256),
         view.findings.exists(_.contains("rendition checksum mismatch")),
         parsed.integrity.auditChain.intact
+      )
+    },
+    test("attachments are listed with their checksums and read back from object storage (DMS-114)") {
+      val annex = "%PDF-1.7 annex 2".getBytes(UTF_8)
+      for
+        doc    <- publishedDocument("Cyberdyne", Some(("Annex 2.pdf", annex)))
+        intact <- createReport(auditor, doc.id).map(as[EvidenceReportView])
+        parsed <- payloadOf(auditor, intact).map(r => EvidenceReport.parse(r.text).toOption.get)
+        listed = parsed.versions.head.attachments.toList.flatten
+        check  = parsed.integrity.checks.find(_.check == "attachment checksum (Annex 2.pdf)")
+        // A recorded checksum that does not match the stored bytes is a violation.
+        _ <- ownerQuery {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          sql"""update dms.document_attachment_file set sha256 = ${"0" * 64}
+                where document_id = ${doc.id}""".update.run()
+        }
+        violated <- createReport(auditor, doc.id).map(as[EvidenceReportView])
+        broken   <- payloadOf(auditor, violated).map(r => EvidenceReport.parse(r.text).toOption.get)
+        mismatch = broken.integrity.checks.find(_.check == "attachment checksum (Annex 2.pdf)")
+      yield assertTrue(
+        intact.integrityStatus == "Intact",
+        listed.map(a => (a.name, a.sha256, a.size)) == List(
+          ("Annex 2.pdf", sha256(annex), annex.length.toLong)
+        ),
+        check.exists(c => c.status == "Match" && c.expected.contains(sha256(annex))),
+        violated.integrityStatus == "Violated",
+        mismatch.exists(_.status == "Mismatch"),
+        // the approval bound the attachments' checksums as part of the content (DMS-114)
+        broken.integrity.checks.exists(c => c.check == "approved content" && c.status == "Mismatch")
       )
     },
     test("a changed audit entry of the document makes the report Violated") {

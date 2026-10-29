@@ -122,6 +122,7 @@ The partner master is the built-in demo directory (`dms.partners.directory = dem
 #### Walkthrough: from draft to publication
 
 1. Sign in as `author`. Under Documents, open the draft "Service contract Nordlicht Logistik" (or create one with "New document" from the template "Service contract"; pick the partner under "From the partner master"). Complete the fields; the preview updates as you type.
+   Under "Attachments" add related files (drag and drop or "Choose files…"; up to 50 MB, `dms.attachments.maxSizeMegabytes`; programs and scripts are refused). They are reviewed, approved and archived with the version and taken over by the next version (DMS-114, ADR 0041). API: `POST /api/v1/documents/{id}/attachments` (multipart, part `file`), `GET …/versions/{versionId}/attachments`, `GET`/`PATCH`/`DELETE …/attachments/{attachmentId}`. No virus scanner is configured locally (`dms.attachments.scanner = none`); ADR 0041 describes plugging in ClamAV.
 2. "Submit for review": the document moves to In review and the workflow starts with the legal review.
 3. Review as `reviewer`. The web UI cannot cast votes yet (DMS-91); until then vote through the API, which approves all open tasks of the user:
 

@@ -221,7 +221,11 @@ private[core] object DocumentStore:
       .query[VersionRow]
       .run()
       .map(toVersion(_, codec))
-      .toList
+      .toList match
+      case Nil      => Nil
+      case versions =>
+        val attachments = AttachmentStore.ofDocument(id)
+        versions.map(v => v.copy(attachments = attachments.getOrElse(v.id, Nil)))
 
   /** A version, locked for a change. */
   def lockVersion(id: UUID, codec: ContentCodec)(using DbTx): Option[DocumentVersion] =
@@ -235,6 +239,7 @@ private[core] object DocumentStore:
       .run()
       .headOption
       .map(toVersion(_, codec))
+      .map(v => v.copy(attachments = AttachmentStore.ofVersion(v.id)))
 
   /** The open version of a document, locked for a change. */
   def lockOpenVersion(id: DocumentId, codec: ContentCodec)(using DbTx): Option[DocumentVersion] =
@@ -249,6 +254,7 @@ private[core] object DocumentStore:
       .run()
       .headOption
       .map(toVersion(_, codec))
+      .map(v => v.copy(attachments = AttachmentStore.ofVersion(v.id)))
 
   def insertVersion(v: DocumentVersion, codec: ContentCodec)(using DbTx): Unit =
     val _ = sql"""insert into dms.document_version

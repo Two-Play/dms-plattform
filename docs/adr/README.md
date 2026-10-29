@@ -54,3 +54,4 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0038](0038-ui-localization.md) | UI localization: German default with English, own typed message catalogs, Intl for formats | Accepted | high |
 | [0039](0039-document-view-and-on-demand-pdfs.md) | Document view and on-demand PDFs: every readable version rendered as HTML, draft PDFs and copies with change history printed on request and never stored | Accepted | high |
 | [0040](0040-number-ranges.md) | Number ranges: counter row locked in the creating transaction (gap-free on rollback), the document number as frozen core field and stable key | Accepted | medium |
+| [0041](0041-document-attachments.md) | Document attachments: files linked to versions, content-addressed per document, streamed uploads with a scan port, frozen with the version | Proposed | medium |

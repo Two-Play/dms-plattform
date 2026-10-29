@@ -571,6 +571,59 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/attachments': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Adds a file to the draft of the document. 413 above the configured size limit, 422 for blocked (executable) types, empty files and missing names, 409 if the version is not a draft or the name or the same content is already attached, 422 `attachment_infected` if the virus scanner finds something, 503 if the scanner or object storage is unavailable. The same bytes are stored once per document. */
+    post: operations['postApiV1DocumentsIdAttachments']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/attachments': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The attachments of a version, in the order they were added; requires reading the version */
+    get: operations['getApiV1DocumentsIdVersionsVersionidAttachments']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/attachments/{attachmentId}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Downloads an attachment, always as a file (Content-Disposition attachment), with its SHA-256 as Repr-Digest and ETag; requires reading the version it belongs to. The stored object is checked against the recorded SHA-256 before it is sent (500 `attachment_integrity` otherwise). */
+    get: operations['getApiV1DocumentsIdAttachmentsAttachmentid']
+    put?: never
+    post?: never
+    /** @description Removes an attachment from the draft. Only the link to the draft is removed; the stored file stays for the versions that reference it. 409 if the version is not a draft. */
+    delete: operations['deleteApiV1DocumentsIdAttachmentsAttachmentid']
+    options?: never
+    head?: never
+    /** @description Renames an attachment of the draft. 409 if the version is not a draft or the name is taken (names are unique per version, ignoring case); 422 for an invalid name. */
+    patch: operations['patchApiV1DocumentsIdAttachmentsAttachmentid']
+    trace?: never
+  }
   '/api/v1/documents/{id}/current': {
     parameters: {
       query?: never
@@ -1565,6 +1618,41 @@ export interface components {
       /** Format: date-time */
       approvedAt: string
       actingFor?: string
+    }
+    /** AttachmentUpload */
+    AttachmentUpload: {
+      /** Format: binary */
+      file: string
+    }
+    /** AttachmentView */
+    AttachmentView: {
+      /** Format: uuid */
+      id: string
+      /** Format: uuid */
+      versionId: string
+      name: string
+      contentType: string
+      /** Format: int64 */
+      size: number
+      sha256: string
+      scanStatus: string
+      addedBy: string
+      /** Format: date-time */
+      addedAt: string
+      /** Format: uuid */
+      basedOn?: string
+      downloadUrl: string
+    }
+    /** AttachmentsView */
+    AttachmentsView: {
+      /** Format: uuid */
+      versionId: string
+      version: string
+      status: string
+      editable: boolean
+      /** Format: int64 */
+      maxSizeBytes: number
+      attachments?: components['schemas']['AttachmentView'][]
     }
     /** Block */
     Block:
@@ -2743,6 +2831,10 @@ export interface components {
     /** ReleaseLegalHold */
     ReleaseLegalHold: {
       reason?: string
+    }
+    /** RenameAttachment */
+    RenameAttachment: {
+      name: string
     }
     /** RenameGroup */
     RenameGroup: {
@@ -5144,6 +5236,225 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1DocumentsIdAttachments: {
+    parameters: {
+      query?: never
+      header?: {
+        'Content-Type'?: string
+      }
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    /** @description multipart/form-data with one part `file`; its file name becomes the attachment's name */
+    requestBody: {
+      content: {
+        'multipart/form-data': components['schemas']['AttachmentUpload']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AttachmentView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdVersionsVersionidAttachments: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AttachmentsView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdAttachmentsAttachmentid: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Attachment id */
+        attachmentId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          'Content-Length': number
+          ETag: string
+          /** @description SHA-256 of the file (RFC 9530) */
+          'Repr-Digest': string
+          'X-Content-Type-Options': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': string
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter attachmentId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  deleteApiV1DocumentsIdAttachmentsAttachmentid: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Attachment id */
+        attachmentId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter attachmentId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  patchApiV1DocumentsIdAttachmentsAttachmentid: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Attachment id */
+        attachmentId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RenameAttachment']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AttachmentView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter attachmentId, Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown

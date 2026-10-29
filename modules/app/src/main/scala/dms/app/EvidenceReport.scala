@@ -33,6 +33,19 @@ final case class EvidenceValidity(from: Instant, until: Option[Instant]) derives
 final case class EvidenceRendition(objectKey: String, objectVersion: Option[String], sha256: String)
     derives JsonCodec
 
+/** An attachment of a version (DMS-114) with the SHA-256 of its stored bytes. */
+final case class EvidenceAttachment(
+    name: String,
+    contentType: String,
+    size: Long,
+    sha256: String,
+    objectKey: String,
+    objectVersion: String,
+    scanStatus: String,
+    addedBy: String,
+    addedAt: Instant
+) derives JsonCodec
+
 final case class EvidenceDeviationRequest(
     sectionId: String,
     reason: String,
@@ -129,7 +142,11 @@ final case class EvidenceVersion(
     workflow: List[EvidenceCase],
     requiresAcknowledgement: Boolean,
     acknowledgements: Option[EvidenceAcknowledgements],
-    reviews: List[EvidenceReview]
+    reviews: List[EvidenceReview],
+    /** Present only for versions with attachments (DMS-114), so reports of documents without attachments keep
+      * their layout.
+      */
+    attachments: Option[List[EvidenceAttachment]] = None
 ) derives JsonCodec
 
 final case class EvidenceLegalHold(
@@ -284,13 +301,16 @@ object EvidenceReport:
       tenantId: UUID,
       facts: EvidenceFacts,
       chain: ChainIntegrity,
-      renditions: Map[UUID, RenditionCheck]
+      renditions: Map[UUID, RenditionCheck],
+      attachments: Map[UUID, RenditionCheck] = Map.empty
   ): EvidenceReportPayload =
     val d         = facts.details.document
     val versions  = facts.details.versions
     val chainView = chainOf(chain, facts.entries)
-    val checks    = versions.flatMap(v => versionChecks(v, facts) ++ renditionCheck(v, renditions))
-    val findings  =
+    val checks    = versions.flatMap(v =>
+      versionChecks(v, facts) ++ renditionCheck(v, renditions) ++ attachmentChecks(v, attachments)
+    )
+    val findings =
       chainFindings(chainView) ++ checks
         .filter(_.status != Match)
         .map(c =>
@@ -405,7 +425,22 @@ object EvidenceReport:
             t.newVersionId,
             t.comment
           )
+        ),
+      attachments = Option.when(v.attachments.nonEmpty)(
+        v.attachments.map(a =>
+          EvidenceAttachment(
+            a.name,
+            a.contentType,
+            a.size,
+            a.sha256,
+            a.objectKey,
+            a.objectVersion,
+            a.scanStatus.toString,
+            a.addedBy.value,
+            a.addedAt
+          )
         )
+      )
     )
 
   /** In force from its effective start until its successor's effective start or its withdrawal (DMS-53). */
@@ -551,4 +586,15 @@ object EvidenceReport:
         case Some(RenditionCheck.Unverified(d)) => (Unverified, Some(d))
         case None                               => (Unverified, Some("not checked"))
       EvidenceCheck(v.id, v.label, "rendition checksum", status, Some(r.sha256), detail)
+    }
+
+  /** Every attachment file read back from object storage against its SHA-256 (DMS-114), keyed by file id. */
+  private def attachmentChecks(v: DocumentVersion, results: Map[UUID, RenditionCheck]): List[EvidenceCheck] =
+    v.attachments.map { a =>
+      val (status, detail) = results.get(a.fileId) match
+        case Some(RenditionCheck.Matches)       => (Match, None)
+        case Some(RenditionCheck.Mismatch(d))   => (Mismatch, Some(d))
+        case Some(RenditionCheck.Unverified(d)) => (Unverified, Some(d))
+        case None                               => (Unverified, Some("not checked"))
+      EvidenceCheck(v.id, v.label, s"attachment checksum (${a.name})", status, Some(a.sha256), detail)
     }

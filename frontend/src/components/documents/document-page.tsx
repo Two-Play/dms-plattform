@@ -23,6 +23,7 @@ import { DocumentEditor } from './new-document-page'
 import { StatusBadge } from './status-badge'
 import { WorkflowPanel } from './workflow-panel'
 import { AcknowledgementPanel } from './acknowledgement-panel'
+import { AttachmentsPanel } from './attachments-panel'
 import { EvidenceReportAction } from './evidence-report-panel'
 import { DocumentNumberAction } from './document-number-action'
 import { VersionHistory } from './version-history'
@@ -187,6 +188,11 @@ export function DocumentPage({
               <VersionMetadata document={document.data} version={shown} />
             </div>
           )}
+          <AttachmentsPanel
+            key={`attachments-${shown.id}`}
+            documentId={document.data.id}
+            versionId={shown.id}
+          />
           {!showingOther && asksForAcknowledgement(shown) && (
             <AcknowledgementPanel key={shown.id} documentId={document.data.id} version={shown} />
           )}

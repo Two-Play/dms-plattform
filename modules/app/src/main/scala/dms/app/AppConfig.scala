@@ -1,6 +1,7 @@
 package dms.app
 
 import dms.db.DbConfig
+import dms.documents.{AttachmentScanner, AttachmentSettings}
 import dms.documents.core.DocumentSettings
 import dms.identity.{AuthConfig, UserDirectoryConfig}
 import dms.integration.partners.PartnerDirectoryConfig
@@ -109,6 +110,33 @@ final case class WebhooksConfig(
       maxAttempts.max(1)
     )
 
+/** Attachments of document versions (DMS-114, ADR 0041).
+  *
+  * @param maxSizeMegabytes
+  *   largest accepted file in MiB
+  * @param blockedExtensions
+  *   comma-separated file name extensions that are refused; empty: the built-in list of executable types
+  * @param scanner
+  *   virus scanner before an attachment becomes available: `none` (no-op adapter, files are stored as
+  *   NotScanned); see ADR 0041 for plugging in ClamAV
+  */
+final case class AttachmentsConfig(maxSizeMegabytes: Int, blockedExtensions: String, scanner: String):
+  def settings: AttachmentSettings =
+    val configured =
+      blockedExtensions
+        .split(',')
+        .map(_.trim.stripPrefix(".").toLowerCase(java.util.Locale.ROOT))
+        .filter(_.nonEmpty)
+    AttachmentSettings(
+      maxSizeMegabytes.max(1).toLong * 1024 * 1024,
+      if configured.isEmpty then AttachmentSettings.DefaultBlockedExtensions else configured.toSet
+    )
+
+  def attachmentScanner: Either[String, AttachmentScanner] =
+    scanner.trim.toLowerCase(java.util.Locale.ROOT) match
+      case "none" | "" => Right(AttachmentScanner.None)
+      case other       => Left(s"unknown attachment scanner '$other'; supported: none")
+
 final case class AppConfig(
     http: HttpConfig,
     auth: AuthConfig,
@@ -123,7 +151,8 @@ final case class AppConfig(
     rendering: RendererConfig,
     search: SearchConfig,
     webhooks: WebhooksConfig,
-    users: UserDirectoryConfig
+    users: UserDirectoryConfig,
+    attachments: AttachmentsConfig
 )
 
 object AppConfig:

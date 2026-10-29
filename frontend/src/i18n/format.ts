@@ -51,6 +51,19 @@ export function formatNumber(value: number, options?: Intl.NumberFormatOptions):
   return new Intl.NumberFormat(intlLocale(), options).format(value)
 }
 
+/** A file size, e.g. "512 byte", "12.3 kB" or "4,5 MB" (powers of 1024, like file managers). */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024)
+    return formatNumber(bytes, { style: 'unit', unit: 'byte', unitDisplay: 'short' })
+  const kilo = bytes < 1024 * 1024
+  return formatNumber(kilo ? bytes / 1024 : bytes / (1024 * 1024), {
+    style: 'unit',
+    unit: kilo ? 'kilobyte' : 'megabyte',
+    unitDisplay: 'short',
+    maximumFractionDigits: 1,
+  })
+}
+
 /** A share from 0 to 1 as percentage, e.g. "87 %" or "87%". */
 export function formatPercent(value: number, maximumFractionDigits = 0): string {
   return formatNumber(value, { style: 'percent', maximumFractionDigits })

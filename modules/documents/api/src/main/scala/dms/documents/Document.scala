@@ -96,6 +96,9 @@ final case class Document(
   *   default for major versions only (DMS-46); decided when the version is created
   * @param publishedAt
   *   when the version became valid (Approved to Published), recorded by the database (DMS-47)
+  * @param attachments
+  *   the files attached to the version (DMS-114), in the order they were added; they change only while the
+  *   version is a draft
   */
 final case class DocumentVersion(
     id: UUID,
@@ -122,7 +125,8 @@ final case class DocumentVersion(
     validFrom: Option[LocalDate] = None,
     supersededBy: Option[UUID] = None,
     requiresAcknowledgement: Boolean = true,
-    publishedAt: Option[Instant] = None
+    publishedAt: Option[Instant] = None,
+    attachments: List[VersionAttachment] = Nil
 ):
   def label: String = Versioning.label(number, status, workingState)
 
