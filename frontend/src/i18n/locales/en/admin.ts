@@ -1,10 +1,12 @@
 /** Administration, access groups, deputyships and role names. */
 export const admin = {
   title: 'Admin',
-  description: 'Access groups for confidential documents, deputyships and the system status.',
+  description:
+    'Access groups for confidential documents, number ranges, deputyships and the system status.',
   loading: 'Loading',
   onlyAdmins: 'Only tenant administrators can use the administration.',
   tabGroups: 'Access groups',
+  tabNumberRanges: 'Number ranges',
   tabDeputyships: 'Deputyships',
   tabSystem: 'System status',
   setDeputy: 'Set a deputy',

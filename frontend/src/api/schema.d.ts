@@ -1363,6 +1363,111 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/admin/number-ranges': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The number ranges of the tenant by key, each with the number the next document would get */
+    get: operations['getApiV1AdminNumberRanges']
+    put?: never
+    /** @description Creates a number range. 422 for an invalid key, name, pattern or start value, or a yearly reset without year in the pattern; 409 for a taken key. */
+    post: operations['postApiV1AdminNumberRanges']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/number-ranges/preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Checks a pattern and shows the first number of a period this year, e.g. while typing */
+    post: operations['postApiV1AdminNumberRangesPreview']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/number-ranges/{id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description A number range */
+    get: operations['getApiV1AdminNumberRangesId']
+    /** @description Changes name, pattern, start value and yearly reset. Numbers already assigned stay; the change applies to the next number. */
+    put: operations['putApiV1AdminNumberRangesId']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/number-range-assignments': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Every document class with its own and its effective number range, by key */
+    get: operations['getApiV1AdminNumberRangeAssignments']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/number-range-assignments/{classId}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Assigns a number range to a class; subclasses inherit it unless they have their own. Without `numberRangeId` the class explicitly gets no number range. */
+    put: operations['putApiV1AdminNumberRangeAssignmentsClassid']
+    post?: never
+    /** @description Removes the class's own assignment: it inherits the number range of its parent again */
+    delete: operations['deleteApiV1AdminNumberRangeAssignmentsClassid']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/number': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Assigns a document number manually (DMS-113), e.g. one taken over from a previous system. The reason is required (422) and recorded in the audit trail; the number must be free in the tenant (409). A document without number gets one at any time except while a version is in review or approval; an existing number can only be replaced while every version is a draft (409). */
+    post: operations['postApiV1DocumentsIdNumber']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -1795,6 +1900,7 @@ export interface components {
       renditionSha256?: string
       metadata: components['schemas']['Map_MetadataValue']
       links: components['schemas']['CurrentLinks']
+      documentNumber?: string
     }
     /** Date */
     Date: {
@@ -1970,6 +2076,7 @@ export interface components {
       /** Format: date-time */
       updatedAt: string
       mine: boolean
+      documentNumber?: string
     }
     /** DocumentVersionView */
     DocumentVersionView: {
@@ -2033,6 +2140,8 @@ export interface components {
       current: components['schemas']['DocumentVersionView']
       legalHold: boolean
       legalHolds?: components['schemas']['LegalHoldRefView'][]
+      documentNumber?: string
+      canAssignNumber: boolean
     }
     /** EditorialCheckView */
     EditorialCheckView: {
@@ -3446,6 +3555,89 @@ export interface components {
        * @enum {string}
        */
       type: 'YesNo'
+    }
+    /** NumberRangeView */
+    NumberRangeView: {
+      /** Format: uuid */
+      id: string
+      key: string
+      name: string
+      pattern: string
+      /** Format: int64 */
+      startValue: number
+      yearlyReset: boolean
+      nextNumber: string
+      /** Format: int64 */
+      nextCounter: number
+      classIds?: string[]
+      createdBy: string
+      /** Format: date-time */
+      createdAt: string
+      /** Format: date-time */
+      updatedAt: string
+    }
+    /** CreateNumberRange */
+    CreateNumberRange: {
+      key: string
+      name: string
+      pattern: string
+      /** Format: int64 */
+      startValue?: number
+      yearlyReset?: boolean
+    }
+    /** ChangeNumberRange */
+    ChangeNumberRange: {
+      name: string
+      pattern: string
+      /** Format: int64 */
+      startValue: number
+      yearlyReset: boolean
+    }
+    /** NumberRangePreviewRequest */
+    NumberRangePreviewRequest: {
+      pattern: string
+      /** Format: int64 */
+      startValue?: number
+      yearlyReset?: boolean
+    }
+    /** NumberRangePreview */
+    NumberRangePreview: {
+      valid: boolean
+      problems?: string[]
+      example?: string
+    }
+    /** ClassNumberRangeView */
+    ClassNumberRangeView: {
+      /** Format: uuid */
+      classId: string
+      classKey: string
+      label: string
+      /** Format: uuid */
+      parentId?: string
+      mode: string
+      /** Format: uuid */
+      numberRangeId?: string
+      /** Format: uuid */
+      effectiveRangeId?: string
+      /** Format: uuid */
+      inheritedFrom?: string
+    }
+    /** AssignNumberRange */
+    AssignNumberRange: {
+      /** Format: uuid */
+      numberRangeId?: string
+    }
+    /** AssignDocumentNumber */
+    AssignDocumentNumber: {
+      number: string
+      reason: string
+    }
+    /** DocumentNumberView */
+    DocumentNumberView: {
+      /** Format: uuid */
+      documentId: string
+      documentNumber: string
+      previous?: string
     }
   }
   responses: never
@@ -7184,6 +7376,365 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter deliveryId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1AdminNumberRanges: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberRangeView'][]
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1AdminNumberRanges: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateNumberRange']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberRangeView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1AdminNumberRangesPreview: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NumberRangePreviewRequest']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberRangePreview']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1AdminNumberRangesId: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Number range id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberRangeView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1AdminNumberRangesId: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Number range id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ChangeNumberRange']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberRangeView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1AdminNumberRangeAssignments: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ClassNumberRangeView'][]
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1AdminNumberRangeAssignmentsClassid: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        classId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AssignNumberRange']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ClassNumberRangeView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  deleteApiV1AdminNumberRangeAssignmentsClassid: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        classId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ClassNumberRangeView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1DocumentsIdNumber: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AssignDocumentNumber']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentNumberView']
+        }
+      }
+      /** @description Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown

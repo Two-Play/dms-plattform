@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { t } from '@/i18n'
 import { GroupsPanel } from './groups-panel'
+import { NumberRangesPanel } from './number-ranges-panel'
 
 /** All deputyships of the tenant for tenant administrators (DMS-99). */
 function DeputyshipsPanel() {
@@ -50,8 +51,9 @@ function DeputyshipsPanel() {
 }
 
 /**
- * Administration for tenant administrators: access groups for confidential documents (DMS-105)
- * and the deputyships of everyone (DMS-99). The API enforces the permissions.
+ * Administration for tenant administrators: access groups for confidential documents (DMS-105),
+ * number ranges (DMS-113) and the deputyships of everyone (DMS-99). The API enforces the
+ * permissions.
  */
 export function AdminPage() {
   const me = useMe()
@@ -72,11 +74,15 @@ export function AdminPage() {
       <Tabs defaultValue="groups">
         <TabsList>
           <TabsTrigger value="groups">{t('admin.tabGroups')}</TabsTrigger>
+          <TabsTrigger value="number-ranges">{t('admin.tabNumberRanges')}</TabsTrigger>
           <TabsTrigger value="deputyships">{t('admin.tabDeputyships')}</TabsTrigger>
           <TabsTrigger value="system">{t('admin.tabSystem')}</TabsTrigger>
         </TabsList>
         <TabsContent value="groups" className="pt-4">
           <GroupsPanel />
+        </TabsContent>
+        <TabsContent value="number-ranges" className="pt-4">
+          <NumberRangesPanel />
         </TabsContent>
         <TabsContent value="deputyships" className="pt-4">
           <DeputyshipsPanel />
