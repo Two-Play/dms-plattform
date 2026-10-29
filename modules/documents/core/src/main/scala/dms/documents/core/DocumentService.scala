@@ -781,6 +781,10 @@ final class DocumentService(
       carried   = baseRequests.map(r =>
         r.copy(id = UUID.randomUUID(), versionId = versionId, basedOn = Some(r.id))
       )
+      // Attachments are taken over as links to the same files (DMS-114): no bytes are copied.
+      attachments = base.attachments.map(a =>
+        a.copy(id = UUID.randomUUID(), versionId = versionId, basedOn = Some(a.id))
+      )
       version = base.copy(
         id = versionId,
         number = number,
@@ -801,12 +805,14 @@ final class DocumentService(
         supersededBy = None,
         requiresAcknowledgement = requiresAcknowledgement.getOrElse(
           kind == ChangeKind.Major || settings.minorVersionsRequireAcknowledgement
-        )
+        ),
+        attachments = attachments
       )
       _ <- sql {
         DocumentStore.insertVersion(version, templates)
         DocumentStore.insertWorkingState(version, actor, templates)
         carried.foreach(DocumentStore.insertDeviationRequest)
+        attachments.foreach(AttachmentStore.carryOver)
       }.mapError(conflict(s"document ${id.value} was changed concurrently"))
       _ <- record(
         actor,
@@ -817,7 +823,8 @@ final class DocumentService(
           "changeKind"              -> Json.Str(kind.toString),
           "reason"                  -> changeReason.fold(Json.Null)(Json.Str(_)),
           "requiresAcknowledgement" -> Json.Bool(version.requiresAcknowledgement),
-          "deviationRequests"       -> Json.Arr(carried.map(r => Json.Str(r.id.toString))*)
+          "deviationRequests"       -> Json.Arr(carried.map(r => Json.Str(r.id.toString))*),
+          "attachments"             -> Json.Arr(attachments.map(a => Json.Str(a.id.toString))*)
         )
       )
       _ <- publish("document.version-created", document, version)

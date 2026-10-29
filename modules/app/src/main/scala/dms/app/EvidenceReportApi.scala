@@ -16,6 +16,8 @@ import dms.db.{Db, DbError, Jsonb}
 import dms.documents.core.{
   AcknowledgementError,
   AcknowledgementService,
+  AttachmentError,
+  AttachmentUploads,
   DocumentDetails,
   DocumentError,
   ReviewService
@@ -68,7 +70,8 @@ final case class EvidenceReportView(
   */
 object EvidenceReportApi:
   type Env = DocumentApi.Env & AcknowledgementService & ReviewService & LegalHoldService & RoleAssignments &
-    AuditTrail & AuditEvidence & EvidenceReportRegistry & RenditionArchive & PdfRenderer & PdfValidator
+    AuditTrail & AuditEvidence & EvidenceReportRegistry & RenditionArchive & PdfRenderer & PdfValidator &
+    AttachmentUploads
 
   /** Audit action of a created report. */
   val CreatedAction: String = "document.evidence-report-created"
@@ -217,6 +220,7 @@ object EvidenceReportApi:
       // Outside the transaction: the chain verification opens its own, the renditions come from object storage.
       chain      <- evidence.integrity(p.tenantId).mapError(DocumentApi.toResponse)
       renditions <- checkRenditions(facts.details.versions)
+      files      <- checkAttachments(facts.details.versions)
       now        <- Clock.instant.map(_.truncatedTo(ChronoUnit.MICROS))
       reportId = UUID.randomUUID()
       payload  = EvidenceReport.build(
@@ -226,7 +230,8 @@ object EvidenceReportApi:
         p.tenantId.value,
         facts,
         chain,
-        renditions
+        renditions,
+        files
       )
       text   = EvidenceReport.canonical(payload)
       stored = StoredEvidenceReport(
@@ -288,6 +293,27 @@ object EvidenceReportApi:
               case other                       => ZIO.succeed(RenditionCheck.Unverified(other.describe))
             }
             .map(versionId -> _)
+        }
+        .map(_.toMap)
+    )
+
+  /** Reads every attachment file back from object storage and compares it with its recorded SHA-256
+    * (DMS-114); a file referenced by several versions is read once.
+    */
+  private def checkAttachments(
+      versions: List[DocumentVersion]
+  ): URIO[AttachmentUploads, Map[UUID, RenditionCheck]] =
+    ZIO.serviceWithZIO[AttachmentUploads](uploads =>
+      ZIO
+        .foreach(versions.flatMap(_.attachments).distinctBy(_.fileId)) { a =>
+          uploads
+            .verify(a)
+            .as(RenditionCheck.Matches)
+            .catchAll {
+              case AttachmentError.Integrity(m) => ZIO.succeed(RenditionCheck.Mismatch(m))
+              case other                        => ZIO.succeed(RenditionCheck.Unverified(other.describe))
+            }
+            .map(a.fileId -> _)
         }
         .map(_.toMap)
     )
