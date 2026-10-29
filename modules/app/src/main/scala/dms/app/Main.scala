@@ -56,10 +56,9 @@ object Main extends ZIOAppDefault:
       WordTemplateApi.endpoints.map(_.widen[Env]) ++
       // Before the document endpoints: `/documents/valid-at` must not be read as a document id.
       ValidAtApi.endpoints.map(_.widen[Env]) ++
-      // Before the document endpoints: `POST /documents/word` must not be read as a document id.
-      FileDocumentApi.endpoints.map(_.widen[Env]) ++
       DocumentApi.endpoints.map(_.widen[Env]) ++
       AttachmentApi.endpoints.map(_.widen[Env]) ++
+      FileDocumentApi.endpoints.map(_.widen[Env]) ++
       CurrentDocumentApi.endpoints.map(_.widen[Env]) ++
       LibraryApi.endpoints.map(_.widen[Env]) ++
       VersionCompareApi.endpoints.map(_.widen[Env]) ++
