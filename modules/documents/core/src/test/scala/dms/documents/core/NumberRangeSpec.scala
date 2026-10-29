@@ -236,6 +236,18 @@ object NumberRangeSpec extends ZIOSpecDefault:
       p <- inTenant(f.tenant)(s.changeStatus(v.id, Publish, approver))
     yield (a, p)
 
+  /** Sets the creation time, which the database records (`now()`), e.g. to a past year; the guard that keeps
+    * a document's identity is bypassed for this test setup only (superuser, replication role).
+    */
+  private def createdAt(doc: DocumentId, at: String): ZIO[Env, DbError, Unit] =
+    val time = java.time.OffsetDateTime.parse(at)
+    ZIO.serviceWithZIO[Env](
+      _.owner.transactSystem(Db.sql {
+        val _ = sql"set local session_replication_role = replica".update.run()
+        val _ = sql"update dms.document set created_at = $time where id = ${doc.value}".update.run()
+      })
+    )
+
   private def counterRows(f: Fixture): ZIO[Env, DbError, List[(Int, Long)]] =
     ZIO.serviceWithZIO[Env](
       _.owner.transactSystem(
@@ -446,6 +458,111 @@ object NumberRangeSpec extends ZIOSpecDefault:
         found.contains(doc),
         unknown.isEmpty,
         isolated.isEmpty
+      )
+    },
+    test(
+      "backfill numbers existing documents in creation order with the counter of their creation year, gap-free"
+    ) {
+      for
+        f         <- fixture
+        _         <- TestClock.setTime(Instant.parse("2025-03-01T10:00:00Z"))
+        first     <- create(f)
+        _         <- TestClock.setTime(Instant.parse("2025-07-01T10:00:00Z"))
+        published <- create(
+          f,
+          reviewValues + ("validFrom" -> FieldEntry(
+            MetadataValue.Date(LocalDate.of(2025, 1, 1)),
+            ValueOrigin.Manual
+          ))
+        )
+        _        <- approveAndPublish(f, published._1.id)
+        _        <- TestClock.setTime(Instant.parse("2026-02-01T10:00:00Z"))
+        third    <- create(f)
+        inReview <- create(f)
+        s        <- documents
+        _        <- inTenant(f.tenant)(s.submit(inReview._1.id, author))
+        _        <- createdAt(first._1.id, "2025-03-01T10:00:00Z")
+        _        <- createdAt(published._1.id, "2025-07-01T10:00:00Z")
+        _        <- createdAt(third._1.id, "2026-02-01T10:00:00Z")
+        _        <- createdAt(inReview._1.id, "2026-02-02T10:00:00Z")
+        _        <- TestClock.setTime(Instant.parse("2026-05-04T10:00:00Z"))
+        range    <- numbered(f, "POL-{YYYY}-{NNNN}")
+        onCreate <- create(f)
+        service  <- ranges
+        scope    <- inTenant(f.tenant)(service.backfillScope(f.classId.value))
+        e        <- ZIO.service[Env]
+        _        <- e.audit.set(Nil)
+        outcomes <- ZIO.foreach(scope.documents)(id => inTenant(f.tenant)(s.numberExisting(id, admin)))
+        events   <- e.audit.get
+        again    <- inTenant(f.tenant)(service.backfillScope(f.classId.value))
+        repeated <- inTenant(f.tenant)(s.numberExisting(first._1.id, admin))
+        counters <- counterRows(f)
+        firstDoc <- inTenant(f.tenant)(s.get(first._1.id))
+        oldDoc   <- inTenant(f.tenant)(s.get(published._1.id))
+      yield assertTrue(
+        onCreate._1.number.contains("POL-2026-0001"),
+        scope.range.id == range.range.id,
+        scope.classIds == Set(f.classId.value),
+        scope.documents == List(first._1.id, published._1.id, third._1.id, inReview._1.id),
+        outcomes == List(
+          BackfillOutcome.Numbered("POL-2025-0001"),
+          BackfillOutcome.Numbered("POL-2025-0002"),
+          BackfillOutcome.Numbered("POL-2026-0002"),
+          BackfillOutcome.Skipped(BackfillSkip.InReview)
+        ),
+        // The skipped document took no counter value: no gap.
+        counters == List(2025 -> 3L, 2026 -> 3L),
+        again.documents == List(inReview._1.id),
+        repeated == BackfillOutcome.Skipped(BackfillSkip.HasNumber),
+        firstDoc.document.number.contains("POL-2025-0001"),
+        firstDoc.open.flatMap(numberOf).contains("POL-2025-0001"),
+        firstDoc.open.exists(_.workingState == 2),
+        // The approved version keeps its frozen values; the document carries the number for later versions.
+        oldDoc.document.number.contains("POL-2025-0002"),
+        oldDoc.versions.forall(v => !v.metadataSnapshot.exists(_.values.contains(CoreFields.DocumentNumber))),
+        events.count(_.action == "document.number-assigned") == 3,
+        events
+          .filter(_.action == "document.number-assigned")
+          .forall(ev =>
+            ev.actor.id == admin.value &&
+              ev.details.value
+                .fromJson[Json.Obj]
+                .toOption
+                .exists(d =>
+                  d.get("backfill").contains(Json.Bool(true)) && d.get("manual").contains(Json.Bool(false)) &&
+                    d.get("numberRange").contains(Json.Str("policies"))
+                )
+          )
+      )
+    },
+    test("backfill covers subclasses that inherit the range, needs the unit for {OU} and a range at all") {
+      for
+        _      <- TestClock.setTime(Instant.parse("2026-05-04T10:00:00Z"))
+        f      <- fixture
+        e      <- ZIO.service[Env]
+        noUnit <- create(f, reviewValues - "organizationalUnit")
+        unit   <- create(f)
+        none   <- ranges.flatMap(r => inTenant(f.tenant)(r.backfillScope(f.classId.value))).either
+        classes = DocumentClassService(RecordingAuditTrail(e.audit))
+        child <- inTenant(f.tenant)(
+          classes.createClass("hr-policy", Some(f.classId), ClassDraft("HR policy", None, Nil), admin)
+        )
+        _        <- numbered(f, "{OU}-{NNN}", yearlyReset = false)
+        service  <- ranges
+        scope    <- inTenant(f.tenant)(service.backfillScope(f.classId.value))
+        s        <- documents
+        results  <- ZIO.foreach(scope.documents)(id => inTenant(f.tenant)(s.numberExisting(id, admin)))
+        _        <- inTenant(f.tenant)(service.assign(child.classId.value, None, admin))
+        narrowed <- inTenant(f.tenant)(service.backfillScope(f.classId.value))
+      yield assertTrue(
+        none.left.exists(_.isInstanceOf[MetadataError.Conflict]),
+        scope.classIds == Set(f.classId.value, child.classId.value),
+        scope.documents == List(noUnit._1.id, unit._1.id),
+        results == List(
+          BackfillOutcome.Skipped(BackfillSkip.UnitMissing),
+          BackfillOutcome.Numbered("Legal-Compliance-001")
+        ),
+        narrowed.classIds == Set(f.classId.value)
       )
     },
     test("ranges are checked; classes inherit the range of their parent unless they override it") {

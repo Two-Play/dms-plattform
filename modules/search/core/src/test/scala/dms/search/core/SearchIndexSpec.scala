@@ -199,6 +199,7 @@ object SearchIndexSpec extends ZIOSpecDefault:
         partial <- search(reader, SearchQuery(Some("RL-2026-0043")))
       yield assertTrue(
         exact.hits.map(_.title) == List("Travel policy"),
+        exact.hits.map(_.documentNumber) == List(Some("RL-2026-0042")),
         partial.total == 0L
       )
     },

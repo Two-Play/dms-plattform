@@ -89,6 +89,16 @@ private[core] object NumberRangeStore:
       .headOption
       .map(DocumentId(_))
 
+  /** Documents without number with their class, oldest first (creation time, then id): candidates of a
+    * backfill (DMS-116).
+    */
+  def unnumberedDocuments()(using DbTx): List[(DocumentId, UUID)] =
+    sql"""select id, class_id from dms.document where document_number is null order by created_at, id"""
+      .query[(UUID, UUID)]
+      .run()
+      .map((id, cls) => DocumentId(id) -> cls)
+      .toList
+
   def setDocumentNumber(id: DocumentId, number: String)(using DbTx): Unit =
     val _ = sql"""update dms.document set document_number = $number, updated_at = now()
                   where id = ${id.value}""".update.run()

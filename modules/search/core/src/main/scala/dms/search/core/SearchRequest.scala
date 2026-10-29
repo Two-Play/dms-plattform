@@ -37,6 +37,20 @@ object SearchRequest:
     */
   val DocumentNumberField = "metadata.keyword.documentNumber"
 
+  /** Top-level fields of an entry that a hit is read from (see [[result]]). */
+  private val HitFields = List(
+    "documentId",
+    "versionId",
+    "title",
+    "versionLabel",
+    "classPath",
+    "status",
+    "validFrom",
+    "validUntil",
+    "language",
+    "organizationalUnit"
+  )
+
   def validate(query: SearchQuery): Either[String, SearchQuery] =
     if query.page < 1 then Left("page must be at least 1")
     else if query.size < 1 || query.size > MaxSize then Left(s"size must be between 1 and $MaxSize")
@@ -99,11 +113,12 @@ object SearchRequest:
       "from"             -> Json.Num((query.page - 1) * query.size),
       "size"             -> Json.Num(query.size),
       "track_total_hits" -> Json.Bool(true),
-      "_source"          -> Json.Obj("excludes" -> Json.Arr(Json.Str("text"), Json.Str("metadata"))),
-      "query"            -> Json.Obj("bool" -> Json.Obj("must" -> must, "filter" -> filters.toJson)),
-      "post_filter"      -> statuses.toJson,
-      "sort"             -> sort,
-      "aggs"             -> Json.Obj(
+      // Text and metadata stay out of the answer, except the document number shown with each hit.
+      "_source"     -> Json.Obj("includes" -> Json.Arr((HitFields :+ DocumentNumberField).map(Json.Str(_))*)),
+      "query"       -> Json.Obj("bool" -> Json.Obj("must" -> must, "filter" -> filters.toJson)),
+      "post_filter" -> statuses.toJson,
+      "sort"        -> sort,
+      "aggs"        -> Json.Obj(
         "class"    -> filtered("classPath", 200),
         "language" -> filtered("language", 50),
         "status"   -> terms("status", 20)
@@ -177,7 +192,12 @@ object SearchRequest:
         field(source, "language").flatMap(string),
         field(source, "organizationalUnit").flatMap(string),
         snippet,
-        field(json, "_score").flatMap(double)
+        field(json, "_score").flatMap(double),
+        field(source, "metadata")
+          .flatMap(field(_, "keyword"))
+          .flatMap(field(_, "documentNumber"))
+          .flatMap(array(_).headOption)
+          .flatMap(string)
       )
 
   private def field(json: Json, name: String): Option[Json] = json match

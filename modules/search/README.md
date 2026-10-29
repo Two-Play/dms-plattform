@@ -26,7 +26,7 @@ HTTP (module `app`, `SearchApi`):
 | GET | `/api/v1/search?q=&class=&status=&lang=&page=&size=` | Search; hits, total, facets and snippets only over readable versions | signed in; filter per caller |
 | POST | `/api/v1/admin/search/rebuild` | Rebuild the tenant's index from the database | `Configure` on `Search` (tenant administrators) |
 
-Document numbers (DMS-113, ADR 0040): a query also matches the exact document number through a `term` clause on `metadata.keyword.documentNumber`. The core field is indexed like every text value by the existing dynamic template, so the mapping is unchanged and no reindex is needed; documents that get a number later are reindexed by the sync (their `updated_at` changes), and after a backfill of old documents a sync or `POST /api/v1/admin/search/rebuild` picks the numbers up.
+Document numbers (DMS-113, ADR 0040): a query also matches the exact document number through a `term` clause on `metadata.keyword.documentNumber`. The core field is indexed like every text value by the existing dynamic template, so the mapping is unchanged and no reindex is needed; documents that get a number later are reindexed by the sync (their `updated_at` changes); the backfill (DMS-116) enqueues a reindexing job per numbered document. Hits carry the number (`SearchHit.documentNumber`): the answer's `_source` includes the hit fields and `metadata.keyword.documentNumber` only.
 
 `snippet` is plain text with matches in `<mark>`/`</mark>`, nothing escaped. Errors: `400 invalid` (page, size, status), `503 search_unavailable` (OpenSearch not reachable). Command line: `sbt "app/runMain dms.app.SearchRebuild [tenant id ...]"`.
 

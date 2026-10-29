@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label'
 import { t } from '@/i18n'
 import { toast } from '@/lib/toast'
 import { useDebouncedValue } from '@/lib/use-debounced-value'
+import { NumberBackfillDialog } from './number-backfill-dialog'
 
 /** Range keys as the backend accepts them (`NumberRange.KeyPattern`). */
 export const rangeKeyPattern = /^[a-z0-9][a-z0-9-]{0,62}$/
@@ -371,6 +372,7 @@ function ClassAssignments({
   const queryClient = useQueryClient()
   const names = new Map(ranges.map((r) => [r.id, r.name]))
   const labels = new Map(classes.map((c) => [c.classId, c.label]))
+  const [backfilling, setBackfilling] = useState<ClassNumberRange>()
   const assign = useMutation({
     mutationFn: ({ cls, value }: { cls: ClassNumberRange; value: string }) => {
       const mode: AssignmentMode =
@@ -399,8 +401,11 @@ function ClassAssignments({
               <th scope="col" className="py-2 pr-4 font-medium">
                 {t('numberRanges.colAssignment')}
               </th>
-              <th scope="col" className="py-2 font-medium">
+              <th scope="col" className="py-2 pr-4 font-medium">
                 {t('numberRanges.colEffective')}
+              </th>
+              <th scope="col" className="py-2 font-medium">
+                <span className="sr-only">{t('numberRanges.colExisting')}</span>
               </th>
             </tr>
           </thead>
@@ -434,7 +439,7 @@ function ClassAssignments({
                       ))}
                     </select>
                   </td>
-                  <td className="py-2" data-testid={`effective-${c.classKey}`}>
+                  <td className="py-2 pr-4" data-testid={`effective-${c.classKey}`}>
                     {effective === undefined
                       ? t('numberRanges.noEffective')
                       : c.inheritedFrom
@@ -444,12 +449,38 @@ function ClassAssignments({
                           })
                         : effective}
                   </td>
+                  <td className="py-2">
+                    {c.effectiveRangeId && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        aria-label={t('numberRanges.backfillLabel', { cls: c.label })}
+                        onClick={() => {
+                          setBackfilling(c)
+                        }}
+                      >
+                        <Hash className="size-4" aria-hidden />
+                        {t('numberRanges.backfill')}
+                      </Button>
+                    )}
+                  </td>
                 </tr>
               )
             })}
           </tbody>
         </table>
       </div>
+      <NumberBackfillDialog
+        cls={backfilling}
+        rangeName={
+          backfilling?.effectiveRangeId
+            ? (names.get(backfilling.effectiveRangeId) ?? backfilling.effectiveRangeId)
+            : ''
+        }
+        onClose={() => {
+          setBackfilling(undefined)
+        }}
+      />
     </div>
   )
 }

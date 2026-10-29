@@ -162,6 +162,11 @@ function HitItem({ hit }: { hit: SearchHit }) {
         >
           {hit.title}
         </Link>
+        {hit.documentNumber && (
+          <span className="font-mono text-xs" data-testid="hit-number">
+            {t('docNumber.label', { number: hit.documentNumber })}
+          </span>
+        )}
         <span className="font-mono text-xs">{hit.versionLabel}</span>
         <StatusBadge status={hit.status} />
       </div>

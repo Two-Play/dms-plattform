@@ -1,3 +1,5 @@
+import { plural } from '@/i18n/core'
+
 /** Number ranges in the administration and the manual document number (DMS-113). */
 export const numberRanges = {
   newRange: 'New number range',
@@ -59,6 +61,51 @@ export const numberRanges = {
   inherited: '{range} (from {cls})',
   noEffective: 'No numbers',
   assigned: 'Number range of {cls} changed.',
+  colExisting: 'Existing documents',
+  backfill: 'Number existing documents',
+  backfillLabel: 'Number the existing documents of {cls}',
+  backfillTitle: 'Number existing documents of {cls}',
+  backfillDescription:
+    'Documents created before the class had a number range get a number from range {range}, the oldest first. Each document takes the counter of the year it was created in. Documents with a number keep it. Numbers cannot be taken back; every number is recorded in the audit trail.',
+  backfillLoading: 'Counting the documents without number …',
+  backfillCount: plural({
+    zero: 'All documents of this class have a number.',
+    one: '{count} document without number will be numbered.',
+    other: '{count} documents without number will be numbered.',
+  }),
+  backfillLimit: 'One run numbers at most {max} documents; run it again for the rest.',
+  backfillNext: 'A document created now would get {number}.',
+  backfillConfirm: plural({
+    one: 'Number {count} document',
+    other: 'Number {count} documents',
+  }),
+  backfillRunning: 'Numbering …',
+  backfillClose: 'Close',
+  backfillDone: plural({
+    zero: 'No document was numbered.',
+    one: '{count} document numbered.',
+    other: '{count} documents numbered.',
+  }),
+  backfillRange: 'Numbers {first} to {last}.',
+  backfillSkipped: plural({
+    one: '{count} document skipped:',
+    other: '{count} documents skipped:',
+  }),
+  backfillFailed: plural({
+    one: '{count} document could not be numbered:',
+    other: '{count} documents could not be numbered:',
+  }),
+  backfillRemaining: plural({
+    one: '{count} more document is waiting; run it again.',
+    other: '{count} more documents are waiting; run it again.',
+  }),
+  skip: {
+    hasNumber: 'has a number already',
+    noRange: 'its class has no number range',
+    inReview: 'a version is in review or approval; try again once it is decided',
+    unitMissing: 'the organizational unit the pattern needs is missing',
+  },
+  backfillToast: 'Existing documents of {cls} numbered.',
 } as const
 
 export const docNumber = {

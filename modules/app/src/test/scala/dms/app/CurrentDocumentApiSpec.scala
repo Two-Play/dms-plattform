@@ -415,6 +415,8 @@ object CurrentDocumentApiSpec extends ZIOSpecDefault:
         docs.paths.pathItems.contains("/api/v1/documents/{id}/current"),
         docs.paths.pathItems.contains("/api/v1/documents/{id}/current.pdf"),
         docs.paths.pathItems.contains("/api/v1/documents/{id}/current.html"),
+        docs.paths.pathItems.contains("/api/v1/documents/by-number/{number}/current.pdf"),
+        docs.paths.pathItems.contains("/api/v1/documents/by-number/{number}/current.html"),
         docs.paths.pathItems.contains("/api/v1/admin/webhooks/{id}/deliveries")
       )
     },
@@ -591,7 +593,7 @@ object CurrentDocumentApiSpec extends ZIOSpecDefault:
         )
       )
     } @@ TestAspect.withLiveClock,
-    test("the stable address by document number resolves like the one by id (DMS-113)") {
+    test("the stable addresses by document number resolve like the ones by id (DMS-113, DMS-116)") {
       for
         policy   <- validDocument("Travel policy")
         contract <- validDocument("Supplier contract", contract = true)
@@ -612,7 +614,20 @@ object CurrentDocumentApiSpec extends ZIOSpecDefault:
         unknown    <- call(intranet, "GET", "/api/v1/documents/by-number/RL-999/current")
         notAllowed <- call(intranet, "GET", "/api/v1/documents/by-number/VTR-2026-0042/current")
         byReader   <- call(reader, "GET", "/api/v1/documents/by-number/VTR-2026-0042/current")
+        pdfById    <- raw(intranet, s"/api/v1/documents/${policy.id}/current.pdf")
+        pdf        <- raw(intranet, "/api/v1/documents/by-number/RL-042/current.pdf")
+        htmlById   <- raw(intranet, s"/api/v1/documents/${policy.id}/current.html")
+        html       <- raw(intranet, "/api/v1/documents/by-number/RL-042/current.html")
+        hiddenPdf  <- raw(intranet, "/api/v1/documents/by-number/VTR-2026-0042/current.pdf")
+        noHtml     <- raw(intranet, "/api/v1/documents/by-number/RL-999/current.html")
       yield assertTrue(
+        pdf.status == Status.Ok,
+        pdf.headers.get("ETag") == pdfById.headers.get("ETag"),
+        pdf.headers.get("Content-Location") == pdfById.headers.get("Content-Location"),
+        html.status == Status.Ok,
+        html.headers.get("ETag") == htmlById.headers.get("ETag"),
+        hiddenPdf.status == Status.NotFound,
+        noHtml.status == Status.NotFound,
         byId.documentNumber.contains("RL-042"),
         byNumber._1 == Status.Ok,
         as[CurrentVersionView](byNumber) == byId,

@@ -235,6 +235,7 @@ object NumberRangeApiSpec extends ZIOSpecDefault:
         docs.paths.pathItems.contains("/api/v1/admin/number-ranges/preview"),
         docs.paths.pathItems.contains("/api/v1/admin/number-range-assignments"),
         docs.paths.pathItems.contains("/api/v1/admin/number-range-assignments/{classId}"),
+        docs.paths.pathItems.contains("/api/v1/admin/number-range-assignments/{classId}/backfill"),
         docs.paths.pathItems.contains("/api/v1/documents/{id}/number")
       )
     },
@@ -357,6 +358,61 @@ object NumberRangeApiSpec extends ZIOSpecDefault:
         !asAuthor.canAssignNumber,
         asOwner.canAssignNumber,
         audited == 1L
+      )
+    },
+    test("tenant administrators number existing documents of a class; audited and reindexed (DMS-116)") {
+      for
+        s      <- setup.await
+        ranges <- call(admin, "GET", "/api/v1/admin/number-ranges").map(as[List[NumberRangeView]])
+        range      = ranges.find(_.key == "contracts").get
+        assignment = s"/api/v1/admin/number-range-assignments/${s.classId}"
+        _         <- call(admin, "PUT", assignment, Some("{}"))
+        first     <- createDocument()
+        second    <- createDocument()
+        noRange   <- call(admin, "GET", s"$assignment/backfill")
+        _         <- call(admin, "PUT", assignment, Some(s"""{"numberRangeId":"${range.id}"}"""))
+        byAuthor  <- call(author, "POST", s"$assignment/backfill")
+        byRecords <- call(records, "GET", s"$assignment/backfill")
+        preview   <- call(admin, "GET", s"$assignment/backfill").map(as[NumberBackfillPreview])
+        result    <- call(admin, "POST", s"$assignment/backfill").map(as[NumberBackfillResult])
+        again     <- call(admin, "POST", s"$assignment/backfill").map(as[NumberBackfillResult])
+        reloaded  <- call(author, "GET", s"/api/v1/documents/${first.id}").map(as[DocumentView])
+        counts    <- s.owner.transactSystem(
+          Db.sql(
+            (
+              sql"""select count(*) from dms.audit_event where action = 'document.number-assigned'
+                    and object_id = ${first.id}""".query[Long].run().head,
+              sql"""select count(*) from dms.audit_event where action = 'number-range.backfilled'
+                    and object_id = ${s.classId}""".query[Long].run().head,
+              sql"""select count(*) from dms.job where kind = 'search.index-document'
+                    and payload ->> 'documentId' in (${first.id.toString}, ${second.id.toString})"""
+                .query[Long]
+                .run()
+                .head
+            )
+          )
+        )
+        (assigned, runs, jobs) = counts
+        numbers                = result.entries.flatMap(_.number)
+      yield assertTrue(
+        first.documentNumber.isEmpty,
+        second.documentNumber.isEmpty,
+        noRange._1 == Status.Conflict,
+        byAuthor._1 == Status.Forbidden,
+        byRecords._1 == Status.Forbidden,
+        preview.documents == 2,
+        preview.numberRangeId == range.id,
+        preview.classIds == List(s.classId),
+        result.numbered == 2 && result.skipped == 0 && result.failed == 0 && result.remaining == 0,
+        result.entries.map(_.documentId) == List(first.id, second.id),
+        numbers.headOption.contains(preview.nextNumber),
+        numbers.distinct.size == 2,
+        numbers == numbers.sorted,
+        again.numbered == 0 && again.entries.isEmpty,
+        reloaded.documentNumber == numbers.headOption,
+        assigned == 1L,
+        runs == 2L,
+        jobs == 2L
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

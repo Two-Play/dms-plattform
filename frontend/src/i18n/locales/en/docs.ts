@@ -8,6 +8,7 @@ export const docs = {
     newDocument: 'New document',
     loading: 'Loading documents',
     title_: 'Title',
+    number: 'No.',
     status: 'Status',
     version: 'Version',
     class: 'Class',

@@ -411,21 +411,8 @@ final class DocumentService(
       )
       _ <- sql(NumberRangeStore.setDocumentNumber(id, valid))
         .mapError(conflict(s"the number $valid is already assigned to another document"))
-      draft <- ZIO.foreach(open)(o =>
-        for
-          current <- sql(DocumentStore.lockVersion(o.id, templates)).someOrFail(versionNotFound(o.id))
-          entry = FieldEntry(MetadataValue.Text(valid), ValueOrigin.Platform)
-          next  = current.copy(
-            workingState = current.workingState + 1,
-            values = current.values + (CoreFields.DocumentNumber -> entry),
-            rendition = None
-          )
-          _ <- sql(DocumentStore.updateDraft(next, templates))
-            .filterOrFail(identity)(changedConcurrently(next))
-          _ <- sql(DocumentStore.insertWorkingState(next, actor, templates))
-        yield next
-      )
-      _ <- ZIO.foreachDiscard(draft.orElse(versions.lastOption))(v =>
+      draft <- ZIO.foreach(open)(numberDraft(_, valid, actor))
+      _     <- ZIO.foreachDiscard(draft.orElse(versions.lastOption))(v =>
         record(
           actor,
           "document.number-assigned",
@@ -440,6 +427,79 @@ final class DocumentService(
         )
       )
     yield document.copy(number = Some(valid))
+
+  /** The open draft with the document number as a new working state (the platform's value of the core field).
+    */
+  private def numberDraft(open: DocumentVersion, number: String, actor: UserId) =
+    for
+      current <- sql(DocumentStore.lockVersion(open.id, templates)).someOrFail(versionNotFound(open.id))
+      entry = FieldEntry(MetadataValue.Text(number), ValueOrigin.Platform)
+      next  = current.copy(
+        workingState = current.workingState + 1,
+        values = current.values + (CoreFields.DocumentNumber -> entry),
+        rendition = None
+      )
+      _ <- sql(DocumentStore.updateDraft(next, templates))
+        .filterOrFail(identity)(changedConcurrently(next))
+      _ <- sql(DocumentStore.insertWorkingState(next, actor, templates))
+    yield next
+
+  /** Numbers an existing document that has no number from the number range of its class (backfill, DMS-116,
+    * ADR 0040): the counter of the period of the document's creation year is taken as on creation (locked
+    * until the transaction ends, numbers taken manually skipped), so documents numbered one after another in
+    * creation order get consecutive numbers. The open draft gets the number as a new working state; approved
+    * versions keep their frozen values and later versions take the number over. Recorded in the audit trail
+    * as `document.number-assigned` with `backfill: true`.
+    *
+    * Idempotent: a document that has a number already is skipped. Skipped as well: no number range for its
+    * class, a version in review or approval (its values are frozen until it is decided), and a pattern with
+    * `{OU}` while the document has no organizational unit. Run each document in its own transaction.
+    */
+  def numberExisting(id: DocumentId, actor: UserId): IO[DocumentError, BackfillOutcome] =
+    sql(DocumentStore.lockDocument(id)).someOrFail(documentNotFound(id)).flatMap { document =>
+      if document.number.isDefined then ZIO.succeed(BackfillOutcome.Skipped(BackfillSkip.HasNumber))
+      else
+        for
+          profile  <- profile(document.classId, document.classVersion)
+          range    <- sql(DocumentNumbering.rangeOf(profile))
+          versions <- sql(DocumentStore.versions(id, templates))
+          open    = versions.find(v => Versioning.isOpen(v.status))
+          current = open.orElse(versions.lastOption)
+          unit    = current
+            .flatMap(_.values.get(UnitField))
+            .collect { case FieldEntry(MetadataValue.Text(t), _) => t }
+            .filter(NumberPattern.unitSegment(_).nonEmpty)
+          outcome <- range match
+            case None => ZIO.succeed(BackfillOutcome.Skipped(BackfillSkip.NoRange))
+            case Some(_) if open.exists(_.status != DocumentStatus.Draft) =>
+              ZIO.succeed(BackfillOutcome.Skipped(BackfillSkip.InReview))
+            case Some(r) if r.pattern.usesUnit && unit.isEmpty =>
+              ZIO.succeed(BackfillOutcome.Skipped(BackfillSkip.UnitMissing))
+            case Some(r) =>
+              for
+                zone   <- sql(DocumentStore.tenantZone)
+                number <- sql(DocumentNumbering.next(r, zone, document.createdAt, unit))
+                  .flatMap(n => ZIO.fromEither(n).mapError(p => DocumentError.Invalid(List(p))))
+                _ <- sql(NumberRangeStore.setDocumentNumber(id, number))
+                  .mapError(conflict(s"the number $number is already assigned to another document"))
+                draft <- ZIO.foreach(open)(numberDraft(_, number, actor))
+                _     <- ZIO.foreachDiscard(draft.orElse(versions.lastOption))(v =>
+                  record(
+                    actor,
+                    "document.number-assigned",
+                    v,
+                    Json.Obj(
+                      "before"      -> Json.Null,
+                      "after"       -> Json.Str(number),
+                      "numberRange" -> Json.Str(r.key),
+                      "manual"      -> Json.Bool(false),
+                      "backfill"    -> Json.Bool(true)
+                    )
+                  )
+                )
+              yield BackfillOutcome.Numbered(number)
+        yield outcome
+    }
 
   /** The document with `number`, if any (stable address by number, DMS-113). */
   def findByNumber(number: String): IO[DocumentError, Option[DocumentId]] =

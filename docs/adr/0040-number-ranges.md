@@ -65,11 +65,44 @@ Authorization of manual assignment: a new action for records managers and owners
 
 ## Follow-ups
 
-- Should be done: backfill command that numbers existing documents of a class in creation order (in one transaction per document, through `DocumentNumbering`), followed by a search sync.
-- Should be done: show the document number in search hits and the document list (`DocumentSummaryView.documentNumber` exists already).
-- Optional: `/by-number/{number}/current.pdf` and `.html` like the id-based addresses.
+- Done (DMS-116, see addendum): backfill that numbers existing documents of a class in creation order (in one transaction per document, through `DocumentNumbering`), followed by reindexing.
+- Done (DMS-116): the document number in search hits and the document list.
+- Done (DMS-116): `/by-number/{number}/current.pdf` and `.html` like the id-based addresses.
 - Ruled out: PostgreSQL sequences (not gap-free, not tenant-isolated).
 
 ## Reversibility
 
 **medium**: Ranges, counters and assignments are three small tables; the counter mechanism is local to `DocumentNumbering` and could be replaced (e.g. by sequences) without touching documents. Numbers already assigned are frozen in approved versions and must stay valid: removing the feature would keep the column and the core field read-only.
+
+## Addendum (DMS-116, 2026-10-29): backfill of existing documents as an admin operation
+
+**Context.** Documents created before their class had a number range keep no number (see "Negative / Cost"). Tenants that introduce numbering for an existing class want those documents numbered in the order they were created, gap-free, without renumbering anything and visible in the search.
+
+**Decision.**
+
+1. **Admin operation, not a CLI.** `GET /api/v1/admin/number-range-assignments/{classId}/backfill` previews the run (documents without number, range, next number); `POST` on the same path runs it. Same permission as the range administration (`Configure` on `NumberRanges`, tenant administrators). The number range admin page offers it per class with an effective range ("Number existing documents"): a confirmation dialog with the count, then a summary (numbered, skipped with reasons, failed, remaining).
+2. **Scope.** The class and its subclasses whose effective range is the same, so classes sharing a range are numbered in one creation order. Documents without number, oldest first (`created_at`, then id).
+3. **One transaction per document** through `DocumentService.numberExisting`, which uses `DocumentNumbering.next` exactly like creation (counter row locked until commit, manually taken numbers skipped). The counter period is that of the document's **creation year** in the tenant's time zone, so `{YYYY}` shows the year the document was created and a yearly reset numbers each year on its own. A failure rolls back that document's counter only (no gap); the run continues and reports it.
+4. **Skips instead of failures**, all idempotent and reported: the document has a number (never renumbered), its class has no range (any more), a version is in review or approval (values frozen until decided; no counter is taken), or a `{OU}` pattern lacks the organizational unit. The open draft gets the number as a new working state; approved versions keep their frozen snapshot, later versions take the number from `dms.document` (as for a manual assignment).
+5. **Audit and search.** Each number: `document.number-assigned` with `manual: false`, `backfill: true`, the range key and the administrator as actor; each run: `number-range.backfilled` on the class with the counts. Each numbered document gets a `search.index-document` job in its own transaction (idempotency key per document), so hits show the number seconds after the commit; the regular sync would pick them up anyway (`updated_at` changes).
+6. **At most 500 documents per request**; `remaining` tells the administrator to run it again (the operation is idempotent).
+
+**Alternatives considered.**
+
+| Criterion | Chosen: admin endpoint + button | CLI entry like `bin/migrate` / `bin/search-rebuild` | Background job per class |
+|---|---|---|---|
+| Authorization and audit actor | The signed-in tenant administrator, checked per document transaction | A technical actor; tenant id and class key as arguments; no policy check | Administrator who started it, stored with the job |
+| Who can run it | Tenant administrators in the UI | Operators with shell access to the deployment | Tenant administrators |
+| Feedback | Count before, summary after, in the dialog | Console output | Needs a status endpoint and polling UI |
+| Size limit | 500 per request (seconds), repeat for more | None | None |
+| Effort | Small: two endpoints, one dialog | Small, but a second authorization path | Medium: job kind, status, UI |
+
+Tenant administrators may run it although they cannot assign numbers manually (`AssignDocumentNumber`, ADR 0018 keeps them out of document content): the backfill applies the range they configure, reads no content and returns only document ids and numbers.
+
+**Consequences.**
+
+- Positive: numbering can be introduced for existing classes without manual work; numbers are consecutive per period in creation order, traceable per document and visible in the search within seconds.
+- Negative: documents created in a year after the range was assigned already hold the first numbers of that year, so backfilled documents of the same year follow them (creation order holds only among the backfilled documents). Documents skipped because they were in review get a later number when the run is repeated. A run of 500 documents holds the HTTP request for its duration (one short transaction each).
+- Follow-ups: none required; a job-based variant if tenants need to number tens of thousands of documents at once.
+
+**Reversibility:** high. Two endpoints and a dialog; numbers assigned stay like manual ones.

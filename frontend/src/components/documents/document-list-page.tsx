@@ -28,6 +28,11 @@ const columns = (): Column<DocumentSummary>[] => [
       </Link>
     ),
   },
+  {
+    key: 'number',
+    header: t('docs.list.number'),
+    cell: (d) => <span className="font-mono text-xs whitespace-nowrap">{d.documentNumber}</span>,
+  },
   { key: 'status', header: t('docs.list.status'), cell: (d) => <StatusBadge status={d.status} /> },
   {
     key: 'version',

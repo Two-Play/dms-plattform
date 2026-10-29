@@ -109,11 +109,37 @@ function renderAdmin() {
         return ok(ranges)
       case '/api/v1/admin/number-range-assignments':
         return ok(classes)
+      case '/api/v1/admin/number-range-assignments/{classId}/backfill':
+        return ok({
+          classId: 'c1',
+          numberRangeId: 'r1',
+          numberRangeKey: 'contracts',
+          classIds: ['c1', 'c2'],
+          documents: 3,
+          maxPerRun: 500,
+          nextNumber: 'VTR-2026-0007',
+        })
       default:
         return failed(404, { code: 'not_found', message: `unexpected ${p}` })
     }
   })
   const post = vi.fn((p: string, init?: Init) => {
+    if (p === '/api/v1/admin/number-range-assignments/{classId}/backfill') {
+      return ok({
+        classId: 'c1',
+        numberRangeId: 'r1',
+        numberRangeKey: 'contracts',
+        numbered: 2,
+        skipped: 1,
+        failed: 0,
+        remaining: 0,
+        entries: [
+          { documentId: 'd1', outcome: 'Numbered', number: 'VTR-2025-0001' },
+          { documentId: 'd2', outcome: 'Skipped', reason: 'in-review' },
+          { documentId: 'd3', outcome: 'Numbered', number: 'VTR-2026-0007' },
+        ],
+      })
+    }
     if (p === '/api/v1/admin/number-ranges/preview') {
       return ok(preview(init?.body as { pattern: string; startValue?: number }))
     }
@@ -278,6 +304,71 @@ describe('admin: number ranges (DMS-113)', () => {
     await waitFor(() => {
       expect(screen.getByTestId('effective-policy')).toHaveTextContent('Contracts')
     })
+  })
+
+  it('numbers the existing documents of a class after confirmation and summarizes (DMS-116)', async () => {
+    const { get, post, user } = renderAdmin()
+    await openTab(user, 'Number ranges')
+    await screen.findByRole('table', { name: 'Document classes and their number range' })
+
+    // Only classes with a number range offer the action.
+    expect(
+      screen.queryByRole('button', { name: 'Number the existing documents of Policy' }),
+    ).not.toBeInTheDocument()
+    await user.click(
+      screen.getByRole('button', { name: 'Number the existing documents of Contract' }),
+    )
+    const dialog = await screen.findByRole('dialog')
+    expect(
+      within(dialog).getByRole('heading', { name: 'Number existing documents of Contract' }),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByText(/from range Contracts, the oldest first/)).toBeInTheDocument()
+    expect(
+      await within(dialog).findByText('3 documents without number will be numbered.'),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByText('A document created now would get VTR-2026-0007.'))
+    expect(get).toHaveBeenCalledWith('/api/v1/admin/number-range-assignments/{classId}/backfill', {
+      params: { path: { classId: 'c1' } },
+    })
+    expect(post).not.toHaveBeenCalledWith(
+      '/api/v1/admin/number-range-assignments/{classId}/backfill',
+      expect.anything(),
+    )
+
+    await user.click(within(dialog).getByRole('button', { name: 'Number 3 documents' }))
+    const result = await within(dialog).findByTestId('backfill-result')
+    expect(post).toHaveBeenCalledWith('/api/v1/admin/number-range-assignments/{classId}/backfill', {
+      params: { path: { classId: 'c1' } },
+    })
+    expect(result).toHaveTextContent('2 documents numbered.')
+    expect(result).toHaveTextContent('Numbers VTR-2025-0001 to VTR-2026-0007.')
+    expect(result).toHaveTextContent('1 document skipped:')
+    expect(result).toHaveTextContent('a version is in review or approval')
+    // The footer button; the dialog's corner button is named "Close" as well.
+    const [close] = within(dialog).getAllByRole('button', { name: 'Close' })
+    await user.click(close as HTMLElement)
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+  })
+
+  it('cancels numbering existing documents without running it', async () => {
+    const { post, user } = renderAdmin()
+    await openTab(user, 'Number ranges')
+    await screen.findByRole('table', { name: 'Document classes and their number range' })
+    await user.click(
+      screen.getByRole('button', { name: 'Number the existing documents of Service contract' }),
+    )
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByTestId('backfill-preview')
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+    expect(post).not.toHaveBeenCalledWith(
+      '/api/v1/admin/number-range-assignments/{classId}/backfill',
+      expect.anything(),
+    )
   })
 
   it('shows the tab in German', async () => {

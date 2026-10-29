@@ -1,4 +1,4 @@
-import type { Translation } from '@/i18n/core'
+import { plural, type Translation } from '@/i18n/core'
 import type * as en from '@/i18n/locales/en/numbering'
 
 export const numberRanges: Translation<typeof en.numberRanges> = {
@@ -61,6 +61,52 @@ export const numberRanges: Translation<typeof en.numberRanges> = {
   inherited: '{range} (von {cls})',
   noEffective: 'Keine Nummern',
   assigned: 'Nummernkreis von {cls} geändert.',
+  colExisting: 'Vorhandene Dokumente',
+  backfill: 'Vorhandene Dokumente nummerieren',
+  backfillLabel: 'Vorhandene Dokumente von {cls} nummerieren',
+  backfillTitle: 'Vorhandene Dokumente von {cls} nummerieren',
+  backfillDescription:
+    'Dokumente, die angelegt wurden, bevor die Klasse einen Nummernkreis hatte, erhalten eine Nummer aus dem Nummernkreis {range}, die ältesten zuerst. Jedes Dokument erhält den Zähler des Jahres, in dem es angelegt wurde. Dokumente mit Nummer behalten sie. Vergebene Nummern lassen sich nicht zurücknehmen; jede Nummer wird im Prüfpfad festgehalten.',
+  backfillLoading: 'Dokumente ohne Nummer werden gezählt …',
+  backfillCount: plural({
+    zero: 'Alle Dokumente dieser Klasse haben eine Nummer.',
+    one: '{count} Dokument ohne Nummer wird nummeriert.',
+    other: '{count} Dokumente ohne Nummer werden nummeriert.',
+  }),
+  backfillLimit:
+    'Ein Durchlauf nummeriert höchstens {max} Dokumente; für den Rest erneut ausführen.',
+  backfillNext: 'Ein jetzt angelegtes Dokument erhielte {number}.',
+  backfillConfirm: plural({
+    one: '{count} Dokument nummerieren',
+    other: '{count} Dokumente nummerieren',
+  }),
+  backfillRunning: 'Wird nummeriert …',
+  backfillClose: 'Schließen',
+  backfillDone: plural({
+    zero: 'Kein Dokument wurde nummeriert.',
+    one: '{count} Dokument nummeriert.',
+    other: '{count} Dokumente nummeriert.',
+  }),
+  backfillRange: 'Nummern {first} bis {last}.',
+  backfillSkipped: plural({
+    one: '{count} Dokument übersprungen:',
+    other: '{count} Dokumente übersprungen:',
+  }),
+  backfillFailed: plural({
+    one: '{count} Dokument konnte nicht nummeriert werden:',
+    other: '{count} Dokumente konnten nicht nummeriert werden:',
+  }),
+  backfillRemaining: plural({
+    one: '{count} weiteres Dokument wartet; bitte erneut ausführen.',
+    other: '{count} weitere Dokumente warten; bitte erneut ausführen.',
+  }),
+  skip: {
+    hasNumber: 'hat bereits eine Nummer',
+    noRange: 'seine Klasse hat keinen Nummernkreis',
+    inReview: 'eine Version ist in Prüfung oder Freigabe; nach der Entscheidung erneut versuchen',
+    unitMissing: 'die vom Muster benötigte Organisationseinheit fehlt',
+  },
+  backfillToast: 'Vorhandene Dokumente von {cls} nummeriert.',
 }
 
 export const docNumber: Translation<typeof en.docNumber> = {

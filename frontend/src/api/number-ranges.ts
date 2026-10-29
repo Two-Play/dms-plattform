@@ -141,6 +141,50 @@ export async function assignClassNumberRange(
   return data
 }
 
+/** What numbering the existing documents of a class would do (DMS-116). */
+export type NumberBackfillPreview = components['schemas']['NumberBackfillPreview']
+
+/** Result of numbering the existing documents of a class (DMS-116). */
+export type NumberBackfillResult = components['schemas']['NumberBackfillResult']
+
+/** How many existing documents of a class have no number yet (GET …/{classId}/backfill). */
+export async function previewNumberBackfill(
+  client: ApiClient,
+  classId: string,
+): Promise<NumberBackfillPreview> {
+  const { data, error, response } = await client.GET(
+    '/api/v1/admin/number-range-assignments/{classId}/backfill',
+    { params: { path: { classId } } },
+  )
+  if (!response.ok || !data) {
+    throw requestError(
+      response,
+      error,
+      `Counting the documents without number failed with HTTP ${response.status}`,
+    )
+  }
+  return data
+}
+
+/** Numbers the existing documents of a class without number, oldest first (POST …/backfill). */
+export async function runNumberBackfill(
+  client: ApiClient,
+  classId: string,
+): Promise<NumberBackfillResult> {
+  const { data, error, response } = await client.POST(
+    '/api/v1/admin/number-range-assignments/{classId}/backfill',
+    { params: { path: { classId } } },
+  )
+  if (!response.ok || !data) {
+    throw requestError(
+      response,
+      error,
+      `Numbering the existing documents failed with HTTP ${response.status}`,
+    )
+  }
+  return data
+}
+
 /** Assigns a document number manually with a reason (POST /api/v1/documents/{id}/number). */
 export async function assignDocumentNumber(
   client: ApiClient,
