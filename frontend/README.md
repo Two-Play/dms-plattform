@@ -89,6 +89,7 @@ src/
                  documents.ts: list, document, workflow, save and submit; workflow.ts: my tasks, votes;
                  me.ts: user and business roles; acknowledgements.ts: read confirmations;
                  search.ts: full-text search, "valid on" list and CSV export;
+                 library.ts: the library of currently valid documents;
                  versions.ts: version history and version comparison;
                  version-view.ts: rendered HTML and PDF downloads of a version;
                  template-admin.ts: template administration, test mode, status changes, impact analysis;
@@ -159,7 +160,7 @@ For templates with reference fields (`references` in the fields response), the p
 - The document page of a published version that requires acknowledgement (`components/documents/acknowledgement-panel.tsx`, DMS-47) records the opening when it is displayed (`POST …/opened`), reads the caller's state (`GET …/versions/{versionId}/acknowledgement`) and offers "Acknowledge" once the opening is recorded; afterwards it shows the acknowledgement with version and time.
 - Vote dialog: decisions Approve, Approve with conditions and Request changes (review steps) or Reject (approval steps); a reason is required for everything except a plain approval (checked before sending; the backend answers 422 too). On `401 reauthentication_required` the dialog explains why, remembers the vote and offers "Sign in again" (see API client above). After a vote the task list, the document and its workflow are reloaded.
 - The document page's "Review and approval" card shows the caller's open tasks on the document with the same "Vote…" button.
-- Navigation by role (`GET /api/v1/me`, `useMe` in `api/me.ts`): Home, Documents, Search and Tasks for everyone, Templates for template designers, Compliance for compliance officers, Admin for tenant administrators. The user menu links to "Deputies". Hiding entries is a convenience; the API enforces the permissions.
+- Navigation by role (`GET /api/v1/me`, `useMe` in `api/me.ts`): Home, Documents, Library, Search and Tasks for everyone, Templates for template designers, Compliance for compliance officers, Admin for tenant administrators. The user menu links to "Deputies". Hiding entries is a convenience; the API enforces the permissions.
 
 ## Compliance cockpit (DMS-59, ADR 0036)
 
@@ -180,6 +181,12 @@ For templates with reference fields (`references` in the fields response), the p
 - `/search` (`components/search/search-page.tsx`) keeps its state in the URL (`q`, `class`, `status`, `lang`, `page`, `validOn`; parsed in `search-params.ts`), so searches can be bookmarked. Search text and the facets class, status and language call `GET /api/v1/search` (20 hits per page, Previous/Next). The endpoint (DMS-51/52, ADR 0029) is typed by the generated schema; only versions the caller may read are counted and returned, and a 404 (backend without search) shows "Search is not available yet" instead of an error.
 - Snippets contain `<mark>…</mark>` highlights. `snippetParts` (`components/search/snippet.ts`) splits them at these tags and everything is rendered as React text; any other markup in a snippet stays visible text and is never interpreted (no `dangerouslySetInnerHTML`).
 - A "Valid on" date switches to `GET /api/v1/documents/valid-at?date=…&class=…`: per document and validity scope the version in force at the end of that day (tenant time zone), with status now, validity period and approver (and the approver a deputy acted for). The class facet is computed from the listed versions; the search text is not applied. "Export CSV" fetches `…/valid-at/export.csv` with the access token and hands the file to the browser as a blob (the name comes from `Content-Disposition`).
+
+## Library (DMS-119, ADR 0043)
+
+- `/library` (`components/library/library-page.tsx`, navigation "Library" / "Bibliothek" for everyone) lists the documents valid today that the user may read (`GET /api/v1/library`, `api/library.ts`): as cards (class, title, document number, index, issuing body, description from the field `summary`, valid from, scope, tags) or as a list (`DataTable`); the title opens the document page.
+- Badges: "New" (first published on or after the reference date), "Changed since …" (a later version became valid since then), "Acknowledgement open" (the user has yet to acknowledge the version; the document page records opening and confirmation) and "Review due".
+- Filters: free text (sent 300 ms after typing stops), the facets class, issuing body, tags and confidentiality (several values per facet; counts from the backend, each facet ignoring its own filter), "New or changed since {date}" and "Awaiting my acknowledgement"; sorting by title, document number, valid from or last change with order; the reference date of the markers (default 30 days ago). Everything is kept in the URL (`library-params.ts`: lists comma-separated, e.g. `?class=policy,instruction&unit=HR&changed=true`), so views can be shared. 24 documents per page.
 
 ## Attachments (DMS-114, ADR 0041)
 

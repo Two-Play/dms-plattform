@@ -38,6 +38,7 @@ export const shell = {
   nav: {
     home: 'Home',
     documents: 'Documents',
+    library: 'Library',
     search: 'Search',
     tasks: 'Tasks',
     templates: 'Templates',
