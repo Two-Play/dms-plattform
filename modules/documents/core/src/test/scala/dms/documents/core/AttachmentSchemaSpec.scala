@@ -206,16 +206,13 @@ object AttachmentSchemaSpec extends ZIOSpecDefault:
         removed == 1
       )
     },
-    test("files are immutable and belong to one document; names are checked and unique per version") {
+    test("files are immutable, deleted only when unreferenced, belong to one document; names are unique") {
       for
         f      <- fixture
         g      <- fixture
         file   <- asApp(f.tenant)(insertFile(f.document))
         update <- asApp(f.tenant)(
           sql"update dms.document_attachment_file set size_bytes = 1 where id = $file".update.run()
-        ).either
-        delete <- asApp(f.tenant)(
-          sql"delete from dms.document_attachment_file where id = $file".update.run()
         ).either
         // Even the schema owner, who has every grant, cannot change a file: the trigger refuses.
         ownerUpdate <- ZIO.serviceWithZIO[Env](
@@ -250,6 +247,13 @@ object AttachmentSchemaSpec extends ZIOSpecDefault:
         second      <- asApp(f.tenant)(insertFile(f.document, "d" * 64))
         sameName    <- asApp(f.tenant)(link(f.version, second, "ANNEX.pdf")).either
         twice       <- asApp(f.tenant)(link(f.version, file, "again.pdf")).either
+        // A file is deleted only when no version references it (DMS-129, discarding drafts).
+        linkedDelete <- asApp(f.tenant)(
+          sql"delete from dms.document_attachment_file where id = $file".update.run()
+        ).either
+        unlinkedDelete <- asApp(f.tenant)(
+          sql"delete from dms.document_attachment_file where id = $second".update.run()
+        )
         // Row-level security: another tenant sees nothing and cannot reference the rows.
         foreign <- asApp(g.tenant)(
           sql"select count(*) from dms.document_attachment_file".query[Long].run().head
@@ -260,8 +264,9 @@ object AttachmentSchemaSpec extends ZIOSpecDefault:
         crossTen <- asApp(g.tenant)(link(g.version, file, "stolen.pdf")).either
       yield assertTrue(
         update.left.exists(_.isInstanceOf[DbError.PermissionDenied]),
-        delete.left.exists(_.isInstanceOf[DbError.PermissionDenied]),
         guarded(ownerUpdate),
+        guarded(linkedDelete),
+        unlinkedDelete == 1,
         sameBytes.left.exists(_.isInstanceOf[DbError.UniqueViolation]),
         guarded(crossDoc),
         slash.isLeft,
