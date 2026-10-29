@@ -30,7 +30,7 @@ object Main extends ZIOAppDefault:
   private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
     PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env &
     SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env &
-    EvidenceReportApi.Env
+    EvidenceReportApi.Env & CurrentDocumentApi.Env & WebhookApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -42,6 +42,7 @@ object Main extends ZIOAppDefault:
       // Before the document endpoints: `/documents/valid-at` must not be read as a document id.
       ValidAtApi.endpoints.map(_.widen[Env]) ++
       DocumentApi.endpoints.map(_.widen[Env]) ++
+      CurrentDocumentApi.endpoints.map(_.widen[Env]) ++
       VersionCompareApi.endpoints.map(_.widen[Env]) ++
       RenditionApi.endpoints.map(_.widen[Env]) ++
       AcknowledgementApi.endpoints.map(_.widen[Env]) ++
@@ -53,7 +54,8 @@ object Main extends ZIOAppDefault:
       GroupApi.endpoints.map(_.widen[Env]) ++
       LegalHoldApi.endpoints.map(_.widen[Env]) ++
       ComplianceApi.endpoints.map(_.widen[Env]) ++
-      EvidenceReportApi.endpoints.map(_.widen[Env])
+      EvidenceReportApi.endpoints.map(_.widen[Env]) ++
+      WebhookApi.endpoints.map(_.widen[Env])
 
   private val docs =
     SwaggerInterpreter()
@@ -112,6 +114,7 @@ object Main extends ZIOAppDefault:
           RenditionWiring.jobs,
           ZLayer.succeed(cfg.search.openSearch),
           ZLayer.succeed(cfg.search.settings),
+          ZLayer.succeed(cfg.webhooks.settings),
           OpenSearch.layer,
           SearchDocuments.layer,
           SearchIndex.layer,

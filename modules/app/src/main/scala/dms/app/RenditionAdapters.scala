@@ -88,10 +88,44 @@ final class DocumentRenditions(
       v: DocumentVersion,
       request: RenditionRequest
   ): IO[RenderingError, RenditionPage] =
+    val values = v.metadata
+    DocumentRenditions.html(templates, profiles, details, v).map { (html, lang) =>
+      RenditionPage(
+        html,
+        RenditionFacts(
+          documentId = details.document.id.value.toString,
+          title = DocumentRenditions.title(details, v),
+          version = v.number.show,
+          validFrom = values.get("validFrom").collect { case MetadataValue.Date(d) => d },
+          approvedAt = request.approvedAt,
+          approvedBy = request.approver.value,
+          language = lang.code,
+          onBehalfOf = request.onBehalfOf.map(_.value)
+        )
+      )
+    }
+
+object DocumentRenditions:
+  val layer: URLayer[DocumentService & TemplateService & ProfileSource & ApprovalWorkflow, RenditionSource] =
+    ZLayer.fromFunction(DocumentRenditions(_, _, _, _))
+
+  /** The title of a version: its `title` field, else the document's title. */
+  def title(details: DocumentDetails, v: DocumentVersion): String =
+    text(v.metadata, "title").getOrElse(details.document.title)
+
+  /** The stand-alone HTML page of a version (templates module): its content resolved with its field values,
+    * in its language. The archive rendition is printed from it; the stable address of the current version
+    * (DMS-58) serves it as HTML. Runs inside `Db.transact(tenant)`.
+    */
+  def html(
+      templates: TemplateService,
+      profiles: ProfileSource,
+      details: DocumentDetails,
+      v: DocumentVersion
+  ): IO[RenderingError, (String, Language)] =
     val invalid  = (m: String) => RenderingError.Invalid(s"version ${v.label} cannot be rendered: $m")
     val values   = v.metadata
-    val language = DocumentRenditions.text(values, "language").getOrElse(Language.default.code)
-    val title    = DocumentRenditions.text(values, "title").getOrElse(details.document.title)
+    val language = text(values, "language").getOrElse(Language.default.code)
     for
       template <- templates.version(v.templateId, v.templateVersion).mapError(e => invalid(e.describe))
       profile  <- profiles
@@ -109,24 +143,13 @@ final class DocumentRenditions(
         .fromEither(Resolver.resolve(compiled, fieldValues, lang))
         .mapError(e => invalid(e.message))
       labels = profile.fields.map(f => f.key.value -> f.definition.label).toMap
-      html   = HtmlRenderer.renderDocument(resolution.content, HtmlOptions(lang, labels, None, Some(title)))
-    yield RenditionPage(
-      html,
-      RenditionFacts(
-        documentId = details.document.id.value.toString,
-        title = title,
-        version = v.number.show,
-        validFrom = values.get("validFrom").collect { case MetadataValue.Date(d) => d },
-        approvedAt = request.approvedAt,
-        approvedBy = request.approver.value,
-        language = lang.code,
-        onBehalfOf = request.onBehalfOf.map(_.value)
-      )
+    yield (
+      HtmlRenderer.renderDocument(
+        resolution.content,
+        HtmlOptions(lang, labels, None, Some(title(details, v)))
+      ),
+      lang
     )
-
-object DocumentRenditions:
-  val layer: URLayer[DocumentService & TemplateService & ProfileSource & ApprovalWorkflow, RenditionSource] =
-    ZLayer.fromFunction(DocumentRenditions(_, _, _, _))
 
   private def text(values: Map[String, MetadataValue], key: String): Option[String] =
     values.get(key).collect {

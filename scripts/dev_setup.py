@@ -9,6 +9,9 @@ Subcommands:
                   through the API
   approve-tasks USER --api URL  approve all open workflow tasks of a demo user (until the UI can vote, DMS-91)
   search-rebuild --api URL      rebuild the tenant's search index from the database (DMS-51, idempotent)
+  intranet        ensure the intranet's technical user: a ZITADEL machine user with the platform role Reader
+                  scoped to the class `policy` (DMS-58, idempotent); its client credentials are kept in
+                  .local/zitadel/intranet.secret (mode 600) and never printed
   env-file PATH KEY=VALUE...   set keys in a dotenv file, keeping all other lines
 
 Development only. Uses the standard library only. Passwords are kept in .local/dev-users.env (mode 600) and are
@@ -266,6 +269,12 @@ select id from dms.tenant where zitadel_org_id = {sql_literal(org_id)};
     return psql(sql).splitlines()[-1]
 
 
+# The intranet's technical user (DMS-58, ADR 0035): reads the current version of released policies.
+INTRANET_USER = "dms-intranet"
+INTRANET_CLASSES = ["policy"]
+INTRANET_SECRET = LOCAL / "zitadel" / "intranet.secret"
+
+
 def tenant_id(org_id: str) -> str:
     out = psql(f"select id from dms.tenant where zitadel_org_id = {sql_literal(org_id)};")
     if not out:
@@ -287,6 +296,26 @@ where not exists (
     select 1 from dms.role_assignment
     where tenant_id = {sql_literal(tenant)} and user_id = {sql_literal(user_id)} and role = {sql_literal(role)}
       and organizational_unit is null and document_class is null
+      and (valid_until is null or valid_until > now()));""")
+    psql("begin;" + "".join(statements) + "\ncommit;")
+
+
+def grant_class_roles(tenant: str, user_id: str, role: str, classes: list[str]) -> None:
+    """Grants `role` scoped to each document class (subclasses included) that the user does not hold yet. Development
+    setup only, like `grant_roles`."""
+    if not re.fullmatch(r"\d+", user_id):
+        fail(f"unexpected user id {user_id!r}")
+    statements = []
+    for cls in classes:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", cls):
+            fail(f"unexpected class key {cls!r}")
+        statements.append(f"""
+insert into dms.role_assignment (tenant_id, user_id, role, document_class, granted_by)
+select {sql_literal(tenant)}, {sql_literal(user_id)}, {sql_literal(role)}, {sql_literal(cls)}, {sql_literal(GRANTED_BY)}
+where not exists (
+    select 1 from dms.role_assignment
+    where tenant_id = {sql_literal(tenant)} and user_id = {sql_literal(user_id)} and role = {sql_literal(role)}
+      and organizational_unit is null and document_class = {sql_literal(cls)}
       and (valid_until is null or valid_until > now()));""")
     psql("begin;" + "".join(statements) + "\ncommit;")
 
@@ -332,6 +361,34 @@ def cmd_users() -> None:
     set_env_keys(USERS_ENV, updates, mode=0o600)
     grant_roles(tenant_id(z.org_id), grants)
     print(f"Role assignments ensured; passwords are in {USERS_ENV}")
+
+
+def cmd_intranet() -> None:
+    """Ensures the intranet's technical user: a ZITADEL machine user (client credentials, JWT access tokens) with the
+    platform role Reader scoped to the released classes. Reader on a class covers its subclasses; confidential
+    documents stay hidden unless the user is made a member of an allowed access group (ADR 0032)."""
+    z = Zitadel()
+    user_id = z.user_id(INTRANET_USER)
+    if user_id is None:
+        user_id = z.api("POST", "/management/v1/users/machine", {
+            "userName": INTRANET_USER, "name": "Intranet (stable addresses, DMS-58)",
+            "accessTokenType": "ACCESS_TOKEN_TYPE_JWT"})["userId"]
+        print(f"Created machine user {INTRANET_USER}")
+    else:
+        print(f"Reusing machine user {INTRANET_USER}")
+    if not INTRANET_SECRET.exists() or not INTRANET_SECRET.read_text().strip():
+        secret = z.api("PUT", f"/management/v1/users/{user_id}/secret", {})
+        INTRANET_SECRET.parent.mkdir(parents=True, exist_ok=True)
+        INTRANET_SECRET.touch(mode=0o600)
+        INTRANET_SECRET.chmod(0o600)
+        INTRANET_SECRET.write_text(f"{secret['clientId']}:{secret['clientSecret']}\n")
+        print("Generated a client secret")
+    grant_class_roles(tenant_id(z.org_id), user_id, "Reader", INTRANET_CLASSES)
+    print(f"Reader on {', '.join(INTRANET_CLASSES)} ensured for {INTRANET_USER} (user id {user_id})")
+    print(f"Client credentials (client_id:client_secret) are in {INTRANET_SECRET}; a token:")
+    print(f"  curl -u \"$(cat {INTRANET_SECRET.relative_to(ROOT)})\" -d grant_type=client_credentials "
+          f"--data-urlencode 'scope=openid urn:zitadel:iam:org:project:id:{z.project_id}:aud "
+          f"urn:zitadel:iam:user:resourceowner' {z.issuer}/oauth/v2/token")
 
 
 def user_password(username: str) -> str:
@@ -668,6 +725,8 @@ def main(argv: list[str]) -> None:
         cmd_token(args[0])
     elif command == "seed" and len(args) == 2 and args[0] == "--api":
         cmd_seed(args[1])
+    elif command == "intranet":
+        cmd_intranet()
     elif command == "search-rebuild" and len(args) == 2 and args[0] == "--api":
         cmd_search_rebuild(args[1])
     elif command == "approve-tasks" and len(args) == 3 and args[1] == "--api":

@@ -105,6 +105,9 @@ step "Tenant"
 step "Demo users and role assignments"
 "${HELPER[@]}" users
 
+step "Intranet technical user (Reader on class policy)"
+"${HELPER[@]}" intranet
+
 # The backend: reuse one that already answers on the port, otherwise start the staged build in the background.
 # A backend started here is stopped again when the script fails or runs with --no-start.
 started_backend=false

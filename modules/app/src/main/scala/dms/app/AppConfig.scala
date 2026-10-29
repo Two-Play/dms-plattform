@@ -4,6 +4,7 @@ import dms.db.DbConfig
 import dms.documents.core.DocumentSettings
 import dms.identity.AuthConfig
 import dms.integration.partners.PartnerDirectoryConfig
+import dms.integration.webhooks.WebhookSettings
 import dms.rendering.core.RendererConfig
 import dms.search.core.{OpenSearchConfig, SearchSettings}
 import dms.storage.StorageConfig
@@ -80,6 +81,32 @@ final case class SearchConfig(
   def settings: SearchSettings =
     SearchSettings(syncInterval = zio.Duration.fromSeconds(syncIntervalSeconds.toLong))
 
+/** Webhooks for connected systems (DMS-58, ADR 0035).
+  *
+  * @param allowedHosts
+  *   development only: comma-separated hosts that may use http and private or loopback addresses (SSRF
+  *   exemption), e.g. `localhost`
+  * @param allowPrivateNetworks
+  *   lets subscriptions target private networks (https still required), for receivers in the company network
+  * @param timeoutSeconds
+  *   per delivery attempt
+  * @param maxAttempts
+  *   attempts per delivery before it is dead; retries back off exponentially up to one hour
+  */
+final case class WebhooksConfig(
+    allowedHosts: String,
+    allowPrivateNetworks: Boolean,
+    timeoutSeconds: Int,
+    maxAttempts: Int
+):
+  def settings: WebhookSettings =
+    WebhookSettings(
+      allowedHosts.split(',').map(_.trim).filter(_.nonEmpty).toSet,
+      allowPrivateNetworks,
+      zio.Duration.fromSeconds(timeoutSeconds.toLong),
+      maxAttempts.max(1)
+    )
+
 final case class AppConfig(
     http: HttpConfig,
     auth: AuthConfig,
@@ -92,7 +119,8 @@ final case class AppConfig(
     documents: DocumentsConfig,
     partners: PartnerDirectoryConfig,
     rendering: RendererConfig,
-    search: SearchConfig
+    search: SearchConfig,
+    webhooks: WebhooksConfig
 )
 
 object AppConfig:

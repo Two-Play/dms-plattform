@@ -47,10 +47,11 @@ enum Action:
 
 /** Areas of tenant configuration (matrix row "Configuration"). `Search` is the operation of the tenant's
   * search index, e.g. rebuilding it (DMS-51, ADR 0029). `Groups` is the administration of access groups and
-  * their members (DMS-101, ADR 0032).
+  * their members (DMS-101, ADR 0032). `Webhooks` is the administration of webhook subscriptions of connected
+  * systems (DMS-58, ADR 0035).
   */
 enum ConfigurationArea:
-  case DocumentClasses, Workflows, Taxonomies, Retention, Search, Groups
+  case DocumentClasses, Workflows, Taxonomies, Retention, Search, Groups, Webhooks
 
 enum Confidentiality:
   case Public, Internal, Confidential, StrictlyConfidential

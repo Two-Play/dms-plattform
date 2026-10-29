@@ -194,6 +194,8 @@ For API tests with the machine user `dms-api-tester` (client credentials, create
 curl -H "Authorization: Bearer $(scripts/zitadel-test-token.sh)" localhost:8080/api/v1/me
 ```
 
+The intranet reads the valid version of a policy through stable addresses (DMS-58, ADR 0035): `GET /api/v1/documents/{id}/current` (JSON), `/current.pdf` and `/current.html`, optionally `?scope=`. Its technical user `dms-intranet` is a ZITADEL machine user with the platform role Reader scoped to the class `policy`, set up by `scripts/dev-setup.sh` (or `scripts/dev_setup.py intranet`, idempotent). Its client credentials are kept in `.local/zitadel/intranet.secret` (never printed); the command prints the token request. In production, assign Reader with `document_class` for each released class; confidential documents stay hidden unless the user is a member of an allowed access group. Subscriptions for webhooks (`document.published`, `document.superseded`, `document.withdrawn`) are managed at `/api/v1/admin/webhooks`; locally, set `DMS_WEBHOOKS_ALLOWED_HOSTS=localhost` to deliver to a receiver on this machine (see [modules/integration/README.md](modules/integration/README.md)).
+
 Start the web UI (Node 24; details in [frontend/README.md](frontend/README.md)):
 
 ```bash
