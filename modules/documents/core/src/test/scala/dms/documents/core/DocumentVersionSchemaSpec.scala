@@ -658,7 +658,7 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
           .map(m => (m.group(1), m.group(2)))
           .filter((a, b) => names(a) && names(b))
           .toSet
-      // V32 replaces the guard of V18 (which replaced V10's and V9's) and allows exactly the lifecycle's
+      // V31 replaces the guard of V18 (which replaced V10's and V9's) and allows exactly the lifecycle's
       // transitions; V18 lacked only the discarding of a draft (DMS-129), the earlier ones also the withdrawal
       // of a valid version (DMS-55).
       val discard       = Set(("Draft", "Discarded"))
