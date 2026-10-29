@@ -221,7 +221,7 @@ object VersionPrintLayout:
         List(
           Some(RenditionLayout.validity(copy.rendition)),
           Some(RenditionLayout.approvalNote(copy.rendition)),
-          Some(s"${l.copy}. ${generated(facts)}"),
+          Some(generated(facts)),
           copy.sha256.map(sha => s"${l.archived} $sha")
         ).flatten.mkString("\n")
 
@@ -233,6 +233,7 @@ object VersionPrintLayout:
     val mark  = if facts.draft then "color: #b42318; font-weight: 700;" else ""
     val right = s"${marking(facts)}\n${identification(facts)}"
     s"""@page {
+       |  ${if facts.draft then "" else "margin-bottom: 34mm;"}
        |  @top-left { content: ${RenditionLayout.css(facts.title)}; width: 50%; vertical-align: bottom;
        |    padding-bottom: 3mm; border-bottom: 0.5pt solid #888; $margin }
        |  @top-right { content: ${RenditionLayout.css(right)}; width: 50%; text-align: right;

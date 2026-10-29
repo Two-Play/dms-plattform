@@ -62,22 +62,22 @@ The app calls the API on its own origin with the backend's paths unchanged (`/he
 
 TanStack Router with **file-based routing**: the Vite plugin generates `src/routeTree.gen.ts` from `src/routes/` (committed so `tsc` works before the first build; do not edit by hand). File-based routing gives automatic code splitting per route and fully typed links without maintaining a route tree manually.
 
-| Route                                               | File                                             | Access                                                                      |
-| --------------------------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------------- |
-| `/sign-in`                                          | `routes/sign-in.tsx`                             | public landing and sign-in page                                             |
-| `/callback`                                         | `routes/callback.tsx`                            | OIDC redirect target                                                        |
-| `/`, `/documents`, `/templates`, `/tasks`, `/admin` | `routes/_app/*`                                  | signed in; `_app.tsx` is the pathless protected layout (app shell)          |
-| `/documents/new`                                    | `routes/_app/documents/new.tsx`                  | signed in; "New document" with live preview (DMS-39)                        |
-| `/documents/$documentId`                            | `routes/_app/documents/$documentId.tsx`          | signed in; a document: continue and submit a draft, workflow state (DMS-90) |
-| `/documents/$documentId/compare?from=…&to=…`        | `routes/_app/documents/$documentId_.compare.tsx` | signed in; comparison of two versions (DMS-54)                              |
-| `/tasks`                                            | `routes/_app/tasks.tsx`                          | signed in; task inbox with votes and read confirmations (DMS-48)            |
-| `/search`                                           | `routes/_app/search.tsx`                         | signed in; full-text search and "valid on" history (DMS-52, DMS-53)         |
-| `/compliance?view=&unit=&owner=&document=`          | `routes/_app/compliance.tsx`                     | signed in; compliance cockpit for compliance officers (DMS-59)              |
-| `/templates`                                        | `routes/_app/templates/index.tsx`                | signed in; templates for template designers (DMS-98)                        |
-| `/templates/$templateId?version=…`                  | `routes/_app/templates/$templateId.tsx`          | signed in; one template: versions, content, test mode, status (DMS-98)      |
-| `/admin`                                            | `routes/_app/admin.tsx`                          | tenant administrators; access groups and all deputyships (DMS-105, DMS-99)  |
-| `/deputies`                                         | `routes/_app/deputies.tsx`                       | signed in; own deputies, from the user menu (DMS-99)                        |
-| anything else                                       | `components/not-found-page.tsx`                  | 404 page                                                                    |
+| Route                                               | File                                             | Access                                                                                                                                   |
+| --------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `/sign-in`                                          | `routes/sign-in.tsx`                             | public landing and sign-in page                                                                                                          |
+| `/callback`                                         | `routes/callback.tsx`                            | OIDC redirect target                                                                                                                     |
+| `/`, `/documents`, `/templates`, `/tasks`, `/admin` | `routes/_app/*`                                  | signed in; `_app.tsx` is the pathless protected layout (app shell)                                                                       |
+| `/documents/new`                                    | `routes/_app/documents/new.tsx`                  | signed in; "New document" with live preview (DMS-39)                                                                                     |
+| `/documents/$documentId?version=…`                  | `routes/_app/documents/$documentId.tsx`          | signed in; a document: continue and submit a draft, workflow state (DMS-90); content, metadata and PDF of any readable version (DMS-112) |
+| `/documents/$documentId/compare?from=…&to=…`        | `routes/_app/documents/$documentId_.compare.tsx` | signed in; comparison of two versions (DMS-54)                                                                                           |
+| `/tasks`                                            | `routes/_app/tasks.tsx`                          | signed in; task inbox with votes and read confirmations (DMS-48)                                                                         |
+| `/search`                                           | `routes/_app/search.tsx`                         | signed in; full-text search and "valid on" history (DMS-52, DMS-53)                                                                      |
+| `/compliance?view=&unit=&owner=&document=`          | `routes/_app/compliance.tsx`                     | signed in; compliance cockpit for compliance officers (DMS-59)                                                                           |
+| `/templates`                                        | `routes/_app/templates/index.tsx`                | signed in; templates for template designers (DMS-98)                                                                                     |
+| `/templates/$templateId?version=…`                  | `routes/_app/templates/$templateId.tsx`          | signed in; one template: versions, content, test mode, status (DMS-98)                                                                   |
+| `/admin`                                            | `routes/_app/admin.tsx`                          | tenant administrators; access groups and all deputyships (DMS-105, DMS-99)                                                               |
+| `/deputies`                                         | `routes/_app/deputies.tsx`                       | signed in; own deputies, from the user menu (DMS-99)                                                                                     |
+| anything else                                       | `components/not-found-page.tsx`                  | 404 page                                                                                                                                 |
 
 The protected layout checks `context.auth.isAuthenticated` in `beforeLoad` and redirects to `/sign-in?redirect=<path>`. After sign-in the original path is carried through the OIDC `state` and restored on `/callback` (only same-origin paths are accepted).
 
@@ -90,6 +90,7 @@ src/
                  me.ts: user and business roles; acknowledgements.ts: read confirmations;
                  search.ts: full-text search, "valid on" list and CSV export;
                  versions.ts: version history and version comparison;
+                 version-view.ts: rendered HTML and PDF downloads of a version;
                  template-admin.ts: template administration, test mode, status changes, impact analysis;
                  groups.ts: access groups and members; deputyships.ts: deputyships;
                  errors.ts: ApiError with field issues)
@@ -139,9 +140,16 @@ For templates with reference fields (`references` in the fields response), the p
 ## Document list and drafts (DMS-90)
 
 - `/documents` (`document-list-page.tsx`) lists the most recently changed documents the user may read (`GET /api/v1/documents`): "My drafts" (`mine` and status Draft) and "Other documents", each with status and version, linking to the document page.
-- `/documents/$documentId` (`document-page.tsx`) loads the document (`GET /api/v1/documents/{id}`). A draft opens in the same workspace as "New document" (`document-workspace.tsx`: generated form, partner pickers, debounced preview, save); `draft-values.ts` turns the saved entered values back into form input and rebuilds the taken-over partner from the values it filled. Platform, computed and partner master values are not sent again; an unchanged partner is not taken over again. Other statuses show the version's metadata read-only.
+- `/documents/$documentId` (`document-page.tsx`) loads the document (`GET /api/v1/documents/{id}`). A draft opens in the same workspace as "New document" (`document-workspace.tsx`: generated form, partner pickers, debounced preview, save); `draft-values.ts` turns the saved entered values back into form input and rebuilds the taken-over partner from the values it filled. Platform, computed and partner master values are not sent again; an unchanged partner is not taken over again. Other statuses show the version's content and metadata read-only (see below).
 - "Submit for review" (both pages) saves the draft, then `POST /api/v1/documents/{id}/submit` starts the workflow; "New document" then opens the document page. The "Review and approval" card shows the cases from `GET /api/v1/documents/{id}/workflow` (status, round, current step, tasks with their assignees, votes).
 - Errors: issues of a 422 (`invalid_values`, `not_editable`, `incomplete`) are shown at their fields while the field keeps the rejected value; `incomplete` at submission also lists the missing values (click focuses the field); a 409 tells the user to reload; `invalid` at submission (e.g. a changed locked section without an authorized deviation request) is shown with a generic hint.
+
+## Document view, metadata and PDF (DMS-112, ADR 0039)
+
+- The document page shows the content of the version it displays (`version-content.tsx`): `GET /api/v1/documents/{id}/versions/{versionId}/html` returns the backend's HTML fragment, rendered from the saved values with the "Draft – not valid" marking for versions that were never approved, and from the frozen version package for approved ones. It is shown in a scrollable, focusable box styled by the shared document stylesheet (`@dms-document`), like the live preview. A draft the caller edits keeps the workspace with its live preview.
+- The metadata panel (`version-metadata.tsx`) lists status, version and revision index ("Index 1.1" = version number major.minor; open versions add their working state), document number (`documentNumber`, DMS-113, when present), author, owner, issuing body (the core field `organizationalUnit`, labelled "Herausgebende Stelle"), document class, valid from/until, confidentiality, approval (approver and date from the workflow approval, "on behalf of" for deputies), publication and template; then the other template fields under "Further details". Persons via `UserName`.
+- "Download PDF" (`pdf-download.tsx`, `api/version-view.ts`): open versions get the draft PDF generated on demand (`…/draft.pdf`, marked on every page, not archived); approved versions the archived PDF/A (`…/rendition`). "Attach change history" adds the history of all versions up to this one: for drafts in the draft PDF, for approved versions as a copy generated on demand (`…/copy.pdf`) while the archived file stays unchanged. The files are fetched with the access token and handed over as blob.
+- The version history offers "Show" per version; `?version=<id>` shows that version on the document page with a note and a link back to the current version.
 
 ## Task inbox and votes (DMS-48, DMS-91)
 
