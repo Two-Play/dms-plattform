@@ -1,9 +1,11 @@
+import { ErrorState } from '@/components/shared/error-state'
+import { PageHeader } from '@/components/shared/page-header'
+import { LoadingState } from '@/components/shared/states'
 import { useQuery } from '@tanstack/react-query'
 import { useApiClient } from '@/api/context'
 import { deputyshipsQuery } from '@/api/deputyships'
 import { useMe } from '@/api/me'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 import { DeputyshipForm } from './deputyship-form'
 import { DeputyshipTable } from './deputyship-table'
 
@@ -21,14 +23,11 @@ export function MyDeputiesPage() {
   const forOthers = (list.data ?? []).filter((d) => d.deputy === userId)
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h1 className="font-heading text-2xl font-semibold">Deputies</h1>
-        <p className="text-sm text-muted-foreground">
-          While a deputyship is active, the deputy can complete your open review and approval tasks
-          on your behalf. You keep your tasks as well.
-        </p>
-      </div>
+    <div className="max-w-4xl space-y-6">
+      <PageHeader
+        title="Deputies"
+        description="While a deputyship is active, the deputy can complete your open review and approval tasks on your behalf. You keep your tasks as well."
+      />
       <Card>
         <CardHeader>
           <CardTitle>Set a deputy</CardTitle>
@@ -38,12 +37,8 @@ export function MyDeputiesPage() {
           <DeputyshipForm />
         </CardContent>
       </Card>
-      {(list.isPending || me.isPending) && <Skeleton className="h-32 w-full" />}
-      {list.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {list.error.message}
-        </p>
-      )}
+      {(list.isPending || me.isPending) && <LoadingState label="Loading your deputyships" />}
+      {list.isError && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
       {list.data && userId !== undefined && (
         <>
           <Card>

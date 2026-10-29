@@ -1,3 +1,5 @@
+import { InlineError } from '@/components/shared/error-state'
+import { toast } from '@/lib/toast'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useApiClient } from '@/api/context'
 import { endDeputyship, type Deputyship } from '@/api/deputyships'
@@ -23,6 +25,7 @@ function EndButton({ deputyship }: { deputyship: Deputyship }) {
   const end = useMutation({
     mutationFn: () => endDeputyship(client, deputyship.id),
     onSuccess: async () => {
+      toast(`Deputyship of ${deputyship.deputy} for ${deputyship.principal} ended.`)
       await queryClient.invalidateQueries({ queryKey: ['deputyships'] })
       // forwarded tasks leave the deputy's inbox
       await queryClient.invalidateQueries({ queryKey: ['workflow'] })
@@ -41,11 +44,7 @@ function EndButton({ deputyship }: { deputyship: Deputyship }) {
       >
         {end.isPending ? 'Ending…' : 'End now'}
       </Button>
-      {end.isError && (
-        <p role="alert" className="text-xs text-destructive">
-          {end.error.message}
-        </p>
-      )}
+      {end.isError && <InlineError error={end.error} className="text-xs" />}
     </div>
   )
 }

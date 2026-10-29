@@ -1,3 +1,5 @@
+import { ErrorState } from '@/components/shared/error-state'
+import { LoadingState } from '@/components/shared/states'
 import { useQuery } from '@tanstack/react-query'
 import { Lock } from 'lucide-react'
 import { useApiClient } from '@/api/context'
@@ -18,7 +20,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Skeleton } from '@/components/ui/skeleton'
 
 const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -183,11 +184,9 @@ export function ReleaseDialog({
             Check how documents use the earlier versions before you release this one.
           </DialogDescription>
         </DialogHeader>
-        {impact.isPending && <Skeleton className="h-32 w-full" />}
+        {impact.isPending && <LoadingState label="Analysing the impact" rows={3} />}
         {impact.isError && (
-          <p role="alert" className="text-sm text-destructive">
-            {impact.error.message}
-          </p>
+          <ErrorState error={impact.error} onRetry={() => void impact.refetch()} />
         )}
         {impact.data && <Impact impact={impact.data} />}
         {error && (

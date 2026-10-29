@@ -1,3 +1,6 @@
+import { InlineError } from '@/components/shared/error-state'
+import { LoadingState } from '@/components/shared/states'
+import { toast } from '@/lib/toast'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2 } from 'lucide-react'
 import { useEffect, useRef } from 'react'
@@ -6,7 +9,6 @@ import { useApiClient } from '@/api/context'
 import type { DocumentVersionView } from '@/api/partners'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 
 const dateTimeFormat = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
 
@@ -33,7 +35,10 @@ export function AcknowledgementPanel({
   })
   const confirm = useMutation({
     mutationFn: () => acknowledge(client, documentId, version.id),
-    onSuccess: refresh,
+    onSuccess: async () => {
+      toast('Read confirmed')
+      await refresh()
+    },
   })
 
   // Record the opening once per displayed version; the backend keeps the first one.
@@ -55,7 +60,7 @@ export function AcknowledgementPanel({
         <CardTitle>Acknowledgement</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
-        {state.isPending && <Skeleton className="h-10 w-full" />}
+        {state.isPending && <LoadingState label="Loading the read confirmation" rows={1} />}
         {acknowledgedAt ? (
           <p className="flex items-center gap-2" data-testid="acknowledged">
             <CheckCircle2 className="size-4 text-primary" aria-hidden />
@@ -80,11 +85,7 @@ export function AcknowledgementPanel({
             </div>
           )
         )}
-        {error && (
-          <p role="alert" className="text-destructive">
-            {error.message}
-          </p>
-        )}
+        {error && <InlineError error={error} />}
       </CardContent>
     </Card>
   )

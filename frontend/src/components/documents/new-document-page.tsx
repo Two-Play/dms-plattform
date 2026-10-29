@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useApiClient } from '@/api/context'
 import { catalogQuery, templateFieldsQuery, type DocumentLanguage } from '@/api/templates'
 import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/shared/error-state'
+import { PageHeader } from '@/components/shared/page-header'
+import { LoadingState } from '@/components/shared/states'
 import {
   DocumentWorkspace,
   LanguageSelect,
@@ -20,13 +22,9 @@ type EditorProps = Pick<
 export function DocumentEditor(props: EditorProps) {
   const client = useApiClient()
   const fields = useQuery(templateFieldsQuery(client, props.templateId, props.version))
-  if (fields.isPending) return <Skeleton className="h-64 w-full" />
+  if (fields.isPending) return <LoadingState label="Loading the template fields" rows={6} />
   if (fields.isError) {
-    return (
-      <p role="alert" className="text-sm text-destructive">
-        {fields.error.message}
-      </p>
-    )
+    return <ErrorState error={fields.error} onRetry={() => void fields.refetch()} />
   }
   return (
     <DocumentWorkspace
@@ -40,10 +38,12 @@ export function DocumentEditor(props: EditorProps) {
 interface NewDocumentPageProps {
   /** Called after the new draft was submitted, e.g. to open the document page. */
   onSubmitted?: (documentId: string) => void
+  /** Trail to the page, set by the route. */
+  breadcrumbs?: ReactNode
 }
 
 /** "New document": choose a released template, fill in its fields and watch the live preview (US-03.2). */
-export function NewDocumentPage({ onSubmitted }: NewDocumentPageProps = {}) {
+export function NewDocumentPage({ onSubmitted, breadcrumbs }: NewDocumentPageProps = {}) {
   const client = useApiClient()
   const catalog = useQuery(catalogQuery(client))
   const [selected, setSelected] = useState('')
@@ -52,12 +52,11 @@ export function NewDocumentPage({ onSubmitted }: NewDocumentPageProps = {}) {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-1">
-        <h1 className="font-heading text-2xl font-semibold">New document</h1>
-        <p className="text-sm text-muted-foreground">
-          Choose a template, fill in its fields and check the result in the live preview.
-        </p>
-      </div>
+      <PageHeader
+        title="New document"
+        description="Choose a template, fill in its fields and check the result in the live preview."
+        breadcrumbs={breadcrumbs}
+      />
       <div className="grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:max-w-3xl">
         <div className="space-y-1.5">
           <Label htmlFor="template">Template</Label>
@@ -83,9 +82,7 @@ export function NewDocumentPage({ onSubmitted }: NewDocumentPageProps = {}) {
             <p className="text-xs text-muted-foreground">{entry.description}</p>
           )}
           {catalog.isError && (
-            <p role="alert" className="text-xs text-destructive">
-              {catalog.error.message}
-            </p>
+            <ErrorState error={catalog.error} onRetry={() => void catalog.refetch()} />
           )}
           {catalog.data?.length === 0 && (
             <p className="text-xs text-muted-foreground">No released templates yet.</p>

@@ -20,6 +20,7 @@ import { documentListQuery, type DocumentSummary } from '@/api/documents'
 import { hasRole, useMe } from '@/api/me'
 import { openReviewTasksQuery } from '@/api/reviews'
 import { templateAdminListQuery } from '@/api/template-admin'
+import { greetingName } from '@/auth/profile'
 import { myTasksQuery } from '@/api/workflow'
 import { StatusBadge } from '@/components/documents/status-badge'
 import { PageHeader } from '@/components/shared/page-header'
@@ -472,7 +473,7 @@ function ComplianceCard() {
 export function HomePage() {
   const auth = useAuth()
   const me = useMe()
-  const name = auth.user?.profile.given_name ?? auth.user?.profile.name
+  const name = greetingName(auth.user?.profile)
   return (
     <div className="space-y-6">
       <PageHeader

@@ -16,6 +16,7 @@ import {
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { useAuth } from 'react-oidc-context'
 import { hasRole, useMe, type BusinessRole } from '@/api/me'
+import { displayName } from '@/auth/profile'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -92,7 +93,7 @@ function ThemeToggle() {
 function UserMenu() {
   const auth = useAuth()
   const profile = auth.user?.profile
-  const name = profile?.name ?? profile?.preferred_username ?? texts.signedInUser
+  const name = displayName(profile) ?? texts.signedInUser
 
   return (
     <DropdownMenu>
@@ -158,7 +159,8 @@ function SidebarNav({ items, taskCount }: { items: readonly NavItem[]; taskCount
       aria-label={texts.mainNav}
       className="hidden border-r bg-sidebar text-sidebar-foreground md:block md:w-56 md:shrink-0"
     >
-      <ul className="sticky top-14 flex flex-col gap-1 p-2">
+      {/* Stays in view below the header on long pages and scrolls on its own if needed. */}
+      <ul className="sticky top-14 flex max-h-[calc(100svh-3.5rem)] flex-col gap-1 overflow-y-auto p-2">
         {items.map(({ to, label, icon: Icon }) => (
           <li key={to}>
             <Link

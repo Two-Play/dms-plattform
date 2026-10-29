@@ -1,6 +1,14 @@
+import { ErrorState } from '@/components/shared/error-state'
+import {
+  BreadcrumbCurrent,
+  Breadcrumbs,
+  breadcrumbLinkClass,
+  PageHeader,
+} from '@/components/shared/page-header'
+import { LoadingState } from '@/components/shared/states'
+import { toast } from '@/lib/toast'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ArrowLeft } from 'lucide-react'
 import { useState } from 'react'
 import { useApiClient } from '@/api/context'
 import { useMe } from '@/api/me'
@@ -22,7 +30,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Skeleton } from '@/components/ui/skeleton'
 import { ContentEditor } from './content-editor'
 import { FieldsPanel } from './fields-panel'
 import { ReleaseDialog } from './release-dialog'
@@ -85,21 +92,20 @@ function StatusActions({ version, versions, userId }: StatusActionsProps) {
   const client = useApiClient()
   const queryClient = useQueryClient()
   const [dialog, setDialog] = useState<TemplateStatus | undefined>()
-  const [done, setDone] = useState<string | undefined>()
 
   const change = useMutation({
     mutationFn: (to: TemplateStatus) =>
       changeTemplateStatus(client, version.templateId, version.version, to),
     onSuccess: async (updated) => {
       setDialog(undefined)
-      setDone(`Version ${String(updated.version)} is now ${updated.status}.`)
+      toast(`Version ${String(updated.version)} is now ${updated.status}.`)
       await queryClient.invalidateQueries({ queryKey: ['template-admin'] })
     },
   })
   const newVersion = useMutation({
     mutationFn: () => createVersion(client, version.templateId, requestOf(version)),
     onSuccess: async (created) => {
-      setDone(`Version ${String(created.version)} was created as a draft.`)
+      toast(`Version ${String(created.version)} was created as a draft.`)
       await queryClient.invalidateQueries({ queryKey: ['template-admin'] })
     },
   })
@@ -109,7 +115,6 @@ function StatusActions({ version, versions, userId }: StatusActionsProps) {
   const canStartNewVersion = latest && !hasOpenVersion(versions) && version.status !== 'Archived'
 
   function trigger(action: StatusAction) {
-    setDone(undefined)
     change.reset()
     if (action.to === 'Released' || action.to === 'Deprecated') setDialog(action.to)
     else change.mutate(action.to)
@@ -137,7 +142,6 @@ function StatusActions({ version, versions, userId }: StatusActionsProps) {
             variant="outline"
             disabled={newVersion.isPending}
             onClick={() => {
-              setDone(undefined)
               newVersion.mutate()
             }}
           >
@@ -149,11 +153,6 @@ function StatusActions({ version, versions, userId }: StatusActionsProps) {
         <p className="text-xs text-muted-foreground">
           You created or changed this version. Four-eyes principle: another template designer has to
           release it.
-        </p>
-      )}
-      {done && (
-        <p role="status" className="text-sm text-muted-foreground">
-          {done}
         </p>
       )}
       {error && dialog === undefined && (
@@ -300,24 +299,21 @@ export function TemplatePage({ templateId, version }: { templateId: string; vers
 
   return (
     <div className="space-y-6">
-      <div className="space-y-1">
-        <Link
-          to="/templates"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"
-        >
-          <ArrowLeft className="size-4" aria-hidden="true" />
-          Templates
-        </Link>
-        <h1 className="font-heading text-2xl font-semibold">{selected?.name ?? 'Template'}</h1>
-        {selected?.description && (
-          <p className="text-sm text-muted-foreground">{selected.description}</p>
-        )}
-      </div>
-      {versions.isPending && <Skeleton className="h-40 w-full" />}
+      <PageHeader
+        title={selected?.name ?? 'Template'}
+        description={selected?.description}
+        breadcrumbs={
+          <Breadcrumbs>
+            <Link to="/templates" className={breadcrumbLinkClass}>
+              Templates
+            </Link>
+            <BreadcrumbCurrent>{selected?.name ?? 'Template'}</BreadcrumbCurrent>
+          </Breadcrumbs>
+        }
+      />
+      {versions.isPending && <LoadingState label="Loading the template" rows={5} />}
       {versions.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {versions.error.message}
-        </p>
+        <ErrorState error={versions.error} onRetry={() => void versions.refetch()} />
       )}
       {selected && (
         <>

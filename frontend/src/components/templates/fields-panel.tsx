@@ -1,9 +1,9 @@
+import { LoadingState } from '@/components/shared/states'
 import { useQuery } from '@tanstack/react-query'
 import { useApiClient } from '@/api/context'
 import { designerFieldsQuery, type TemplateVersion } from '@/api/template-admin'
 import type { FieldType } from '@/api/templates'
 import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage } from './template-lifecycle'
 
 function typeLabel(t: FieldType): string {
@@ -15,7 +15,7 @@ export function FieldsPanel({ version }: { version: TemplateVersion }) {
   const client = useApiClient()
   const fields = useQuery(designerFieldsQuery(client, version.templateId, version.version))
 
-  if (fields.isPending) return <Skeleton className="h-24 w-full" />
+  if (fields.isPending) return <LoadingState label="Loading the fields" rows={3} />
   if (fields.isError) {
     return (
       <p role="alert" className="text-sm text-destructive">

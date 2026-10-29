@@ -1,5 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
+import { CheckCircle2 } from 'lucide-react'
 import { useState } from 'react'
 import {
   acknowledge,
@@ -15,7 +16,10 @@ import { decisionLabels, myTasksQuery, type WorkflowTask } from '@/api/workflow'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState, InlineError } from '@/components/shared/error-state'
+import { PageHeader } from '@/components/shared/page-header'
+import { EmptyState, LoadingState } from '@/components/shared/states'
+import { toast } from '@/lib/toast'
 import {
   acknowledgementItem,
   formatPlainDate,
@@ -136,11 +140,7 @@ function AcknowledgementActions({
           Open the document first.
         </p>
       )}
-      {error && (
-        <p role="alert" className="text-xs text-destructive">
-          {error.message}
-        </p>
-      )}
+      {error && <InlineError error={error} className="text-xs" />}
     </div>
   )
 }
@@ -196,11 +196,7 @@ function ReviewActions({
           Withdraw…
         </Button>
       </div>
-      {revision.isError && (
-        <p role="alert" className="text-xs text-destructive">
-          {revision.error.message}
-        </p>
-      )}
+      {revision.isError && <InlineError error={revision.error} className="text-xs" />}
     </div>
   )
 }
@@ -224,12 +220,13 @@ function InboxRow({
     <li
       aria-label={`${kindLabels[item.kind]}: ${title}${overdue ? ' (overdue)' : ''}`}
       data-overdue={overdue || undefined}
-      className={`flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between ${
+      className={`flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between ${
         overdue ? 'border-destructive/60 bg-destructive/5' : ''
       }`}
     >
-      <div className="min-w-0 space-y-1">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
+      {/* Same layout for every task: badges, title, context, date; actions right (bottom on mobile). */}
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant={item.kind === 'Approval' ? 'default' : 'secondary'}>
             {kindLabels[item.kind]}
           </Badge>
@@ -238,17 +235,19 @@ function InboxRow({
             // Forwarded by an active deputyship (DMS-49, DMS-99); user id until display names exist.
             <Badge variant="outline">On behalf of {item.task.actingFor}</Badge>
           )}
+        </div>
+        <p className="text-sm">
           <Link
             to="/documents/$documentId"
             params={{ documentId: item.documentId }}
-            className="font-medium break-words hover:underline"
+            className="font-medium break-words underline-offset-4 hover:underline"
           >
             {title}
           </Link>
           {item.versionLabel && (
-            <span className="text-muted-foreground">version {item.versionLabel}</span>
+            <span className="text-muted-foreground"> version {item.versionLabel}</span>
           )}
-        </div>
+        </p>
         <Context item={item} />
         <p className="text-xs">
           <ItemDate item={item} overdue={overdue} />
@@ -299,7 +298,6 @@ export function TaskInboxPage() {
   })
   const [voting, setVoting] = useState<{ task: WorkflowTask; initial?: VoteDraft }>()
   const [deciding, setDeciding] = useState<{ review: ReviewTask; decision: ReviewDecision }>()
-  const [message, setMessage] = useState('')
   const [mountedAt] = useState(() => Date.now())
   // Overdue is judged against the time the tasks were loaded, so a refetch updates it.
   const now = Math.max(tasks.dataUpdatedAt, mountedAt)
@@ -318,12 +316,10 @@ export function TaskInboxPage() {
 
   return (
     <div className="space-y-6">
-      <div className="space-y-1">
-        <h1 className="font-heading text-2xl font-semibold">Tasks</h1>
-        <p className="text-sm text-muted-foreground">
-          Reviews, approvals, read confirmations and periodic reviews waiting for you.
-        </p>
-      </div>
+      <PageHeader
+        title="Tasks"
+        description="Reviews, approvals, read confirmations and periodic reviews waiting for you."
+      />
       {tasks.data && (
         <PendingVoteNotice
           tasks={tasks.data}
@@ -333,9 +329,6 @@ export function TaskInboxPage() {
           }}
         />
       )}
-      <p role="status" className="text-sm empty:hidden">
-        {message}
-      </p>
       <Card>
         <CardHeader>
           <CardTitle>My tasks</CardTitle>
@@ -346,24 +339,23 @@ export function TaskInboxPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {tasks.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {tasks.error.message}
-            </p>
-          )}
+          {tasks.isError && <ErrorState error={tasks.error} onRetry={() => void tasks.refetch()} />}
           {acknowledgements.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {acknowledgements.error.message}
-            </p>
+            <ErrorState
+              error={acknowledgements.error}
+              onRetry={() => void acknowledgements.refetch()}
+            />
           )}
           {reviews.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {reviews.error.message}
-            </p>
+            <ErrorState error={reviews.error} onRetry={() => void reviews.refetch()} />
           )}
-          {loading && <Skeleton className="h-16 w-full" />}
+          {loading && <LoadingState label="Loading your tasks" />}
           {!loading && items.length === 0 && !tasks.isError && (
-            <p className="text-sm text-muted-foreground">Nothing to do right now.</p>
+            <EmptyState
+              icon={CheckCircle2}
+              title="Nothing to do right now."
+              description="New reviews, approvals and read confirmations will appear here."
+            />
           )}
           {items.length > 0 && (
             <ul aria-label="Open tasks" className="space-y-2">
@@ -378,7 +370,7 @@ export function TaskInboxPage() {
                   onReview={(review, decision) => {
                     setDeciding({ review, decision })
                   }}
-                  onDone={setMessage}
+                  onDone={toast}
                 />
               ))}
             </ul>
@@ -393,7 +385,7 @@ export function TaskInboxPage() {
         }}
         onDone={(review) => {
           setDeciding(undefined)
-          setMessage(
+          toast(
             review.status === 'Recertified'
               ? `Recertified: ${review.title} ${review.versionLabel}, next review ${formatPlainDate(review.nextDueOn ?? review.dueOn)}.`
               : `Withdrawn: ${review.title} ${review.versionLabel} is no longer in force.`,
@@ -409,9 +401,7 @@ export function TaskInboxPage() {
         }}
         onVoted={(task, decision) => {
           setVoting(undefined)
-          setMessage(
-            `Vote recorded: ${decisionLabels[decision]} on ${titleOf(task) ?? 'the document'}.`,
-          )
+          toast(`Vote recorded: ${decisionLabels[decision]} on ${titleOf(task) ?? 'the document'}.`)
         }}
       />
     </div>
