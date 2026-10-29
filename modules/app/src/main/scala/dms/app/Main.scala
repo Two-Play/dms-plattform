@@ -62,6 +62,7 @@ object Main extends ZIOAppDefault:
       DocumentApi.endpoints.map(_.widen[Env]) ++
       AttachmentApi.endpoints.map(_.widen[Env]) ++
       FileDocumentApi.endpoints.map(_.widen[Env]) ++
+      UploadFlowApi.endpoints.map(_.widen[Env]) ++
       CurrentDocumentApi.endpoints.map(_.widen[Env]) ++
       LibraryApi.endpoints.map(_.widen[Env]) ++
       VersionCompareApi.endpoints.map(_.widen[Env]) ++
@@ -98,7 +99,8 @@ object Main extends ZIOAppDefault:
     Handler.fromFunctionHandler[Request] { request =>
       if request.body.isComplete || AttachmentApi.isUpload(request.method, request.path) ||
         FileDocumentApi.isUpload(request.method, request.path) ||
-        WordTemplateApi.isUpload(request.method, request.path)
+        WordTemplateApi.isUpload(request.method, request.path) ||
+        UploadFlowApi.isUpload(request.method, request.path)
       then handler
       else
         Handler.succeed(

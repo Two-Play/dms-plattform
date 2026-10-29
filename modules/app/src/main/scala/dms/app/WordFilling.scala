@@ -94,6 +94,17 @@ object WordFilling:
       value.map(f.key -> _)
     }.toMap
 
+  /** The manual values as filled, for fields with a value (DMS-127: previews before a document exists). */
+  def manualValues(
+      fields: List[WordField],
+      values: Map[String, String],
+      language: String
+  ): Map[String, FieldValue] =
+    fields
+      .filter(_.source == WordFieldSource.Manual)
+      .flatMap(f => values.get(f.key).filter(_.trim.nonEmpty).flatMap(manual(f, _, language)).map(f.key -> _))
+      .toMap
+
   /** A manual value as filled. */
   private def manual(field: WordField, raw: String, language: String): Option[FieldValue] =
     field.fieldType match

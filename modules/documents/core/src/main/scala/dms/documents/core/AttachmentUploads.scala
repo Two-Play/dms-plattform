@@ -154,13 +154,12 @@ final class AttachmentUploads(
       bytes: Chunk[Byte],
       contentType: String
   ): IO[AttachmentError, ObjectVersion] =
+    storeBytesAt(AttachmentService.objectKey(tenant, document, fileId), bytes, contentType)
+
+  /** Stores bytes under `key`, e.g. the copy of a document's original as Word template (DMS-127). */
+  def storeBytesAt(key: String, bytes: Chunk[Byte], contentType: String): IO[AttachmentError, ObjectVersion] =
     objects
-      .put(
-        AttachmentService.objectKey(tenant, document, fileId),
-        ObjectContent.Bytes(bytes),
-        contentType,
-        expectedSha256 = Some(Sha256.of(bytes))
-      )
+      .put(key, ObjectContent.Bytes(bytes), contentType, expectedSha256 = Some(Sha256.of(bytes)))
       .mapBoth(storageError, _.version)
 
   /** The bytes of a stored object, checked against `sha256` (e.g. a template's Word file). */

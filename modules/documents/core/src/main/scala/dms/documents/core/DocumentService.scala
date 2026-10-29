@@ -1110,6 +1110,12 @@ final class DocumentService(
     * state, replacing the previous file. The stored file is inserted unless the document already has a file
     * with the same content, which is used instead (content addressing per document, shared with attachments).
     *
+    * @param carried
+    *   values of manual fields the file carries (DMS-127: a re-uploaded filled Word document); invalid ones
+    *   are left out
+    * @param carriedWins
+    *   whether the carried values replace the previous values (the platform filled the file); otherwise they
+    *   only fill fields without value
     * @return
     *   the draft and whether `file` was inserted (if not, its object is not referenced and can be removed)
     */
@@ -1118,7 +1124,9 @@ final class DocumentService(
       file: AttachmentFile,
       name: String,
       fields: List[WordField],
-      actor: UserId
+      actor: UserId,
+      carried: Map[String, String] = Map.empty,
+      carriedWins: Boolean = false
   ): IO[DocumentError, (DocumentVersion, Boolean)] =
     for
       document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
@@ -1150,8 +1158,14 @@ final class DocumentService(
             .isEmpty
         )
       )
+      found = cleanWordValues(fields, carried).filter((k, v) =>
+        manual.contains(k) && WordFields
+          .check(fields, Map(k -> v), complete = false, DocumentJson.readRows)
+          .isEmpty
+      )
+      values = if carriedWins then kept ++ found else found ++ kept
       _ <- sql {
-        VersionFileStore.set(current.id, stored.id, name, fields, kept, actor, None)
+        VersionFileStore.set(current.id, stored.id, name, fields, values, actor, None)
         DocumentStore.insertWorkingState(next, actor, templates)
       }
       updated <- sql(DocumentStore.lockVersion(current.id, templates)).someOrFail(versionNotFound(current.id))
@@ -1168,7 +1182,8 @@ final class DocumentService(
           "scanner"        -> Json.Str(stored.scanner),
           "reused"         -> Json.Bool(!inserted),
           "previousSha256" -> current.file.fold(Json.Null)(f => Json.Str(f.sha256)),
-          "fields"         -> Json.Arr(fields.map(f => Json.Str(f.key))*)
+          "fields"         -> Json.Arr(fields.map(f => Json.Str(f.key))*),
+          "carriedValues"  -> Json.Arr(found.keys.toList.sorted.map(Json.Str(_))*)
         )
       )
     yield (updated, inserted)

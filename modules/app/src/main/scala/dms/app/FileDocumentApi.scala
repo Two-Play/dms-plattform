@@ -524,7 +524,7 @@ object FileDocumentApi:
   /** The document, the version if the caller may read it, whether the caller may edit it (a draft) and its
     * workflow approval.
     */
-  private def readable(p: Principal, id: UUID, versionId: UUID) =
+  private[app] def readable(p: Principal, id: UUID, versionId: UUID) =
     DocumentApi.inTransaction(p) { ctx =>
       for
         details <- ctx.service.get(DocumentId(id))
@@ -581,11 +581,20 @@ object FileDocumentApi:
         for
           received <- AttachmentApi.receive(uploads, boundary, body).mapError(AttachmentApi.toResponse)
           (rawName, declared, spooled) = received
-          name     <- validName(rawName)
-          _        <- uploads.check(name, spooled).mapError(AttachmentApi.toResponse)
-          _        <- convertible(name)
-          _        <- contentMatches(name, spooled)
-          fields   <- scanned(name, spooled, draft.file.map(_.fields).getOrElse(Nil))
+          name   <- validName(rawName)
+          _      <- uploads.check(name, spooled).mapError(AttachmentApi.toResponse)
+          _      <- convertible(name)
+          _      <- contentMatches(name, spooled)
+          fields <- scanned(name, spooled, draft.file.map(_.fields).getOrElse(Nil))
+          // the values a filled document carries (DMS-127): they win over the previous ones if the platform
+          // filled the file, otherwise they only fill fields without value
+          carried <-
+            if OfficeFields.fillable(name) then
+              ZIO
+                .attemptBlocking(Files.readAllBytes(spooled.path))
+                .orDie
+                .flatMap(UploadFlowApi.recovered(name, _, fields))
+            else ZIO.succeed((false, Map.empty[String, String]))
           existing <- DocumentApi.inTransaction(p)(_ => service.attachmentFile(id, spooled.sha256))
           file     <- existing match
             case Some(f) => ZIO.succeed((f, None))
@@ -617,7 +626,8 @@ object FileDocumentApi:
           (candidate, fresh) = file
           updated <- DocumentApi
             .inTransaction(p) { ctx =>
-              editableDraft(ctx, p, id).flatMap(_ => service.setFile(id, candidate, name, fields, p.userId))
+              editableDraft(ctx, p, id)
+                .flatMap(_ => service.setFile(id, candidate, name, fields, p.userId, carried._2, carried._1))
             }
             .tapError(_ => AttachmentApi.discard(uploads, fresh))
           (version, inserted) = updated
@@ -631,7 +641,7 @@ object FileDocumentApi:
       .fromEither(AttachmentRules.normalizeName(raw))
       .mapError(m => (StatusCode.UnprocessableEntity, ApiError("invalid_name", m)))
 
-  private def convertible(name: String): IO[(StatusCode, ApiError), Unit] =
+  private[app] def convertible(name: String): IO[(StatusCode, ApiError), Unit] =
     ZIO
       .unless(DocumentConverter.convertible(name))(
         ZIO.fail(
