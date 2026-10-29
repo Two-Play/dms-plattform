@@ -59,7 +59,8 @@ final case class WordParagraph(text: String, headingLevel: Option[Int] = None)
   *     field key, the title (`w:alias`) its label. Tags `dms:<key>` are filled by the platform, other tags
   *     are manual fields. Filling replaces the control's text with the value in the formatting of its first
   *     run; the control stays, so the filled document can be filled again. A data binding (`w:dataBinding`)
-  *     is removed, since it would make Word show the bound value instead.
+  *     is removed, since it would make Word show the bound value instead; plain text controls are bound to
+  *     the platform's custom XML part instead (DMS-127, [[WordFieldStore]]).
   *   - **Typed controls** (DMS-122): a check box (`w14:checkbox`) is a [[WordFieldType.Checkbox]] field whose
   *     state and symbol are set; a date picker (`w:date`) a date printed in the control's format and language
   *     (`w:dateFormat`, `w:lid`) and stored as ISO date (`w:fullDate`); a drop-down list or combo box
@@ -72,7 +73,11 @@ final case class WordParagraph(text: String, headingLevel: Option[Int] = None)
   *     warning.
   *   - **Placeholders** `{{key}}` / `{{dms:key}}` in the text of a paragraph, also when Word split them into
   *     several runs; the value takes the formatting of the run where the placeholder starts (see
-  *     [[Placeholders]]).
+  *     [[Placeholders]]). A filled placeholder becomes a plain text content control tagged with its name
+  *     (DMS-127), so the key stays in the document.
+  *
+  * The filled values are also kept in the package (custom XML part and custom document properties,
+  * [[WordFieldStore]]) and read back by [[recover]] when a filled document is uploaded again.
   *
   * Fields without value keep their content (e.g. Word's placeholder text). Deterministic: equal input gives
   * equal bytes (fixed entry times, ids of repeated controls numbered in document order), so a filled document
