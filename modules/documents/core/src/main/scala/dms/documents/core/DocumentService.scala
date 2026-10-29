@@ -1429,6 +1429,11 @@ final class DocumentService(
         .filterOrFail(identity)(changedConcurrently(current))
         .mapError(conflict(s"document ${document.id.value} already has a valid version in this scope"))
       _ <- ZIO.foreachDiscard(reviewDueOn)(d => sql(ReviewStore.setDueOn(current.id, d)))
+      // Who must acknowledge is fixed by the class's settings at publication (DMS-100, ADR 0048).
+      _ <- ZIO.when(
+        current.status == DocumentStatus.Approved && target == DocumentStatus.Published &&
+          current.requiresAcknowledgement
+      )(sql(AcknowledgementService.recordAudience(current.id, document.classId.value)))
       updated = current.copy(
         status = target,
         updatedAt = now,

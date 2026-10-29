@@ -1,6 +1,6 @@
 package dms.app
 
-import dms.authz.{AccessDenied, Action, Authorizer}
+import dms.authz.{AccessDenied, Authorizer}
 import dms.db.{Db, DbError}
 import dms.documents.*
 import dms.documents.core.*
@@ -63,9 +63,10 @@ final case class AcknowledgementStateView(
 /** Acknowledgement of valid versions (business concept 6.3, US-06.2, ADR 0027).
   *
   * Who must acknowledge: everyone who may read the valid version (`ReadPublished`: every business role whose
-  * assignment covers the document's class and organizational unit, respecting confidentiality). Opening is
-  * recorded by the client when it displays the version (`POST .../opened`); acknowledging requires it.
-  * Opening, acknowledging and the per-version state require `ReadDocument` on the version.
+  * assignment covers the document's class and organizational unit, respecting confidentiality) and passes the
+  * recipient filter of its document class recorded at publication (DMS-100, ADR 0048). Opening is recorded by
+  * the client when it displays the version (`POST .../opened`); acknowledging requires it. Opening,
+  * acknowledging and the per-version state require `ReadDocument` on the version.
   */
 object AcknowledgementApi:
   type Env = DocumentApi.Env & AcknowledgementService
@@ -114,8 +115,9 @@ object AcknowledgementApi:
         (id, versionId) =>
           inTransaction(p) { (ctx, acks) =>
             for
-              found <- readableVersion(ctx, id, versionId)
-              _     <- acks.markOpened(found._2, p.userId)
+              found     <- readableVersion(ctx, id, versionId)
+              recipient <- isRecipient(ctx, acks, found._1, found._2)
+              _         <- ZIO.when(recipient)(acks.markOpened(found._2, p.userId))
             yield ()
           }
       )
@@ -134,8 +136,17 @@ object AcknowledgementApi:
         (id, versionId) =>
           inTransaction(p) { (ctx, acks) =>
             for
-              found <- readableVersion(ctx, id, versionId)
-              a     <- acks.acknowledge(found._2, p.userId)
+              found     <- readableVersion(ctx, id, versionId)
+              recipient <- isRecipient(ctx, acks, found._1, found._2)
+              _         <- ZIO.unless(recipient)(
+                ZIO.fail(
+                  AcknowledgementError.NotRequested(
+                    s"version ${found._2.label} does not ask the caller for acknowledgement: they are not among " +
+                      "the recipients its document class sets"
+                  )
+                )
+              )
+              a <- acks.acknowledge(found._2, p.userId)
             yield AcknowledgementView(
               a.documentId.value,
               a.versionId,
@@ -159,12 +170,13 @@ object AcknowledgementApi:
           inTransaction(p) { (ctx, acks) =>
             for
               found <- readableVersion(ctx, id, versionId)
-              (_, v) = found
-              s <- acks.status(v.id, p.userId)
+              (details, v) = found
+              s         <- acks.status(v.id, p.userId)
+              recipient <- isRecipient(ctx, acks, details, v)
             yield AcknowledgementStateView(
               v.id,
               v.label,
-              Acknowledgements.requested(v),
+              Acknowledgements.requested(v) && recipient,
               s.openedAt.isDefined,
               s.openedAt,
               s.acknowledgement.map(_.acknowledgedAt)
@@ -178,15 +190,16 @@ object AcknowledgementApi:
 
   private def open(p: Principal, ctx: DocumentApi.Context, acks: AcknowledgementService) =
     for
-      pending <- acks.pending(p.userId)
-      opened  <- acks.openedValid(p.userId)
-      byDoc   <- documents(ctx, pending.map(_._1))
-      items   <- ZIO.foreach(pending) { (doc, versionId) =>
+      pending   <- acks.pending(p.userId)
+      opened    <- acks.openedValid(p.userId)
+      audiences <- acks.audiences(pending.map(_._2).toSet)
+      byDoc     <- documents(ctx, pending.map(_._1))
+      items     <- ZIO.foreach(pending) { (doc, versionId) =>
         val details = byDoc(doc)
         ZIO
           .foreach(details.versions.find(_.id == versionId))(v =>
             ctx
-              .allowed(Action.ReadPublished, DocumentApi.resource(p.tenantId, details, v))
+              .isRecipient(details, v, Recipients.filterOf(audiences.get(v.id)))
               .map(Option.when(_)(item(details, v, opened.get(v.id), None)))
           )
           .map(_.flatten)
@@ -229,6 +242,19 @@ object AcknowledgementApi:
       acknowledgedAt
     )
 
+  /** Whether the caller is among the recipients of the valid version `v` (DMS-100, ADR 0048). */
+  private def isRecipient(
+      ctx: DocumentApi.Context,
+      acks: AcknowledgementService,
+      details: DocumentDetails,
+      v: DocumentVersion
+  ) =
+    if !Acknowledgements.requested(v) then ZIO.succeed(false)
+    else
+      acks
+        .audiences(Set(v.id))
+        .flatMap(a => ctx.isRecipient(details, v, Recipients.filterOf(a.get(v.id))))
+
   /** The version of the document if the caller may read it (404 if it does not exist, 403 if not readable).
     */
   private def readableVersion(ctx: DocumentApi.Context, id: UUID, versionId: UUID) =
@@ -268,4 +294,8 @@ object AcknowledgementApi:
     case AcknowledgementError.NotOpened(m)           => (StatusCode.Conflict, ApiError("not_opened", m))
     case AcknowledgementError.AlreadyAcknowledged(m) =>
       (StatusCode.Conflict, ApiError("already_acknowledged", m))
+    case AcknowledgementError.ReminderTooSoon(m, _) =>
+      (StatusCode.TooManyRequests, ApiError("reminder_too_soon", m))
+    case AcknowledgementError.Invalid(problems) =>
+      (StatusCode.UnprocessableEntity, ApiError("invalid_settings", problems.mkString("; ")))
     case AcknowledgementError.Database(e) => DocumentApi.toResponse(e)

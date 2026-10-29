@@ -15,7 +15,8 @@ import { formatDateTime } from '@/i18n/format'
 /**
  * Acknowledgement of a published version (DMS-47, ADR 0027). Displaying the card records that the
  * caller opened the version; "Acknowledge" is enabled once that is recorded and then shows the
- * acknowledgement with version and time.
+ * acknowledgement with version and time. Readers outside the recipients the document class set
+ * (DMS-100) are told that the version does not ask them.
  */
 export function AcknowledgementPanel({
   documentId,
@@ -63,7 +64,11 @@ export function AcknowledgementPanel({
         {state.isPending && (
           <LoadingState label={t('docPanels.acknowledgement.loading')} rows={1} />
         )}
-        {acknowledgedAt ? (
+        {state.data && !state.data.requested && !acknowledgedAt ? (
+          <p className="text-muted-foreground" data-testid="not-requested">
+            {t('ackOverview.notRequested')}
+          </p>
+        ) : acknowledgedAt ? (
           <p className="flex items-center gap-2" data-testid="acknowledged">
             <CheckCircle2 className="size-4 text-primary" aria-hidden />
             {t('docPanels.acknowledgement.done', {

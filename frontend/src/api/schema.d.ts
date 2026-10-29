@@ -210,6 +210,59 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/admin/acknowledgement-settings': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The tenant default and every document class with its acknowledgement settings */
+    get: operations['getApiV1AdminAcknowledgement-settings']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/acknowledgement-settings/tenant': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Replaces the tenant default, which applies to classes without settings of their own */
+    put: operations['putApiV1AdminAcknowledgement-settingsTenant']
+    post?: never
+    /** @description Removes the tenant default: every reader must acknowledge, installation reminder interval */
+    delete: operations['deleteApiV1AdminAcknowledgement-settingsTenant']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/acknowledgement-settings/classes/{classId}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Replaces the acknowledgement settings of a class and its subclasses without settings of their own. Applies to versions published afterwards. 422 for unknown roles or groups. */
+    put: operations['putApiV1AdminAcknowledgement-settingsClassesClassid']
+    post?: never
+    /** @description Removes the settings of a class, which then inherits again (404 if it has none) */
+    delete: operations['deleteApiV1AdminAcknowledgement-settingsClassesClassid']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/admin/number-ranges/preview': {
     parameters: {
       query?: never
@@ -1310,6 +1363,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/acknowledgement-overview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Acknowledgement figures of every valid version of the document that requires acknowledgement: recipients as set by the document class at publication, audience, acknowledged, open, reminder interval and manual reminders. For the document's owner and compliance officers in scope (403 otherwise); no names. */
+    get: operations['getApiV1DocumentsIdAcknowledgement-overview']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/acknowledgement-recipients': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Who must acknowledge the version, with display names, and whether they did (acknowledgement time). For the document's owner and compliance officers in scope, with a stated purpose and reason (403 purpose_required otherwise); every access is recorded in the audit trail. 422 if the version does not ask for acknowledgement. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidAcknowledgement-recipients']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/acknowledgement-reminders': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Reminds every recipient who has not acknowledged the version yet (delivered by the notifications module). For the document's owner and compliance officers in scope; at most once per 24 hours and version (429 reminder_too_soon); 422 nothing_open if everybody acknowledged. Audited. */
+    post: operations['postApiV1DocumentsIdVersionsVersionidAcknowledgement-reminders']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/reviews': {
     parameters: {
       query?: never
@@ -1955,6 +2059,40 @@ export interface components {
       /** Format: date-time */
       acknowledgedAt?: string
     }
+    /** AcknowledgementOverviewView */
+    AcknowledgementOverviewView: {
+      /** Format: uuid */
+      documentId: string
+      title: string
+      versions?: components['schemas']['VersionAcknowledgementOverviewView'][]
+    }
+    /** AcknowledgementSettingsChange */
+    AcknowledgementSettingsChange: {
+      roles?: string[]
+      groups?: string[]
+      units?: string[]
+      /** Format: int32 */
+      reminderDays?: number
+    }
+    /** AcknowledgementSettingsOverviewView */
+    AcknowledgementSettingsOverviewView: {
+      /** Format: int32 */
+      defaultReminderDays: number
+      roles?: string[]
+      tenant?: components['schemas']['AcknowledgementSettingsView']
+      classes?: components['schemas']['ClassAcknowledgementSettingsView'][]
+    }
+    /** AcknowledgementSettingsView */
+    AcknowledgementSettingsView: {
+      roles?: string[]
+      groups?: string[]
+      units?: string[]
+      /** Format: int32 */
+      reminderDays?: number
+      /** Format: date-time */
+      updatedAt: string
+      updatedBy: string
+    }
     /** AcknowledgementStateView */
     AcknowledgementStateView: {
       /** Format: uuid */
@@ -2239,6 +2377,16 @@ export interface components {
       /** Format: int32 */
       documentClassVersion: number
       content: components['schemas']['TemplateContent']
+    }
+    /** ClassAcknowledgementSettingsView */
+    ClassAcknowledgementSettingsView: {
+      /** Format: uuid */
+      classId: string
+      classKey: string
+      label: string
+      /** Format: uuid */
+      parentId?: string
+      settings?: components['schemas']['AcknowledgementSettingsView']
     }
     /** ClassNumberRangeView */
     ClassNumberRangeView: {
@@ -3435,6 +3583,41 @@ export interface components {
       nextReviewOn?: string
       comment?: string
     }
+    /** RecipientListView */
+    RecipientListView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title: string
+      versionLabel: string
+      purpose: string
+      /** Format: int32 */
+      audience: number
+      /** Format: int32 */
+      acknowledged: number
+      /** Format: int32 */
+      open: number
+      recipients?: components['schemas']['RecipientView'][]
+    }
+    /** RecipientView */
+    RecipientView: {
+      userId: string
+      displayName?: string
+      status: string
+      /** Format: date-time */
+      acknowledgedAt?: string
+    }
+    /** RecipientsView */
+    RecipientsView: {
+      everyReader: boolean
+      roles?: string[]
+      groups?: string[]
+      units?: string[]
+      source: string
+      /** Format: uuid */
+      sourceClassId?: string
+    }
     /** ReferenceField */
     ReferenceField: {
       key: string
@@ -3463,6 +3646,17 @@ export interface components {
     /** ReleaseLegalHold */
     ReleaseLegalHold: {
       reason?: string
+    }
+    /** ReminderSentView */
+    ReminderSentView: {
+      /** Format: uuid */
+      versionId: string
+      /** Format: date-time */
+      sentAt: string
+      /** Format: int32 */
+      reminded: number
+      /** Format: date-time */
+      nextReminderAt: string
     }
     /** RenameAttachment */
     RenameAttachment: {
@@ -4134,6 +4328,30 @@ export interface components {
       sourceBefore?: string
       originAfter?: string
       sourceAfter?: string
+    }
+    /** VersionAcknowledgementOverviewView */
+    VersionAcknowledgementOverviewView: {
+      /** Format: uuid */
+      versionId: string
+      versionLabel: string
+      status: string
+      /** Format: date-time */
+      publishedAt?: string
+      recipients: components['schemas']['RecipientsView']
+      /** Format: int32 */
+      reminderDays: number
+      /** Format: int32 */
+      audience: number
+      /** Format: int32 */
+      acknowledged: number
+      /** Format: int32 */
+      open: number
+      /** Format: double */
+      rate?: number
+      /** Format: date-time */
+      lastReminderAt?: string
+      /** Format: date-time */
+      nextReminderAt?: string
     }
     /** VersionComparisonView */
     VersionComparisonView: {
@@ -4894,6 +5112,178 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminAcknowledgement-settings': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AcknowledgementSettingsOverviewView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'putApiV1AdminAcknowledgement-settingsTenant': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AcknowledgementSettingsChange']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AcknowledgementSettingsView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'deleteApiV1AdminAcknowledgement-settingsTenant': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'putApiV1AdminAcknowledgement-settingsClassesClassid': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        classId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AcknowledgementSettingsChange']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AcknowledgementSettingsView']
+        }
+      }
+      /** @description Invalid value for: path parameter classId, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'deleteApiV1AdminAcknowledgement-settingsClassesClassid': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        classId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Invalid value for: path parameter classId */
       400: {
         headers: {
           [name: string]: unknown
@@ -8093,6 +8483,134 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['AcknowledgementView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsIdAcknowledgement-overview': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AcknowledgementOverviewView']
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsIdVersionsVersionidAcknowledgement-recipients': {
+    parameters: {
+      query?: {
+        /** @description open, done or absent for all */
+        status?: string
+        /** @description Required: escalation or reminder */
+        purpose?: string
+        /** @description Required: why the names are needed, up to 500 characters; recorded in the audit trail */
+        reason?: string
+      }
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RecipientListView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1DocumentsIdVersionsVersionidAcknowledgement-reminders': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReminderSentView']
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */

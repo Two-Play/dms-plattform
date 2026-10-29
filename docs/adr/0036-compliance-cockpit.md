@@ -86,3 +86,7 @@ A SQL-only aggregate (joining role assignments to versions by unit and class pat
 ## Reversibility
 
 **high**: The role is an enum value and a check constraint; the cockpit is four read-only endpoints and one frontend route; nothing stores derived data. Replacing the on-request computation by a summary table changes `ComplianceApi` only. Removing the role would need revoking its assignments first.
+
+## Addendum (DMS-100, 2026-10-29): recipients per class and owner overview
+
+The cockpit's audience follows the recipients per document class of [ADR 0048](0048-acknowledgement-recipients-overview-and-reminders.md) (`Audience.readers(resource, filter)`). The follow-up "owner view of open acknowledgements in the document page", display names and the export are done there: the owner overview uses the same purpose limitation and audit action; its name list also shows who acknowledged when.

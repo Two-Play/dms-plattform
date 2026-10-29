@@ -240,7 +240,14 @@ object LibraryApi:
           )
         )
         acknowledged <- acks.acknowledgementsOf(p.userId).map(_.map(_.versionId).toSet)
-        labels       <- classes.listClasses
+        audiences    <- acks.audiencesOfValid
+        // Versions the caller must acknowledge: those whose recipients they belong to (DMS-100, ADR 0048).
+        recipientOf <- ZIO
+          .filter(readable.filter(_.requiresAcknowledgement))(v =>
+            ctx.passes(Recipients.filterOf(audiences.get(v.versionId)))
+          )
+          .map(_.map(_.versionId).toSet)
+        labels <- classes.listClasses
           .mapError(DocumentService.metadataError)
           .map(_.map(c => c.key.value -> c.label).toMap)
         reference = since.getOrElse(LocalDate.ofInstant(now, zone).minusDays(Library.DefaultChangeWindowDays))
@@ -272,7 +279,7 @@ object LibraryApi:
             Library.isNew(first, boundary),
             Library.isChanged(first, since, boundary),
             v.requiresAcknowledgement,
-            v.requiresAcknowledgement && !acknowledged.contains(v.versionId)
+            recipientOf.contains(v.versionId) && !acknowledged.contains(v.versionId)
           )
         },
         labels,

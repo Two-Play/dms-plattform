@@ -23,6 +23,7 @@ import { DocumentEditor } from './new-document-page'
 import { StatusBadge } from './status-badge'
 import { WorkflowPanel } from './workflow-panel'
 import { AcknowledgementPanel } from './acknowledgement-panel'
+import { AcknowledgementOverviewPanel } from './acknowledgement-overview-panel'
 import { AttachmentsPanel } from './attachments-panel'
 import { EvidenceReportAction } from './evidence-report-panel'
 import { DocumentNumberAction } from './document-number-action'
@@ -233,6 +234,9 @@ export function DocumentPage({
           />
           {!showingOther && asksForAcknowledgement(shown) && (
             <AcknowledgementPanel key={shown.id} documentId={document.data.id} version={shown} />
+          )}
+          {!showingOther && asksForAcknowledgement(shown) && (
+            <AcknowledgementOverviewPanel documentId={document.data.id} />
           )}
           <WorkflowPanel
             documentId={document.data.id}
