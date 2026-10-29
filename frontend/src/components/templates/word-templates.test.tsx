@@ -151,7 +151,7 @@ describe('Word templates (DMS-115)', () => {
     expect(upload).toHaveBeenCalledTimes(1)
   })
 
-  it('the template list marks Word templates and creates a new one from a class of a template', async () => {
+  it('the template list marks Word templates and creates a new one for a chosen class (DMS-121)', async () => {
     const created = version('Draft', { templateId: 'new-1', name: 'Angebot' })
     const get = vi.fn((p: string) => {
       switch (p) {
@@ -164,6 +164,23 @@ describe('Word templates (DMS-115)', () => {
           ])
         case '/api/v1/admin/word-templates':
           return ok([word])
+        case '/api/v1/admin/template-classes':
+          return ok([
+            {
+              id: 'class-root',
+              key: 'contract',
+              version: 2,
+              label: 'Contract',
+              path: ['Contract'],
+            },
+            {
+              id: 'class-offer',
+              key: 'offer',
+              version: 5,
+              label: 'Offer',
+              path: ['Contract', 'Offer'],
+            },
+          ])
         default:
           return ok([])
       }
@@ -192,7 +209,11 @@ describe('Word templates (DMS-115)', () => {
 
     expect(screen.getByText('New Word template')).toBeInTheDocument()
     await user.type(screen.getByLabelText('Name'), 'Angebot')
-    await user.selectOptions(screen.getByLabelText('Document class as in template'), 'struct-1')
+    const classes = screen.getByLabelText('Document class')
+    expect(
+      await within(classes).findByRole('option', { name: 'Contract › Offer' }),
+    ).toBeInTheDocument()
+    await user.selectOptions(classes, 'class-offer')
     // The upload itself needs the access token; the template is created first.
     await user.upload(screen.getByLabelText('Word file (.docx)'), new File(['x'], 'Angebot.docx'))
     await user.click(screen.getByRole('button', { name: 'Create Word template' }))
@@ -202,8 +223,8 @@ describe('Word templates (DMS-115)', () => {
         body: {
           name: 'Angebot',
           description: undefined,
-          documentClassId: classId,
-          documentClassVersion: 3,
+          documentClassId: 'class-offer',
+          documentClassVersion: 5,
           content: { sections: [] },
         },
       })

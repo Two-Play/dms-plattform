@@ -100,7 +100,7 @@ export function TemplateListPage() {
           </CardContent>
         </Card>
       )}
-      {list.data && <NewWordTemplateCard templates={templates} />}
+      {list.data && <NewWordTemplateCard />}
     </div>
   )
 }

@@ -169,6 +169,11 @@ export const docs = {
     copyHint:
       'A copy generated now with the change history; the archived PDF/A stays unchanged and authoritative.',
     failed: 'The PDF could not be downloaded: {message}',
+    downloadWord: 'Download as Word',
+    downloadingWord: 'Preparing the Word document…',
+    wordHint:
+      'The Word document is generated now from the same version; it is editable but not authoritative.',
+    wordFailed: 'The Word document could not be downloaded: {message}',
   },
   groups: {
     perLine: 'One group key per line',
@@ -228,5 +233,26 @@ export const docs = {
       Changed: 'Changed block: ',
     },
     prefix: { ClauseRef: 'Clause', Conditional: 'If', Repeat: 'For each', Table: 'Table' },
+    sectionNames: { original: 'Text of the Word document' },
+    originalTitle: 'Original file',
+    originalChanged: 'Original file changed',
+    originalUnchanged: 'Original file unchanged',
+    noOriginal: 'no file',
+    wordCompared:
+      'The text of the Word documents with their fields filled is compared; changed values of manual fields are listed under “Fields”.',
+    textNotCompared:
+      'Text is compared for Word documents (.docx) only. For other formats the comparison shows whether and how the file changed.',
+    properties: {
+      status: 'Status',
+      renditionChecksum: 'Rendition checksum',
+      changeKind: 'Change kind',
+      classVersion: 'Class version',
+      approvedBy: 'Approved by',
+      approvedAt: 'Approved at',
+      publishedAt: 'Published at',
+      requiresAcknowledgement: 'Requires acknowledgement',
+      originalName: 'Original file',
+      originalChecksum: 'Original checksum',
+    },
   },
 } as const

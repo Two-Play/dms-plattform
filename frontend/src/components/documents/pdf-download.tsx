@@ -1,9 +1,9 @@
 import { useMutation } from '@tanstack/react-query'
-import { FileDown } from 'lucide-react'
+import { FileDown, FileText } from 'lucide-react'
 import { useId, useState } from 'react'
 import { useApiClient } from '@/api/context'
 import type { DocumentVersionView } from '@/api/partners'
-import { downloadVersionPdf, pdfKind } from '@/api/version-view'
+import { downloadVersionDocx, downloadVersionPdf, pdfKind } from '@/api/version-view'
 import { Button } from '@/components/ui/button'
 import { t } from '@/i18n'
 
@@ -11,14 +11,18 @@ import { t } from '@/i18n'
  * "Download PDF" for a version (DMS-112): the draft PDF of an open version (generated from its last saved
  * state, marked "Draft – not valid"), the archived PDF/A of an approved version, or – with "Attach change
  * history" – a copy of the approved version with the change history; the archived file stays unchanged.
- * Hidden for versions without a PDF (e.g. a withdrawn draft).
+ * Hidden for versions without a PDF (e.g. a withdrawn draft). With `wordExport` (structured documents,
+ * DMS-121) also "Download as Word": the same page converted into a Word document, with the same options.
  */
 export function PdfDownload({
   documentId,
   version,
+  wordExport = false,
 }: {
   documentId: string
   version: DocumentVersionView
+  /** Offer the Word export (structured documents; a file document's Word file is its filled original). */
+  wordExport?: boolean
 }) {
   const client = useApiClient()
   const checkboxId = useId()
@@ -28,6 +32,9 @@ export function PdfDownload({
   const [attachments, setAttachments] = useState(false)
   const download = useMutation({
     mutationFn: () => downloadVersionPdf(client, documentId, version, changelog, attachments),
+  })
+  const word = useMutation({
+    mutationFn: () => downloadVersionDocx(client, documentId, version, changelog, attachments),
   })
 
   const kind = pdfKind(version, changelog || attachments)
@@ -57,6 +64,20 @@ export function PdfDownload({
             ? t('docs.pdf.downloadWithHistory')
             : t('docs.pdf.download')}
       </Button>
+      {wordExport && (
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={word.isPending}
+          aria-describedby={hintId}
+          onClick={() => {
+            word.mutate()
+          }}
+        >
+          <FileText className="size-4" aria-hidden />
+          {word.isPending ? t('docs.pdf.downloadingWord') : t('docs.pdf.downloadWord')}
+        </Button>
+      )}
       <div className="flex items-center gap-2">
         <input
           type="checkbox"
@@ -82,11 +103,17 @@ export function PdfDownload({
         <label htmlFor={attachmentsId}>{t('docs.pdf.attachmentList')}</label>
       </div>
       <p id={hintId} className="text-xs text-muted-foreground">
-        {hint}
+        <span>{hint}</span>
+        {wordExport && <span className="block">{t('docs.pdf.wordHint')}</span>}
       </p>
       {download.error && (
         <p role="alert" className="text-destructive">
           {t('docs.pdf.failed', { message: download.error.message })}
+        </p>
+      )}
+      {word.error && (
+        <p role="alert" className="text-destructive">
+          {t('docs.pdf.wordFailed', { message: word.error.message })}
         </p>
       )}
     </div>
