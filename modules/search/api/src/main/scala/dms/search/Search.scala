@@ -134,7 +134,9 @@ final case class SearchHit(
     language: Option[String],
     organizationalUnit: Option[String],
     snippet: String,
-    score: Option[Double]
+    score: Option[Double],
+    /** The document number (DMS-113), if the version has one. */
+    documentNumber: Option[String] = None
 )
 
 final case class FacetCount(value: String, count: Long)

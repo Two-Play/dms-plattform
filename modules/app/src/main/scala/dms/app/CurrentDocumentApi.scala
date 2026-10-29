@@ -137,15 +137,11 @@ object CurrentDocumentApi:
           }
       )
 
-  val pdf: ZServerEndpoint[Env, Any] =
-    SecuredApi.base.get
-      .in(base / "current.pdf")
-      .in(scope)
-      .in(ifNoneMatch)
-      .out(header[String]("ETag"))
-      .out(header("Cache-Control", CacheControl))
-      .out(header[String]("Content-Location").description("The rendition of exactly this version"))
-      .out(
+  private val pdfOutput =
+    header[String]("ETag")
+      .and(header("Cache-Control", CacheControl))
+      .and(header[String]("Content-Location").description("The rendition of exactly this version"))
+      .and(
         conditional(
           header(Header.contentType(MediaType.ApplicationPdf))
             .and(header[String]("Content-Disposition"))
@@ -153,67 +149,79 @@ object CurrentDocumentApi:
             .and(byteArrayBody)
         )
       )
+
+  val pdf: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(base / "current.pdf")
+      .in(scope)
+      .in(ifNoneMatch)
+      .out(pdfOutput)
       .description(
         "Stable address of the archive rendition (PDF/A) of the version that is valid now. The ETag is the " +
           "SHA-256 of the PDF; 404 also if the valid version has no rendition."
       )
       .tag("Current documents")
-      .serverLogic(p =>
-        (id, scope, etags) =>
-          for
-            found <- current(p, id, scope)
-            (details, v) = found
-            rendition <- ZIO
-              .fromOption(v.rendition)
-              .orElseFail(notFound(s"version ${v.label} of document $id has no rendition"))
-            tag      = s"\"${rendition.sha256}\""
-            location = s"/api/v1/documents/$id/versions/${v.id}/rendition"
-            body <-
-              if matches(etags, tag) then ZIO.none
-              else
-                ZIO
-                  .serviceWithZIO[RenditionArchive](_.read(rendition))
-                  .mapError(RenditionApi.toResponse)
-                  .map { bytes =>
-                    val digest = Sha256.fromHex(rendition.sha256).fold(_ => "", d => s"sha-256=:${d.base64}:")
-                    Some(
-                      (
-                        s"""inline; filename="${details.document.id.value}-${v.label}.pdf"""",
-                        digest,
-                        bytes.toArray
-                      )
-                    )
-                  }
-          yield (tag, location, body)
-      )
+      .serverLogic(p => (id, scope, etags) => pdfOf(p, id, scope, etags))
+
+  private def pdfOf(p: Principal, id: UUID, scope: Option[String], etags: Option[String]) =
+    for
+      found <- current(p, id, scope)
+      (details, v) = found
+      rendition <- ZIO
+        .fromOption(v.rendition)
+        .orElseFail(notFound(s"version ${v.label} of document $id has no rendition"))
+      tag      = s"\"${rendition.sha256}\""
+      location = s"/api/v1/documents/$id/versions/${v.id}/rendition"
+      body <-
+        if matches(etags, tag) then ZIO.none
+        else
+          ZIO
+            .serviceWithZIO[RenditionArchive](_.read(rendition))
+            .mapError(RenditionApi.toResponse)
+            .map { bytes =>
+              val digest = Sha256.fromHex(rendition.sha256).fold(_ => "", d => s"sha-256=:${d.base64}:")
+              Some(
+                (
+                  s"""inline; filename="${details.document.id.value}-${v.label}.pdf"""",
+                  digest,
+                  bytes.toArray
+                )
+              )
+            }
+    yield (tag, location, body)
+
+  private val htmlOutput =
+    header[String]("ETag")
+      .and(header("Cache-Control", CacheControl))
+      .and(conditional(header("Content-Security-Policy", ContentSecurityPolicy).and(htmlBodyUtf8)))
 
   val html: ZServerEndpoint[Env, Any] =
     SecuredApi.base.get
       .in(base / "current.html")
       .in(scope)
       .in(ifNoneMatch)
-      .out(header[String]("ETag"))
-      .out(header("Cache-Control", CacheControl))
-      .out(conditional(header("Content-Security-Policy", ContentSecurityPolicy).and(htmlBodyUtf8)))
+      .out(htmlOutput)
       .description(
         "Stable address of the HTML page of the version that is valid now: its content resolved with its field " +
           "values, as printed into the archive rendition. Self-contained (no scripts, no external resources)."
       )
       .tag("Current documents")
-      .serverLogic(p =>
-        (id, scope, etags) =>
-          for
-            found <- current(p, id, scope)
-            (details, v) = found
-            page <- rendered(p, details, v)
-            tag = etag(page.getBytes(StandardCharsets.UTF_8))
-          yield (tag, Option.unless(matches(etags, tag))(page))
-      )
+      .serverLogic(p => (id, scope, etags) => htmlOf(p, id, scope, etags))
+
+  private def htmlOf(p: Principal, id: UUID, scope: Option[String], etags: Option[String]) =
+    for
+      found <- current(p, id, scope)
+      (details, v) = found
+      page <- rendered(p, details, v)
+      tag = etag(page.getBytes(StandardCharsets.UTF_8))
+    yield (tag, Option.unless(matches(etags, tag))(page))
+
+  private val number       = path[String]("number").description("Document number")
+  private val byNumberBase = "api" / "v1" / "documents" / "by-number" / number
 
   val byNumber: ZServerEndpoint[Env, Any] =
     SecuredApi.base.get
-      .in("api" / "v1" / "documents" / "by-number" / path[String]("number").description("Document number"))
-      .in("current")
+      .in(byNumberBase / "current")
       .in(scope)
       .in(ifNoneMatch)
       .out(header[String]("ETag"))
@@ -226,24 +234,58 @@ object CurrentDocumentApi:
       .tag("Current documents")
       .serverLogic(p =>
         (number, scope, etags) =>
-          DocumentApi
-            .inTransaction(p)(_.service.findByNumber(number))
-            .flatMap(ZIO.fromOption(_).orElseFail(notFound(s"no document with number $number you may read")))
-            .flatMap(id =>
-              current(p, id.value, scope).mapError {
-                case (StatusCode.NotFound, _) =>
-                  notFound(s"no document with number $number you may read")
-                case other => other
-              }
-            )
-            .map { (details, v) =>
-              val view = viewOf(details, v)
-              val tag  = etag(view.toJson.getBytes(StandardCharsets.UTF_8))
-              (tag, Option.unless(matches(etags, tag))(view))
-            }
+          byNumberOf(p, number)(id => current(p, id, scope)).map { (details, v) =>
+            val view = viewOf(details, v)
+            val tag  = etag(view.toJson.getBytes(StandardCharsets.UTF_8))
+            (tag, Option.unless(matches(etags, tag))(view))
+          }
       )
 
-  def endpoints: List[ZServerEndpoint[Env, Any]] = List(byNumber, metadata, pdf, html)
+  val pdfByNumber: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(byNumberBase / "current.pdf")
+      .in(scope)
+      .in(ifNoneMatch)
+      .out(pdfOutput)
+      .description(
+        "Stable address by document number (DMS-116): the same as `/documents/{id}/current.pdf` for the " +
+          "document with this number."
+      )
+      .tag("Current documents")
+      .serverLogic(p => (number, scope, etags) => byNumberOf(p, number)(pdfOf(p, _, scope, etags)))
+
+  val htmlByNumber: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(byNumberBase / "current.html")
+      .in(scope)
+      .in(ifNoneMatch)
+      .out(htmlOutput)
+      .description(
+        "Stable address by document number (DMS-116): the same as `/documents/{id}/current.html` for the " +
+          "document with this number."
+      )
+      .tag("Current documents")
+      .serverLogic(p => (number, scope, etags) => byNumberOf(p, number)(htmlOf(p, _, scope, etags)))
+
+  /** Resolves a document number and answers for that document; 404 without revealing whether a document has
+    * the number when the caller may not read a valid version of it.
+    */
+  private def byNumberOf[A](p: Principal, number: String)(
+      f: UUID => ZIO[Env, (StatusCode, ApiError), A]
+  ): ZIO[Env, (StatusCode, ApiError), A] =
+    val unknown = notFound(s"no document with number $number you may read")
+    DocumentApi
+      .inTransaction(p)(_.service.findByNumber(number))
+      .flatMap(ZIO.fromOption(_).orElseFail(unknown))
+      .flatMap(id =>
+        f(id.value).mapError {
+          case (StatusCode.NotFound, _) => unknown
+          case other                    => other
+        }
+      )
+
+  def endpoints: List[ZServerEndpoint[Env, Any]] =
+    List(byNumber, pdfByNumber, htmlByNumber, metadata, pdf, html)
 
   /** The current version the caller may read, resolved now. Versions the caller may not read do not count, as
     * if they did not exist; the withdrawn version is reported only to callers who could read it while it was

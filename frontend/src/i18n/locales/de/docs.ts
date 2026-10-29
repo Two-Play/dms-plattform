@@ -8,6 +8,7 @@ export const docs: Translation<typeof en.docs> = {
     newDocument: 'Neues Dokument',
     loading: 'Dokumente werden geladen',
     title_: 'Titel',
+    number: 'Nr.',
     status: 'Status',
     version: 'Version',
     class: 'Klasse',

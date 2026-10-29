@@ -641,6 +641,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/by-number/{number}/current.pdf': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Stable address by document number (DMS-116): the same as `/documents/{id}/current.pdf` for the document with this number. */
+    get: operations['getApiV1DocumentsBy-numberNumberCurrent.pdf']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/by-number/{number}/current.html': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Stable address by document number (DMS-116): the same as `/documents/{id}/current.html` for the document with this number. */
+    get: operations['getApiV1DocumentsBy-numberNumberCurrent.html']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/{id}/current': {
     parameters: {
       query?: never
@@ -1520,6 +1554,24 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/admin/number-range-assignments/{classId}/backfill': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description How many existing documents of the class (and of its subclasses with the same number range) have no number yet and would be numbered by `POST …/backfill`. 409 if the class has no number range. */
+    get: operations['getApiV1AdminNumber-range-assignmentsClassidBackfill']
+    put?: never
+    /** @description Numbers the existing documents without number of the class and of its subclasses with the same number range (DMS-116), oldest first, each in its own transaction like on creation (counter of the year the document was created in). At most 500 per run; `remaining` tells how many are left. Documents with a version in review or approval, or without the organizational unit a `{OU}` pattern needs, are skipped. Idempotent: numbered documents are never renumbered. Each number is audited (`document.number-assigned` with `backfill`) and the documents are reindexed for the search. */
+    post: operations['postApiV1AdminNumber-range-assignmentsClassidBackfill']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/admin/number-range-assignments/{classId}': {
     parameters: {
       query?: never
@@ -1786,23 +1838,6 @@ export interface paths {
     }
     /** @description A PDF of a file document version for reading in the browser: the archived rendition of an approved version; otherwise the original (a Word file with its fields filled) converted on request with the draft marking on every page. Not stored; a conversion is kept in memory per version and state, so an unchanged draft is converted once. 409 for structured documents (see …/html), 404 without file, 503 if the conversion worker is unavailable. Requires ReadDocument on the version. */
     get: operations['getApiV1DocumentsIdVersionsVersionidPreview.pdf']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/documents/by-number/{number}/current': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Stable address by document number (DMS-113): the same as `/documents/{id}/current` for the document with this number. 404 if no document has the number or the caller may not read a valid version. */
-    get: operations['getApiV1DocumentsBy-numberNumberCurrent']
     put?: never
     post?: never
     delete?: never
@@ -3379,6 +3414,7 @@ export interface components {
       organizationalUnit?: string
       /** Format: double */
       score?: number
+      documentNumber?: string
     }
     /** SearchRebuildView */
     SearchRebuildView: {
@@ -4086,6 +4122,45 @@ export interface components {
       /** Format: int64 */
       startValue?: number
       yearlyReset?: boolean
+    }
+    /** NumberBackfillEntry */
+    NumberBackfillEntry: {
+      /** Format: uuid */
+      documentId: string
+      outcome: string
+      number?: string
+      reason?: string
+    }
+    /** NumberBackfillPreview */
+    NumberBackfillPreview: {
+      /** Format: uuid */
+      classId: string
+      /** Format: uuid */
+      numberRangeId: string
+      numberRangeKey: string
+      classIds?: string[]
+      /** Format: int32 */
+      documents: number
+      /** Format: int32 */
+      maxPerRun: number
+      nextNumber: string
+    }
+    /** NumberBackfillResult */
+    NumberBackfillResult: {
+      /** Format: uuid */
+      classId: string
+      /** Format: uuid */
+      numberRangeId: string
+      numberRangeKey: string
+      /** Format: int32 */
+      numbered: number
+      /** Format: int32 */
+      skipped: number
+      /** Format: int32 */
+      failed: number
+      /** Format: int32 */
+      remaining: number
+      entries?: components['schemas']['NumberBackfillEntry'][]
     }
     /** NumberRangePreview */
     NumberRangePreview: {
@@ -8516,6 +8591,84 @@ export interface operations {
       }
     }
   }
+  'getApiV1AdminNumber-range-assignmentsClassidBackfill': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        classId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberBackfillPreview']
+        }
+      }
+      /** @description Invalid value for: path parameter classId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1AdminNumber-range-assignmentsClassidBackfill': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        classId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberBackfillResult']
+        }
+      }
+      /** @description Invalid value for: path parameter classId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   'putApiV1AdminNumber-range-assignmentsClassid': {
     parameters: {
       query?: never
@@ -9575,6 +9728,107 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['CurrentVersionView']
+        }
+      }
+      304: {
+        headers: {
+          ETag: string
+          'Cache-Control': string
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsBy-numberNumberCurrent.pdf': {
+    parameters: {
+      query?: {
+        /** @description Validity scope, e.g. DE. Without it: the version without restriction, or the only valid one. */
+        scope?: string
+      }
+      header?: {
+        /** @description ETag of a copy the client holds; 304 if it is current */
+        'If-None-Match'?: string
+      }
+      path: {
+        /** @description Document number */
+        number: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          ETag: string
+          'Cache-Control': string
+          /** @description The rendition of exactly this version */
+          'Content-Location': string
+          'Content-Type': string
+          'Content-Disposition': string
+          /** @description SHA-256 of the PDF (RFC 9530) */
+          'Repr-Digest': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/pdf': string
+        }
+      }
+      304: {
+        headers: {
+          ETag: string
+          'Cache-Control': string
+          /** @description The rendition of exactly this version */
+          'Content-Location': string
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsBy-numberNumberCurrent.html': {
+    parameters: {
+      query?: {
+        /** @description Validity scope, e.g. DE. Without it: the version without restriction, or the only valid one. */
+        scope?: string
+      }
+      header?: {
+        /** @description ETag of a copy the client holds; 304 if it is current */
+        'If-None-Match'?: string
+      }
+      path: {
+        /** @description Document number */
+        number: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          ETag: string
+          'Cache-Control': string
+          'Content-Security-Policy': string
+          [name: string]: unknown
+        }
+        content: {
+          'text/html': string
         }
       }
       304: {

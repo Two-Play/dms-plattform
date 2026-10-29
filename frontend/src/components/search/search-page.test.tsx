@@ -37,6 +37,7 @@ const result = (overrides: Partial<SearchResult> = {}): SearchResult => ({
       classPath: ['policy', 'safety'],
       status: 'Published',
       validFrom: '2027-01-01',
+      documentNumber: 'RL-2027-0003',
       snippet:
         'Always wear <mark>gloves</mark> <img src=x onerror="window.pwned=true"> <script>window.pwned=true</script> in the lab.',
     },
@@ -169,6 +170,12 @@ describe('Search page', () => {
       `/documents/${docA}`,
     )
     expect(within(hits).getByText('policy › safety', { exact: false })).toBeInTheDocument()
+    // The document number (DMS-113) of hits that have one.
+    expect(
+      within(hits)
+        .getAllByTestId('hit-number')
+        .map((n) => n.textContent),
+    ).toEqual(['No. RL-2027-0003'])
     expect(within(hits).getByText('In review')).toBeInTheDocument()
     expect(within(hits).getByText('gloves', { selector: 'mark' })).toBeInTheDocument()
     expect(within(hits).getByText('Glove', { selector: 'mark' })).toBeInTheDocument()

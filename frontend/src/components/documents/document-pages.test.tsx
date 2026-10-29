@@ -147,6 +147,7 @@ const list: DocumentSummary[] = [
     status: 'InReview',
     updatedAt: '2026-10-19T10:00:00Z',
     mine: false,
+    documentNumber: 'RL-2026-0042',
     kind: 'Structured',
   },
 ]
@@ -313,6 +314,10 @@ describe('Document list', () => {
     expect(within(drafts).getByText('Draft')).toBeInTheDocument()
     expect(within(others).getByRole('link', { name: 'Travel policy' })).toBeInTheDocument()
     expect(within(others).getByText('In review')).toBeInTheDocument()
+    // The document number (DMS-113) has its own column; documents without one leave it empty.
+    expect(within(others).getByRole('columnheader', { name: 'No.' })).toBeInTheDocument()
+    expect(within(others).getByText('RL-2026-0042')).toBeInTheDocument()
+    expect(within(drafts).queryByText(/RL-/)).not.toBeInTheDocument()
 
     await user.click(within(drafts).getByRole('link', { name: 'Service contract ACME' }))
 

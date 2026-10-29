@@ -52,6 +52,38 @@ final case class ClassNumberRange(
     inheritedFrom: Option[UUID]
 )
 
+/** Why a backfill left a document without number (DMS-116). */
+enum BackfillSkip:
+  /** The document has a number already (numbered on creation, manually or by an earlier backfill). */
+  case HasNumber
+
+  /** Its class has no number range (any more). */
+  case NoRange
+
+  /** A version is in review or approval; its values are frozen until it is decided. */
+  case InReview
+
+  /** The pattern contains `{OU}` and the document has no organizational unit. */
+  case UnitMissing
+
+/** What a backfill did with one document (DMS-116). */
+enum BackfillOutcome:
+  case Numbered(number: String)
+  case Skipped(reason: BackfillSkip)
+
+/** What a backfill of a class would number (DMS-116): the documents without number of the class and of its
+  * subclasses that take their number from the same range, oldest first.
+  *
+  * @param classIds
+  *   the class and the subclasses that share its effective number range
+  */
+final case class BackfillScope(
+    classId: UUID,
+    range: NumberRange,
+    classIds: Set[UUID],
+    documents: List[dms.kernel.DocumentId]
+)
+
 /** Administration of number ranges and their assignment to document classes (DMS-113, ADR 0040).
   *
   * Every method must run inside `Db.transact(tenant)`; changes are recorded in the audit trail in the same
@@ -187,6 +219,52 @@ final class NumberRangeService(audit: AuditTrail):
       cls <- classOf(classId)
     yield cls
 
+  /** What a backfill of `classId` would number (DMS-116): the documents without number of the class and of
+    * its subclasses with the same effective number range, oldest first. 404 for an unknown class, 409 if the
+    * class has no number range.
+    */
+  def backfillScope(classId: UUID): IO[MetadataError, BackfillScope] =
+    for
+      all     <- classes
+      cls     <- ZIO.fromOption(all.find(_.classId == classId)).orElseFail(classNotFound(classId))
+      rangeId <- ZIO
+        .fromOption(cls.effective)
+        .orElseFail(MetadataError.Conflict(s"the class ${cls.classKey} has no number range"))
+      range <- existing(rangeId)
+      parents = all.map(c => c.classId -> c.parentId).toMap
+      members = all
+        .filter(c => c.effective.contains(rangeId) && descendsFrom(c.classId, classId, parents))
+        .map(_.classId)
+        .toSet
+      unnumbered <- sql(NumberRangeStore.unnumberedDocuments())
+    yield BackfillScope(classId, range, members, unnumbered.collect { case (id, c) if members(c) => id })
+
+  /** Records the summary of a backfill run of a class (`number-range.backfilled`); every numbered document
+    * has its own `document.number-assigned` entry.
+    */
+  def recordBackfill(
+      scope: BackfillScope,
+      numbered: Int,
+      skipped: Int,
+      failed: Int,
+      remaining: Int,
+      actor: UserId
+  ): IO[MetadataError, Unit] =
+    record(
+      actor,
+      "number-range.backfilled",
+      scope.classId,
+      Json.Obj(
+        "rangeId"   -> Json.Str(scope.range.id.toString),
+        "rangeKey"  -> Json.Str(scope.range.key),
+        "numbered"  -> Json.Num(numbered),
+        "skipped"   -> Json.Num(skipped),
+        "failed"    -> Json.Num(failed),
+        "remaining" -> Json.Num(remaining)
+      ),
+      "document-class"
+    )
+
   private def classOf(classId: UUID): IO[MetadataError, ClassNumberRange] =
     classes.flatMap(all => ZIO.fromOption(all.find(_.classId == classId)).orElseFail(classNotFound(classId)))
 
@@ -267,6 +345,15 @@ object NumberRangeService:
       case Some(c) if assignments.contains(c) => Some(c)
       case Some(c) if !seen.contains(c)       => go(parents.get(c).flatten, seen + c)
       case _                                  => None
+    go(Some(id), Set.empty)
+
+  /** Whether `id` is `ancestor` or one of its descendants. */
+  def descendsFrom(id: UUID, ancestor: UUID, parents: Map[UUID, Option[UUID]]): Boolean =
+    @annotation.tailrec
+    def go(current: Option[UUID], seen: Set[UUID]): Boolean = current match
+      case Some(c) if c == ancestor     => true
+      case Some(c) if !seen.contains(c) => go(parents.get(c).flatten, seen + c)
+      case _                            => false
     go(Some(id), Set.empty)
 
   private def details(r: NumberRange): Json =

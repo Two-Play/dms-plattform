@@ -36,7 +36,9 @@ final case class SearchHitView(
     language: Option[String],
     organizationalUnit: Option[String],
     /** Relevance; absent for a listing without query text. */
-    score: Option[Double]
+    score: Option[Double],
+    /** The document number (DMS-113), if the version has one. */
+    documentNumber: Option[String] = None
 ) derives JsonCodec,
       Schema
 
@@ -200,7 +202,8 @@ object SearchApi:
           h.validUntil,
           h.language,
           h.organizationalUnit,
-          h.score.filterNot(_.isNaN)
+          h.score.filterNot(_.isNaN),
+          h.documentNumber
         )
       ),
       SearchFacetsView(counts(r.facets.classes), counts(r.facets.statuses), counts(r.facets.languages))
