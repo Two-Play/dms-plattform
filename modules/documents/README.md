@@ -216,7 +216,7 @@ Class settings: `review: {intervalMonths?, leadDays?}` in `POST /api/v1/admin/do
 
 Business concept 12, US-15.1. Compliance officers (role `ComplianceOfficer`) see overdue reviews per organizational unit and owner and the acknowledgement rate per version and unit of the valid versions in their scope; names of readers who have not acknowledged only with a stated purpose, audited.
 
-- `core`: `DocumentService.currentlyValid` (every valid version with document, class path, review date and acknowledgement requirement, one query); `AcknowledgementService.acknowledgersOfValid` (acknowledgers per valid version that requires acknowledgement) and `acknowledgersOf(versionId)`.
+- `core`: `DocumentService.currentlyValid` (every valid version with document, class path, review date and acknowledgement requirement, one query; also used by the library, DMS-119); `AcknowledgementService.acknowledgersOfValid` (acknowledgers per valid version that requires acknowledgement) and `acknowledgersOf(versionId)`.
 - `authz`: `Audience` decides `ReadPublished` for all users of the tenant at once (users with equal assignments and groups are decided once per version; author and owner individually); `RoleAssignments.activeAt`, `Groups.currentMemberships`.
 - No table; the role is allowed by migration V20.
 
@@ -233,6 +233,14 @@ HTTP (module `app`, `ComplianceApi`):
 
 `documents-api`, `CurrentVersion.resolve(versions, scope)`: the version a stable address stands for, among the versions the caller may read: `Found` (the valid version of the scope: exact scope key, else the only scope key containing the value; without scope the unrestricted version, else the only valid one), `Ambiguous(scopes)`, `Withdrawn` (the last valid version was withdrawn or archived without successor) or `NotFound`. Served by `app`, `CurrentDocumentApi`: `GET /api/v1/documents/{id}/current`, `/current.pdf`, `/current.html` with `?scope=`, `ETag`, `Cache-Control: private, no-cache` and `If-None-Match` (304); 404, 410 `withdrawn`, 409 `scope_required`.
 
+
+## Library (DMS-119, ADR 0043)
+
+The versions valid now that the caller may read, for browsing: `DocumentService.currentlyValid` also returns the validity scope, the document number and the first publication of the document. Served by `app`, `LibraryApi` (filtering, facets and sorting in `Library`):
+
+| Method | Path | Purpose | Authorization |
+|---|---|---|---|
+| GET | `/api/v1/library?q=&class=&unit=&tag=&confidentiality=&since=&changed=&pending=&sort=title\|number\|validFrom\|lastChanged&order=asc\|desc&page=&size=` | `{total, page, size, sort, order, since, timeZone, items:[{documentId, versionId, title, documentNumber, version, status, classPath, classLabel, organizationalUnit, confidentiality, tags, scope, summary, validFrom, validSince, publishedAt, isNew, changed, requiresAcknowledgement, acknowledgementPending}], facets:{class:[{value, label, count}], unit, tag, confidentiality, changed, pending}}`; facets ignore their own filter; the description is the tenant field `summary`; `since` defaults to 30 days ago; 422 for an unknown sort or order or a page out of range | versions filtered by `ReadDocument` |
 
 ## Number ranges and document numbers (DMS-113, ADR 0040)
 
