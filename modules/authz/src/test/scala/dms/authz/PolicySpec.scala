@@ -44,6 +44,7 @@ object PolicySpec extends ZIOSpecDefault:
     case MonitorCompliance   => document(ReviewDue)
     case ViewAcknowledgementPersons => document(Published)
     case GenerateEvidenceReport     => document(Superseded)
+    case AssignDocumentNumber       => document(Draft)
 
   /** The condition that turns a ◐ cell of the matrix into a permission. */
   private def favorable(action: Action, role: Role): Resource =
@@ -54,6 +55,7 @@ object PolicySpec extends ZIOSpecDefault:
       case (Approve, Owner)      => r.copy(ownerMayApprove = true)
       case (Recertify, _)        => r.copy(ownerId = Some(user))
       case (ViewAcknowledgementPersons, _) => r.copy(ownerId = Some(user))
+      case (AssignDocumentNumber, _)       => r.copy(ownerId = Some(user))
       case (Publish, Approver)             => r.copy(approvedBy = Set(user))
       case (ViewHistory, Author)           => r.copy(authorId = Some(user))
       case (ViewHistory, Reviewer)         => r.copy(assignedParticipants = Set(user))
@@ -93,7 +95,9 @@ object PolicySpec extends ZIOSpecDefault:
     MonitorCompliance   -> List(Never, Never, Never, Never, Never, Never, Never, Never, Never, Full),
     ViewAcknowledgementPersons -> List(Never, Never, Partial, Never, Never, Never, Never, Never, Never, Full),
     // Evidence reports (US-12.1, DMS-57): internal audit and records management.
-    GenerateEvidenceReport -> List(Never, Never, Never, Never, Never, Never, Full, Full, Never, Never)
+    GenerateEvidenceReport -> List(Never, Never, Never, Never, Never, Never, Full, Full, Never, Never),
+    // Manual document numbers (DMS-113, ADR 0040): records management, and owners for their own documents.
+    AssignDocumentNumber -> List(Never, Never, Partial, Never, Never, Never, Full, Never, Never, Never)
   )
 
   private def permitted(roles: Seq[Role], action: Action, resource: Resource): Boolean =

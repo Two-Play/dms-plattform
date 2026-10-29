@@ -185,6 +185,23 @@ object SearchIndexSpec extends ZIOSpecDefault:
         marker.hits.head.snippet == "Ein falscher Treffer im Text über <mark>Kündigung</mark>."
       )
     },
+    test("finds a version by its exact document number (DMS-113)") {
+      val numbered = doc("Travel policy", "Rules for business trips.", List("policy"))
+      for
+        _ <- clear
+        _ <- put(
+          numbered.copy(metadata =
+            numbered.metadata + ("documentNumber" -> MetadataValue.Text("RL-2026-0042"))
+          ),
+          doc("Other policy", "Rules for something else.", List("policy"))
+        )
+        exact   <- search(reader, SearchQuery(Some("RL-2026-0042")))
+        partial <- search(reader, SearchQuery(Some("RL-2026-0043")))
+      yield assertTrue(
+        exact.hits.map(_.title) == List("Travel policy"),
+        partial.total == 0L
+      )
+    },
     test("an empty query lists by filter, with facets over class path, status and language") {
       for
         _        <- clear

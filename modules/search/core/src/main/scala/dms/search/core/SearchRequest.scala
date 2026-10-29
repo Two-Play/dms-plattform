@@ -32,6 +32,11 @@ object SearchRequest:
 
   private val SnippetFields = List("text.de", "text.en", "text")
 
+  /** The core field `documentNumber` (DMS-113), indexed as keyword like every text value (dynamic template
+    * `metadata.keyword.*`), so existing indices need no mapping change.
+    */
+  val DocumentNumberField = "metadata.keyword.documentNumber"
+
   def validate(query: SearchQuery): Either[String, SearchQuery] =
     if query.page < 1 then Left("page must be at least 1")
     else if query.size < 1 || query.size > MaxSize then Left(s"size must be between 1 and $MaxSize")
@@ -60,13 +65,26 @@ object SearchRequest:
         Option.when(query.languages.nonEmpty)(Filter.anyOf("language", query.languages)).toList
     )
     val text = query.text.map(_.trim).filter(_.nonEmpty)
+    // A document number (DMS-113) is found exactly, even if the template does not print it in the text.
     val must = text.fold(Json.Obj("match_all" -> Json.Obj()))(q =>
       Json.Obj(
-        "simple_query_string" -> Json.Obj(
-          "query"            -> Json.Str(q),
-          "fields"           -> Json.Arr(TextFields.map(Json.Str(_))*),
-          "default_operator" -> Json.Str("and"),
-          "lenient"          -> Json.Bool(true)
+        "bool" -> Json.Obj(
+          "should" -> Json.Arr(
+            Json.Obj(
+              "simple_query_string" -> Json.Obj(
+                "query"            -> Json.Str(q),
+                "fields"           -> Json.Arr(TextFields.map(Json.Str(_))*),
+                "default_operator" -> Json.Str("and"),
+                "lenient"          -> Json.Bool(true)
+              )
+            ),
+            Json.Obj(
+              "term" -> Json.Obj(
+                DocumentNumberField -> Json.Obj("value" -> Json.Str(q), "boost" -> Json.Num(10))
+              )
+            )
+          ),
+          "minimum_should_match" -> Json.Num(1)
         )
       )
     )

@@ -198,6 +198,13 @@ object Policy:
           "evidence reports require the auditor or records manager role"
         )
 
+      case AssignDocumentNumber =>
+        grantIf(
+          resource.isDocument && !statusIn(Destroyed) &&
+            (has(RecordsManager) || (has(Owner) && resource.ownerId.contains(subject.userId))),
+          "assigning a document number requires the records manager role or being the document's owner"
+        )
+
       case Configure =>
         resource.configurationArea match
           case None       => Decision.Deny("not a configuration resource")

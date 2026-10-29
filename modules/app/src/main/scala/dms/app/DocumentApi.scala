@@ -229,7 +229,27 @@ final case class DocumentView(
     /** True while an active legal hold covers the document (DMS-56): it cannot be destroyed. */
     legalHold: Boolean = false,
     /** The active legal holds covering the document; only for callers who may manage legal holds of it. */
-    legalHolds: Option[List[LegalHoldRefView]] = None
+    legalHolds: Option[List[LegalHoldRefView]] = None,
+    /** The document number (DMS-113), from the number range of the class or assigned manually. */
+    documentNumber: Option[String] = None,
+    /** True if the caller may assign a number manually now (`POST /api/v1/documents/{id}/number`). */
+    canAssignNumber: Boolean = false
+) derives JsonCodec,
+      Schema
+
+final case class AssignDocumentNumber(
+    /** Letters, digits, `.`, `_` and `-`, at most 64 characters, starting with a letter or digit. */
+    number: String,
+    /** Why the number is assigned manually; required, recorded in the audit trail. */
+    reason: String
+) derives JsonCodec,
+      Schema
+
+final case class DocumentNumberView(
+    documentId: UUID,
+    documentNumber: String,
+    /** The number before, if the document had one. */
+    previous: Option[String]
 ) derives JsonCodec,
       Schema
 
@@ -251,7 +271,9 @@ final case class DocumentSummaryView(
     status: String,
     updatedAt: Instant,
     /** True if the caller created the document or the shown version. */
-    mine: Boolean
+    mine: Boolean,
+    /** The document number (DMS-113), if it has one. */
+    documentNumber: Option[String] = None
 ) derives JsonCodec,
       Schema
 
@@ -349,14 +371,42 @@ object DocumentApi:
               current = readable.find(v => Versioning.isOpen(v.status)).getOrElse(readable.last)
               holds  <- LegalHoldStore.activeHolds(details.document.id).mapError(DocumentError.Database(_))
               manage <- ctx.allowed(Action.ManageRetention, resource(p, details, current))
+              number <- ctx.allowed(Action.AssignDocumentNumber, resource(p, details, current))
             yield documentView(
               details.document,
               details.profile,
               versionViewIn(details, ctx.service.settings)(current)
             ).copy(
               legalHold = holds.nonEmpty,
-              legalHolds = Option.when(manage)(holds.map(LegalHoldApi.refView))
+              legalHolds = Option.when(manage)(holds.map(LegalHoldApi.refView)),
+              canAssignNumber = number && details.numberAssignable
             )
+          }
+      )
+
+  val assignNumber: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.post
+      .in(documents / documentId / "number")
+      .in(jsonBody[AssignDocumentNumber])
+      .out(jsonBody[DocumentNumberView])
+      .description(
+        "Assigns a document number manually (DMS-113), e.g. one taken over from a previous system. The reason " +
+          "is required (422) and recorded in the audit trail; the number must be free in the tenant (409). A " +
+          "document without number gets one at any time except while a version is in review or approval; an " +
+          "existing number can only be replaced while every version is a draft (409)."
+      )
+      .tag("Documents")
+      .serverLogic(p =>
+        (id, req) =>
+          inTransaction(p) { ctx =>
+            for
+              details <- ctx.service.get(DocumentId(id))
+              current <- ZIO
+                .fromOption(details.open.orElse(details.versions.lastOption))
+                .orElseFail(DocumentError.NotFound(s"document $id has no version"))
+              _       <- ctx.check(Action.AssignDocumentNumber, resource(p, details, current))
+              updated <- ctx.service.assignNumber(DocumentId(id), req.number, req.reason, p.userId)
+            yield DocumentNumberView(id, updated.number.getOrElse(req.number.trim), details.document.number)
           }
       )
 
@@ -561,7 +611,8 @@ object DocumentApi:
       newVersion,
       requestDeviation,
       withdrawDeviation,
-      deviations
+      deviations,
+      assignNumber
     )
 
   /** What a request may use inside its transaction. */
@@ -755,7 +806,8 @@ object DocumentApi:
       d.templateId.value,
       d.templateVersion,
       d.createdAt,
-      current
+      current,
+      documentNumber = d.number
     )
 
   private def summaryView(details: DocumentDetails, v: DocumentVersion, caller: UserId): DocumentSummaryView =
@@ -772,7 +824,8 @@ object DocumentApi:
       v.label,
       v.status.toString,
       v.updatedAt,
-      d.authorId == caller || v.createdBy == caller
+      d.authorId == caller || v.createdBy == caller,
+      d.number
     )
 
   private[app] def versionView(v: DocumentVersion): DocumentVersionView =

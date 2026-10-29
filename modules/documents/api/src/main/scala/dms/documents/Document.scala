@@ -43,6 +43,11 @@ final case class MetadataSnapshot(values: Map[String, MetadataValue], takenAt: I
   *   the profile version of the document class the document was created with
   * @param templateVersion
   *   the released template version the document was created from
+  * @param number
+  *   the document number (DMS-113, ADR 0040): from the number range of the class or assigned manually; the
+  *   same in every version (core field `documentNumber`). Read with the document itself
+  *   (`DocumentService.get` and `recent`); lists built from version rows leave it empty and carry it in the
+  *   field values instead.
   */
 final case class Document(
     id: DocumentId,
@@ -53,7 +58,8 @@ final case class Document(
     authorId: UserId,
     templateId: TemplateId,
     templateVersion: Int,
-    createdAt: Instant
+    createdAt: Instant,
+    number: Option[String] = None
 )
 
 /** One version of a document: a complete, self-contained version package (ADR 0021). Open versions (draft,

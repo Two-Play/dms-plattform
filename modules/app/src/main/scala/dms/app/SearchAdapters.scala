@@ -57,7 +57,8 @@ final class SearchDocuments(documents: DocumentService, templates: TemplateServi
         publishedAt = v.publishedAt,
         scope = Versioning.scopeKey(values).split('|').toList.filter(_.nonEmpty),
         language = SearchDocuments.text(values, "language"),
-        metadata = values,
+        // The document number (DMS-113) also for versions frozen before the document got one.
+        metadata = values ++ details.document.number.map(n => "documentNumber" -> MetadataValue.Text(n)),
         access = AccessFilter.attributes(resource),
         changedAt = v.updatedAt
       )

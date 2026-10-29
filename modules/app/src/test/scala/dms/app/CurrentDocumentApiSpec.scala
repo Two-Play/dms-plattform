@@ -591,6 +591,37 @@ object CurrentDocumentApiSpec extends ZIOSpecDefault:
         )
       )
     } @@ TestAspect.withLiveClock,
+    test("the stable address by document number resolves like the one by id (DMS-113)") {
+      for
+        policy   <- validDocument("Travel policy")
+        contract <- validDocument("Supplier contract", contract = true)
+        _        <- call(
+          owner,
+          "POST",
+          s"/api/v1/documents/${policy.id}/number",
+          Some("""{"number":"RL-042","reason":"number from the policy register"}""")
+        )
+        _ <- call(
+          owner,
+          "POST",
+          s"/api/v1/documents/${contract.id}/number",
+          Some("""{"number":"VTR-2026-0042","reason":"number from the contract register"}""")
+        )
+        byId       <- current(intranet, policy.id).map(as[CurrentVersionView])
+        byNumber   <- call(intranet, "GET", "/api/v1/documents/by-number/RL-042/current")
+        unknown    <- call(intranet, "GET", "/api/v1/documents/by-number/RL-999/current")
+        notAllowed <- call(intranet, "GET", "/api/v1/documents/by-number/VTR-2026-0042/current")
+        byReader   <- call(reader, "GET", "/api/v1/documents/by-number/VTR-2026-0042/current")
+      yield assertTrue(
+        byId.documentNumber.contains("RL-042"),
+        byNumber._1 == Status.Ok,
+        as[CurrentVersionView](byNumber) == byId,
+        unknown._1 == Status.NotFound,
+        notAllowed._1 == Status.NotFound,
+        byReader._1 == Status.Ok,
+        as[CurrentVersionView](byReader).documentId == contract.id
+      )
+    } @@ TestAspect.withLiveClock,
     test("tenant administrators manage webhooks; unsafe targets and other roles are rejected") {
       for
         byReader <- call(
