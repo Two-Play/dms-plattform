@@ -1,4 +1,5 @@
 import type { TemplateField } from '@/api/templates'
+import { Lock } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -36,14 +37,20 @@ function FieldControl({ field, input, error, onChange }: FieldProps) {
 
   if (field.reference) {
     return (
-      <Input
-        {...common}
-        readOnly
-        aria-readonly="true"
-        className="bg-muted/50"
-        placeholder="Pick a partner above"
-        value={text}
-      />
+      <div className="relative">
+        <Lock
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+        />
+        <Input
+          {...common}
+          readOnly
+          aria-readonly="true"
+          className="pl-8"
+          placeholder="Pick a partner above"
+          value={text}
+        />
+      </div>
     )
   }
 
@@ -236,7 +243,8 @@ function FieldRow({ field, input, error, onChange }: FieldProps) {
         )}
       </Label>
       {field.reference && (
-        <p id={`${id}-origin`} className="text-xs text-muted-foreground">
+        <p id={`${id}-origin`} className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Lock aria-hidden="true" className="size-3" />
           From partner master – taken over from the system, not editable
         </p>
       )}

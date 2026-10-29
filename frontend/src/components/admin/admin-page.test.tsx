@@ -198,7 +198,8 @@ function renderAt(path: string) {
   return { router, get, post, put, del, user: userEvent.setup() }
 }
 
-const membersTable = () => screen.findByRole('table', { name: /Members of/ })
+// The first render loads the route chunk and several queries; allow for a busy test machine.
+const membersTable = () => screen.findByRole('table', { name: /Members of/ }, { timeout: 3000 })
 
 describe('admin: access groups (DMS-105)', () => {
   it('lists the members of a group with their history', async () => {

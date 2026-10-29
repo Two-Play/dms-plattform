@@ -1,3 +1,5 @@
+import { ErrorState } from '@/components/shared/error-state'
+import { LoadingState } from '@/components/shared/states'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
@@ -5,7 +7,6 @@ import { useApiClient } from '@/api/context'
 import { documentVersionsQuery } from '@/api/versions'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from './status-badge'
 import { changeKindLabel } from './version-labels'
 
@@ -51,11 +52,9 @@ export function VersionHistory({ documentId }: { documentId: string }) {
         <CardDescription>Pick two versions to see what changed between them.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {versions.isPending && <Skeleton className="h-16 w-full" />}
+        {versions.isPending && <LoadingState label="Loading the versions" rows={2} />}
         {versions.isError && (
-          <p role="alert" className="text-sm text-destructive">
-            {versions.error.message}
-          </p>
+          <ErrorState error={versions.error} onRetry={() => void versions.refetch()} />
         )}
         {versions.data && (
           <>

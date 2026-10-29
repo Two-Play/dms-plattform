@@ -37,6 +37,9 @@ export const userManager = new UserManager({
   response_type: 'code', // authorization code flow; oidc-client-ts always uses PKCE
   scope: oidcScopes(config.oidcProjectId),
   userStore: new WebStorageStateStore({ store: window.sessionStorage }),
+  // ZITADEL puts name and email into the ID token only with "user info inside ID token"; the
+  // userinfo endpoint always has them for the `profile` and `email` scopes (DMS-109).
+  loadUserInfo: true,
   automaticSilentRenew: true,
 })
 

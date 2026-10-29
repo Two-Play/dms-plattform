@@ -1,3 +1,7 @@
+import { Users } from 'lucide-react'
+import { ErrorState, InlineError } from '@/components/shared/error-state'
+import { EmptyState, LoadingState } from '@/components/shared/states'
+import { toast } from '@/lib/toast'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useId, useState, type SyntheticEvent } from 'react'
 import { useApiClient } from '@/api/context'
@@ -17,7 +21,6 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
 
 /** Group keys as the backend accepts them (`Groups.KeyPattern`). */
 export const groupKeyPattern = /^[a-z0-9][a-z0-9-]{0,62}$/
@@ -41,6 +44,7 @@ function CreateGroupForm({ onCreated }: { onCreated: (group: Group) => void }) {
       setKey('')
       setName('')
       setAttempted(false)
+      toast(`Group ${group.name} created.`)
       onCreated(group)
     },
   })
@@ -104,11 +108,7 @@ function CreateGroupForm({ onCreated }: { onCreated: (group: Group) => void }) {
           {create.isPending ? 'Creating…' : 'Create group'}
         </Button>
       </div>
-      {create.isError && (
-        <p role="alert" className="text-sm text-destructive sm:col-span-3">
-          {create.error.message}
-        </p>
-      )}
+      {create.isError && <InlineError error={create.error} className="sm:col-span-3" />}
     </form>
   )
 }
@@ -121,6 +121,7 @@ function RenameForm({ group }: { group: Group }) {
   const rename = useMutation({
     mutationFn: () => renameGroup(client, group.key, name.trim()),
     onSuccess: async () => {
+      toast(`Group renamed to ${name.trim()}.`)
       await queryClient.invalidateQueries({ queryKey: ['groups'] })
     },
   })
@@ -150,21 +151,22 @@ function RenameForm({ group }: { group: Group }) {
       >
         {rename.isPending ? 'Renaming…' : 'Rename'}
       </Button>
-      {rename.isError && (
-        <p role="alert" className="w-full text-sm text-destructive">
-          {rename.error.message}
-        </p>
-      )}
+      {rename.isError && <InlineError error={rename.error} className="w-full" />}
     </form>
   )
 }
 
 /** Membership changes reload the members and the task inbox (participants are re-resolved). */
-function useMembershipChange(group: Group, change: (userId: string) => Promise<GroupMember[]>) {
+function useMembershipChange(
+  group: Group,
+  change: (userId: string) => Promise<GroupMember[]>,
+  done: (userId: string) => string,
+) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: change,
-    onSuccess: async (members) => {
+    onSuccess: async (members, userId) => {
+      toast(done(userId))
       queryClient.setQueryData(['groups', group.key, 'members'], members)
       await queryClient.invalidateQueries({ queryKey: ['workflow'] })
     },
@@ -175,7 +177,11 @@ function AddMemberForm({ group }: { group: Group }) {
   const client = useApiClient()
   const id = useId()
   const [userId, setUserId] = useState('')
-  const add = useMembershipChange(group, (user) => addGroupMember(client, group.key, user))
+  const add = useMembershipChange(
+    group,
+    (user) => addGroupMember(client, group.key, user),
+    (user) => `${user} added to ${group.name}.`,
+  )
   return (
     <form
       onSubmit={(e) => {
@@ -203,28 +209,30 @@ function AddMemberForm({ group }: { group: Group }) {
       <Button type="submit" disabled={add.isPending || userId.trim() === ''}>
         {add.isPending ? 'Adding…' : 'Add member'}
       </Button>
-      {add.isError && (
-        <p role="alert" className="w-full text-sm text-destructive">
-          {add.error.message}
-        </p>
-      )}
+      {add.isError && <InlineError error={add.error} className="w-full" />}
     </form>
   )
 }
 
 function MemberTable({ group, members }: { group: Group; members: GroupMember[] }) {
   const client = useApiClient()
-  const remove = useMembershipChange(group, (user) => removeGroupMember(client, group.key, user))
+  const remove = useMembershipChange(
+    group,
+    (user) => removeGroupMember(client, group.key, user),
+    (user) => `${user} removed from ${group.name}.`,
+  )
   if (members.length === 0) {
-    return <p className="text-sm text-muted-foreground">The group has no members yet.</p>
+    return (
+      <EmptyState
+        icon={Users}
+        title="The group has no members yet."
+        description="Add members by their user id."
+      />
+    )
   }
   return (
     <div className="space-y-2">
-      {remove.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {remove.error.message}
-        </p>
-      )}
+      {remove.isError && <InlineError error={remove.error} />}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <caption className="sr-only">Members of {group.name}, current ones first</caption>
@@ -314,11 +322,9 @@ function GroupDetail({ group }: { group: Group }) {
       <CardContent className="space-y-6">
         <RenameForm key={group.name} group={group} />
         <AddMemberForm group={group} />
-        {members.isPending && <Skeleton className="h-24 w-full" />}
+        {members.isPending && <LoadingState label="Loading the members" />}
         {members.isError && (
-          <p role="alert" className="text-sm text-destructive">
-            {members.error.message}
-          </p>
+          <ErrorState error={members.error} onRetry={() => void members.refetch()} />
         )}
         {members.data && <MemberTable group={group} members={members.data} />}
       </CardContent>
@@ -350,14 +356,14 @@ export function GroupsPanel() {
           />
         </CardContent>
       </Card>
-      {groups.isPending && <Skeleton className="h-40 w-full" />}
-      {groups.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {groups.error.message}
-        </p>
-      )}
+      {groups.isPending && <LoadingState label="Loading the access groups" rows={4} />}
+      {groups.isError && <ErrorState error={groups.error} onRetry={() => void groups.refetch()} />}
       {groups.data && groups.data.length === 0 && (
-        <p className="text-sm text-muted-foreground">No access groups yet.</p>
+        <EmptyState
+          icon={Users}
+          title="No access groups yet."
+          description="Create a group above, then add members to it."
+        />
       )}
       {groups.data && selected && (
         <div className="grid gap-6 md:grid-cols-[14rem_1fr]">

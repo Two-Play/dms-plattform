@@ -54,6 +54,7 @@ if [[ -z "$CLIENT_ID" ]]; then
     \"accessTokenType\": \"OIDC_TOKEN_TYPE_JWT\",
     \"accessTokenRoleAssertion\": true,
     \"idTokenRoleAssertion\": true,
+    \"idTokenUserinfoAssertion\": true,
     \"devMode\": true
   }" | json "d['clientId']")"
   echo "Created OIDC application $APP_NAME ($CLIENT_ID)"

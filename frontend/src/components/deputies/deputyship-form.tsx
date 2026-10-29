@@ -1,3 +1,5 @@
+import { InlineError } from '@/components/shared/error-state'
+import { toast } from '@/lib/toast'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useId, useState, type SyntheticEvent } from 'react'
 import { useApiClient } from '@/api/context'
@@ -35,6 +37,7 @@ export function DeputyshipForm({
   const create = useMutation({
     mutationFn: () => createDeputyship(client, toRequest(input)),
     onSuccess: async (created) => {
+      toast(`Deputy set: ${created.deputy} for ${created.principal} (${created.status}).`)
       await queryClient.invalidateQueries({ queryKey: ['deputyships'] })
       setInput(emptyDeputyshipInput)
       setAttempted(false)
@@ -181,16 +184,7 @@ export function DeputyshipForm({
         <Button type="submit" disabled={create.isPending}>
           {create.isPending ? 'Saving…' : 'Set deputy'}
         </Button>
-        {create.isError && (
-          <p role="alert" className="text-sm text-destructive">
-            {create.error.message}
-          </p>
-        )}
-        {create.isSuccess && (
-          <p role="status" className="text-sm text-muted-foreground">
-            Deputy set: {create.data.deputy} for {create.data.principal} ({create.data.status}).
-          </p>
-        )}
+        {create.isError && <InlineError error={create.error} />}
       </div>
     </form>
   )

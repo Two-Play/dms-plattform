@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link, useSearch } from '@tanstack/react-router'
-import { X } from 'lucide-react'
+import { CheckCircle2, X } from 'lucide-react'
 import { useId, useState, type ReactNode, type SyntheticEvent } from 'react'
 import {
   acknowledgementRatesQuery,
@@ -14,6 +14,9 @@ import {
 } from '@/api/compliance'
 import { useApiClient } from '@/api/context'
 import { statusLabel } from '@/components/documents/status-label'
+import { ErrorState, InlineError } from '@/components/shared/error-state'
+import { PageHeader } from '@/components/shared/page-header'
+import { EmptyState, LoadingState } from '@/components/shared/states'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -25,7 +28,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { groupLabel, type CompliancePageSearch } from './compliance-params'
 
@@ -106,13 +108,9 @@ function Overview() {
   const client = useApiClient()
   const overview = useQuery(complianceOverviewQuery(client))
 
-  if (overview.isPending) return <Skeleton className="h-32 w-full" />
+  if (overview.isPending) return <LoadingState label="Loading the compliance overview" />
   if (overview.isError) {
-    return (
-      <p role="alert" className="text-sm text-destructive">
-        {overview.error.message}
-      </p>
-    )
+    return <ErrorState error={overview.error} onRetry={() => void overview.refetch()} />
   }
   const o = overview.data
   const acks = o.acknowledgements
@@ -277,13 +275,15 @@ function OverdueReviewList({ search }: { search: CompliancePageSearch }) {
       <ListHeader title="Overdue reviews" search={search} />
       <CardContent>
         {list.isPending ? (
-          <Skeleton className="h-24 w-full" />
+          <LoadingState label="Loading the list" />
         ) : list.isError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {list.error.message}
-          </p>
+          <ErrorState error={list.error} onRetry={() => void list.refetch()} />
         ) : list.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No overdue reviews.</p>
+          <EmptyState
+            icon={CheckCircle2}
+            title="No overdue reviews."
+            description="All periodic reviews in this selection are on time."
+          />
         ) : (
           <Table
             caption="Overdue reviews"
@@ -444,11 +444,7 @@ function OpenAcknowledgementsDialog({
                     : `Up to ${String(MAX_REASON)} characters, without personal data.`}
                 </p>
               </div>
-              {mutation.isError && (
-                <p role="alert" className="text-sm text-destructive">
-                  {mutation.error.message}
-                </p>
-              )}
+              {mutation.isError && <InlineError error={mutation.error} />}
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={close}>
                   Cancel
@@ -474,13 +470,15 @@ function AcknowledgementList({ search }: { search: CompliancePageSearch }) {
       <ListHeader title="Acknowledgements" search={search} />
       <CardContent>
         {list.isPending ? (
-          <Skeleton className="h-24 w-full" />
+          <LoadingState label="Loading the list" />
         ) : list.isError ? (
-          <p role="alert" className="text-sm text-destructive">
-            {list.error.message}
-          </p>
+          <ErrorState error={list.error} onRetry={() => void list.refetch()} />
         ) : list.data.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No versions require acknowledgement.</p>
+          <EmptyState
+            icon={CheckCircle2}
+            title="No versions require acknowledgement."
+            description="Versions that ask readers for a read confirmation appear here."
+          />
         ) : (
           <Table
             caption="Acknowledgement rate per version"
@@ -538,7 +536,10 @@ export function CompliancePage() {
   const search = useSearch({ from: '/_app/compliance' })
   return (
     <div className="space-y-6">
-      <h1 className="font-heading text-2xl font-semibold">Compliance cockpit</h1>
+      <PageHeader
+        title="Compliance cockpit"
+        description="Overdue periodic reviews and read confirmation rates per unit and owner."
+      />
       <Overview />
       {search.view === 'reviews' && <OverdueReviewList search={search} />}
       {search.view === 'acknowledgements' && <AcknowledgementList search={search} />}

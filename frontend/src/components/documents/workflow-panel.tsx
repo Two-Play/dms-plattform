@@ -1,3 +1,6 @@
+import { ErrorState } from '@/components/shared/error-state'
+import { LoadingState } from '@/components/shared/states'
+import { toast } from '@/lib/toast'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useApiClient } from '@/api/context'
@@ -7,7 +10,6 @@ import { PendingVoteNotice } from '@/components/tasks/pending-vote-notice'
 import { VoteDialog, type VoteDraft } from '@/components/tasks/vote-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from './status-badge'
 import { statusLabel } from './status-label'
 
@@ -108,7 +110,6 @@ function MyOpenTasks({ documentId, title }: { documentId: string; title: string 
   const client = useApiClient()
   const myTasks = useQuery(myTasksQuery(client))
   const [voting, setVoting] = useState<{ task: WorkflowTask; initial?: VoteDraft }>()
-  const [message, setMessage] = useState('')
   const open = (myTasks.data ?? []).filter((t) => t.documentId === documentId)
   return (
     <>
@@ -137,9 +138,6 @@ function MyOpenTasks({ documentId, title }: { documentId: string; title: string 
           </Button>
         </div>
       ))}
-      <p role="status" className="text-sm empty:hidden">
-        {message}
-      </p>
       <VoteDialog
         task={voting?.task}
         documentTitle={title}
@@ -149,7 +147,7 @@ function MyOpenTasks({ documentId, title }: { documentId: string; title: string 
         }}
         onVoted={(_task, decision) => {
           setVoting(undefined)
-          setMessage(`Vote recorded: ${decisionLabels[decision]}.`)
+          toast(`Vote recorded: ${decisionLabels[decision]}.`)
         }}
       />
     </>
@@ -178,11 +176,9 @@ export function WorkflowPanel({
       </CardHeader>
       <CardContent className="space-y-3">
         <MyOpenTasks documentId={documentId} title={title} />
-        {workflow.isPending && <Skeleton className="h-16 w-full" />}
+        {workflow.isPending && <LoadingState label="Loading the workflow" rows={2} />}
         {workflow.isError && (
-          <p role="alert" className="text-sm text-destructive">
-            {workflow.error.message}
-          </p>
+          <ErrorState error={workflow.error} onRetry={() => void workflow.refetch()} />
         )}
         {workflow.data?.length === 0 && (
           <p className="text-sm text-muted-foreground">Not submitted yet.</p>

@@ -1,9 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ArrowLeft, ArrowRight } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import { useState } from 'react'
 import { useApiClient } from '@/api/context'
-import { ApiRequestError } from '@/api/errors'
 import {
   versionComparisonQuery,
   type BlockDiff,
@@ -12,9 +11,16 @@ import {
   type ValueChange,
   type VersionComparison,
 } from '@/api/versions'
+import { ErrorState } from '@/components/shared/error-state'
+import {
+  BreadcrumbCurrent,
+  Breadcrumbs,
+  breadcrumbLinkClass,
+  PageHeader,
+} from '@/components/shared/page-header'
+import { LoadingState } from '@/components/shared/states'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { displayValue } from './draft-values'
 import { StatusBadge } from './status-badge'
@@ -270,18 +276,9 @@ function Summaries({ summaries }: { summaries: ChangeSummary[] }) {
   )
 }
 
-function LoadError({ error }: { error: Error }) {
-  const text =
-    error instanceof ApiRequestError && error.status === 403
-      ? 'You are not allowed to read one of these versions.'
-      : error instanceof ApiRequestError && error.status === 404
-        ? 'One of these versions does not exist.'
-        : error.message
-  return (
-    <p role="alert" className="text-sm text-destructive">
-      {text}
-    </p>
-  )
+const loadErrorTitles = {
+  forbidden: 'You are not allowed to read one of these versions.',
+  notFound: 'One of these versions does not exist.',
 }
 
 /**
@@ -307,34 +304,52 @@ export function VersionComparePage({
 
   return (
     <div className="space-y-6">
-      <Link
-        to="/documents/$documentId"
-        params={{ documentId }}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      <PageHeader
+        title="Compare versions"
+        description={data?.title}
+        breadcrumbs={
+          <Breadcrumbs>
+            <Link to="/documents" className={breadcrumbLinkClass}>
+              Documents
+            </Link>
+            <Link
+              to="/documents/$documentId"
+              params={{ documentId }}
+              className={breadcrumbLinkClass}
+            >
+              {data?.title ?? 'Document'}
+            </Link>
+            <BreadcrumbCurrent>Compare</BreadcrumbCurrent>
+          </Breadcrumbs>
+        }
       >
-        <ArrowLeft className="size-4" />
-        Document
-      </Link>
+        {data && (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span>Version {data.from.version}</span>
+            <StatusBadge status={data.from.status} />
+            <ArrowRight className="size-4" aria-label="to" />
+            <span>Version {data.to.version}</span>
+            <StatusBadge status={data.to.status} />
+          </div>
+        )}
+      </PageHeader>
       {(!from || !to) && (
         <p role="alert" className="text-sm text-destructive">
           Pick two versions in the version history of the document.
         </p>
       )}
-      {from && to && comparison.isPending && <Skeleton className="h-64 w-full" />}
-      {comparison.isError && <LoadError error={comparison.error} />}
+      {from && to && comparison.isPending && (
+        <LoadingState label="Loading the comparison" rows={6} />
+      )}
+      {comparison.isError && (
+        <ErrorState
+          error={comparison.error}
+          titles={loadErrorTitles}
+          onRetry={() => void comparison.refetch()}
+        />
+      )}
       {data && (
         <>
-          <div className="space-y-1">
-            <h1 className="font-heading text-2xl font-semibold">Compare versions</h1>
-            <p className="text-muted-foreground">{data.title}</p>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span>Version {data.from.version}</span>
-              <StatusBadge status={data.from.status} />
-              <ArrowRight className="size-4" aria-label="to" />
-              <span>Version {data.to.version}</span>
-              <StatusBadge status={data.to.status} />
-            </div>
-          </div>
           <Summaries summaries={data.summaries ?? []} />
           <Tabs defaultValue="text">
             <TabsList>

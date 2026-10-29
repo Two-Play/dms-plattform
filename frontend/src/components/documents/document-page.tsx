@@ -1,15 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { ArrowLeft } from 'lucide-react'
 import { useState } from 'react'
 import { useApiClient } from '@/api/context'
 import { documentQuery } from '@/api/documents'
-import { ApiRequestError } from '@/api/errors'
 import type { DocumentVersionView, DocumentView } from '@/api/partners'
 import { useGroups } from '@/api/groups'
 import { templateFieldsQuery, type DocumentLanguage, type MetadataValue } from '@/api/templates'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState } from '@/components/shared/error-state'
+import {
+  BreadcrumbCurrent,
+  Breadcrumbs,
+  breadcrumbLinkClass,
+  PageHeader,
+} from '@/components/shared/page-header'
+import { LoadingState } from '@/components/shared/states'
 import { allowedGroupsOf, confidentialityOf, isRestrictedLevel } from './access-groups'
 import { displayValue } from './draft-values'
 import { LanguageSelect } from './document-workspace'
@@ -48,11 +53,9 @@ function VersionValues({ document }: { document: DocumentView }) {
         <CardTitle>Metadata</CardTitle>
       </CardHeader>
       <CardContent>
-        {fields.isPending && <Skeleton className="h-24 w-full" />}
+        {fields.isPending && <LoadingState label="Loading the metadata" />}
         {fields.isError && (
-          <p role="alert" className="text-sm text-destructive">
-            {fields.error.message}
-          </p>
+          <ErrorState error={fields.error} onRetry={() => void fields.refetch()} />
         )}
         {fields.data && (
           <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
@@ -99,18 +102,9 @@ export function AccessNote({ document }: { document: DocumentView }) {
   )
 }
 
-function LoadError({ error }: { error: Error }) {
-  const text =
-    error instanceof ApiRequestError && error.status === 404
-      ? 'This document does not exist.'
-      : error instanceof ApiRequestError && error.status === 403
-        ? 'You are not allowed to see this document.'
-        : error.message
-  return (
-    <p role="alert" className="text-sm text-destructive">
-      {text}
-    </p>
-  )
+const loadErrorTitles = {
+  notFound: 'This document does not exist.',
+  forbidden: 'You are not allowed to see this document.',
 }
 
 /**
@@ -124,38 +118,52 @@ export function DocumentPage({ documentId }: { documentId: string }) {
 
   return (
     <div className="space-y-6">
-      <Link
-        to="/documents"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      <PageHeader
+        title={document.data?.title ?? 'Document'}
+        breadcrumbs={
+          <Breadcrumbs>
+            <Link to="/documents" className={breadcrumbLinkClass}>
+              Documents
+            </Link>
+            <BreadcrumbCurrent>{document.data?.title ?? 'Document'}</BreadcrumbCurrent>
+          </Breadcrumbs>
+        }
+        actions={
+          document.data && (
+            <>
+              {document.data.current.status === 'Draft' && (
+                <div className="w-48">
+                  <LanguageSelect
+                    value={language ?? documentLanguage(document.data)}
+                    onChange={setLanguage}
+                  />
+                </div>
+              )}
+              <EvidenceReportAction documentId={document.data.id} />
+            </>
+          )
+        }
       >
-        <ArrowLeft className="size-4" />
-        Documents
-      </Link>
-      {document.isPending && <Skeleton className="h-64 w-full" />}
-      {document.isError && <LoadError error={document.error} />}
+        {document.data && (
+          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+            <StatusBadge status={document.data.current.status} />
+            <span>Version {document.data.current.version}</span>
+            {document.data.classPath && document.data.classPath.length > 0 && (
+              <span>· {document.data.classPath.join(' › ')}</span>
+            )}
+          </div>
+        )}
+      </PageHeader>
+      {document.isPending && <LoadingState label="Loading the document" rows={6} />}
+      {document.isError && (
+        <ErrorState
+          error={document.error}
+          titles={loadErrorTitles}
+          onRetry={() => void document.refetch()}
+        />
+      )}
       {document.data && (
         <>
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div className="space-y-1">
-              <h1 className="font-heading text-2xl font-semibold">{document.data.title}</h1>
-              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                <StatusBadge status={document.data.current.status} />
-                <span>Version {document.data.current.version}</span>
-                {document.data.classPath && document.data.classPath.length > 0 && (
-                  <span>· {document.data.classPath.join(' › ')}</span>
-                )}
-              </div>
-            </div>
-            {document.data.current.status === 'Draft' && (
-              <div className="w-48">
-                <LanguageSelect
-                  value={language ?? documentLanguage(document.data)}
-                  onChange={setLanguage}
-                />
-              </div>
-            )}
-            <EvidenceReportAction documentId={document.data.id} />
-          </div>
           <AccessNote document={document.data} />
           {document.data.current.status === 'Draft' ? (
             <DocumentEditor

@@ -13,7 +13,7 @@ cp .env.example .env.local   # fill in client and project id from ../.local/zita
 npm run dev                  # http://localhost:5173
 ```
 
-Start the backend (`sbt app/run` in the repository root) for the "System status" card.
+Start the backend (`sbt app/run` in the repository root) for the dashboard and all other pages; tenant administrators see its health check under Admin › System status.
 
 ## Environment variables
 
@@ -94,11 +94,13 @@ src/
                  groups.ts: access groups and members; deputyships.ts: deputyships;
                  errors.ts: ApiError with field issues)
   auth/          oidc-client-ts UserManager, scopes, return-path check
-  components/    app shell, pages and cards; ui/ holds shadcn/ui components; documents/ the document pages;
+  components/    app shell, pages and cards; ui/ holds shadcn/ui components; shared/ page building blocks
+                 (PageHeader, breadcrumbs, ErrorState, EmptyState, LoadingState, DataTable, Toaster);
+                 home/ the personal dashboard; documents/ the document pages;
                  tasks/ the task inbox and the vote dialog; search/ the search page;
                  templates/ the template pages;
                  admin/ the administration; deputies/ the deputyship pages
-  lib/           utilities, theme switch
+  lib/           utilities, theme switch, tab title (document-title.ts), toast store (toast.ts)
   routes/        file-based routes (files starting with "-" are ignored by the router)
   test/          Vitest setup
   index.css      Tailwind entry and design tokens
@@ -184,6 +186,15 @@ For template designers (`EditTemplates`; the API answers 403 to everyone else):
 - Test mode (`test-mode-panel.tsx`, `POST …/versions/{version}/test` with generated sample data in English or German): branch coverage per condition, the generated cases, and each case rendered as HTML by the backend (`html`, same renderer and document stylesheet as the live preview, draft marking).
 - Status (`template-lifecycle.ts` mirrors `TemplateLifecycle`): Draft → "Start testing"; Testing → "Back to draft" or "Release…"; Released → "Deprecate…" (confirmation); Deprecated → "Archive". "Release…" opens `release-dialog.tsx`, which loads the impact analysis (`GET /api/v1/templates/{id}/versions/{version}/impact`): documents on earlier versions per status, open drafts with title, author, status and last change, and the backend's explanation that a release changes no existing document. Titles of confidential drafts the caller may not read arrive masked (`titleMasked`) and are shown with a lock. If the signed-in user created or changed the version, the page explains that another designer has to release it (four-eyes principle); the backend decides, and its 403 `segregation_of_duties` is shown in the dialog. A 409 (concurrent change, open version) asks to reload.
 - Users (creators, editors, releasers, draft authors) are shown by user id: there is no source of display names yet.
+
+## Dashboard, shell and page building blocks (DMS-109)
+
+- **Home** (`components/home/home-page.tsx`) is a personal dashboard: greeting, quick actions (New document, Search) and cards with count, the top five items and a "view all" link: open tasks (`GET /api/v1/workflow/tasks` and periodic reviews `GET /api/v1/reviews?status=open`), read confirmations, own drafts and recently published documents (both from the document list). Role cards only when the role applies: templates in testing (template designers), overdue reviews and read confirmation rate with a link to the cockpit (compliance officers), system status (tenant administrators; also a tab on the admin page). Every card has a loading skeleton, an empty state with the next step and an error with "Try again" (`dashboard-card.tsx`).
+- **Shell** (`components/app-shell.tsx`): skip link to the content; sticky header with a global search field (submits to `/search?q=`, hidden on the search page itself); desktop sidebar that stays in view on long pages and highlights the section of nested pages (`/documents/...` → Documents); below `md` a menu button instead of the sidebar; open task count on "Tasks" (workflow tasks, periodic reviews and read confirmations; given to screen readers as description of the link). After navigating to another path, focus moves to the page heading (or `main`), so screen readers announce the new page. `scroll-padding-top` keeps focused elements clear of the sticky header.
+- **Page building blocks** (`components/shared/`): `PageHeader` (title, description, actions, breadcrumbs; sets the tab title "Title · DMS"), `Breadcrumbs` on nested pages (Documents › Document › Compare, Templates › name), `ErrorState` (user-facing text by HTTP status or network error: 401, 403, 404, 409, 400/422, 5xx; the backend's own message as detail, generic "failed with HTTP n" fallbacks are hidden; "Try again" calls `refetch` where retrying can help), `InlineError` for failed actions, `EmptyState`, `LoadingState` (skeleton rows with a screen-reader text) and `DataTable` (documents and templates lists). Error texts live in `error-messages.ts`.
+- **Toasts** (`lib/toast.ts`, `shared/toaster.tsx`): a small own implementation instead of a dependency; a polite live region, at most three at a time, dismissable, paused while hovered or focused. Shown after saving and submitting drafts, votes, read confirmations, periodic review decisions, template status changes, group and member changes and deputyships. Confirmation dialogs for destructive actions stay.
+- **Sign-in name**: ZITADEL puts name and email claims into the ID token only with "user info inside ID token"; the client therefore loads the userinfo endpoint (`loadUserInfo`), and `scripts/zitadel-setup.sh` enables the assertion for new setups. The shell shows name, given and family name, user name or email, in this order (`auth/profile.ts`).
+- **Visual consistency**: read-only inputs (values taken over from the partner master) have a dashed border, muted background and a lock; disabled primary buttons are neutral grey instead of faded blue; task inbox entries share one layout (badges, title, context, date; actions on the right). The shell, the dashboard and the shared building blocks keep their UI texts in one `texts` object per component (no concatenated sentences), ready for the German localization (DMS-110); the older pages follow there.
 
 ## Notes
 

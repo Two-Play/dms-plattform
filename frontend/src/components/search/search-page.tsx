@@ -18,7 +18,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Skeleton } from '@/components/ui/skeleton'
+import { ErrorState, InlineError } from '@/components/shared/error-state'
+import { PageHeader } from '@/components/shared/page-header'
+import { EmptyState, LoadingState } from '@/components/shared/states'
 import type { SearchPageSearch } from './search-params'
 import { snippetParts } from './snippet'
 
@@ -195,18 +197,16 @@ function SearchResults({
 
   if (q === '') {
     return (
-      <p className="text-sm text-muted-foreground">
-        Enter a search text, or choose a “valid on” date to see the versions in force on that day.
-      </p>
+      <EmptyState
+        icon={Search}
+        title="Search the documents you may read"
+        description="Enter a search text, or choose a “valid on” date to see the versions in force on that day."
+      />
     )
   }
-  if (result.isPending) return <Skeleton className="h-40 w-full" />
+  if (result.isPending) return <LoadingState label="Searching" rows={4} />
   if (result.isError) {
-    return (
-      <p role="alert" className="text-sm text-destructive">
-        {result.error.message}
-      </p>
-    )
+    return <ErrorState error={result.error} onRetry={() => void result.refetch()} />
   }
   if (result.data === null) {
     return (
@@ -358,16 +358,10 @@ function ValidAtResults({
               The search text is not applied to this list; it shows every document you may read.
             </p>
           )}
-          {exportCsv.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {exportCsv.error.message}
-            </p>
-          )}
-          {result.isPending && <Skeleton className="h-40 w-full" />}
+          {exportCsv.isError && <InlineError error={exportCsv.error} />}
+          {result.isPending && <LoadingState label="Loading the valid versions" rows={4} />}
           {result.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {result.error.message}
-            </p>
+            <ErrorState error={result.error} onRetry={() => void result.refetch()} />
           )}
           {result.data &&
             ((result.data.items ?? []).length > 0 ? (
@@ -462,7 +456,7 @@ export function SearchPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="font-heading text-2xl font-semibold">Search</h1>
+      <PageHeader title="Search" />
       <SearchForm
         key={`${search.q ?? ''}|${search.validOn ?? ''}`}
         search={search}

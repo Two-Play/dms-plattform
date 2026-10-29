@@ -1,3 +1,4 @@
+import { toast } from '@/lib/toast'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { useApiClient } from '@/api/context'
@@ -203,7 +204,7 @@ export function DocumentWorkspace({
   }
 
   /** Saves the draft; the document id if it was saved (taking partners over may still have failed). */
-  const save = async (): Promise<string | undefined> => {
+  const save = async (submitting = false): Promise<string | undefined> => {
     const title = values.title?.type === 'Text' ? values.title.value : ''
     if (title === '') {
       setSaveState({ kind: 'failed', message: 'Enter a title before saving the draft.' })
@@ -270,17 +271,19 @@ export function DocumentWorkspace({
     })
     // The list and the document page show the new title and version.
     void queryClient.invalidateQueries({ queryKey: ['documents'] })
+    if (!submitting) toast('Draft saved')
     return current.documentId
   }
 
   const submit = async () => {
-    const documentId = await save()
+    const documentId = await save(true)
     if (!documentId) return
     setSaveState({ kind: 'submitting' })
     try {
       const submitted = await submitDocument(client, documentId)
       void queryClient.invalidateQueries({ queryKey: ['documents'] })
       setSaveState({ kind: 'saved', label: submitted.version })
+      toast('Submitted for review')
       onSubmitted?.(documentId, submitted)
     } catch (e) {
       if (e instanceof ApiRequestError && e.code === 'incomplete') {
