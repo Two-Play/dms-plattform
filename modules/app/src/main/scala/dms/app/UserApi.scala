@@ -1,7 +1,16 @@
 package dms.app
 
-import dms.db.DbError
-import dms.identity.{Authenticator, Principal, TenantOrganizations, UserDirectory, UserDirectoryError}
+import dms.authz.{AccessDenied, Action, Authorizer, Resource}
+import dms.db.{Db, DbError}
+import dms.identity.{
+  Authenticator,
+  Principal,
+  TenantOrganizations,
+  UserDirectory,
+  UserDirectoryError,
+  UserInfo,
+  UserQuery
+}
 import dms.kernel.UserId
 import sttp.model.StatusCode
 import sttp.tapir.Schema
@@ -17,15 +26,48 @@ final case class UserView(id: String, displayName: Option[String], email: Option
     derives JsonCodec,
       Schema
 
+/** A person found by the people picker (DMS-111): the user id to store, the name and email to show. */
+final case class UserMatch(id: String, displayName: String, email: Option[String]) derives JsonCodec, Schema
+
 /** User directory (DMS-110): display names for the user ids the API returns (authors, assignees, members,
   * ...). Every signed-in user may resolve ids, limited to users of the ZITADEL organization of their own
   * tenant. Names come from ZITADEL and are cached for a while (`dms.users.cacheSeconds`).
+  *
+  * The people picker (DMS-111, ADR 0037 addendum) searches the same directory by name or email; it needs a
+  * role in the tenant (`Action.SearchUsers`) and returns at most [[MaxResults]] people of the caller's
+  * tenant.
   */
 object UserApi:
-  type Env = Authenticator & TenantOrganizations & UserDirectory
+  type Env = Authenticator & TenantOrganizations & UserDirectory & Db & Authorizer
 
   /** Ids per request. */
   val MaxIds = 200
+
+  /** People per search, at most; the default is [[DefaultResults]]. */
+  val MaxResults     = 20
+  val DefaultResults = 10
+
+  val search: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in("api" / "v1" / "users" / "search")
+      .in(
+        query[String]("q").description(
+          s"Name or email: every word must be the start of the first name, last name, display name, email " +
+            s"or user name; ${UserQuery.MinLength} to ${UserQuery.MaxLength} characters, at most " +
+            s"${UserQuery.MaxWords} words"
+        )
+      )
+      .in(
+        query[Option[Int]]("limit").description(s"People at most, 1 to $MaxResults (default $DefaultResults)")
+      )
+      .out(jsonBody[List[UserMatch]])
+      .description(
+        "Finds active people of the caller's tenant (its ZITADEL organization) by name or email, for pickers " +
+          "of group members, deputies and person fields; sorted by display name. Requires a role in the " +
+          "tenant. Answers 503 if the identity provider cannot be reached or no user directory is configured."
+      )
+      .tag("Identity")
+      .serverLogic(principal => (q, limit) => find(principal, q, limit))
 
   val users: ZServerEndpoint[Env, Any] =
     SecuredApi.base.get
@@ -42,7 +84,7 @@ object UserApi:
       .tag("Identity")
       .serverLogic(principal => ids => resolve(principal, ids))
 
-  val endpoints: List[ZServerEndpoint[Env, Any]] = List(users)
+  val endpoints: List[ZServerEndpoint[Env, Any]] = List(search, users)
 
   /** Distinct, non-empty ids in the order given. */
   def parseIds(raw: String): Either[String, List[UserId]] =
@@ -72,10 +114,48 @@ object UserApi:
         case None       => UserView(id.value, None, None)
     )
 
-  def toResponse(error: DbError | UserDirectoryError): (StatusCode, ApiError) = error match
+  /** The requested number of people, if it is in range. */
+  def parseLimit(limit: Option[Int]): Either[String, Int] = limit match
+    case None                                 => Right(DefaultResults)
+    case Some(n) if n >= 1 && n <= MaxResults => Right(n)
+    case Some(_)                              => Left(s"The limit must be between 1 and $MaxResults.")
+
+  private def find(
+      principal: Principal,
+      raw: String,
+      rawLimit: Option[Int]
+  ): ZIO[Db & Authorizer & TenantOrganizations & UserDirectory, (StatusCode, ApiError), List[UserMatch]] =
+    for
+      query <- ZIO
+        .fromEither(UserQuery.parse(raw))
+        .mapError(message => (StatusCode.BadRequest, ApiError("invalid_query", message)))
+      limit <- ZIO
+        .fromEither(parseLimit(rawLimit))
+        .mapError(message => (StatusCode.BadRequest, ApiError("invalid_limit", message)))
+      db    <- ZIO.service[Db]
+      authz <- ZIO.service[Authorizer]
+      _     <- db
+        .transact(principal.tenantId)(
+          authz
+            .subject(principal)
+            .flatMap(s => authz.check(s, Action.SearchUsers, Resource(principal.tenantId)))
+        )
+        .mapError(toResponse)
+      organization <- ZIO
+        .serviceWithZIO[TenantOrganizations](_.organizationOf(principal.tenantId))
+        .mapError(toResponse)
+      found <- organization match
+        case Some(org) => ZIO.serviceWithZIO[UserDirectory](_.search(org, query, limit)).mapError(toResponse)
+        case None      => ZIO.succeed(Nil)
+    yield found.take(limit).map(matchView)
+
+  private def matchView(user: UserInfo): UserMatch = UserMatch(user.id.value, user.displayName, user.email)
+
+  def toResponse(error: AccessDenied | DbError | UserDirectoryError): (StatusCode, ApiError) = error match
     case UserDirectoryError.Unavailable(reason) =>
       (
         StatusCode.ServiceUnavailable,
         ApiError("user_directory_unavailable", s"User names cannot be looked up right now: $reason")
       )
-    case e: DbError => DocumentApi.toResponse(e)
+    case e: AccessDenied => DocumentApi.toResponse(e)
+    case e: DbError      => DocumentApi.toResponse(e)

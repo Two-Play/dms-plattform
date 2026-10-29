@@ -16,6 +16,7 @@ import {
   type GroupMember,
 } from '@/api/groups'
 import { cachedUserName, useUserLabel } from '@/api/users'
+import { PersonPicker } from '@/components/shared/person-picker'
 import { UserName } from '@/components/shared/user-name'
 import { t } from '@/i18n'
 import { formatDateTime } from '@/i18n/format'
@@ -198,14 +199,8 @@ function AddMemberForm({ group }: { group: Group }) {
       className="flex flex-wrap items-end gap-2"
     >
       <div className="grid min-w-48 flex-1 gap-1.5">
-        <Label htmlFor={`${id}-user`}>{t('groups.userId')}</Label>
-        <Input
-          id={`${id}-user`}
-          value={userId}
-          onChange={(e) => {
-            setUserId(e.target.value)
-          }}
-        />
+        <Label htmlFor={`${id}-user`}>{t('groups.member')}</Label>
+        <PersonPicker id={`${id}-user`} value={userId} onChange={setUserId} />
       </div>
       <Button type="submit" disabled={add.isPending || userId.trim() === ''}>
         {add.isPending ? t('groups.adding') : t('groups.add')}

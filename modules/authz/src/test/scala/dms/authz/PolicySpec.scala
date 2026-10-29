@@ -45,6 +45,7 @@ object PolicySpec extends ZIOSpecDefault:
     case ViewAcknowledgementPersons => document(Published)
     case GenerateEvidenceReport     => document(Superseded)
     case AssignDocumentNumber       => document(Draft)
+    case SearchUsers                => Resource(tenant)
 
   /** The condition that turns a ◐ cell of the matrix into a permission. */
   private def favorable(action: Action, role: Role): Resource =
@@ -97,7 +98,9 @@ object PolicySpec extends ZIOSpecDefault:
     // Evidence reports (US-12.1, DMS-57): internal audit and records management.
     GenerateEvidenceReport -> List(Never, Never, Never, Never, Never, Never, Full, Full, Never, Never),
     // Manual document numbers (DMS-113, ADR 0040): records management, and owners for their own documents.
-    AssignDocumentNumber -> List(Never, Never, Partial, Never, Never, Never, Full, Never, Never, Never)
+    AssignDocumentNumber -> List(Never, Never, Partial, Never, Never, Never, Full, Never, Never, Never),
+    // Finding people by name for pickers (DMS-111): every role of the tenant; nobody without a role.
+    SearchUsers -> List(Full, Full, Full, Full, Full, Full, Full, Full, Full, Full)
   )
 
   private def permitted(roles: Seq[Role], action: Action, resource: Resource): Boolean =
@@ -268,6 +271,19 @@ object PolicySpec extends ZIOSpecDefault:
         !Policy
           .decide(hrOfficer, ViewAcknowledgementPersons, hr.copy(status = Some(Superseded)), now)
           .isPermitted
+      )
+    },
+    test("searching people needs a role in the same tenant and is no action on a document (DMS-111)") {
+      val expired = Subject(
+        user,
+        tenant,
+        Set(RoleAssignment(Reader, validUntil = Some(now.minusSeconds(60))))
+      )
+      assertTrue(
+        !permitted(Nil, SearchUsers, Resource(tenant)),
+        !Policy.decide(expired, SearchUsers, Resource(tenant), now).isPermitted,
+        !permitted(Seq(TenantAdmin), SearchUsers, Resource(TenantId.random())),
+        !permitted(Seq(Reader), SearchUsers, document(Published))
       )
     },
     test("every denial carries a reason") {

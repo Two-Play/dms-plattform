@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cachedUserName } from '@/api/users'
 import { statusLabel } from '@/components/documents/status-label'
+import { PersonPicker } from '@/components/shared/person-picker'
 import { roleLabel } from '@/components/shared/role-label'
 import { t } from '@/i18n'
 import {
@@ -84,13 +85,13 @@ export function DeputyshipForm({
       {withPrincipal && (
         <div className="grid gap-1.5">
           <Label htmlFor={`${id}-principal`}>{t('deputies.principalOptional')}</Label>
-          <Input
+          <PersonPicker
             id={`${id}-principal`}
             value={input.principal}
-            onChange={(e) => {
-              update('principal', e.target.value)
+            onChange={(userId) => {
+              update('principal', userId)
             }}
-            aria-describedby={`${id}-principal-hint`}
+            describedBy={`${id}-principal-hint`}
           />
           <p id={`${id}-principal-hint`} className="text-xs text-muted-foreground">
             {t('deputies.principalHint')}
@@ -99,15 +100,15 @@ export function DeputyshipForm({
       )}
       <div className="grid gap-1.5">
         <Label htmlFor={`${id}-deputy`}>{t('deputies.deputyRequired')}</Label>
-        <Input
+        <PersonPicker
           id={`${id}-deputy`}
           value={input.deputy}
-          onChange={(e) => {
-            update('deputy', e.target.value)
+          onChange={(userId) => {
+            update('deputy', userId)
           }}
-          aria-required
-          aria-invalid={shown.deputy ? true : undefined}
-          aria-describedby={`${id}-deputy-hint`}
+          required
+          invalid={Boolean(shown.deputy)}
+          describedBy={`${id}-deputy-hint`}
         />
         {hint('deputy', t('deputies.deputyHint'))}
       </div>

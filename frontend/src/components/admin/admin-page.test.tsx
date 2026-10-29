@@ -48,6 +48,23 @@ interface State {
 
 let state: State
 
+/** The tenant's people as the user directory finds them (DMS-111). */
+const people = [
+  { id: 'reviewer-1', displayName: 'Rita Reviewer', email: 'rita@example.com' },
+  { id: 'approver-2', displayName: 'Arne Approver', email: 'arne@example.com' },
+  { id: 'deputy-2', displayName: 'Dora Deputy', email: 'dora@example.com' },
+  { id: 'nobody', displayName: 'Nora Nobody' },
+]
+
+/** Like the backend: every word starts a part of the name or the email. */
+function searchPeople(q: string) {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean)
+  return people.filter((p) => {
+    const parts = [...p.displayName.toLowerCase().split(' '), p.email ?? '']
+    return words.every((w) => parts.some((part) => part.startsWith(w)))
+  })
+}
+
 function deputyship(over: Partial<Deputyship>): Deputyship {
   return {
     id: 'd1',
@@ -112,6 +129,8 @@ function renderAt(path: string) {
         )
       case '/api/v1/workflow/tasks':
         return ok([])
+      case '/api/v1/users/search':
+        return ok(searchPeople((init?.params?.query?.q as string | undefined) ?? ''))
       default:
         return failed(404, { code: 'not_found', message: `unexpected ${p}` })
     }
@@ -198,6 +217,18 @@ function renderAt(path: string) {
   return { router, get, post, put, del, user: userEvent.setup() }
 }
 
+/** Types into the people picker labelled `label` and picks the person named `name` from the hits. */
+async function pickPerson(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  query: string,
+  name: string,
+) {
+  await user.type(screen.getByRole('combobox', { name: label }), query)
+  const hits = await screen.findByRole('listbox', { name: 'People found' })
+  await user.click(within(hits).getByRole('option', { name: new RegExp(name) }))
+}
+
 // The first render loads the route chunk and several queries; allow for a busy test machine.
 const membersTable = () => screen.findByRole('table', { name: /Members of/ }, { timeout: 3000 })
 
@@ -217,16 +248,21 @@ describe('admin: access groups (DMS-105)', () => {
     const { put, del, user } = renderAt('/admin')
     await membersTable()
 
-    await user.type(screen.getByLabelText('User id'), ' reviewer-1 ')
+    // The member is picked by name (DMS-111); the user id is stored.
+    await pickPerson(user, 'Person', 'rit', 'Rita Reviewer')
+    expect(screen.getByRole('combobox', { name: 'Person' })).toHaveValue('Rita Reviewer')
+    expect(screen.getByText('rita@example.com')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Add member' }))
     await waitFor(() => {
       expect(put).toHaveBeenCalledWith('/api/v1/groups/{key}/members/{userId}', {
         params: { path: { key: 'board', userId: 'reviewer-1' } },
       })
     })
+    expect(await screen.findByText('Rita Reviewer added to Board.')).toBeInTheDocument()
     expect(
-      await screen.findByRole('button', { name: 'Remove reviewer-1 from Board' }),
+      await screen.findByRole('button', { name: 'Remove Rita Reviewer from Board' }),
     ).toBeEnabled()
+    expect(screen.getByRole('combobox', { name: 'Person' })).toHaveValue('')
 
     await user.click(screen.getByRole('button', { name: 'Remove approver-1 from Board' }))
     await waitFor(() => {
@@ -300,8 +336,8 @@ describe('deputyships (DMS-99)', () => {
     const table = await screen.findByRole('table', { name: 'All deputyships of the tenant' })
     expect(within(table).getAllByRole('row')).toHaveLength(3)
 
-    await user.type(screen.getByLabelText('Principal (optional)'), 'approver-2')
-    await user.type(screen.getByLabelText('Deputy *'), 'deputy-2')
+    await pickPerson(user, 'Principal (optional)', 'arne', 'Arne Approver')
+    await pickPerson(user, 'Deputy *', 'dora@', 'Dora Deputy')
     await user.type(screen.getByLabelText('Until *'), '2099-01-31T18:00')
     await user.click(screen.getByRole('button', { name: 'Set deputy' }))
     await waitFor(() => {
@@ -313,7 +349,7 @@ describe('deputyships (DMS-99)', () => {
         }) as unknown,
       })
     })
-    expect(await screen.findByText(/Deputy set: deputy-2 for approver-2/)).toBeInTheDocument()
+    expect(await screen.findByText(/Deputy set: Dora Deputy for Arne Approver/)).toBeInTheDocument()
   })
 
   it('everyone manages their own deputies from the user menu page', async () => {
@@ -346,11 +382,20 @@ describe('deputyships (DMS-99)', () => {
     await screen.findByRole('table', { name: 'My deputies' })
 
     await user.click(screen.getByRole('button', { name: 'Set deputy' }))
-    expect(await screen.findByText('Enter the user id of the deputy.')).toBeInTheDocument()
+    expect(await screen.findByText('Select the deputy.')).toBeInTheDocument()
     expect(screen.getByText('Choose the end of the period.')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Deputy *' })).toHaveAttribute(
+      'aria-invalid',
+      'true',
+    )
     expect(post).not.toHaveBeenCalled()
 
-    await user.type(screen.getByLabelText('Deputy *'), 'nobody')
+    // Keyboard only: arrow down to the hit, Enter picks it and does not submit the form.
+    await user.type(screen.getByRole('combobox', { name: 'Deputy *' }), 'nora')
+    await screen.findByRole('option', { name: /Nora Nobody/ })
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(screen.getByRole('combobox', { name: 'Deputy *' })).toHaveValue('Nora Nobody')
+    expect(post).not.toHaveBeenCalled()
     await user.type(screen.getByLabelText('Until *'), '2099-01-31T18:00')
     await user.click(screen.getByRole('checkbox', { name: 'Approver' }))
     await user.click(screen.getByRole('button', { name: 'Set deputy' }))

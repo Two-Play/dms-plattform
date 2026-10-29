@@ -38,6 +38,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/users/search': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Finds active people of the caller's tenant (its ZITADEL organization) by name or email, for pickers of group members, deputies and person fields; sorted by display name. Requires a role in the tenant. Answers 503 if the identity provider cannot be reached or no user directory is configured. */
+    get: operations['getApiV1UsersSearch']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/users': {
     parameters: {
       query?: never
@@ -3838,6 +3855,12 @@ export interface components {
       values: components['schemas']['Map_MetadataValue']
       content?: components['schemas']['TemplateContent']
     }
+    /** UserMatch */
+    UserMatch: {
+      id: string
+      displayName: string
+      email?: string
+    }
     /** UserView */
     UserView: {
       id: string
@@ -4333,6 +4356,47 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['Me']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1UsersSearch: {
+    parameters: {
+      query: {
+        /** @description Name or email: every word must be the start of the first name, last name, display name, email or user name; 2 to 100 characters, at most 4 words */
+        q: string
+        /** @description People at most, 1 to 20 (default 10) */
+        limit?: number
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['UserMatch'][]
+        }
+      }
+      /** @description Invalid value for: query parameter q, Invalid value for: query parameter limit */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
         }
       }
       default: {
