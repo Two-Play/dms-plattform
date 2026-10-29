@@ -3,7 +3,9 @@ package dms.app
 import dms.archive.core.LegalHoldSync
 import dms.audit.core.*
 import dms.db.Db
+import dms.authz.{Groups, RoleAssignments}
 import dms.documents.core.{
+  AcknowledgementService,
   DocumentService,
   PublicationJobs,
   PublicationScheduleConfig,
@@ -25,8 +27,9 @@ import java.lang.management.ManagementFactory
 import java.net.http.HttpClient
 
 /** Background processing of this instance: the job runner (audit, publication, review, rendition, search,
-  * legal hold and deputyship jobs), the outbox relay and the schedulers of periodic audit jobs, scheduled
-  * publications, the periodic review check, the search synchronization and the deputyship check.
+  * legal hold, deputyship and acknowledgement reminder jobs), the outbox relay and the schedulers of periodic
+  * audit jobs, scheduled publications, the periodic review check, the search synchronization, the deputyship
+  * check and the acknowledgement reminder check.
   *
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
   * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029) and the webhooks
@@ -39,7 +42,7 @@ object Background:
       config: AppConfig
   ): ZIO[
     Db & S3Client & DocumentService & ReviewService & RenditionJobs & SearchIndex & Deputyships &
-      WebhookSettings & WebhookSender,
+      WebhookSettings & WebhookSender & AcknowledgementService & RoleAssignments & Groups,
     Throwable,
     Nothing
   ] =
@@ -53,6 +56,9 @@ object Background:
       deputies  <- ZIO.service[Deputyships]
       hooks     <- ZIO.service[WebhookSettings]
       sender    <- ZIO.service[WebhookSender]
+      acks      <- ZIO.service[AcknowledgementService]
+      roles     <- ZIO.service[RoleAssignments]
+      groups    <- ZIO.service[Groups]
       _         <- secureWebhookSecrets(db, hooks)
       tsa = TsaConfig(config.audit.tsaUrl, trustedCertificates = config.audit.tsaTrustedCertificates)
       trust <- TsaTrust.fromConfig(tsa).mapError(e => RuntimeException(e.message))
@@ -84,10 +90,11 @@ object Background:
         deputies,
         DeputyshipScheduleConfig(config.workflow.deputyshipCheckSeconds.seconds)
       )
-      runner = JobRunner(
+      reminders = AcknowledgementReminderJobs(db, documents, acks, roles, groups, config.documents.reminders)
+      runner    = JobRunner(
         db,
         jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers ++
-          legalHolds.handlers ++ webhooks.handlers ++ deputyJobs.handlers +
+          legalHolds.handlers ++ webhooks.handlers ++ deputyJobs.handlers ++ reminders.handlers +
           (RenditionRequest.JobKind -> rendering.handle),
         WorkerConfig(s"${workerName(config)}-jobs")
       )
@@ -103,6 +110,7 @@ object Background:
         .raceFirst(reviewJobs.schedule)
         .raceFirst(searchJobs.schedule)
         .raceFirst(deputyJobs.schedule)
+        .raceFirst(reminders.schedule)
     yield nothing
 
   /** Encrypts plain-text webhook secrets and re-encrypts those of older keys with the active key (DMS-107). A

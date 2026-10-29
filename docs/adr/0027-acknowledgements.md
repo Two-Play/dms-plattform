@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-10-28, implemented in DMS-47) |
+| Status | Accepted (2026-10-28, implemented in DMS-47); amended by [0048](0048-acknowledgement-recipients-overview-and-reminders.md) (DMS-100) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -58,3 +58,7 @@ Storing open acknowledgements as rows per reader (materialized at publication) w
 ## Reversibility
 
 **medium**: The tables are append-only proof and stay; changing the audience rule (e.g. a class-level distribution list) only changes how the open list is computed. Recording openings differently (e.g. by rendition download) adds a second writer to the same table.
+
+## Addendum (DMS-100, 2026-10-29): recipients per class, owner overview, reminders
+
+See [ADR 0048](0048-acknowledgement-recipients-overview-and-reminders.md). Decision 1 (audience) is narrowed: the audience is the readers of the version who pass the recipient filter its document class (or the tenant default) set when the version became valid; without settings it stays every reader. The follow-ups "reporting for owners" and "reminders" and the later "audience per document class" are done there; delivering reminders (mail, in-app) remains with the notifications module.

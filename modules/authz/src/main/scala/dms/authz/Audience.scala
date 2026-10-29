@@ -17,6 +17,36 @@ final case class Population(
   def subject(user: UserId): Subject =
     Subject(user, tenant, assignments.getOrElse(user, Set.empty), groups.getOrElse(user, Set.empty))
 
+/** Who of the readers of a version must acknowledge it (the recipients, DMS-100, ADR 0048): readers who hold
+  * an active assignment of one of `roles` (in any scope), are a current member of one of the access `groups`,
+  * or hold an active assignment restricted to one of the organizational `units`. Without restriction every
+  * reader is a recipient (ADR 0027). Only readers can be recipients: the filter narrows `ReadPublished`, it
+  * never widens it.
+  */
+final case class RecipientFilter(
+    roles: Set[Role] = Set.empty,
+    groups: Set[String] = Set.empty,
+    units: Set[String] = Set.empty
+):
+  def isEveryReader: Boolean = roles.isEmpty && groups.isEmpty && units.isEmpty
+
+  /** Whether a user with these active assignments and group memberships passes the filter. */
+  def admits(active: Set[RoleAssignment], memberOf: Set[String]): Boolean =
+    isEveryReader ||
+      active.exists(a => roles.contains(a.role) || a.organizationalUnit.exists(units.contains)) ||
+      memberOf.exists(groups.contains)
+
+  /** Whether `subject` passes the filter at `now` (readership is decided separately by the policy). */
+  def admits(subject: Subject, now: Instant): Boolean =
+    admits(subject.assignments.filter(_.isActiveAt(now)), subject.groups)
+
+object RecipientFilter:
+  val everyReader: RecipientFilter = RecipientFilter()
+
+  /** The filter of stored role names; names that are not business roles are ignored. */
+  def of(roles: Set[String], groups: Set[String], units: Set[String]): RecipientFilter =
+    RecipientFilter(roles.flatMap(r => Role.values.find(_.toString == r)), groups, units)
+
 /** The readers of document versions (`ReadPublished`, ADR 0027: everyone who may read a valid version must
   * acknowledge it), decided by [[Policy]] for a whole [[Population]] (compliance cockpit, ADR 0036).
   *
@@ -56,14 +86,21 @@ final class Audience(population: Population, now: Instant):
       )
       .isPermitted
 
-  /** The readers of one version: how many there are and a test whether a user is one of them. */
-  final class Readers private[Audience] (resource: Resource):
-    private val permitted: Set[Profile] = sizes.keySet.filter(decide(Anonymous, _, resource))
+  /** The readers of one version (who pass the recipient filter): how many there are and a test whether a user
+    * is one of them.
+    */
+  final class Readers private[Audience] (resource: Resource, filter: RecipientFilter):
+    private def admitted(profile: Profile) = filter.admits(profile.assignments, profile.groups)
+
+    private val permitted: Set[Profile] =
+      sizes.keySet.filter(p => admitted(p) && decide(Anonymous, p, resource))
 
     /** Author and owner: the confidentiality rule may let them read although their profile does not. */
     private val personal: Map[UserId, Boolean] =
       (resource.authorId.toSet ++ resource.ownerId.toSet)
-        .flatMap(user => profileOf.get(user).map(profile => user -> decide(user, profile, resource)))
+        .flatMap(user =>
+          profileOf.get(user).map(profile => user -> (admitted(profile) && decide(user, profile, resource)))
+        )
         .toMap
 
     def contains(user: UserId): Boolean =
@@ -80,7 +117,9 @@ final class Audience(population: Population, now: Instant):
     /** All readers, sorted by user id; evaluates one lookup per user of the population. */
     def members: List[UserId] = population.users.filter(contains).toList.sortBy(_.value)
 
-  def readers(resource: Resource): Readers = Readers(resource)
+  /** The readers of one version who pass `filter` (the recipients of its acknowledgement, ADR 0048). */
+  def readers(resource: Resource, filter: RecipientFilter = RecipientFilter.everyReader): Readers =
+    Readers(resource, filter)
 
 object Audience:
   private final case class Profile(assignments: Set[RoleAssignment], groups: Set[String])

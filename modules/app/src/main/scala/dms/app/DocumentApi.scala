@@ -735,6 +735,24 @@ object DocumentApi:
     def allowed(action: Action, resource: Resource): UIO[Boolean] =
       Clock.instant.map(now => Policy.decide(subject, action, resource, now).isPermitted)
 
+    /** Whether the caller must acknowledge the valid version `v`: they may read it (`ReadPublished`) and pass
+      * the recipient filter its class set at publication (DMS-100, ADR 0048).
+      */
+    def isRecipient(
+        details: DocumentDetails,
+        v: DocumentVersion,
+        filter: dms.authz.RecipientFilter
+    ): UIO[Boolean] =
+      Clock.instant.map(now =>
+        filter.admits(subject, now) &&
+          Policy
+            .decide(subject, Action.ReadPublished, DocumentApi.resource(subject.tenantId, details, v), now)
+            .isPermitted
+      )
+
+    /** Whether the caller passes a recipient filter (DMS-100); readership is decided separately. */
+    def passes(filter: dms.authz.RecipientFilter): UIO[Boolean] = Clock.instant.map(filter.admits(subject, _))
+
     /** The versions the caller may read, possibly none. */
     def visible(details: DocumentDetails): IO[WorkflowError, List[DocumentVersion]] =
       visibleWith(details).map(_._1)

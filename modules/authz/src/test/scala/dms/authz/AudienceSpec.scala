@@ -103,5 +103,61 @@ object AudienceSpec extends ZIOSpecDefault:
       )
       val readers = Audience(p, now).readers(secret)
       assertTrue(readers.size == 2, readers.members == List(UserId("a"), UserId("o")))
+    },
+    test("a recipient filter narrows the readers and agrees with the filter decided per user (DMS-100)") {
+      val filters = Gen.oneOf(
+        Gen.const(RecipientFilter.everyReader),
+        Gen.setOfBounded(1, 2)(Gen.fromIterable(roles)).map(r => RecipientFilter(roles = r)),
+        Gen
+          .setOfBounded(1, 2)(Gen.fromIterable(List("board", "legal")))
+          .map(g => RecipientFilter(groups = g)),
+        Gen.setOfBounded(1, 2)(Gen.fromIterable(List("hr", "finance"))).map(u => RecipientFilter(units = u))
+      )
+      check(population.flatMap(p => resource(p.users.size).map(p -> _)), filters) { (pr, filter) =>
+        val (p, r)     = pr
+        val recipients = Audience(p, now).readers(r, filter)
+        val want       = expected(p, r).filter(u => filter.admits(p.subject(u), now))
+        assertTrue(
+          recipients.size == want.size,
+          recipients.members == want.toList.sortBy(_.value),
+          want.subsetOf(expected(p, r))
+        )
+      }
+    } @@ TestAspect.samples(300),
+    test("recipients by role, group or unit; expired assignments and the tenant administrator do not count") {
+      val p = Population(
+        tenant,
+        Map(
+          // Tenant-wide readers who also hold a role restricted to their unit.
+          UserId("hr-reader")  -> Set(RoleAssignment(Role.Reader), RoleAssignment(Role.Author, Some("hr"))),
+          UserId("fin-reader") -> Set(
+            RoleAssignment(Role.Reader),
+            RoleAssignment(Role.Author, Some("finance"))
+          ),
+          UserId("owner")   -> Set(RoleAssignment(Role.Owner)),
+          UserId("expired") -> Set(
+            RoleAssignment(Role.Reader),
+            RoleAssignment(Role.Owner, validUntil = Some(now.minusSeconds(1)))
+          ),
+          UserId("board") -> Set(RoleAssignment(Role.Reader)),
+          UserId("admin") -> Set(RoleAssignment(Role.TenantAdmin))
+        ),
+        Map(UserId("board") -> Set("board"))
+      )
+      val policy                      = Resource(tenant, status = Some(DocumentStatus.Published))
+      val audience                    = Audience(p, now)
+      def members(f: RecipientFilter) = audience.readers(policy, f).members.map(_.value)
+      assertTrue(
+        members(RecipientFilter.everyReader) == List("board", "expired", "fin-reader", "hr-reader", "owner"),
+        members(RecipientFilter(roles = Set(Role.Owner))) == List("owner"),
+        members(RecipientFilter(units = Set("hr"))) == List("hr-reader"),
+        members(RecipientFilter(groups = Set("board"), units = Set("finance"))) == List(
+          "board",
+          "fin-reader"
+        ),
+        members(RecipientFilter(roles = Set(Role.TenantAdmin))).isEmpty,
+        RecipientFilter.of(Set("Owner", "Nonsense"), Set.empty, Set.empty) ==
+          RecipientFilter(roles = Set(Role.Owner))
+      )
     }
   )

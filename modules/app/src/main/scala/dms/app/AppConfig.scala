@@ -55,15 +55,28 @@ final case class WorkflowSettings(reauthenticationSeconds: Int, deputyshipCheckS
   *   how often approved versions are looked up to schedule their publication jobs
   * @param reviewCheckSeconds
   *   how often the periodic review check runs per tenant: review tasks, review dates reached (US-07.1)
+  * @param acknowledgementReminderDays
+  *   days after publication until open acknowledgements are reminded of, and between reminders, where neither
+  *   the class nor the tenant sets it (DMS-100); 0: no automatic reminders
+  * @param acknowledgementReminderCheckSeconds
+  *   how often the reminder check runs per tenant
   */
 final case class DocumentsConfig(
     editorialChangeThresholdPercent: Int,
     minorVersionsRequireAcknowledgement: Boolean,
     publicationCheckSeconds: Int,
-    reviewCheckSeconds: Int
+    reviewCheckSeconds: Int,
+    acknowledgementReminderDays: Int = AcknowledgementReminderConfig.DefaultDays,
+    acknowledgementReminderCheckSeconds: Int = 3600
 ):
   def settings: DocumentSettings =
     DocumentSettings(editorialChangeThresholdPercent / 100.0, minorVersionsRequireAcknowledgement)
+
+  def reminders: AcknowledgementReminderConfig =
+    AcknowledgementReminderConfig(
+      acknowledgementReminderDays.max(0).min(dms.documents.AcknowledgementSettings.MaxReminderDays),
+      zio.Duration.fromSeconds(acknowledgementReminderCheckSeconds.max(1).toLong)
+    )
 
 /** Search index in OpenSearch (DMS-51, ADR 0029).
   *

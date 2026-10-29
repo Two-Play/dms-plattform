@@ -43,12 +43,14 @@ object Main extends ZIOAppDefault:
     PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env &
     SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env &
     EvidenceReportApi.Env & CurrentDocumentApi.Env & WebhookApi.Env & UserApi.Env & VersionViewApi.Env &
-    NumberRangeApi.Env & AttachmentApi.Env & LibraryApi.Env & FileDocumentApi.Env & WordTemplateApi.Env
+    NumberRangeApi.Env & AttachmentApi.Env & LibraryApi.Env & FileDocumentApi.Env & WordTemplateApi.Env &
+    AcknowledgementOverviewApi.Env & AcknowledgementSettingsApi.Env
 
   private[app] val apiEndpoints: List[ZServerEndpoint[Env, ZioStreams]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
       UserApi.endpoints.map(_.widen[Env]) ++
       DocumentClassApi.endpoints.map(_.widen[Env]) ++
+      AcknowledgementSettingsApi.endpoints.map(_.widen[Env]) ++
       NumberRangeApi.endpoints.map(_.widen[Env]) ++
       TemplateApi.endpoints.map(_.widen[Env]) ++
       TemplateLifecycleApi.endpoints.map(_.widen[Env]) ++
@@ -66,6 +68,7 @@ object Main extends ZIOAppDefault:
       RenditionApi.endpoints.map(_.widen[Env]) ++
       VersionViewApi.endpoints.map(_.widen[Env]) ++
       AcknowledgementApi.endpoints.map(_.widen[Env]) ++
+      AcknowledgementOverviewApi.endpoints.map(_.widen[Env]) ++
       ReviewApi.endpoints.map(_.widen[Env]) ++
       WorkflowApi.endpoints.map(_.widen[Env]) ++
       DeputyshipApi.endpoints.map(_.widen[Env]) ++
@@ -146,6 +149,7 @@ object Main extends ZIOAppDefault:
           DocumentTemplates.layer,
           DocumentService.configured(cfg.documents.settings),
           AcknowledgementService.layer,
+          ZLayer.succeed(cfg.documents.reminders),
           ReviewService.layer,
           LegalHoldService.layer,
           FlowableEngine.layer,

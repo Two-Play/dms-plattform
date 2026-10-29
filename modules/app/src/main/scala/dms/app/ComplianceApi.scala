@@ -256,7 +256,7 @@ object ComplianceApi:
   private def rateView(versions: Int, r: Rate) =
     RateView(versions, r.audience, r.acknowledged, r.open, r.share)
 
-  private def resource(tenant: dms.kernel.TenantId, v: CurrentVersion): Resource =
+  private[app] def resource(tenant: dms.kernel.TenantId, v: CurrentVersion): Resource =
     DocumentResource.of(
       tenant,
       v.document.ownerId,
@@ -266,13 +266,6 @@ object ComplianceApi:
       v.releasedBy,
       v.metadata
     )
-
-  /** The readers of the tenant: active role assignments and group memberships of every user. */
-  private def audience(now: Instant, tenant: dms.kernel.TenantId) =
-    for
-      assignments <- ZIO.serviceWithZIO[RoleAssignments](_.activeAt(now))
-      groups      <- ZIO.serviceWithZIO[Groups](_.currentMemberships)
-    yield Audience(Population(tenant, assignments, groups), now)
 
   /** Runs `f` over the valid versions the caller may monitor, with acknowledgement rates if `withRates`;
     * denied unless the caller holds an active compliance officer assignment.
@@ -303,13 +296,14 @@ object ComplianceApi:
           if !withRates then ZIO.succeed(visible.map((v, _) => Entry(v, None)))
           else
             for
-              readers      <- audience(now, p.tenantId)
+              readers      <- Recipients.population(now, p.tenantId)
               acknowledged <- ZIO.serviceWithZIO[AcknowledgementService](_.acknowledgersOfValid)
+              audiences    <- ZIO.serviceWithZIO[AcknowledgementService](_.audiencesOfValid)
             yield visible.map { (v, r) =>
               Entry(
                 v,
                 Option.when(v.requiresAcknowledgement) {
-                  val audience = readers.readers(r)
+                  val audience = readers.readers(r, Recipients.filterOf(audiences.get(v.versionId)))
                   Rate(audience.size, acknowledged.getOrElse(v.versionId, Set.empty).count(audience.contains))
                 }
               )
@@ -352,8 +346,11 @@ object ComplianceApi:
             AcknowledgementError.NotRequested(s"version ${version.label} does not ask for acknowledgement")
           )
         )
-        now          <- Clock.instant
-        readers      <- audience(now, p.tenantId).map(_.readers(r))
+        now      <- Clock.instant
+        recorded <- ZIO.serviceWithZIO[AcknowledgementService](_.audiences(Set(versionId)))
+        readers  <- Recipients
+          .population(now, p.tenantId)
+          .map(_.readers(r, Recipients.filterOf(recorded.get(versionId))))
         acknowledged <- ZIO.serviceWithZIO[AcknowledgementService](_.acknowledgersOf(versionId))
         members = readers.members
         open    = members.filterNot(acknowledged.contains)
