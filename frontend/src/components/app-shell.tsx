@@ -9,6 +9,7 @@ import {
   LogOut,
   Languages,
   Moon,
+  Scale,
   Search,
   Settings,
   ShieldCheck,
@@ -17,7 +18,8 @@ import {
 } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { useAuth } from 'react-oidc-context'
-import { hasRole, useMe, type BusinessRole } from '@/api/me'
+import { canManageLegalHolds } from '@/api/legal-holds'
+import { hasRole, useMe, type BusinessRole, type Me } from '@/api/me'
 import { displayName } from '@/auth/profile'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -38,13 +40,25 @@ import { currentTheme, setTheme, type Theme } from '@/lib/theme'
 import { LOCALES, setLocale, t, useLocale, type Locale } from '@/i18n'
 import type { Messages } from '@/i18n/locales/en'
 
-/** Navigation entries; those with `role` are shown only to holders of that business role. */
+/**
+ * Navigation entries; those with `role` are shown only to holders of that business role, those with
+ * `allowed` only to users it accepts.
+ */
 const navItems: readonly {
   to:
-    '/' | '/documents' | '/library' | '/search' | '/tasks' | '/templates' | '/compliance' | '/admin'
+    | '/'
+    | '/documents'
+    | '/library'
+    | '/search'
+    | '/tasks'
+    | '/templates'
+    | '/compliance'
+    | '/legal-holds'
+    | '/admin'
   label: keyof Messages['shell']['nav']
   icon: typeof LayoutDashboard
   role?: BusinessRole
+  allowed?: (me: Me | undefined) => boolean
 }[] = [
   { to: '/', label: 'home', icon: LayoutDashboard },
   { to: '/documents', label: 'documents', icon: FileText },
@@ -53,6 +67,8 @@ const navItems: readonly {
   { to: '/tasks', label: 'tasks', icon: CheckSquare },
   { to: '/templates', label: 'templates', icon: LayoutTemplate, role: 'TemplateDesigner' },
   { to: '/compliance', label: 'compliance', icon: ShieldCheck, role: 'ComplianceOfficer' },
+  // Records managers for the whole tenant: the only ones the legal hold endpoints accept (ADR 0047).
+  { to: '/legal-holds', label: 'legalHolds', icon: Scale, allowed: canManageLegalHolds },
   { to: '/admin', label: 'admin', icon: Settings, role: 'TenantAdmin' },
 ]
 
@@ -283,7 +299,10 @@ export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const main = useRef<HTMLElement>(null)
   useFocusOnNavigation(main)
-  const visible = navItems.filter((item) => !item.role || hasRole(me.data, item.role))
+  const visible = navItems.filter(
+    (item) =>
+      (!item.role || hasRole(me.data, item.role)) && (!item.allowed || item.allowed(me.data)),
+  )
   return (
     <div className="flex min-h-svh flex-col">
       <a

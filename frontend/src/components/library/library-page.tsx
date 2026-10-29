@@ -12,6 +12,7 @@ import {
   type LibraryResult,
   type LibrarySort,
 } from '@/api/library'
+import { LegalHoldBadge } from '@/components/legal-holds/legal-hold-badge'
 import { DataTable, type Column } from '@/components/shared/data-table'
 import { ErrorState } from '@/components/shared/error-state'
 import { PageHeader } from '@/components/shared/page-header'
@@ -72,6 +73,7 @@ function Markers({ item, since }: { item: LibraryItem; since: string }) {
         </Badge>
       )}
       {item.status === 'ReviewDue' && <Badge variant="outline">{t('library.reviewDue')}</Badge>}
+      {item.legalHold && <LegalHoldBadge />}
     </>
   )
 }

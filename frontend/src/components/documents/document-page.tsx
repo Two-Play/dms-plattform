@@ -20,6 +20,7 @@ import { t, tOptional } from '@/i18n'
 import { allowedGroupsOf, confidentialityOf, isRestrictedLevel } from './access-groups'
 import { LanguageSelect } from './document-workspace'
 import { DocumentEditor } from './new-document-page'
+import { LegalHoldBadge } from '@/components/legal-holds/legal-hold-badge'
 import { StatusBadge } from './status-badge'
 import { WorkflowPanel } from './workflow-panel'
 import { AcknowledgementPanel } from './acknowledgement-panel'
@@ -152,6 +153,7 @@ export function DocumentPage({
         {document.data && shown && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <StatusBadge status={shown.status} />
+            {document.data.legalHold && <LegalHoldBadge holds={document.data.legalHolds} />}
             <span>{t('docs.page.version', { label: shown.version })}</span>
             {document.data.classPath && document.data.classPath.length > 0 && (
               <span>· {document.data.classPath.join(' › ')}</span>

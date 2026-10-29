@@ -1760,6 +1760,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/legal-holds/search-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description The documents a search would put under a hold (DMS-106): the search runs as the caller, as when the hold is set; `expectedCount` is ignored. Returns the hit count, the distinct documents (whether the caller may manage each and whether a hold covers it already) and a `fingerprint` to confirm exactly these documents with `expectedFingerprint`. 422 too_many_documents above 1000 hits. Requires the records manager role for the whole tenant. */
+    post: operations['postApiV1Legal-holdsSearch-preview']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/legal-holds/{id}': {
     parameters: {
       query?: never
@@ -1788,6 +1805,23 @@ export interface paths {
     put?: never
     /** @description Puts further documents under an active hold, named or from a confirmed search (as on creation); a reason is required (422). Documents the hold covers already are skipped; `addedDocumentIds` lists the new ones. 409 released if the hold was released. */
     post: operations['postApiV1Legal-holdsIdDocuments']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/legal-holds/{id}/documents/{documentId}/remove': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Takes a single document out of an active hold (DMS-106), e.g. one added by mistake; a reason is required (422). The entry stays in the hold's history with the removal; the document is no longer under legal hold unless another active hold covers it. 404 if the hold does not cover the document, 409 released if the hold was released. Requires the records manager role for the whole tenant and for the document. */
+    post: operations['postApiV1Legal-holdsIdDocumentsDocumentidRemove']
     delete?: never
     options?: never
     head?: never
@@ -2784,6 +2818,7 @@ export interface components {
       mine: boolean
       documentNumber?: string
       kind: string
+      legalHold: boolean
     }
     /** DocumentVersionView */
     DocumentVersionView: {
@@ -3015,6 +3050,19 @@ export interface components {
       addedBy: string
       /** Format: date-time */
       addedAt: string
+      /** Format: date-time */
+      removedAt?: string
+      removedBy?: string
+      removalReason?: string
+    }
+    /** HoldCandidateView */
+    HoldCandidateView: {
+      /** Format: uuid */
+      documentId: string
+      title: string
+      documentNumber?: string
+      manageable: boolean
+      underLegalHold: boolean
     }
     /** HoldSearchFilter */
     HoldSearchFilter: {
@@ -3024,6 +3072,14 @@ export interface components {
       lang?: string[]
       /** Format: int64 */
       expectedCount?: number
+      expectedFingerprint?: string
+    }
+    /** HoldSearchPreviewView */
+    HoldSearchPreviewView: {
+      /** Format: int64 */
+      total: number
+      documents?: components['schemas']['HoldCandidateView'][]
+      fingerprint: string
     }
     /** Inline */
     Inline:
@@ -3126,6 +3182,7 @@ export interface components {
       changed: boolean
       requiresAcknowledgement: boolean
       acknowledgementPending: boolean
+      legalHold: boolean
     }
     /** LibraryView */
     LibraryView: {
@@ -3658,6 +3715,10 @@ export interface components {
       /** Format: date-time */
       nextReminderAt: string
     }
+    /** RemoveLegalHoldDocument */
+    RemoveLegalHoldDocument: {
+      reason?: string
+    }
     /** RenameAttachment */
     RenameAttachment: {
       name: string
@@ -3819,6 +3880,7 @@ export interface components {
       /** Format: double */
       score?: number
       documentNumber?: string
+      legalHold: boolean
     }
     /** SearchRebuildView */
     SearchRebuildView: {
@@ -9603,6 +9665,46 @@ export interface operations {
       }
     }
   }
+  'postApiV1Legal-holdsSearch-preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['HoldSearchFilter']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HoldSearchPreviewView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   'getApiV1Legal-holdsId': {
     parameters: {
       query?: never
@@ -9667,6 +9769,51 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1Legal-holdsIdDocumentsDocumentidRemove': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Legal hold id */
+        id: string
+        /** @description Document id */
+        documentId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RemoveLegalHoldDocument']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LegalHoldView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter documentId, Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown

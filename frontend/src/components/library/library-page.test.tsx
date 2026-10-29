@@ -54,6 +54,7 @@ const result = (overrides: Partial<LibraryResult> = {}): LibraryResult => ({
       changed: true,
       requiresAcknowledgement: true,
       acknowledgementPending: false,
+      legalHold: false,
     },
     {
       documentId: travelId,
@@ -76,6 +77,7 @@ const result = (overrides: Partial<LibraryResult> = {}): LibraryResult => ({
       changed: false,
       requiresAcknowledgement: true,
       acknowledgementPending: true,
+      legalHold: true,
     },
   ],
   facets: {
@@ -170,12 +172,14 @@ describe('Library page', () => {
     expect(within(card).getByText('New')).toBeInTheDocument()
     expect(within(card).getByText('Acknowledgement open')).toBeInTheDocument()
     expect(within(card).getByText(/Scope: DE/)).toBeInTheDocument()
+    expect(within(card).getByTestId('legal-hold-badge')).toHaveTextContent('Legal Hold')
 
     const security = within(list)
       .getByRole('link', { name: 'IT security policy' })
       .closest('li') as HTMLElement
     expect(within(security).getByText('Changed since 29 Sept 2026')).toBeInTheDocument()
     expect(within(security).queryByText('Acknowledgement open')).not.toBeInTheDocument()
+    expect(within(security).queryByTestId('legal-hold-badge')).not.toBeInTheDocument()
   })
 
   it('keeps filters in the URL and sends them to the API; several values per facet', async () => {

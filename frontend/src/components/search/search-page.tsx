@@ -12,7 +12,11 @@ import {
   type SearchHit,
   type ValidVersion,
 } from '@/api/search'
+import { canManageLegalHolds } from '@/api/legal-holds'
+import { useMe } from '@/api/me'
 import { StatusBadge } from '@/components/documents/status-badge'
+import { LegalHoldBadge } from '@/components/legal-holds/legal-hold-badge'
+import { SearchHoldAction } from '@/components/legal-holds/search-hold-dialog'
 import { statusLabel } from '@/components/documents/status-label'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -169,6 +173,7 @@ function HitItem({ hit }: { hit: SearchHit }) {
         )}
         <span className="font-mono text-xs">{hit.versionLabel}</span>
         <StatusBadge status={hit.status} />
+        {hit.legalHold && <LegalHoldBadge />}
       </div>
       <p className="text-xs text-muted-foreground">
         {hit.classPath.join(' › ')}
@@ -189,6 +194,7 @@ function SearchResults({
   setPage: (page: number) => void
 }) {
   const client = useApiClient()
+  const me = useMe()
   const q = search.q ?? ''
   const page = search.page ?? 1
   const result = useQuery({
@@ -256,9 +262,16 @@ function SearchResults({
         />
       </aside>
       <div className="space-y-3">
-        <p className="text-sm text-muted-foreground" aria-live="polite">
-          {t('search.results', { count: total })}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-muted-foreground" aria-live="polite">
+            {t('search.results', { count: total })}
+          </p>
+          {total > 0 && canManageLegalHolds(me.data) && (
+            <SearchHoldAction
+              search={{ q, class: search.class, status: search.status, lang: search.lang }}
+            />
+          )}
+        </div>
         {hits.length > 0 ? (
           <ol aria-label={t('search.resultList')}>
             {hits.map((hit) => (

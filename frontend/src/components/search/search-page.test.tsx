@@ -40,6 +40,7 @@ const result = (overrides: Partial<SearchResult> = {}): SearchResult => ({
       documentNumber: 'RL-2027-0003',
       snippet:
         'Always wear <mark>gloves</mark> <img src=x onerror="window.pwned=true"> <script>window.pwned=true</script> in the lab.',
+      legalHold: false,
     },
     {
       documentId: docB,
@@ -49,6 +50,7 @@ const result = (overrides: Partial<SearchResult> = {}): SearchResult => ({
       classPath: ['contract'],
       status: 'InReview',
       snippet: '<mark>Glove</mark> deliveries',
+      legalHold: true,
     },
   ],
   facets: {
@@ -177,6 +179,8 @@ describe('Search page', () => {
         .map((n) => n.textContent),
     ).toEqual(['No. RL-2027-0003'])
     expect(within(hits).getByText('In review')).toBeInTheDocument()
+    // Only the second hit is under legal hold (DMS-106).
+    expect(within(hits).getAllByTestId('legal-hold-badge')).toHaveLength(1)
     expect(within(hits).getByText('gloves', { selector: 'mark' })).toBeInTheDocument()
     expect(within(hits).getByText('Glove', { selector: 'mark' })).toBeInTheDocument()
 

@@ -43,6 +43,7 @@ export const shell = {
     tasks: 'Tasks',
     templates: 'Templates',
     compliance: 'Compliance',
+    legalHolds: 'Legal holds',
     admin: 'Admin',
   },
 } as const

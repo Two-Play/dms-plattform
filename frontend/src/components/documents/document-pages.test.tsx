@@ -135,6 +135,7 @@ const list: DocumentSummary[] = [
     updatedAt: '2026-10-21T10:00:00Z',
     mine: true,
     kind: 'Structured',
+    legalHold: false,
   },
   {
     id: reviewedId,
@@ -150,6 +151,7 @@ const list: DocumentSummary[] = [
     mine: false,
     documentNumber: 'RL-2026-0042',
     kind: 'Structured',
+    legalHold: true,
   },
 ]
 
@@ -318,6 +320,9 @@ describe('Document list', () => {
     // The document number (DMS-113) has its own column; documents without one leave it empty.
     expect(within(others).getByRole('columnheader', { name: 'No.' })).toBeInTheDocument()
     expect(within(others).getByText('RL-2026-0042')).toBeInTheDocument()
+    // Documents under legal hold are marked (DMS-106), the others are not.
+    expect(within(others).getByTestId('legal-hold-badge')).toHaveTextContent('Legal Hold')
+    expect(within(drafts).queryByTestId('legal-hold-badge')).not.toBeInTheDocument()
     expect(within(drafts).queryByText(/RL-/)).not.toBeInTheDocument()
 
     await user.click(within(drafts).getByRole('link', { name: 'Service contract ACME' }))

@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { t } from '@/i18n'
 import { formatDateTime } from '@/i18n/format'
+import { LegalHoldBadge } from '@/components/legal-holds/legal-hold-badge'
 import { StatusBadge } from './status-badge'
 
 /** Built per render, so the headers follow the active language. */
@@ -33,7 +34,16 @@ const columns = (): Column<DocumentSummary>[] => [
     header: t('docs.list.number'),
     cell: (d) => <span className="font-mono text-xs whitespace-nowrap">{d.documentNumber}</span>,
   },
-  { key: 'status', header: t('docs.list.status'), cell: (d) => <StatusBadge status={d.status} /> },
+  {
+    key: 'status',
+    header: t('docs.list.status'),
+    cell: (d) => (
+      <div className="flex flex-wrap gap-1">
+        <StatusBadge status={d.status} />
+        {d.legalHold && <LegalHoldBadge />}
+      </div>
+    ),
+  },
   {
     key: 'version',
     header: t('docs.list.version'),
