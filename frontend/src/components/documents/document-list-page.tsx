@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { FilePen, FilePlus, FileText } from 'lucide-react'
+import { FilePen, FilePlus, FileText, Upload } from 'lucide-react'
 import { useApiClient } from '@/api/context'
 import { documentListQuery, type DocumentSummary } from '@/api/documents'
+import { hasRole, useMe } from '@/api/me'
 import { DataTable, type Column } from '@/components/shared/data-table'
 import { ErrorState } from '@/components/shared/error-state'
 import { PageHeader } from '@/components/shared/page-header'
@@ -73,6 +74,11 @@ export function DocumentListPage() {
   const list = useQuery(documentListQuery(client))
   const drafts = list.data?.filter((d) => d.mine && d.status === 'Draft') ?? []
   const others = list.data?.filter((d) => !(d.mine && d.status === 'Draft')) ?? []
+  // Uploading a finished file (DMS-127) is for those who may create documents or templates.
+  const me = useMe()
+  const mayUpload = (['Author', 'Owner', 'TemplateDesigner'] as const).some((r) =>
+    hasRole(me.data, r),
+  )
 
   return (
     <div className="space-y-6">
@@ -80,12 +86,22 @@ export function DocumentListPage() {
         title={t('docs.list.title')}
         description={t('docs.list.description')}
         actions={
-          <Button asChild>
-            <Link to="/documents/new">
-              <FilePlus />
-              {t('docs.list.newDocument')}
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {mayUpload && (
+              <Button asChild variant="outline">
+                <Link to="/documents/upload">
+                  <Upload />
+                  {t('upload.entry')}
+                </Link>
+              </Button>
+            )}
+            <Button asChild>
+              <Link to="/documents/new">
+                <FilePlus />
+                {t('docs.list.newDocument')}
+              </Link>
+            </Button>
+          </div>
         }
       />
       {list.isPending && <LoadingState label={t('docs.list.loading')} rows={5} />}

@@ -23,6 +23,7 @@ import { Route as AppTasksRouteImport } from './routes/_app/tasks'
 import { Route as AppDocumentsIndexRouteImport } from './routes/_app/documents/index'
 import { Route as AppDocumentsDocumentIdRouteImport } from './routes/_app/documents/$documentId'
 import { Route as AppDocumentsNewRouteImport } from './routes/_app/documents/new'
+import { Route as AppDocumentsUploadRouteImport } from './routes/_app/documents/upload'
 import { Route as AppTemplatesIndexRouteImport } from './routes/_app/templates/index'
 import { Route as AppTemplatesTemplateIdRouteImport } from './routes/_app/templates/$templateId'
 import { Route as AppDocumentsDocumentIdCompareRouteImport } from './routes/_app/documents/$documentId_.compare'
@@ -96,6 +97,11 @@ const AppDocumentsNewRoute = AppDocumentsNewRouteImport.update({
   path: '/documents/new',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDocumentsUploadRoute = AppDocumentsUploadRouteImport.update({
+  id: '/documents/upload',
+  path: '/documents/upload',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppTemplatesIndexRoute = AppTemplatesIndexRouteImport.update({
   id: '/templates/',
   path: '/templates/',
@@ -126,6 +132,7 @@ export interface FileRoutesByFullPath {
   '/tasks': typeof AppTasksRoute
   '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/documents/new': typeof AppDocumentsNewRoute
+  '/documents/upload': typeof AppDocumentsUploadRoute
   '/templates/$templateId': typeof AppTemplatesTemplateIdRoute
   '/documents/': typeof AppDocumentsIndexRoute
   '/templates/': typeof AppTemplatesIndexRoute
@@ -144,6 +151,7 @@ export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/documents/new': typeof AppDocumentsNewRoute
+  '/documents/upload': typeof AppDocumentsUploadRoute
   '/templates/$templateId': typeof AppTemplatesTemplateIdRoute
   '/documents': typeof AppDocumentsIndexRoute
   '/templates': typeof AppTemplatesIndexRoute
@@ -164,6 +172,7 @@ export interface FileRoutesById {
   '/_app/': typeof AppIndexRoute
   '/_app/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/_app/documents/new': typeof AppDocumentsNewRoute
+  '/_app/documents/upload': typeof AppDocumentsUploadRoute
   '/_app/templates/$templateId': typeof AppTemplatesTemplateIdRoute
   '/_app/documents/': typeof AppDocumentsIndexRoute
   '/_app/templates/': typeof AppTemplatesIndexRoute
@@ -184,6 +193,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/documents/$documentId'
     | '/documents/new'
+    | '/documents/upload'
     | '/templates/$templateId'
     | '/documents/'
     | '/templates/'
@@ -202,6 +212,7 @@ export interface FileRouteTypes {
     | '/'
     | '/documents/$documentId'
     | '/documents/new'
+    | '/documents/upload'
     | '/templates/$templateId'
     | '/documents'
     | '/templates'
@@ -221,6 +232,7 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_app/documents/$documentId'
     | '/_app/documents/new'
+    | '/_app/documents/upload'
     | '/_app/templates/$templateId'
     | '/_app/documents/'
     | '/_app/templates/'
@@ -333,6 +345,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDocumentsNewRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/documents/upload': {
+      id: '/_app/documents/upload'
+      path: '/documents/upload'
+      fullPath: '/documents/upload'
+      preLoaderRoute: typeof AppDocumentsUploadRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/templates/': {
       id: '/_app/templates/'
       path: '/templates'
@@ -368,6 +387,7 @@ interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   AppDocumentsDocumentIdRoute: typeof AppDocumentsDocumentIdRoute
   AppDocumentsNewRoute: typeof AppDocumentsNewRoute
+  AppDocumentsUploadRoute: typeof AppDocumentsUploadRoute
   AppTemplatesTemplateIdRoute: typeof AppTemplatesTemplateIdRoute
   AppDocumentsIndexRoute: typeof AppDocumentsIndexRoute
   AppTemplatesIndexRoute: typeof AppTemplatesIndexRoute
@@ -385,6 +405,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   AppDocumentsDocumentIdRoute: AppDocumentsDocumentIdRoute,
   AppDocumentsNewRoute: AppDocumentsNewRoute,
+  AppDocumentsUploadRoute: AppDocumentsUploadRoute,
   AppTemplatesTemplateIdRoute: AppTemplatesTemplateIdRoute,
   AppDocumentsIndexRoute: AppDocumentsIndexRoute,
   AppTemplatesIndexRoute: AppTemplatesIndexRoute,

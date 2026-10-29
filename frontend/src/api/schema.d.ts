@@ -1107,6 +1107,91 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/uploads/classes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The document classes an uploaded file can become a document of: the latest version of every class the caller holds the author or owner role for (tenant-wide or restricted to the class or an ancestor), with label path, sorted by path. */
+    get: operations['getApiV1UploadsClasses']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/uploads/classes/{classId}/template': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description The upload template of a document class for its latest version (DMS-127, ADR 0049): a template with empty structured content from which file documents of the class are created (POST /api/v1/documents with kind File), supplying the metadata form and the number range. Created and released by the platform on first use and when the class has a new version; not listed in the template catalog. Requires the author or owner role for the class; 404 for unknown classes. */
+    post: operations['postApiV1UploadsClassesClassidTemplate']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/uploads/fields': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Analyses a file before it becomes a document or a template (DMS-127); nothing is stored. The fields of a Word document (content controls, {{key}} placeholders) or of an Excel/PowerPoint file ({{key}} placeholders) with defaults; manual fields with the value the file carries (a document filled by the platform keeps its values in a custom XML part and custom properties), automatic fields with the value known before creation (author, title, version, status). Requires the author, owner or template designer role. 422 like the upload of an original (blocked, not convertible, content not fitting the extension, unreadable), 413 above the size limit. */
+    post: operations['postApiV1UploadsFields']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/uploads/preview.pdf': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description A PDF preview of a file before it becomes a document (DMS-127): the fields filled with the entered manual values and the automatic values known before creation, converted by the conversion worker and marked as preview on every page. Not stored, not audited. 422 for invalid values or files (as for the upload of an original), 503 if the conversion worker is unavailable. Requires the author, owner or template designer role. */
+    post: operations['postApiV1UploadsPreview.pdf']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/word-template': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Use as template (DMS-127): a new Word template whose draft version 1 has a copy of the version's original (unchanged) and its field definitions, without the entered values, for the latest version of the document's class. Testing and the four-eyes release follow as for every template; the caller is its creator. Requires reading the version and the template designer role (EditTemplates); 409 if the original is not a Word document (DOCX). */
+    post: operations['postApiV1DocumentsIdVersionsVersionidWord-template']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/by-number/{number}/current': {
     parameters: {
       query?: never
@@ -4163,6 +4248,11 @@ export interface components {
       fields?: components['schemas']['TemplateFieldView'][]
       references?: components['schemas']['ReferenceFieldView'][]
     }
+    /** TemplateFromVersion */
+    TemplateFromVersion: {
+      name: string
+      description?: string
+    }
     /** TemplateImpactView */
     TemplateImpactView: {
       /** Format: uuid */
@@ -4350,6 +4440,35 @@ export interface components {
       title?: string
       values: components['schemas']['Map_MetadataValue']
       content?: components['schemas']['TemplateContent']
+    }
+    /** UploadAnalysisView */
+    UploadAnalysisView: {
+      name: string
+      /** Format: int64 */
+      size: number
+      sha256: string
+      word: boolean
+      fillable: boolean
+      filledBefore: boolean
+      fields?: components['schemas']['WordFieldView'][]
+    }
+    /** UploadPreviewForm */
+    UploadPreviewForm: {
+      values: string
+      /** Format: binary */
+      file: string
+    }
+    /** UploadTemplateView */
+    UploadTemplateView: {
+      /** Format: uuid */
+      templateId: string
+      /** Format: int32 */
+      version: number
+      name: string
+      /** Format: uuid */
+      documentClassId: string
+      /** Format: int32 */
+      documentClassVersion: number
     }
     /** UserMatch */
     UserMatch: {
@@ -7823,6 +7942,212 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1UploadsClasses: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateClassView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1UploadsClassesClassidTemplate: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        classId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['UploadTemplateView']
+        }
+      }
+      /** @description Invalid value for: path parameter classId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1UploadsFields: {
+    parameters: {
+      query?: {
+        /** @description Document language of dates and labels: de or en (default) */
+        language?: string
+      }
+      header?: {
+        'Content-Type'?: string
+      }
+      path?: never
+      cookie?: never
+    }
+    /** @description multipart/form-data with one part `file` */
+    requestBody: {
+      content: {
+        'multipart/form-data': components['schemas']['FileUpload']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['UploadAnalysisView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1UploadsPreview.pdf': {
+    parameters: {
+      query?: {
+        /** @description Document language of dates and labels: de or en (default) */
+        language?: string
+      }
+      header?: {
+        'Content-Type'?: string
+      }
+      path?: never
+      cookie?: never
+    }
+    /** @description multipart/form-data: part `values` (JSON object of the manual values by key, optional) before part `file` */
+    requestBody: {
+      content: {
+        'multipart/form-data': components['schemas']['UploadPreviewForm']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Cache-Control': string
+          'X-Content-Type-Options': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/pdf': string
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1DocumentsIdVersionsVersionidWord-template': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TemplateFromVersion']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WordTemplateView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown

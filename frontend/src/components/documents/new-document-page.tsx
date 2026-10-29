@@ -18,7 +18,15 @@ import {
 
 type EditorProps = Pick<
   DocumentWorkspaceProps,
-  'templateId' | 'version' | 'language' | 'draft' | 'onSubmitted' | 'kind' | 'aside' | 'onCreated'
+  | 'templateId'
+  | 'version'
+  | 'language'
+  | 'draft'
+  | 'onSubmitted'
+  | 'kind'
+  | 'aside'
+  | 'onCreated'
+  | 'afterCreate'
 >
 
 /** Loads the fields of the template version and shows the workspace for them. */
