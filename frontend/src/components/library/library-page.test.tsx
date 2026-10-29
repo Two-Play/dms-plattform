@@ -226,6 +226,18 @@ describe('Library page', () => {
     await waitFor(() => {
       expect(queries(get)).toContainEqual({ q: 'travel', sort: 'number', page: 1, size: 24 })
     })
+    const order = screen.getByRole('combobox', { name: 'Order' })
+    expect(order).toHaveValue('asc')
+    await user.selectOptions(order, 'desc')
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ q: 'travel', sort: 'number', order: 'desc' })
+    })
+    // Dates sort newest first by default; the default stays out of the URL.
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Sort by' }), 'lastChanged')
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ q: 'travel', sort: 'lastChanged' })
+    })
+    expect(screen.getByRole('combobox', { name: 'Order' })).toHaveValue('desc')
   })
 
   it('switches to the list view and back', async () => {

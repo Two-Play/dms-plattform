@@ -278,6 +278,8 @@ function Toolbar({
   update: (changes: Partial<LibraryPageSearch>) => void
 }) {
   const view = search.view ?? 'cards'
+  // Titles and numbers ascending, dates newest first (as the backend defaults).
+  const defaultOrder = search.sort === 'validFrom' || search.sort === 'lastChanged' ? 'desc' : 'asc'
   return (
     <div role="search" className="flex flex-wrap items-end gap-3">
       <TextFilter
@@ -309,20 +311,13 @@ function Toolbar({
         <select
           id="library-order"
           className={selectClass}
-          value={search.order ?? ''}
+          value={search.order ?? defaultOrder}
           onChange={(e) => {
-            const order = e.target.value
-            update({
-              order: order === 'asc' || order === 'desc' ? order : undefined,
-              page: undefined,
-            })
+            const order = e.target.value === 'desc' ? 'desc' : 'asc'
+            // The default order of the sort stays out of the URL.
+            update({ order: order === defaultOrder ? undefined : order, page: undefined })
           }}
         >
-          <option value="">
-            {search.sort === 'validFrom' || search.sort === 'lastChanged'
-              ? t('library.descending')
-              : t('library.ascending')}
-          </option>
           <option value="asc">{t('library.ascending')}</option>
           <option value="desc">{t('library.descending')}</option>
         </select>
