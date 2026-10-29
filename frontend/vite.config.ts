@@ -45,6 +45,8 @@ export default defineConfig(({ mode }) => {
       environment: 'jsdom',
       globals: true,
       setupFiles: ['./src/test/setup.ts'],
+      // Above the 5 s of `asyncUtilTimeout` in the setup file, so a slow `findBy…` reports its own error.
+      testTimeout: 15000,
       css: false,
     },
   }
