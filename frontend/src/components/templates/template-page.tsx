@@ -304,13 +304,7 @@ function StructuredContent({ version, editable }: { version: TemplateVersion; ed
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {editable ? (
-            <ContentEditor version={version} />
-          ) : (
-            <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 text-xs">
-              {contentText(version.content)}
-            </pre>
-          )}
+          <ContentEditor version={version} readOnly={!editable} />
         </CardContent>
       </Card>
       <Card>

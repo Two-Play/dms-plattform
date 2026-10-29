@@ -349,22 +349,27 @@ describe('Template page', () => {
       failed(422, { code: 'invalid_content', message: 'section main: unknown field' })
     const { put, post, user } = renderAt(`/templates/${templateId}`)
 
-    const editor = await screen.findByLabelText('Content (JSON)')
+    // The JSON is only an advanced view; it is hidden until asked for.
+    await user.click(await screen.findByRole('button', { name: 'Advanced: show JSON' }))
+    const editor = screen.getByLabelText('Content (JSON)')
     fireEvent.change(editor, { target: { value: '{"sections": [' } })
-    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+    await user.click(screen.getByRole('button', { name: 'Apply JSON' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Not valid JSON')
-    expect(put).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled()
 
     fireEvent.change(editor, {
-      target: { value: JSON.stringify({ format: 1, sections: [{ id: 'main', blocks: [] }] }) },
+      target: { value: JSON.stringify({ format: 1, sections: [{ id: 'main', locked: false }] }) },
     })
+    await user.click(screen.getByRole('button', { name: 'Apply JSON' }))
     await user.click(screen.getByRole('button', { name: 'Save draft' }))
 
-    const alert = await screen.findByRole('alert')
+    const alert = await screen.findByText('1 issue in the content')
+    const summary = alert.closest('[role="alert"]')
+    if (!(summary instanceof HTMLElement)) throw new Error('no issue summary')
     await waitFor(() => {
-      expect(alert).toHaveTextContent("unknown field 'termTyp'")
+      expect(summary).toHaveTextContent("unknown field 'termTyp'")
     })
-    expect(alert).toHaveTextContent('Section main › /blocks/0 › placeholder, line 1, column 1')
+    expect(summary).toHaveTextContent('Section main › /blocks/0 › placeholder, line 1, column 1')
     expect(put).toHaveBeenCalledTimes(1)
     expect(post).toHaveBeenCalledWith('/api/v1/admin/templates/check', expect.anything())
   })

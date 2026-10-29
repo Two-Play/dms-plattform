@@ -62,3 +62,4 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0047](0047-legal-hold-ui-removal-and-exact-confirmation.md) | Legal hold UI: own page for tenant-wide records managers, a marker without hold details, removal of single documents, exact confirmation of search results | Proposed | medium |
 | [0048](0048-acknowledgement-recipients-overview-and-reminders.md) | Acknowledgements: recipients per document class as a filter on the readers, an owner overview with purpose-bound names, idempotent reminders through the outbox | Proposed | medium |
 | [0050](0050-discarding-drafts.md) | Discarding drafts: a terminal version status instead of deletion, files released unless held, numbers stay reserved | Proposed | medium |
+| [0051](0051-visual-template-content-editor.md) | Visual editor for structured template content: a block editor over the content model, ProseMirror only for inline text, forms for expressions | Proposed | high |

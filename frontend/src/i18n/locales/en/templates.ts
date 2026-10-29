@@ -45,7 +45,7 @@ export const templates = {
     fieldsText: 'Fields of the document class the template can use.',
     content: 'Content',
     contentEditable:
-      'Edit the content of this draft as JSON; the server checks it against the document class.',
+      'Edit the sections, text, fields and rules of this draft; “Check” has the server compile it against the document class.',
     contentReadOnly:
       'Only drafts can be changed. Create a new version to change a released template.',
     testMode: 'Test mode',
@@ -86,7 +86,6 @@ export const templates = {
     references: 'Reference fields: {list}',
   },
   editor: {
-    notObject: 'The content must be a JSON object with "sections".',
     invalidJson: 'Not valid JSON: {message}',
     label: 'Content (JSON)',
     check: 'Check',

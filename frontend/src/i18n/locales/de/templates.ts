@@ -46,7 +46,7 @@ export const templates: Translation<typeof en.templates> = {
     fieldsText: 'Felder der Dokumentenklasse, die die Vorlage verwenden kann.',
     content: 'Inhalt',
     contentEditable:
-      'Inhalt dieses Entwurfs als JSON bearbeiten; der Server prüft ihn gegen die Dokumentenklasse.',
+      'Abschnitte, Texte, Felder und Regeln dieses Entwurfs bearbeiten; „Prüfen“ lässt den Server ihn gegen die Dokumentenklasse übersetzen.',
     contentReadOnly:
       'Nur Entwürfe sind änderbar. Für Änderungen an einer freigegebenen Vorlage eine neue Version anlegen.',
     testMode: 'Testmodus',
@@ -87,7 +87,6 @@ export const templates: Translation<typeof en.templates> = {
     references: 'Referenzfelder: {list}',
   },
   editor: {
-    notObject: 'Der Inhalt muss ein JSON-Objekt mit "sections" sein.',
     invalidJson: 'Kein gültiges JSON: {message}',
     label: 'Inhalt (JSON)',
     check: 'Prüfen',
