@@ -15,9 +15,10 @@ import { changeKindLabel } from './version-labels'
 
 /**
  * The versions of a document the caller may read (US-05.1, DMS-54), newest first, with the authors' change
- * summaries. Two picked versions, or a version and its predecessor, open the comparison.
+ * summaries. Two picked versions, or a version and its predecessor, open the comparison. "Show" opens a
+ * version on the document page (DMS-112); `shownId` marks the one shown there.
  */
-export function VersionHistory({ documentId }: { documentId: string }) {
+export function VersionHistory({ documentId, shownId }: { documentId: string; shownId?: string }) {
   const client = useApiClient()
   const navigate = useNavigate()
   const versions = useQuery(documentVersionsQuery(client, documentId))
@@ -89,6 +90,21 @@ export function VersionHistory({ documentId }: { documentId: string }) {
                         <p className="text-muted-foreground">{version.changeReason}</p>
                       )}
                     </div>
+                    {version.id === shownId ? (
+                      <span className="text-sm text-muted-foreground">
+                        {t('docPanels.history.shown')}
+                      </span>
+                    ) : (
+                      <Link
+                        to="/documents/$documentId"
+                        params={{ documentId }}
+                        search={{ version: version.id }}
+                        className="text-sm text-primary underline-offset-4 hover:underline"
+                        aria-label={t('docPanels.history.showLabel', { label: version.version })}
+                      >
+                        {t('docPanels.history.show')}
+                      </Link>
+                    )}
                     {previous && (
                       <Link
                         to="/documents/$documentId/compare"

@@ -5,8 +5,8 @@ import { useApiClient } from '@/api/context'
 import { documentQuery } from '@/api/documents'
 import type { DocumentVersionView, DocumentView } from '@/api/partners'
 import { useGroups } from '@/api/groups'
-import { templateFieldsQuery, type DocumentLanguage, type MetadataValue } from '@/api/templates'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { type DocumentLanguage, type MetadataValue } from '@/api/templates'
+import { documentVersionsQuery } from '@/api/versions'
 import { ErrorState } from '@/components/shared/error-state'
 import {
   BreadcrumbCurrent,
@@ -18,7 +18,6 @@ import { LoadingState } from '@/components/shared/states'
 import { UserName } from '@/components/shared/user-name'
 import { t, tOptional } from '@/i18n'
 import { allowedGroupsOf, confidentialityOf, isRestrictedLevel } from './access-groups'
-import { displayValue } from './draft-values'
 import { LanguageSelect } from './document-workspace'
 import { DocumentEditor } from './new-document-page'
 import { StatusBadge } from './status-badge'
@@ -26,6 +25,9 @@ import { WorkflowPanel } from './workflow-panel'
 import { AcknowledgementPanel } from './acknowledgement-panel'
 import { EvidenceReportAction } from './evidence-report-panel'
 import { VersionHistory } from './version-history'
+import { PdfDownload } from './pdf-download'
+import { VersionContent } from './version-content'
+import { VersionMetadata } from './version-metadata'
 
 /** Whether the page shows the acknowledgement card for a version: valid and requiring it. */
 function asksForAcknowledgement(version: DocumentVersionView): boolean {
@@ -39,45 +41,6 @@ function asksForAcknowledgement(version: DocumentVersionView): boolean {
 function documentLanguage(document: DocumentView): DocumentLanguage {
   const value = document.current.values.language?.value
   return value?.type === 'Text' && value.value === 'de' ? 'de' : 'en'
-}
-
-/** The values of a version that is not a draft, labelled like the template's fields. */
-function VersionValues({ document }: { document: DocumentView }) {
-  const client = useApiClient()
-  const fields = useQuery(
-    templateFieldsQuery(client, document.current.templateId, document.current.templateVersion),
-  )
-  const labels = new Map((fields.data?.fields ?? []).map((f) => [f.key, f.label]))
-  const shown = Object.entries(document.current.values).filter(([key]) => labels.has(key))
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t('docs.page.metadata')}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {fields.isPending && <LoadingState label={t('docs.page.loadingMetadata')} />}
-        {fields.isError && (
-          <ErrorState error={fields.error} onRetry={() => void fields.refetch()} />
-        )}
-        {fields.data && (
-          <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-            {shown.map(([key, field]) => (
-              <div key={key} className="contents">
-                <dt className="text-muted-foreground">{labels.get(key)}</dt>
-                <dd>
-                  {field.value.type === 'PersonRef' ? (
-                    <UserName id={field.value.userId} />
-                  ) : (
-                    displayValue(field.value)
-                  )}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
-      </CardContent>
-    </Card>
-  )
 }
 
 /**
@@ -106,13 +69,27 @@ export function AccessNote({ document }: { document: DocumentView }) {
 }
 
 /**
- * A document (DMS-90): its draft to continue editing and submit, or the version the caller may read,
- * with its review and approval state.
+ * A document (DMS-90, DMS-112): its draft to continue editing and submit, or a version the caller may read
+ * with its rendered content and metadata; the review and approval state and the version history. `versionId`
+ * picks a version from the history; without it the page shows the current version.
  */
-export function DocumentPage({ documentId }: { documentId: string }) {
+export function DocumentPage({
+  documentId,
+  versionId,
+}: {
+  documentId: string
+  versionId?: string
+}) {
   const client = useApiClient()
   const document = useQuery(documentQuery(client, documentId))
+  const versions = useQuery({ ...documentVersionsQuery(client, documentId), enabled: !!versionId })
   const [language, setLanguage] = useState<DocumentLanguage | undefined>(undefined)
+
+  const current = document.data?.current
+  const picked = versionId ? versions.data?.find((v) => v.id === versionId) : undefined
+  const shown = picked ?? current
+  const showingOther = shown !== undefined && current !== undefined && shown.id !== current.id
+  const editing = shown?.status === 'Draft' && !showingOther
 
   return (
     <div className="space-y-6">
@@ -127,9 +104,10 @@ export function DocumentPage({ documentId }: { documentId: string }) {
           </Breadcrumbs>
         }
         actions={
-          document.data && (
+          document.data &&
+          shown && (
             <>
-              {document.data.current.status === 'Draft' && (
+              {editing && (
                 <div className="w-48">
                   <LanguageSelect
                     value={language ?? documentLanguage(document.data)}
@@ -137,15 +115,16 @@ export function DocumentPage({ documentId }: { documentId: string }) {
                   />
                 </div>
               )}
+              <PdfDownload key={shown.id} documentId={document.data.id} version={shown} />
               <EvidenceReportAction documentId={document.data.id} />
             </>
           )
         }
       >
-        {document.data && (
+        {document.data && shown && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <StatusBadge status={document.data.current.status} />
-            <span>{t('docs.page.version', { label: document.data.current.version })}</span>
+            <StatusBadge status={shown.status} />
+            <span>{t('docs.page.version', { label: shown.version })}</span>
             {document.data.classPath && document.data.classPath.length > 0 && (
               <span>· {document.data.classPath.join(' › ')}</span>
             )}
@@ -168,34 +147,49 @@ export function DocumentPage({ documentId }: { documentId: string }) {
           onRetry={() => void document.refetch()}
         />
       )}
-      {document.data && (
+      {document.data && shown && (
         <>
           <AccessNote document={document.data} />
-          {document.data.current.status === 'Draft' ? (
-            <DocumentEditor
-              // A new open version (e.g. after a return) starts a fresh form; saves keep the form as is.
-              key={document.data.current.id}
-              templateId={document.data.current.templateId}
-              version={document.data.current.templateVersion}
-              language={language ?? documentLanguage(document.data)}
-              draft={{ documentId: document.data.id, version: document.data.current }}
-            />
-          ) : (
-            <VersionValues document={document.data} />
+          {showingOther && (
+            <p className="rounded-md border bg-muted/50 p-3 text-sm" role="status">
+              {t('docs.view.olderVersion', { label: shown.version })}{' '}
+              <Link
+                to="/documents/$documentId"
+                params={{ documentId }}
+                search={{}}
+                className="text-primary underline-offset-4 hover:underline"
+              >
+                {t('docs.view.toCurrent')}
+              </Link>
+            </p>
           )}
-          {asksForAcknowledgement(document.data.current) && (
-            <AcknowledgementPanel
-              key={document.data.current.id}
-              documentId={document.data.id}
-              version={document.data.current}
-            />
+          {editing ? (
+            <>
+              <DocumentEditor
+                // A new open version (e.g. after a return) starts a fresh form; saves keep the form as is.
+                key={shown.id}
+                templateId={shown.templateId}
+                version={shown.templateVersion}
+                language={language ?? documentLanguage(document.data)}
+                draft={{ documentId: document.data.id, version: shown }}
+              />
+              <VersionMetadata document={document.data} version={shown} />
+            </>
+          ) : (
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+              <VersionContent documentId={document.data.id} version={shown} />
+              <VersionMetadata document={document.data} version={shown} />
+            </div>
+          )}
+          {!showingOther && asksForAcknowledgement(shown) && (
+            <AcknowledgementPanel key={shown.id} documentId={document.data.id} version={shown} />
           )}
           <WorkflowPanel
             documentId={document.data.id}
             title={document.data.title}
             versions={{ [document.data.current.id]: document.data.current.version }}
           />
-          <VersionHistory documentId={document.data.id} />
+          <VersionHistory documentId={document.data.id} shownId={shown.id} />
         </>
       )}
     </div>

@@ -266,7 +266,12 @@ describe('Version history', () => {
       `/documents/${documentId}/compare?from=v2&to=v3`,
     )
     // The first version has no predecessor to compare with.
-    expect(within(item(2)).queryByRole('link')).not.toBeInTheDocument()
+    expect(within(item(2)).queryByRole('link', { name: /^Changes/ })).not.toBeInTheDocument()
+    // Every version but the shown (current) one can be opened on the document page (DMS-112).
+    expect(within(item(2)).getByRole('link', { name: 'Show version 1.0' })).toHaveAttribute(
+      'href',
+      `/documents/${documentId}?version=v1`,
+    )
   })
 
   it('compares two picked versions, the older one first', async () => {

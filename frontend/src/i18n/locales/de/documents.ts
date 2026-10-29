@@ -60,6 +60,9 @@ export const docPanels: Translation<typeof en.docPanels> = {
     changesSinceLabel: 'Änderungen in {version} seit {previous}',
     changesSince: 'Änderungen seit {previous}',
     compare: 'Ausgewählte Versionen vergleichen',
+    show: 'Anzeigen',
+    showLabel: 'Version {label} anzeigen',
+    shown: 'angezeigt',
   },
   changeKinds: { Major: 'Inhaltlich', Minor: 'Redaktionell' },
   structure: {
