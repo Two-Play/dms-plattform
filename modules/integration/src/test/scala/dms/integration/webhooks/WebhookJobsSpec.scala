@@ -358,7 +358,7 @@ object WebhookJobsSpec extends ZIOSpecDefault:
           t        <- newTenant
           env      <- ZIO.service[Env]
           legacyId = UUID.randomUUID()
-          // A subscription as migration V29 finds it: secret in plain text.
+          // A subscription as migration V28 finds it: secret in plain text.
           _ <- env.app.transact(t)(
             WebhookStore.create(
               legacyId,

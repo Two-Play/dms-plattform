@@ -6,7 +6,7 @@ import dms.kernel.TenantId
 import zio.*
 
 /** Brings every stored webhook secret to the active platform key (DMS-107, ADR 0035): plain-text secrets from
-  * before migration V29 are encrypted, secrets of older keys are re-encrypted. Runs at startup of every
+  * before migration V28 are encrypted, secrets of older keys are re-encrypted. Runs at startup of every
   * instance, one transaction per tenant; idempotent, and safe beside an administrator rotating a secret (a
   * row that changed meanwhile is left alone).
   *

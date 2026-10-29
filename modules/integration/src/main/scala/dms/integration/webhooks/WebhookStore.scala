@@ -19,7 +19,7 @@ final case class DeliveryTarget(
     subscriptionActive: Boolean
 )
 
-/** Webhook subscriptions and deliveries (migrations V22, V29). Every method runs inside
+/** Webhook subscriptions and deliveries (migrations V22, V28). Every method runs inside
   * `Db.transact(tenant)`; RLS limits the rows to the tenant. Lists of event types and classes are passed as
   * JSON to stay independent of the driver's array mapping.
   */

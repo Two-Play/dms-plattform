@@ -16,7 +16,7 @@ enum StoredSecret:
     */
   case Sealed(keyId: String, ciphertext: String)
 
-  /** Plain text from before migration V29; re-encrypted at startup ([[WebhookSecretMigration]]). */
+  /** Plain text from before migration V28; re-encrypted at startup ([[WebhookSecretMigration]]). */
   case Plain(secret: String)
 
   def encryptedWith: Option[String] = this match
@@ -33,7 +33,7 @@ enum StoredSecret:
   * Secrets are encrypted with AES-256-GCM under the active key. The additional authenticated data binds a
   * ciphertext to its tenant and subscription, so a ciphertext copied to another row does not decrypt. Older
   * keys stay in the ring for decryption only; [[WebhookSecretMigration]] re-encrypts secrets of older keys
-  * (and plain-text secrets from before V29) with the active key at startup, so a key can be retired once no
+  * (and plain-text secrets from before V28) with the active key at startup, so a key can be retired once no
   * row uses it any more.
   *
   * Without configured keys the well-known development key [[WebhookSecretKeys.DevelopmentKeyId]] is active,
