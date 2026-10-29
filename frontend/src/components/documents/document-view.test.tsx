@@ -116,6 +116,7 @@ function documentWith(current: DocumentVersionView): DocumentView {
     classId: fields.documentClassId,
     classVersion: 1,
     classPath: ['policy'],
+    canAssignNumber: false,
     title: 'IT security policy',
     ownerId: 'owner-1',
     authorId: 'author-1',
