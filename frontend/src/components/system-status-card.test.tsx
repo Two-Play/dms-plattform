@@ -39,7 +39,7 @@ describe('SystemStatusCard', () => {
 
     renderWithClient(get)
 
-    expect(await screen.findByText('Unavailable')).toBeInTheDocument()
-    expect(screen.getByText('Health check failed with HTTP 502')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('The backend is unavailable')
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
 })
