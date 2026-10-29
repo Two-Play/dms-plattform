@@ -92,6 +92,19 @@ private[core] object ChainStore:
   def entries(tenant: UUID)(using DbTx): Vector[StoredEntry] =
     query(selectEntries)(_.setObject(1, tenant))(readEntry)
 
+  /** The entries about `objectId` in chain order; row-level security limits them to the current tenant. */
+  def entriesOf(objectId: UUID)(using DbTx): Vector[StoredEntry] =
+    query(selectColumns + " where object_id = ? order by chain_seq")(_.setObject(1, objectId))(readEntry)
+
+  /** The newest anchor of the tenant with its TSA time. */
+  def newestAnchor(tenant: UUID)(using DbTx): Option[(Long, java.time.Instant, String)] =
+    query(
+      """select anchored_until_seq, tsa_time, tsa_url from dms.audit_anchor
+        |where tenant_id = ? order by anchored_until_seq desc limit 1""".stripMargin
+    )(_.setObject(1, tenant))(rs =>
+      (rs.getLong(1), rs.getObject(2, classOf[OffsetDateTime]).toInstant, rs.getString(3))
+    ).headOption
+
   def anchors(tenant: UUID)(using DbTx): Vector[StoredAnchor] =
     query(
       """select anchored_until_seq, chain_head_hash, tsa_url, tsa_token from dms.audit_anchor
@@ -116,11 +129,13 @@ private[core] object ChainStore:
       ps.setObject(6, OffsetDateTime.ofInstant(tsaTime, ZoneOffset.UTC))
     }(_.getLong(1)).nonEmpty
 
-  private val selectEntries =
+  private val selectColumns =
     """select seq, hash_format, hash, tenant_id, chain_seq, prev_hash, occurred_at, actor_id, actor_kind,
       |  on_behalf_of, action, object_type, object_id, object_version, details::text, reason, channel,
       |  correlation_id
-      |from dms.audit_event where tenant_id = ? order by chain_seq""".stripMargin
+      |from dms.audit_event""".stripMargin
+
+  private val selectEntries = selectColumns + " where tenant_id = ? order by chain_seq"
 
   private def readEntry(rs: ResultSet): StoredEntry =
     StoredEntry(

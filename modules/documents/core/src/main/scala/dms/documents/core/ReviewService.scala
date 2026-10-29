@@ -133,6 +133,10 @@ final class ReviewService(audit: AuditTrail, documents: DocumentService, classes
   def tasksOf(owner: UserId, open: Boolean, limit: Int = MaxTasks): IO[DocumentError, List[ReviewTask]] =
     sql(ReviewStore.tasksOfOwner(owner, open, limit))
 
+  /** Every review task of a document with its decision, the earliest first (evidence reports, DMS-57). */
+  def tasksOfDocument(document: DocumentId): IO[DocumentError, List[ReviewTask]] =
+    sql(ReviewStore.tasksOfDocument(document))
+
   /** Recertifies the version without a change (business concept 6.2 a): it keeps its content and number and
     * gets a new review date, `nextDueOn` or today plus the class's interval; a version in ReviewDue is
     * Published again. Recorded as `document.recertified`.

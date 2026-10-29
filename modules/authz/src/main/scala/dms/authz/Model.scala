@@ -34,13 +34,16 @@ enum Role:
   * `ViewAcknowledgementPersons` is seeing who has not acknowledged a version yet (purpose limitation,
   * business concept 10.2; ADR 0036): compliance officers for escalation and the document's owner for their
   * own documents. Callers additionally have to state the purpose, which is recorded in the audit trail.
+  *
+  * `GenerateEvidenceReport` is creating and reading the evidence report of a document (US-12.1, DMS-57, ADR
+  * 0034): internal audit (auditor) and records managers, in any status of the document.
   */
 enum Action:
   case ReadPublished, ReadDocument, CreateFromTemplate, EditDraft, CommentInReview, Review, Approve, Publish,
     Withdraw, Recertify,
     EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
     ManageRetention, Destroy, ViewHistory, Configure,
-    MonitorCompliance, ViewAcknowledgementPersons
+    MonitorCompliance, ViewAcknowledgementPersons, GenerateEvidenceReport
 
 /** Areas of tenant configuration (matrix row "Configuration"). `Search` is the operation of the tenant's
   * search index, e.g. rebuilding it (DMS-51, ADR 0029). `Groups` is the administration of access groups and

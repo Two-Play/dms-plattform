@@ -220,6 +220,14 @@ final class AcknowledgementService(audit: AuditTrail):
             order by acknowledged_at desc, id""".query[Row].run().map(toAcknowledgement).toList
     )
 
+  /** The acknowledgements of a version, the earliest first (evidence reports, DMS-57). */
+  def acknowledgementsOfVersion(versionId: UUID): IO[AcknowledgementError, List[Acknowledgement]] =
+    sql(
+      sql"""select id, document_id, version_id, version_label, user_id, opened_at, acknowledged_at
+            from dms.document_acknowledgement where version_id = $versionId
+            order by acknowledged_at, id""".query[Row].run().map(toAcknowledgement).toList
+    )
+
   private def record(reader: UserId, action: String, v: DocumentVersion, details: Json.Obj) =
     audit
       .record(

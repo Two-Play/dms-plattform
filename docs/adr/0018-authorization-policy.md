@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (addenda DMS-49, DMS-51, DMS-101, DMS-56, DMS-59) |
+| Status | Accepted (addenda DMS-49, DMS-51, DMS-101, DMS-56, DMS-59, DMS-57) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -68,3 +68,7 @@ Legal holds (ADR 0031) use `ManageRetention`, the action of the matrix row "Rete
 ## Addendum (DMS-59, 2026-10-29): compliance officer
 
 New business role `ComplianceOfficer` (business concept 2.2, "Compliance-Beauftragter"; database check extended in V20) and two actions, see ADR 0036: `MonitorCompliance` (a valid version in the compliance cockpit: review deadline and acknowledgement figures; compliance officers in scope) and `ViewAcknowledgementPersons` (who has not acknowledged a valid version; compliance officers in scope and the document's owner, with a stated purpose recorded in the audit trail). Like every business role, the compliance officer reads published versions. `dms.authz.Audience` decides `ReadPublished` for all users of a tenant at once, grouping users with equal assignments and groups; it is tested against `Policy` for generated populations. `DocumentResource.of` builds the resource of a version from its attributes for bulk queries.
+
+## Addendum (DMS-57, 2026-10-29): evidence reports
+
+New action `GenerateEvidenceReport` (ADR 0034): creating and downloading the evidence report of a document, granted to auditors and records managers whose assignment covers the document (class/unit scope) in any status; the confidentiality rules apply unchanged, so a confidential document additionally needs an allowed group. It is checked on the `DocumentResource` of the latest version. The permission matrix of business concept 2.3 has no row for audit reports; the action follows the audit role's "evidence" duties.

@@ -43,6 +43,7 @@ object PolicySpec extends ZIOSpecDefault:
     case Configure           => Resource(tenant, configurationArea = Some(ConfigurationArea.DocumentClasses))
     case MonitorCompliance   => document(ReviewDue)
     case ViewAcknowledgementPersons => document(Published)
+    case GenerateEvidenceReport     => document(Superseded)
 
   /** The condition that turns a ◐ cell of the matrix into a permission. */
   private def favorable(action: Action, role: Role): Resource =
@@ -90,7 +91,9 @@ object PolicySpec extends ZIOSpecDefault:
     ViewHistory         -> List(Never, Partial, Full, Partial, Partial, Never, Full, Full, Partial, Never),
     Configure           -> List(Never, Never, Never, Never, Never, Never, Partial, Never, Full, Never),
     MonitorCompliance   -> List(Never, Never, Never, Never, Never, Never, Never, Never, Never, Full),
-    ViewAcknowledgementPersons -> List(Never, Never, Partial, Never, Never, Never, Never, Never, Never, Full)
+    ViewAcknowledgementPersons -> List(Never, Never, Partial, Never, Never, Never, Never, Never, Never, Full),
+    // Evidence reports (US-12.1, DMS-57): internal audit and records management.
+    GenerateEvidenceReport -> List(Never, Never, Never, Never, Never, Never, Full, Full, Never, Never)
   )
 
   private def permitted(roles: Seq[Role], action: Action, resource: Resource): Boolean =
@@ -118,6 +121,26 @@ object PolicySpec extends ZIOSpecDefault:
       assertTrue(
         decision == Decision.Permit(Set(Condition.SecondPersonConfirmation)),
         !permitted(Seq(Owner, Approver, Auditor), Destroy, base(Destroy))
+      )
+    },
+    test("evidence reports need a document and respect confidentiality") {
+      val confidential = document(Published).copy(confidentiality = Confidentiality.Confidential)
+      assertTrue(
+        !permitted(Seq(Auditor), GenerateEvidenceReport, Resource(tenant)),
+        !permitted(Seq(Auditor), GenerateEvidenceReport, confidential),
+        permitted(
+          Seq(Auditor),
+          GenerateEvidenceReport,
+          confidential.copy(allowedGroups = Set("audit"))
+        ) == false,
+        Policy
+          .decide(
+            subjectWith(Auditor).copy(groups = Set("audit")),
+            GenerateEvidenceReport,
+            confidential.copy(allowedGroups = Set("audit")),
+            now
+          )
+          .isPermitted
       )
     },
     test("deny by default without any role") {

@@ -192,6 +192,12 @@ object Policy:
           )
         )
 
+      case GenerateEvidenceReport =>
+        grantIf(
+          resource.isDocument && (has(Auditor) || has(RecordsManager)),
+          "evidence reports require the auditor or records manager role"
+        )
+
       case Configure =>
         resource.configurationArea match
           case None       => Decision.Deny("not a configuration resource")

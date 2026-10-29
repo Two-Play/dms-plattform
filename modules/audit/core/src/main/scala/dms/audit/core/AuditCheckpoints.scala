@@ -79,6 +79,10 @@ final class AuditCheckpoints(db: Db, trail: AuditTrail, store: ObjectStore, conf
         }
     }
 
+  /** Chain position of the newest checkpoint of `tenant`, if any. */
+  def newestSeq(tenant: TenantId): IO[StorageError, Option[Long]] =
+    newestKey(tenant).map(_.flatMap(_.split('/').lastOption).flatMap(_.toLongOption))
+
   private def compare(
       tenant: TenantId,
       report: VerificationReport,
