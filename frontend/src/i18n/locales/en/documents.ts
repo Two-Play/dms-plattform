@@ -60,6 +60,9 @@ export const docPanels = {
     changesSinceLabel: 'Changes in {version} since {previous}',
     changesSince: 'Changes since {previous}',
     compare: 'Compare selected versions',
+    show: 'Show',
+    showLabel: 'Show version {label}',
+    shown: 'shown',
   },
   changeKinds: { Major: 'Major', Minor: 'Editorial' },
   structure: {

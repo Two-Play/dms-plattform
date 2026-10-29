@@ -656,6 +656,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/versions/{versionId}/html': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The content of a version resolved with its stored values, as HTML fragment for reading on screen. Versions that were never approved carry the draft marking; approved versions are rendered from their frozen content and values. Requires ReadDocument on the version. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidHtml']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/draft.pdf': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description A PDF of an open version (draft, in review, in approval), printed on demand from its saved state and marked "Draft – not valid" in the header and as watermark on every page. Not archived and not stored; the download is audited. 409 for approved versions (download their rendition). Requires ReadDocument on the version. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidDraftPdf']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/copy.pdf': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description A copy of an approved version printed on demand, e.g. with the change history appended; header and footer as in the archive rendition plus the note that the archived rendition is authoritative. The archived PDF/A is not altered. Not stored; the download is audited. 409 for versions that were never approved. Requires ReadDocument on the version. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidCopyPdf']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/acknowledgements': {
     parameters: {
       query?: never
@@ -3241,6 +3292,20 @@ export interface components {
       fields?: components['schemas']['ValueChangeView'][]
       metadata?: components['schemas']['ValueChangeView'][]
     }
+    /** VersionHtmlView */
+    VersionHtmlView: {
+      /** Format: uuid */
+      versionId: string
+      /** @description `1.1-draft.3` while open, `1.1` from approval on. */
+      version: string
+      status: string
+      /** @description "Draft – not valid" (in the document language) for versions that were never approved; shown as banner and watermark in the HTML. Empty for approved versions, which are rendered from their frozen package. */
+      draftMarking?: string
+      /** @description Language of the document, e.g. `de`. */
+      language: string
+      /** @description HTML fragment: one `article.dms-document`, styled by the shared document stylesheet (`document.css`). All text is escaped; no scripts, ids, inline styles or external references. */
+      html: string
+    }
     /** VersionRateView */
     VersionRateView: {
       /** Format: uuid */
@@ -5151,6 +5216,141 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdVersionsVersionidHtml: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['VersionHtmlView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdVersionsVersionidDraftPdf: {
+    parameters: {
+      query?: {
+        /** @description Append the change history (default false) */
+        changelog?: boolean
+      }
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          'Cache-Control': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/pdf': string
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: query parameter changelog */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdVersionsVersionidCopyPdf: {
+    parameters: {
+      query?: {
+        /** @description Append the change history (default false) */
+        changelog?: boolean
+      }
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          'Cache-Control': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/pdf': string
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: query parameter changelog */
       400: {
         headers: {
           [name: string]: unknown
