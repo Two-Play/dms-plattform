@@ -396,10 +396,15 @@ object SearchApiSpec extends ZIOSpecDefault:
     test("a new version supersedes the old one in the index; the history stays searchable") {
       for
         doc <- validDocument("Reisekostenrichtlinie", "Compliance")
-        _ <- call(author, "POST", s"/api/v1/documents/${doc.id}/versions", Some("""{"changeKind":"Major"}"""))
-        _ <- approveDefault(doc.id)
-        _ <- runPublicationJobs
-        _ <- runIndexing
+        _   <- call(
+          author,
+          "POST",
+          s"/api/v1/documents/${doc.id}/versions",
+          Some("""{"changeKind":"Major","reason":"Content revised"}""")
+        )
+        _          <- approveDefault(doc.id)
+        _          <- runPublicationJobs
+        _          <- runIndexing
         current    <- results(reader, "q=Reisekostenrichtlinie")
         superseded <- results(reader, "q=Reisekostenrichtlinie&status=Superseded")
         both       <- results(reader, "q=Reisekostenrichtlinie&status=Published,Superseded")

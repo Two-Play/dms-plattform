@@ -19,12 +19,12 @@ export const MAX_CHANGE_SUMMARY = 4000
 
 /**
  * Starts the next version from the valid version as a draft (POST /api/v1/documents/{id}/versions, DMS-103).
- * `reason` is the change summary, required for Minor.
+ * `reason` is the change summary, required for every new version (DMS-126).
  */
 export async function startNewVersion(
   client: ApiClient,
   id: string,
-  body: { changeKind: ChangeKind; reason?: string },
+  body: { changeKind: ChangeKind; reason: string },
 ): Promise<DocumentVersionView> {
   const { data, error, response } = await client.POST('/api/v1/documents/{id}/versions', {
     params: { path: { id } },
@@ -42,7 +42,7 @@ export async function startNewVersion(
 
 /**
  * Changes the change summary of the open draft (PUT /api/v1/documents/{id}/draft/change-summary, DMS-103);
- * an empty summary removes it (not allowed for Minor).
+ * an empty summary removes it (only allowed on the first version 1.0 of a document, DMS-126).
  */
 export async function updateChangeSummary(
   client: ApiClient,

@@ -721,7 +721,7 @@ export interface paths {
     /** @description The versions of a document the caller may read, oldest first */
     get: operations['getApiV1DocumentsIdVersions']
     put?: never
-    /** @description Starts the next version from the valid version as a draft: Major for a change of content (full workflow of the class), Minor for an editorial correction (reason required, 422; on submission the owner confirms it in a shortened workflow, and an automatic comparison warns in `editorialCheck` if more text changed than the configured threshold). 409 while a version is open or an approved version waits for its valid-from date. */
+    /** @description Starts the next version from the valid version as a draft: Major for a change of content (full workflow of the class), Minor for an editorial correction (on submission the owner confirms it in a shortened workflow, and an automatic comparison warns in `editorialCheck` if more text changed than the configured threshold). Both need a change summary in `reason` (422 if empty, DMS-126). 409 while a version is open or an approved version waits for its valid-from date. */
     post: operations['postApiV1DocumentsIdVersions']
     delete?: never
     options?: never
@@ -771,7 +771,7 @@ export interface paths {
       cookie?: never
     }
     get?: never
-    /** @description Changes the author's change summary of the open draft (DMS-103), shown in the version history and above version comparisons. Requires EditDraft; only while the version is a draft (409 from submission on). An editorial (Minor) version needs a summary (422); at most 4000 characters (422). Content and values are unchanged, so no working state is added. Recorded in the audit trail. */
+    /** @description Changes the author's change summary of the open draft (DMS-103), shown in the version history and above version comparisons. Requires EditDraft; only while the version is a draft (409 from submission on). Every version with a predecessor, Major or Minor, needs a summary (422, DMS-126); only the first version 1.0 of a document may have none. At most 4000 characters (422). Content and values are unchanged, so no working state is added. Recorded in the audit trail. */
     put: operations['putApiV1DocumentsIdDraftChange-summary']
     post?: never
     delete?: never
@@ -1353,7 +1353,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Revision required: starts the next version as a draft from the valid version (Major by default; Minor needs a reason) or links the version already open; the valid version stays in force until the new one is published. `newVersionId` names the draft. 403 unless the caller is the document's owner and may edit drafts, 409 if the task was decided already or an approved version waits for its valid-from date. */
+    /** @description Revision required: starts the next version as a draft from the valid version (Major by default; a `reason` is required as its change summary, 422, DMS-126) or links the version already open; the valid version stays in force until the new one is published. `newVersionId` names the draft. 403 unless the caller is the document's owner and may edit drafts, 409 if the task was decided already or an approved version waits for its valid-from date. */
     post: operations['postApiV1ReviewsTaskidRevise']
     delete?: never
     options?: never

@@ -723,7 +723,9 @@ final class DocumentService(
     for
       document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
       current  <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
-      _        <- ZIO.when(document.kind == DocumentKind.File)(
+      // Drafts started before DMS-126 may lack the summary; they cannot be submitted without one.
+      _ <- checkChangeReason(current.changeKind, current.number, current.changeReason)
+      _ <- ZIO.when(document.kind == DocumentKind.File)(
         current.file match
           case None =>
             ZIO.fail(DocumentError.Invalid(List("upload the file of the document before submitting it")))
@@ -833,7 +835,8 @@ final class DocumentService(
     yield updated
 
   /** Starts the next version of a document from its valid version: a major version for a change of content, a
-    * minor version (with a reason) for an editorial change. A document has at most one open version.
+    * minor version for an editorial change. Every new version needs a change summary (DMS-126, business
+    * concept 5.1). A document has at most one open version.
     */
   def newVersion(
       id: DocumentId,
@@ -860,8 +863,8 @@ final class DocumentService(
       base <- ZIO
         .fromOption(versions.filter(v => Versioning.isValid(v.status)).maxByOption(_.number))
         .orElseFail(DocumentError.Conflict("only a document with a valid version can get a new version"))
-      changeReason <- checkChangeReason(kind, reason)
       number = Versioning.next(versions.filter(_.releasedAt.isDefined).map(_.number).maxOption, kind)
+      changeReason <- checkChangeReason(kind, number, reason)
       workingState <- sql(DocumentStore.workingStates(id, number)).map(Versioning.nextWorkingState)
       template     <- templates.version(base.templateId, base.templateVersion)
       profile      <- profile(document.classId, base.classVersion)
@@ -927,8 +930,9 @@ final class DocumentService(
 
   /** Changes the change summary of the open draft (DMS-103): what changed and why, shown in the version
     * history and above version comparisons. It can be changed until the draft is submitted (409 afterwards);
-    * a minor version keeps a non-empty summary (422). Not a working state: content and values are unchanged.
-    * Recorded in the audit trail with the summary before and after; an unchanged summary records nothing.
+    * a version with a predecessor keeps a non-empty summary (422, DMS-126). Not a working state: content and
+    * values are unchanged. Recorded in the audit trail with the summary before and after; an unchanged
+    * summary records nothing.
     */
   def updateChangeReason(
       id: DocumentId,
@@ -944,7 +948,7 @@ final class DocumentService(
           )
         )
       )
-      changeReason <- checkChangeReason(current.changeKind, reason)
+      changeReason <- checkChangeReason(current.changeKind, current.number, reason)
       updated      <-
         if changeReason == current.changeReason then ZIO.succeed(current)
         else
@@ -966,11 +970,23 @@ final class DocumentService(
           yield next
     yield updated
 
-  /** The trimmed change summary; required for minor versions, at most `MaxReasonLength` characters. */
-  private def checkChangeReason(kind: ChangeKind, reason: Option[String]): IO[DocumentError, Option[String]] =
+  /** The trimmed change summary, at most `MaxReasonLength` characters. Required for every version that has a
+    * predecessor, major or minor (DMS-126, business concept 5.1: each new version comes with a reason and an
+    * overview of the changes); only the first version of a document is exempt. A version has a predecessor
+    * exactly when its number is above [[Versioning.first]]: [[Versioning.next]] returns the first number only
+    * while no version was ever approved.
+    */
+  private def checkChangeReason(
+      kind: ChangeKind,
+      number: VersionNo,
+      reason: Option[String]
+  ): IO[DocumentError, Option[String]] =
     val changeReason = reason.map(_.trim).filter(_.nonEmpty)
-    if kind == ChangeKind.Minor && changeReason.isEmpty then
-      ZIO.fail(DocumentError.Invalid(List("an editorial (minor) version needs a reason")))
+    if changeReason.isEmpty && Ordering[VersionNo].gt(number, Versioning.first) then
+      val what = kind match
+        case ChangeKind.Major => "a new (major) version"
+        case ChangeKind.Minor => "an editorial (minor) version"
+      ZIO.fail(DocumentError.Invalid(List(s"$what needs a change summary: what changed and why")))
     else if changeReason.exists(_.length > MaxReasonLength) then
       ZIO.fail(
         DocumentError.Invalid(List(s"the change summary must have at most $MaxReasonLength characters"))

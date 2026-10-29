@@ -421,8 +421,8 @@ object PublicationApiSpec extends ZIOSpecDefault:
         edited    <- changeSummary(doc.id, Some("  Rule 7 rewritten: new reporting channel  "))
           .map(as[DocumentVersionView])
         same    <- changeSummary(doc.id, Some("Rule 7 rewritten: new reporting channel"))
-        cleared <- changeSummary(doc.id, None).map(as[DocumentVersionView])
-        _       <- changeSummary(doc.id, Some("Rule 7 rewritten: new reporting channel"))
+        cleared <- changeSummary(doc.id, None)
+        blank   <- changeSummary(doc.id, Some("   "))
         history <- versions(doc.id, author)
         _       <- call(author, "POST", s"/api/v1/documents/${doc.id}/submit")
         late    <- changeSummary(doc.id, Some("Too late"))
@@ -440,14 +440,46 @@ object PublicationApiSpec extends ZIOSpecDefault:
         edited.changeReason.contains("Rule 7 rewritten: new reporting channel"),
         edited.workingState == major.workingState,
         same._1 == Status.Ok,
-        cleared.changeReason.isEmpty,
+        // A major version keeps a change summary as well (DMS-126).
+        cleared._1 == Status.UnprocessableEntity,
+        error(cleared._2).exists(_.message.contains("needs a change summary")),
+        blank._1 == Status.UnprocessableEntity,
         history.last.changeReason.contains("Rule 7 rewritten: new reporting channel"),
         late._1 == Status.Conflict,
         audited == List(
-          (Some("Rule 7 rewritten"), Some("Rule 7 rewritten: new reporting channel")),
-          (Some("Rule 7 rewritten: new reporting channel"), None),
-          (None, Some("Rule 7 rewritten: new reporting channel"))
+          (Some("Rule 7 rewritten"), Some("Rule 7 rewritten: new reporting channel"))
         )
+      )
+    },
+    test("every new version needs a change summary; the first version of a document is exempt (DMS-126)") {
+      for
+        s     <- setup.await
+        first <- call(
+          author,
+          "POST",
+          "/api/v1/documents",
+          Some(
+            s"""{"templateId":"${s.released.value}","templateVersion":1,"title":"First draft",
+               |"values":${values(owner, past)}}""".stripMargin
+          )
+        ).map(as[DocumentView])
+        firstSummary <- changeSummary(first.id, Some("Initial issue")).map(as[DocumentVersionView])
+        firstCleared <- changeSummary(first.id, None).map(as[DocumentVersionView])
+        doc          <- validDocument(owner)
+        noReason     <- newVersion(doc.id, """{"changeKind":"Major"}""")
+        blank        <- newVersion(doc.id, """{"changeKind":"Major","reason":" \n "}""")
+        untouched    <- versions(doc.id, author)
+        major        <- newVersion(doc.id, """{"changeKind":"Major","reason":"New reporting channel"}""")
+          .map(as[DocumentVersionView])
+      yield assertTrue(
+        firstSummary.version == "1.0-draft.1",
+        firstSummary.changeReason.contains("Initial issue"),
+        firstCleared.changeReason.isEmpty,
+        noReason._1 == Status.UnprocessableEntity,
+        error(noReason._2).exists(_.message.contains("a new (major) version needs a change summary")),
+        blank._1 == Status.UnprocessableEntity,
+        untouched.map(_.version) == List("1.0"),
+        major.changeReason.contains("New reporting channel")
       )
     },
     test("an editorial version keeps a change summary") {
@@ -481,8 +513,10 @@ object PublicationApiSpec extends ZIOSpecDefault:
       val future = LocalDate.of(2099, 1, 1)
       for
         doc   <- validDocument(owner)
-        major <- newVersion(doc.id, """{"changeKind":"Major"}""").map(as[DocumentVersionView])
-        _     <- call(
+        major <- newVersion(doc.id, """{"changeKind":"Major","reason":"Content revised"}""").map(
+          as[DocumentVersionView]
+        )
+        _ <- call(
           author,
           "PUT",
           s"/api/v1/documents/${doc.id}/draft",

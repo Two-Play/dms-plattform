@@ -349,7 +349,12 @@ object CurrentDocumentApiSpec extends ZIOSpecDefault:
   /** Starts a major version with the given values and approves it. */
   private def approveNewVersion(doc: UUID, body: String): ZIO[Env, Any, DocumentVersionView] =
     for
-      v <- call(author, "POST", s"/api/v1/documents/$doc/versions", Some("""{"changeKind":"Major"}"""))
+      v <- call(
+        author,
+        "POST",
+        s"/api/v1/documents/$doc/versions",
+        Some("""{"changeKind":"Major","reason":"Content revised"}""")
+      )
         .map(as[DocumentVersionView])
       _ <- call(author, "PUT", s"/api/v1/documents/$doc/draft", Some(s"""{"values":$body}"""))
       _ <- approve(doc)

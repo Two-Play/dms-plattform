@@ -37,8 +37,7 @@ export const tasks: Translation<typeof en.tasks> = {
   openFirst: 'Zuerst das Dokument öffnen.',
   readConfirmed: 'Kenntnisnahme bestätigt: {title} {version}.',
   recertify: 'Rezertifizieren …',
-  revise: 'Überarbeiten',
-  starting: 'Wird gestartet …',
+  revise: 'Überarbeiten …',
   withdraw: 'Außer Kraft setzen …',
   revisionStarted: 'Überarbeitung gestartet: Ein neuer Entwurf von {title} ist geöffnet.',
   recertified: 'Rezertifiziert: {title} {version}, nächste Rezertifizierung am {date}.',
@@ -77,9 +76,12 @@ export const tasks: Translation<typeof en.tasks> = {
   },
   reviewDialog: {
     recertifyTitle: 'Rezertifizieren: {title} {version}',
+    reviseTitle: 'Überarbeiten: {title} {version}',
     withdrawTitle: 'Außer Kraft setzen: {title} {version}',
     recertifyText:
       'Die Version bleibt unverändert gültig und erhält ein neues Rezertifizierungsdatum. Rezertifizierung fällig am {date}.',
+    reviseText:
+      'Startet die nächste Version als Entwurf aus der gültigen Version; diese bleibt gültig, bis die neue veröffentlicht ist. Ist bereits ein Entwurf in Arbeit, wird er stattdessen verknüpft.',
     withdrawText:
       'Die Version tritt außer Kraft und gilt für Lesende nicht mehr. Andere Versionen des Dokuments sind nicht betroffen.',
     nextDateRequired: 'Nächstes Rezertifizierungsdatum *',
@@ -94,6 +96,13 @@ export const tasks: Translation<typeof en.tasks> = {
     note: 'Notiz (optional)',
     recertifying: 'Wird rezertifiziert …',
     recertify: 'Rezertifizieren',
+    summary: 'Änderungsübersicht *',
+    summaryMissing:
+      'Bitte beschreiben, was sich ändert und warum: Jede neue Version braucht eine Änderungsübersicht.',
+    summaryHint:
+      'Was sich ändert und warum, in verständlichen Worten für Lesende. Wird die Änderungsübersicht des neuen Entwurfs und ist bis zum Einreichen änderbar.',
+    revising: 'Wird gestartet …',
+    revise: 'Überarbeitung starten',
     reason: 'Begründung *',
     reasonMissing: 'Eine Begründung ist erforderlich.',
     reasonHint: 'Warum das Dokument nicht mehr benötigt wird; wird im Audit-Trail festgehalten.',

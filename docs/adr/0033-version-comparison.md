@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-10-28, implemented in DMS-54; addendum 2026-10-29, DMS-103) |
+| Status | Accepted (2026-10-28, implemented in DMS-54; addenda 2026-10-29, DMS-103 and DMS-126) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -50,7 +50,8 @@ For the change summary, a separate `change_summary` column captured on submit wa
 ## Follow-ups
 
 - Done (DMS-103, see the addendum): a frontend form to start a new version with its change summary; authors edit the summary while the version is a draft.
-- Possible: expand clause references to their clause text; side-by-side view; require a summary for major versions too (see the addendum).
+- Done (DMS-126, see the addendum): a summary is required for major versions too.
+- Possible: expand clause references to their clause text; side-by-side view.
 - Ruled out: comparing renditions; storing diffs.
 
 ## Addendum 2026-10-29: starting versions and editing the change summary in the UI (DMS-103)
@@ -59,7 +60,7 @@ Decisions:
 
 1. **Still one text, `change_reason`; no migration.** The author maintains it from starting the version until submission through `PUT /api/v1/documents/{id}/draft/change-summary` (`{"reason": ...}`). The guard trigger (ADR 0021) already lets drafts change the column; the service checks the same rules as on start (required for Minor, trimmed, at most 4000 characters, now also applied on start) and the update condition `status = 'Draft'`. From submission on the summary is frozen with the version (409). It is not part of a working state (content and values are unchanged), so no working state is added; the change is audited as `document.change-reason-changed` with the text before and after (an unchanged text records nothing). Authorization: `EditDraft` on the draft; on a submitted version, where `EditDraft` means reviewers' suggestions, the caller only needs to read it to learn that it can no longer change.
 2. **The backend tells the UI whether a version can be started.** `DocumentView.canStartVersion` (the caller may start the next version now) and `startVersionBlocked` (`OpenVersion` or `ScheduledVersion`, only for callers who could start one) are computed with the same policy question as `POST …/versions` (`EditDraft` on a draft of which the caller is the author) and the same state rules. The UI hides "New version" for callers without permission and disables it with the reason while the document's state blocks it (hidden when the caller looks at the version in progress itself). The endpoint still decides.
-3. **Required as the backend demands.** The dialog requires a summary for editorial (Minor) versions and recommends it for major ones; making it mandatory for major versions (fachkonzept 5.1: "jeweils mit Begründung und Änderungsübersicht") would change the check constraint and the API for all clients and is left as a follow-up decision.
+3. **Required as the backend demands** (superseded by DMS-126, see below). The dialog requires a summary for editorial (Minor) versions and recommends it for major ones; making it mandatory for major versions (fachkonzept 5.1: "jeweils mit Begründung und Änderungsübersicht") would change the check constraint and the API for all clients and is left as a follow-up decision.
 4. **File and Word documents** keep the behavior of ADR 0042: the new draft takes the original, its field definitions and values over; the dialog and the confirmation tell the author to upload the revised file in the draft, where the file panel offers the upload.
 
 | Criterion | Chosen: separate endpoint for the summary | Summary as part of `PUT …/draft` | Separate `change_summary` column captured on submit |
@@ -70,6 +71,17 @@ Decisions:
 | Audit | Own action with before/after | Mixed into `document.draft-changed` | Own action |
 
 Consequences: positive: readers see the corrected summary in the history and the comparison at once; no migration. Negative: the summary of a submitted version cannot be corrected anymore (a return to draft makes it editable again); the UI computes the "becomes version" labels from the valid version's label, while the server counts from the highest approved number (they differ only after withdrawn approved versions). Reversibility: high; the endpoint and the two view fields can be removed without data changes.
+
+### DMS-126 (2026-10-29): a change summary for every new version
+
+Decision (product owner, following business concept 5.1: "jeweils mit Begründung und Änderungsübersicht"): every **new** version needs a change summary, major and minor alike. Only the first version 1.0 of a document, which has no predecessor, is exempt.
+
+- **Where it is checked.** `DocumentService.checkChangeReason` requires a non-empty trimmed summary whenever the version has a predecessor; it is used on start (`POST /api/v1/documents/{id}/versions`, and the revision of a periodic review, `POST /api/v1/reviews/{taskId}/revise`, which starts the version through the same service method) and on edit (`PUT …/draft/change-summary`). Otherwise 422 with "a new (major) version needs a change summary: what changed and why" (or "an editorial (minor) version …"). "Has a predecessor" is the version number above `Versioning.first` (1.0): `Versioning.next` returns 1.0 only while no version was ever approved, and a new version can only start from a valid one, so every started version is 1.1 or higher. No other code path inserts versions (document creation inserts only 1.0; renditions, withdrawal and file or Word uploads change existing versions). The seed script `scripts/dev_setup.py` only creates first versions.
+- **UI.** The "New version" dialog marks the summary as required for both kinds of change; the change summary card on drafts requires it on every version except 1.0; "Revise" in the task inbox opens a dialog that asks for the summary of the new draft instead of starting it with one click.
+- **The database check of V9 stays as it is** (`change_kind = 'Major' or length(trim(coalesce(change_reason, ''))) > 0`). Existing major versions without a summary, frozen or still drafts, stay valid; tightening the constraint would need a backfill with invented summaries for frozen versions, which the guard trigger (ADR 0021) rightly refuses. Consequence: the rule is enforced by the application only; submitting checks the same rule, so an existing major draft without a summary has to get one before it can be submitted (`DocumentService.submit`, 422). A later migration could add the constraint as `not valid` for new rows only, if a second writer ever appears.
+- **Alternatives.** Required only in the UI (rejected: other API clients and the review revision would still create versions without a summary); a stricter check constraint (rejected for the existing data, see above); a default text such as "no summary" (rejected: it satisfies the rule without informing readers).
+- **Consequences.** Positive: the version history and comparisons always explain new versions; one rule for both kinds of change, simpler to explain. Negative: one more required input when starting a major version, including the revision from the task inbox; API clients that started major versions without `reason` now get 422.
+- **Reversibility: high.** Making the summary optional for major versions again is a change of `checkChangeReason` and the two dialogs; no data changes.
 
 ## Reversibility
 

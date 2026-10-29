@@ -389,6 +389,7 @@ object ReviewApiSpec extends ZIOSpecDefault:
         byOther <- decide(owner2, task, "revise", "{}")
         badKind <- decide(owner, task, "revise", """{"changeKind":"Patch"}""")
         minor   <- decide(owner, task, "revise", """{"changeKind":"Minor"}""")
+        major   <- decide(owner, task, "revise", """{"changeKind":"Major","reason":"  "}""")
         revised <- decide(owner, task, "revise", """{"reason":"New regulation"}""")
         found   <- versions(doc.id)
         view = as[ReviewTaskView](revised)
@@ -397,6 +398,8 @@ object ReviewApiSpec extends ZIOSpecDefault:
         badKind._1 == Status.UnprocessableEntity,
         // An editorial version needs a reason; nothing was changed.
         minor._1 == Status.UnprocessableEntity,
+        // So does a major one (DMS-126).
+        major._1 == Status.UnprocessableEntity,
         revised._1 == Status.Ok,
         view.status == "Revised",
         view.newVersionId == found.find(_.status == "Draft").map(_.id),

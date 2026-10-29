@@ -36,8 +36,7 @@ export const tasks = {
   openFirst: 'Open the document first.',
   readConfirmed: 'Read confirmed: {title} {version}.',
   recertify: 'Recertify…',
-  revise: 'Revise',
-  starting: 'Starting…',
+  revise: 'Revise…',
   withdraw: 'Withdraw…',
   revisionStarted: 'Revision started: a new draft of {title} is open.',
   recertified: 'Recertified: {title} {version}, next review {date}.',
@@ -76,9 +75,12 @@ export const tasks = {
   },
   reviewDialog: {
     recertifyTitle: 'Recertify: {title} {version}',
+    reviseTitle: 'Revise: {title} {version}',
     withdrawTitle: 'Withdraw: {title} {version}',
     recertifyText:
       'The version stays valid without a change and gets a new review date. Review date: {date}.',
+    reviseText:
+      'Starts the next version as a draft from the valid version, which stays in force until the new one is published. If a draft is already in progress, it is linked instead.',
     withdrawText:
       'The version goes out of force and readers no longer see it as valid. Other versions of the document are not affected.',
     nextDateRequired: 'Next review date *',
@@ -92,6 +94,12 @@ export const tasks = {
     note: 'Note (optional)',
     recertifying: 'Recertifying…',
     recertify: 'Recertify',
+    summary: 'Change summary *',
+    summaryMissing: 'Describe what changes and why: every new version needs a change summary.',
+    summaryHint:
+      'What changes and why, in plain words for readers. It becomes the change summary of the new draft; you can change it until you submit the draft.',
+    revising: 'Starting…',
+    revise: 'Start revision',
     reason: 'Reason *',
     reasonMissing: 'A reason is required.',
     reasonHint: 'Why the document is not needed any more; recorded in the audit trail.',

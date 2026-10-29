@@ -52,19 +52,16 @@ function NewVersionForm({
   const labels = nextLabels(document.current.version)
 
   const trimmed = summary.trim()
+  // Every new version needs a change summary, major and minor (DMS-126, business concept 5.1).
   const problem =
-    kind === 'Minor' && trimmed === ''
+    trimmed === ''
       ? t('newVersion.summaryMissing')
       : trimmed.length > MAX_CHANGE_SUMMARY
         ? t('newVersion.summaryTooLong', { max: MAX_CHANGE_SUMMARY, count: trimmed.length })
         : undefined
 
   const start = useMutation({
-    mutationFn: () =>
-      startNewVersion(client, document.id, {
-        changeKind: kind,
-        ...(trimmed === '' ? {} : { reason: trimmed }),
-      }),
+    mutationFn: () => startNewVersion(client, document.id, { changeKind: kind, reason: trimmed }),
     onSuccess: async (created) => {
       toast(
         fileDocument
@@ -132,9 +129,7 @@ function NewVersionForm({
         ))}
       </fieldset>
       <div className="grid gap-1.5">
-        <Label htmlFor={summaryId}>
-          {kind === 'Minor' ? t('newVersion.summary') : t('newVersion.summaryOptional')}
-        </Label>
+        <Label htmlFor={summaryId}>{t('newVersion.summary')}</Label>
         <Textarea
           id={summaryId}
           value={summary}
@@ -142,7 +137,7 @@ function NewVersionForm({
           onChange={(e) => {
             setSummary(e.target.value)
           }}
-          aria-required={kind === 'Minor'}
+          aria-required
           aria-invalid={error ? true : undefined}
           aria-describedby={hintId}
         />

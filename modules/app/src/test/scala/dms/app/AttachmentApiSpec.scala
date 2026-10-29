@@ -604,7 +604,7 @@ object AttachmentApiSpec extends ZIOSpecDefault:
           author,
           "POST",
           s"/api/v1/documents/${doc.id}/versions",
-          Some("""{"changeKind":"Major"}""")
+          Some("""{"changeKind":"Major","reason":"Content revised"}""")
         )
           .map(as[DocumentVersionView])
         carried <- attachments(author, doc.id, next.id).map(as[AttachmentsView])

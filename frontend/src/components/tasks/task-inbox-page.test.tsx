@@ -410,7 +410,7 @@ describe('task inbox', () => {
     expect(within(row).getByText(/^Review due /)).toBeInTheDocument()
     expect(within(row).getByText('version 3.0')).toBeInTheDocument()
     expect(within(row).getByText('policy · valid, review ahead')).toBeInTheDocument()
-    for (const name of ['Recertify…', 'Revise', 'Withdraw…']) {
+    for (const name of ['Recertify…', 'Revise…', 'Withdraw…']) {
       expect(within(row).getByRole('button', { name })).toBeInTheDocument()
     }
     expect(screen.getByText('2 open, 1 overdue')).toBeInTheDocument()
@@ -463,20 +463,33 @@ describe('task inbox', () => {
     })
   })
 
-  it('starts the revision and opens the document', async () => {
+  it('starts the revision with its required change summary and opens the document', async () => {
     state.tasks = []
     state.reviews = [review]
     const { post, user, router } = renderAt('/tasks')
 
     const row = await screen.findByRole('listitem', { name: 'Periodic review: Handbook' })
-    await user.click(within(row).getByRole('button', { name: 'Revise' }))
+    await user.click(within(row).getByRole('button', { name: 'Revise…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Revise: Handbook 3.0' })
+    const summary = within(dialog).getByLabelText('Change summary *')
+    expect(summary).toHaveAttribute('aria-required', 'true')
+    // Every new version needs a change summary (DMS-126).
+    await user.click(within(dialog).getByRole('button', { name: 'Start revision' }))
+    expect(
+      within(dialog).getByText(
+        'Describe what changes and why: every new version needs a change summary.',
+      ),
+    ).toHaveAttribute('role', 'alert')
+    expect(post).not.toHaveBeenCalledWith('/api/v1/reviews/{taskId}/revise', expect.anything())
 
+    await user.type(summary, ' New regulation 2026 ')
+    await user.click(within(dialog).getByRole('button', { name: 'Start revision' }))
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`/documents/${handbookId}`)
     })
     expect(post).toHaveBeenCalledWith('/api/v1/reviews/{taskId}/revise', {
       params: { path: { taskId: 'review-handbook' } },
-      body: {},
+      body: { reason: 'New regulation 2026' },
     })
   })
 

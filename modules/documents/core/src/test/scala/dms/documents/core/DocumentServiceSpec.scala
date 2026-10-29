@@ -316,6 +316,16 @@ object DocumentServiceSpec extends ZIOSpecDefault:
   private def create(f: Fixture, values: Map[String, FieldEntry] = initialValues) =
     as(f.tenant)(_.create(NewDocument(f.templateId, 1, "Service contract ACME", values), author))
 
+  /** A draft as it could exist from before DMS-126: a new version without change summary. */
+  private def clearChangeReason(version: UUID): ZIO[Env, DbError, Unit] =
+    ZIO
+      .serviceWithZIO[Env](
+        _.owner.transactSystem(
+          Db.sql(sql"update dms.document_version set change_reason = null where id = $version".update.run())
+        )
+      )
+      .unit
+
   private def outbox(document: DocumentId): ZIO[Env, DbError, List[String]] =
     ZIO.serviceWithZIO[Env](
       _.owner.transactSystem(
@@ -634,7 +644,7 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         _  <- as(f.tenant)(_.attachRendition(v1.id, Rendition("renditions/1.pdf", None, "e" * 64), author))
         _  <- as(f.tenant)(_.changeStatus(v1.id, Approve, approver))
         _  <- as(f.tenant)(_.changeStatus(v1.id, Publish, approver))
-        v2 <- as(f.tenant)(_.newVersion(doc.id, ChangeKind.Major, None, author))
+        v2 <- as(f.tenant)(_.newVersion(doc.id, ChangeKind.Major, Some("Content revised"), author))
         carried  <- as(f.tenant)(_.deviationRequests(v2.id))
         original <- as(f.tenant)(_.deviationRequests(v1.id))
         // The carried-over request keeps permitting the deviation in the new draft.
@@ -748,6 +758,23 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         stored.status == InApproval
       )
     },
+    test("a new version without change summary, started before DMS-126, cannot be submitted") {
+      for
+        f       <- fixture
+        doc     <- published(f)
+        v2      <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Content revised"), author))
+        _       <- clearChangeReason(v2.id)
+        blocked <- as(f.tenant)(_.submit(doc, author)).either
+        _       <- as(f.tenant)(_.updateChangeReason(doc, Some("Content revised"), author))
+        passed  <- as(f.tenant)(_.submit(doc, author))
+      yield assertTrue(
+        blocked.left.exists {
+          case DocumentError.Invalid(errors) => errors.exists(_.contains("needs a change summary"))
+          case _                             => false
+        },
+        passed.status == InReview
+      )
+    },
     test(
       "a new version starts from the valid one; one draft at a time; publication supersedes the old version"
     ) {
@@ -755,8 +782,9 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         f      <- fixture
         doc    <- published(f)
         minor  <- as(f.tenant)(_.newVersion(doc, ChangeKind.Minor, Some(" "), author)).either
-        v2     <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, None, author))
-        second <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, None, author)).either
+        major  <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, None, author)).either
+        v2     <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Content revised"), author))
+        second <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Content revised"), author)).either
         _      <- as(f.tenant)(_.submit(doc, author))
         _      <- as(f.tenant)(_.changeStatus(v2.id, ReviewPassed, UserId("reviewer-1")))
         _  <- as(f.tenant)(_.attachRendition(v2.id, Rendition("renditions/2.pdf", None, "d" * 64), author))
@@ -766,6 +794,11 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         details <- as(f.tenant)(_.get(doc))
       yield assertTrue(
         minor.left.exists(_.isInstanceOf[DocumentError.Invalid]),
+        // Every new version needs a change summary, a major one as well (DMS-126).
+        major.left.exists {
+          case DocumentError.Invalid(errors) => errors.exists(_.contains("needs a change summary"))
+          case _                             => false
+        },
         v2.label == "2.0-draft.1",
         v2.values("version").value == MetadataValue.Text("2.0"),
         v2.content == content,
@@ -893,7 +926,7 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         f         <- fixture
         other     <- fixture
         published <- published(f)
-        next      <- as(f.tenant)(_.newVersion(published, ChangeKind.Major, None, author))
+        next      <- as(f.tenant)(_.newVersion(published, ChangeKind.Major, Some("Content revised"), author))
         created   <- create(f)
         (draft, draftVersion) = created
         onThree <- as(f.tenant)(

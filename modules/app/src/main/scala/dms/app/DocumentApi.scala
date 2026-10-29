@@ -122,8 +122,8 @@ final case class EditorialCheckView(
 final case class NewVersion(
     /** Major (change of content, full workflow) or Minor (editorial correction, shortened workflow). */
     changeKind: String,
-    /** The author's change summary, shown above version comparisons (DMS-54). Required for Minor: why the
-      * change is editorial; optional for Major.
+    /** The author's change summary, shown above version comparisons (DMS-54): what changed and why. Required
+      * for every new version, Major and Minor (DMS-126); for Minor it also says why the change is editorial.
       */
     reason: Option[String],
     /** Whether publishing the version asks readers for a new acknowledgement. Default: yes for Major, the
@@ -134,8 +134,9 @@ final case class NewVersion(
       Schema
 
 final case class UpdateChangeSummary(
-    /** The author's change summary of the draft (DMS-103): what changed and why. Required for Minor; empty or
-      * missing removes it from a Major version.
+    /** The author's change summary of the draft (DMS-103): what changed and why. Required for every version
+      * with a predecessor (DMS-126); only the first version 1.0 of a document may have none (empty or missing
+      * removes it there).
       */
     reason: Option[String]
 ) derives JsonCodec,
@@ -547,10 +548,10 @@ object DocumentApi:
       .out(statusCode(StatusCode.Created).and(jsonBody[DocumentVersionView]))
       .description(
         "Starts the next version from the valid version as a draft: Major for a change of content (full " +
-          "workflow of the class), Minor for an editorial correction (reason required, 422; on submission the " +
+          "workflow of the class), Minor for an editorial correction (on submission the " +
           "owner confirms it in a shortened workflow, and an automatic comparison warns in `editorialCheck` if " +
-          "more text changed than the configured threshold). 409 while a version is open or an approved version " +
-          "waits for its valid-from date."
+          "more text changed than the configured threshold). Both need a change summary in `reason` (422 if " +
+          "empty, DMS-126). 409 while a version is open or an approved version waits for its valid-from date."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -590,7 +591,8 @@ object DocumentApi:
       .description(
         "Changes the author's change summary of the open draft (DMS-103), shown in the version history and above " +
           "version comparisons. Requires EditDraft; only while the version is a draft (409 from submission on). " +
-          "An editorial (Minor) version needs a summary (422); at most 4000 characters (422). Content and values " +
+          "Every version with a predecessor, Major or Minor, needs a summary (422, DMS-126); only the first version " +
+          "1.0 of a document may have none. At most 4000 characters (422). Content and values " +
           "are unchanged, so no working state is added. Recorded in the audit trail."
       )
       .tag("Documents")

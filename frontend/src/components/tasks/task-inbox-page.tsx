@@ -11,7 +11,7 @@ import {
 import { useApiClient } from '@/api/context'
 import { documentQuery } from '@/api/documents'
 import type { DocumentView } from '@/api/partners'
-import { invalidateAfterReview, openReviewTasksQuery, revise, type ReviewTask } from '@/api/reviews'
+import { openReviewTasksQuery, type ReviewTask } from '@/api/reviews'
 import { decisionLabel, myTasksQuery, type WorkflowTask } from '@/api/workflow'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -162,23 +162,10 @@ function AcknowledgementActions({
 function ReviewActions({
   review,
   onDecide,
-  onDone,
 }: {
   review: ReviewTask
   onDecide: (review: ReviewTask, decision: ReviewDecision) => void
-  onDone: (message: string) => void
 }) {
-  const client = useApiClient()
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
-  const revision = useMutation({
-    mutationFn: () => revise(client, review.id),
-    onSuccess: async () => {
-      await invalidateAfterReview(queryClient, review.documentId)
-      onDone(t('tasks.revisionStarted', { title: review.title }))
-      await navigate({ to: '/documents/$documentId', params: { documentId: review.documentId } })
-    },
-  })
   return (
     <div className="flex flex-col items-start gap-1 sm:items-end">
       <div className="flex flex-wrap gap-2">
@@ -193,12 +180,11 @@ function ReviewActions({
         <Button
           size="sm"
           variant="outline"
-          disabled={revision.isPending}
           onClick={() => {
-            revision.mutate()
+            onDecide(review, 'revise')
           }}
         >
-          {revision.isPending ? t('tasks.starting') : t('tasks.revise')}
+          {t('tasks.revise')}
         </Button>
         <Button
           size="sm"
@@ -210,7 +196,6 @@ function ReviewActions({
           {t('tasks.withdraw')}
         </Button>
       </div>
-      {revision.isError && <InlineError error={revision.error} className="text-xs" />}
     </div>
   )
 }
@@ -289,9 +274,7 @@ function InboxRow({
         {item.kind === 'Acknowledgement' && (
           <AcknowledgementActions ack={item.acknowledgement} onDone={onDone} />
         )}
-        {item.kind === 'ReviewDate' && (
-          <ReviewActions review={item.review} onDecide={onReview} onDone={onDone} />
-        )}
+        {item.kind === 'ReviewDate' && <ReviewActions review={item.review} onDecide={onReview} />}
       </div>
     </li>
   )
@@ -410,13 +393,15 @@ export function TaskInboxPage() {
         onDone={(review) => {
           setDeciding(undefined)
           toast(
-            review.status === 'Recertified'
-              ? t('tasks.recertified', {
-                  title: review.title,
-                  version: review.versionLabel,
-                  date: formatPlainDate(review.nextDueOn ?? review.dueOn),
-                })
-              : t('tasks.withdrawn', { title: review.title, version: review.versionLabel }),
+            review.status === 'Revised'
+              ? t('tasks.revisionStarted', { title: review.title })
+              : review.status === 'Recertified'
+                ? t('tasks.recertified', {
+                    title: review.title,
+                    version: review.versionLabel,
+                    date: formatPlainDate(review.nextDueOn ?? review.dueOn),
+                  })
+                : t('tasks.withdrawn', { title: review.title, version: review.versionLabel }),
           )
         }}
       />

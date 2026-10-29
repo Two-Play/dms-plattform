@@ -61,8 +61,9 @@ final case class RecertifyVersion(
       Schema
 
 final case class ReviseVersion(
-    /** Major (default; change of content, full workflow) or Minor (editorial correction, reason required). */
+    /** Major (default; change of content, full workflow) or Minor (editorial correction). */
     changeKind: Option[String],
+    /** The change summary of the new version; required unless a version is open already (DMS-126). */
     reason: Option[String]
 ) derives JsonCodec,
       Schema
@@ -156,8 +157,8 @@ object ReviewApi:
       .in(jsonBody[ReviseVersion])
       .out(jsonBody[ReviewTaskView])
       .description(
-        "Revision required: starts the next version as a draft from the valid version (Major by default; Minor " +
-          "needs a reason) or links the version already open; the valid version stays in force until the new one " +
+        "Revision required: starts the next version as a draft from the valid version (Major by default; a " +
+          "`reason` is required as its change summary, 422, DMS-126) or links the version already open; the valid version stays in force until the new one " +
           "is published. `newVersionId` names the draft. 403 unless the caller is the document's owner and may " +
           "edit drafts, 409 if the task was decided already or an approved version waits for its valid-from date."
       )
