@@ -199,6 +199,7 @@ function renderAt(path: string) {
       case '/api/v1/documents/{id}/versions/{versionId}/rendition':
       case '/api/v1/documents/{id}/versions/{versionId}/draft.pdf':
       case '/api/v1/documents/{id}/versions/{versionId}/copy.pdf':
+      case '/api/v1/documents/{id}/versions/{versionId}/document.docx':
         return ok(new Blob(['%PDF']), 200, {
           'Content-Disposition': `attachment; filename="${p.split('/').pop() ?? ''}"`,
         })
@@ -320,6 +321,38 @@ describe('Document page: content and metadata of a published version', () => {
       parseAs: 'blob',
     })
   })
+
+  it('downloads a structured version as Word with the same options (DMS-121)', async () => {
+    const downloads = captureDownloads()
+    const { get, user } = renderAt(`/documents/${documentId}`)
+
+    const word = await screen.findByRole('button', { name: 'Download as Word' })
+    expect(screen.getByText(/editable but not authoritative/)).toBeInTheDocument()
+    await user.click(word)
+    await waitFor(() => {
+      expect(downloads).toEqual(['document.docx'])
+    })
+    await user.click(screen.getByRole('checkbox', { name: 'Attach change history' }))
+    await user.click(screen.getByRole('checkbox', { name: 'Attach list of attachments' }))
+    await user.click(screen.getByRole('button', { name: 'Download as Word' }))
+    await waitFor(() => {
+      expect(downloads).toEqual(['document.docx', 'document.docx'])
+    })
+    expect(get).toHaveBeenCalledWith('/api/v1/documents/{id}/versions/{versionId}/document.docx', {
+      params: {
+        path: { id: documentId, versionId: 'v1' },
+        query: { changelog: false, attachments: false },
+      },
+      parseAs: 'blob',
+    })
+    expect(get).toHaveBeenCalledWith('/api/v1/documents/{id}/versions/{versionId}/document.docx', {
+      params: {
+        path: { id: documentId, versionId: 'v1' },
+        query: { changelog: true, attachments: true },
+      },
+      parseAs: 'blob',
+    })
+  })
 })
 
 describe('Document page: a version in review', () => {
@@ -384,6 +417,7 @@ describe('Document page in German', () => {
     renderAt(`/documents/${documentId}`)
 
     expect(await screen.findByRole('button', { name: 'PDF herunterladen' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Als Word herunterladen' })).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: 'Änderungshistorie anhängen' })).toBeInTheDocument()
     await screen.findByTestId('version-metadata')
     expect(row('Herausgebende Stelle')).toHaveTextContent('IT Governance')

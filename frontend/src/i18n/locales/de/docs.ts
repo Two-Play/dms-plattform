@@ -172,6 +172,11 @@ export const docs: Translation<typeof en.docs> = {
     copyHint:
       'Eine jetzt erzeugte Kopie mit Änderungshistorie; die archivierte PDF/A-Fassung bleibt unverändert und maßgeblich.',
     failed: 'Das PDF konnte nicht heruntergeladen werden: {message}',
+    downloadWord: 'Als Word herunterladen',
+    downloadingWord: 'Word-Dokument wird erzeugt …',
+    wordHint:
+      'Das Word-Dokument wird jetzt aus derselben Fassung erzeugt und ist bearbeitbar, aber nicht maßgeblich.',
+    wordFailed: 'Das Word-Dokument konnte nicht heruntergeladen werden: {message}',
   },
   groups: {
     perLine: 'Ein Gruppenschlüssel pro Zeile',
@@ -232,5 +237,26 @@ export const docs: Translation<typeof en.docs> = {
       Changed: 'Geänderter Block: ',
     },
     prefix: { ClauseRef: 'Klausel', Conditional: 'Wenn', Repeat: 'Für jedes', Table: 'Tabelle' },
+    sectionNames: { original: 'Text des Word-Dokuments' },
+    originalTitle: 'Originaldatei',
+    originalChanged: 'Originaldatei geändert',
+    originalUnchanged: 'Originaldatei unverändert',
+    noOriginal: 'keine Datei',
+    wordCompared:
+      'Verglichen wird der Text der Word-Dokumente mit ausgefüllten Feldern; geänderte Werte manueller Felder stehen unter „Felder“.',
+    textNotCompared:
+      'Der Text wird nur bei Word-Dokumenten (.docx) verglichen. Bei anderen Formaten zeigt der Vergleich nur, ob und wie sich die Datei geändert hat.',
+    properties: {
+      status: 'Status',
+      renditionChecksum: 'Prüfsumme der Archivfassung',
+      changeKind: 'Änderungsart',
+      classVersion: 'Klassenversion',
+      approvedBy: 'Freigegeben von',
+      approvedAt: 'Freigegeben am',
+      publishedAt: 'Veröffentlicht am',
+      requiresAcknowledgement: 'Kenntnisnahme erforderlich',
+      originalName: 'Originaldatei',
+      originalChecksum: 'Prüfsumme der Originaldatei',
+    },
   },
 }

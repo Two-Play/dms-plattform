@@ -3,11 +3,12 @@ import { createMemoryHistory, RouterProvider } from '@tanstack/react-router'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { AuthContextProps } from 'react-oidc-context'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
 import { ApiClientProvider } from '@/api/context'
 import type { DocumentVersionView, DocumentView } from '@/api/partners'
 import type { VersionComparison } from '@/api/versions'
+import { setLocale } from '@/i18n'
 import { createAppRouter } from '@/router'
 
 const signedIn = {
@@ -213,6 +214,10 @@ beforeEach(() => {
   compareReply = () => ok(comparison)
 })
 
+afterEach(() => {
+  setLocale('en')
+})
+
 function renderAt(path: string) {
   const get = vi.fn((p: string) => {
     switch (p) {
@@ -362,6 +367,108 @@ describe('Version comparison', () => {
     expect(await screen.findByRole('alert', {}, firstLoad)).toHaveTextContent(
       'You are not allowed to read one of these versions.',
     )
+  })
+
+  it('compares file documents by their Word text and shows the originals, in German (DMS-121)', async () => {
+    setLocale('de')
+    const file = (name: string, sha: string) => ({ name, size: 2048, sha256: sha.repeat(64) })
+    compareReply = () =>
+      ok({
+        ...comparison,
+        summaries: [],
+        text: {
+          changed: true,
+          insertedWords: 1,
+          deletedWords: 1,
+          sections: [
+            {
+              id: 'original',
+              status: 'Changed',
+              moved: false,
+              blocks: [
+                {
+                  path: [],
+                  location: 'block 1',
+                  kind: 'Paragraph',
+                  status: 'Changed',
+                  spans: [
+                    { kind: 'Equal', text: 'Kunde:' },
+                    { kind: 'Deleted', text: 'ACME' },
+                    { kind: 'Inserted', text: 'Beta' },
+                  ],
+                  changes: [],
+                },
+              ],
+            },
+          ],
+        },
+        fields: [
+          {
+            key: 'word:customer',
+            label: 'Kunde',
+            before: { type: 'Text', value: 'ACME' },
+            after: { type: 'Text', value: 'Beta' },
+            originBefore: 'Manual',
+            originAfter: 'Manual',
+          },
+        ],
+        metadata: [
+          {
+            key: 'originalChecksum',
+            label: 'Original checksum',
+            before: { type: 'Text', value: 'a'.repeat(64) },
+            after: { type: 'Text', value: 'b'.repeat(64) },
+            originBefore: 'System',
+            sourceBefore: 'dms',
+            originAfter: 'System',
+            sourceAfter: 'dms',
+          },
+        ],
+        original: {
+          changed: true,
+          before: file('Vertrag.docx', 'a'),
+          after: file('Vertrag v2.docx', 'b'),
+          textCompared: true,
+        },
+      } satisfies VersionComparison)
+    const { user } = renderAt(`/documents/${documentId}/compare?from=v1&to=v3`)
+
+    const originals = await screen.findByRole('table', { name: 'Originaldatei' }, firstLoad)
+    expect(screen.getByText('Originaldatei geändert')).toBeInTheDocument()
+    expect(within(originals).getByText('Vertrag.docx')).toBeInTheDocument()
+    expect(within(originals).getByText('Vertrag v2.docx')).toBeInTheDocument()
+    expect(within(originals).getByText(`SHA-256 ${'b'.repeat(64)}`)).toBeInTheDocument()
+    expect(screen.getByText(/Verglichen wird der Text der Word-Dokumente/)).toBeInTheDocument()
+
+    const section = screen.getByRole('region', { name: 'Text des Word-Dokuments' })
+    expect(section.querySelector('del')?.textContent).toBe('[gelöscht: ACME]')
+    expect(section.querySelector('ins')?.textContent).toBe('[eingefügt: Beta]')
+
+    await user.click(screen.getByRole('tab', { name: 'Felder (1)' }))
+    expect(screen.getByRole('row', { name: /Kunde/ })).toHaveTextContent('KundeACMEBeta')
+    await user.click(screen.getByRole('tab', { name: 'Metadaten (1)' }))
+    expect(screen.getByRole('row', { name: /Prüfsumme der Originaldatei/ })).toBeInTheDocument()
+  })
+
+  it('says when the originals are compared as files only', async () => {
+    compareReply = () =>
+      ok({
+        ...comparison,
+        text: { changed: false, insertedWords: 0, deletedWords: 0, sections: [] },
+        original: {
+          changed: true,
+          before: { name: 'Budget.xlsx', size: 10, sha256: 'a'.repeat(64) },
+          after: { name: 'Budget 2027.xlsx', size: 12, sha256: 'b'.repeat(64) },
+          textCompared: false,
+        },
+      } satisfies VersionComparison)
+    renderAt(`/documents/${documentId}/compare?from=v1&to=v3`)
+
+    expect(
+      await screen.findByText(/Text is compared for Word documents \(.docx\) only/, {}, firstLoad),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Original file changed')).toBeInTheDocument()
+    expect(screen.getByText('Budget 2027.xlsx')).toBeInTheDocument()
   })
 
   it('asks for two versions when the address names fewer', async () => {

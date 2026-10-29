@@ -1,9 +1,9 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { Download, Upload } from 'lucide-react'
 import { useId, useRef, useState } from 'react'
 import { useApiClient } from '@/api/context'
-import { createTemplate, type TemplateVersion } from '@/api/template-admin'
+import { createTemplate, templateClassesQuery, type TemplateVersion } from '@/api/template-admin'
 import {
   downloadTemplateWord,
   isWordFile,
@@ -291,14 +291,12 @@ export function WordTemplatePanel({
 }
 
 /**
- * "New Word template" (DMS-115): name, the document class (taken from an existing template, since designers
- * see templates, not the class configuration) and the DOCX; creates the template and uploads the file.
+ * "New Word template" (DMS-115): name, the document class (from the read-only class list for designers,
+ * DMS-121) and the DOCX; creates the template for the class's latest version and uploads the file.
  */
 export function NewWordTemplateCard({
-  templates,
   upload,
 }: {
-  templates: TemplateVersion[]
   /** Replaceable in tests. */
   upload?: (templateId: string, version: number) => UploadFile<WordTemplate>
 }) {
@@ -314,16 +312,17 @@ export function NewWordTemplateCard({
   const [source, setSource] = useState('')
   const [file, setFile] = useState<File | undefined>(undefined)
   const [problem, setProblem] = useState<string | undefined>(undefined)
-  const template = templates.find((tpl) => tpl.templateId === source)
+  const classes = useQuery(templateClassesQuery(client))
+  const chosen = classes.data?.find((c) => c.id === source)
 
   const create = useMutation({
     mutationFn: async () => {
-      if (!template || !file) throw new Error(t('word.templates.notDocx'))
+      if (!chosen || !file) throw new Error(t('word.templates.notDocx'))
       const created = await createTemplate(client, {
         name: name.trim(),
         description: description.trim() || undefined,
-        documentClassId: template.documentClassId,
-        documentClassVersion: template.documentClassVersion,
+        documentClassId: chosen.id,
+        documentClassVersion: chosen.version,
         content: { sections: [] },
       })
       const send = (upload ?? uploadTemplateWord)(created.templateId, created.version)
@@ -389,12 +388,17 @@ export function NewWordTemplateCard({
               }}
             >
               <option value="">{t('word.templates.chooseClass')}</option>
-              {templates.map((tpl) => (
-                <option key={tpl.templateId} value={tpl.templateId}>
-                  {tpl.name}
+              {(classes.data ?? []).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {(c.path ?? [c.label]).join(' › ')}
                 </option>
               ))}
             </select>
+            {classes.error && (
+              <p role="alert" className="text-sm text-destructive">
+                {t('word.templates.classesFailed', { message: message(classes.error) })}
+              </p>
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor={fileId}>{t('word.templates.file')}</Label>

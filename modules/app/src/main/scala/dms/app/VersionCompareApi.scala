@@ -4,8 +4,22 @@ import dms.documents.*
 import dms.documents.core.{DocumentDetails, DocumentError}
 import dms.documents.core.MetadataJson.given
 import dms.documents.metadata.MetadataValue
+import dms.identity.{Principal, TenantOrganizations, UserDirectory}
 import dms.kernel.DocumentId
-import dms.templates.{BlockDiff, ContentDiff, PathStep, SectionDiff, StructureChange}
+import dms.templates.{
+  Block,
+  BlockDiff,
+  ContentDiff,
+  Inline,
+  PathStep,
+  Section,
+  SectionDiff,
+  SectionId,
+  StructureChange,
+  TemplateContent
+}
+import dms.workflow.Approval
+import sttp.model.StatusCode
 import dms.templates.core.DeviationJson.given
 import sttp.tapir.Schema
 import sttp.tapir.json.zio.jsonBody
@@ -112,6 +126,22 @@ final case class ValueChangeView(
 ) derives JsonCodec,
       Schema
 
+/** The original of a file version (DMS-115): file name, size and SHA-256. */
+final case class OriginalFileView(name: String, size: Long, sha256: String) derives JsonCodec, Schema
+
+/** The originals of two file versions (DMS-121). */
+final case class OriginalComparisonView(
+    /** The SHA-256 (or the presence) of the original differs. */
+    changed: Boolean,
+    before: Option[OriginalFileView],
+    after: Option[OriginalFileView],
+    /** True if `text` compares the text of the originals: Word documents (DOCX) with their fields filled.
+      * False for other formats (PDF, spreadsheets, ...), whose text is not compared; only the file is.
+      */
+    textCompared: Boolean
+) derives JsonCodec,
+      Schema
+
 final case class VersionComparisonView(
     documentId: UUID,
     title: String,
@@ -125,16 +155,25 @@ final case class VersionComparisonView(
     /** Changed field values of the document class, with their origin. */
     fields: List[ValueChangeView],
     /** Changed core and system metadata and version properties (status, approval, rendition checksum). */
-    metadata: List[ValueChangeView]
+    metadata: List[ValueChangeView],
+    /** File documents only (DMS-121): the originals of both versions. `text` then compares the paragraphs of
+      * the filled Word documents, and `fields` includes the manual Word field values (keys `word:<key>`).
+      */
+    original: Option[OriginalComparisonView] = None
 ) derives JsonCodec,
       Schema
 
 /** Comparison of two versions of a document (US-05.1, DMS-54, ADR 0033): the text, the field values and the
   * metadata separately, with the authors' change summaries. Both versions need `ReadDocument` in their
   * current status, exactly as reading them one by one; one unreadable version denies the comparison (403).
+  *
+  * File documents (DMS-121, ADR 0044): the text is that of the Word documents with their fields filled (as
+  * the filled DOCX download gives them), one paragraph per block; the manual Word field values are compared
+  * with the field values and the original's name and SHA-256 with the metadata. Originals in other formats
+  * are compared as files only.
   */
 object VersionCompareApi:
-  type Env = DocumentApi.Env
+  type Env = DocumentApi.Env & FileVersions & TenantOrganizations & UserDirectory
 
   val compare: ZServerEndpoint[Env, Any] =
     SecuredApi.base.get
@@ -145,25 +184,88 @@ object VersionCompareApi:
       .description(
         "Compares two versions of a document: word-level text changes per section and block (inserted, deleted, " +
           "structural changes), changed field values with their origin and changed metadata, with the change " +
-          "summaries of the versions in between. Both versions must be readable by the caller (403 otherwise); " +
-          "404 if a version does not belong to the document."
+          "summaries of the versions in between. File documents: the paragraphs of the Word documents with their " +
+          "fields filled, the manual Word field values and the originals (`original`); originals in other formats " +
+          "are compared by name and SHA-256 only. Both versions must be readable by the caller (403 otherwise); " +
+          "404 if a version does not belong to the document; 503 if the original of a file version cannot be read."
       )
       .tag("Documents")
       .serverLogic(p =>
         (id, fromId, toId) =>
-          DocumentApi.inTransaction(p) { ctx =>
-            for
-              details <- ctx.service.get(DocumentId(id))
-              from    <- version(details, fromId)
-              to      <- version(details, toId)
-              _       <- ctx.checkRead(details, from)
-              _       <- ctx.checkRead(details, to)
-              visible <- ctx.visible(details)
-            yield view(details, VersionComparison.compare(details.profile, from, to, visible))
-          }
+          for
+            found <- DocumentApi.inTransaction(p) { ctx =>
+              for
+                details <- ctx.service.get(DocumentId(id))
+                from    <- version(details, fromId)
+                to      <- version(details, toId)
+                _       <- ctx.checkRead(details, from)
+                _       <- ctx.checkRead(details, to)
+                visible <- ctx.visible(details)
+                cases   <-
+                  if details.document.kind == DocumentKind.File then ctx.workflow.cases(details.document.id)
+                  else ZIO.succeed(Nil)
+              yield (details, from, to, visible, cases.flatMap(_.approval))
+            }
+            (details, from, to, visible, approvals) = found
+            file                                    = details.document.kind == DocumentKind.File
+            textCompared                            = file && List(from, to).forall(_.file.forall(_.isWord))
+            contents <-
+              if textCompared then
+                (wordContent(p, details, from, approvals) <*> wordContent(p, details, to, approvals)).asSome
+              else if file then ZIO.some((TemplateContent(Nil), TemplateContent(Nil)))
+              else ZIO.none
+            comparison = VersionComparison.compare(details.profile, from, to, visible, contents)
+          yield view(details, comparison).copy(original =
+            Option.when(file)(
+              OriginalComparisonView(
+                from.file.map(_.sha256) != to.file.map(_.sha256),
+                from.file.map(originalView),
+                to.file.map(originalView),
+                textCompared
+              )
+            )
+          )
       )
 
   def endpoints: List[ZServerEndpoint[Env, Any]] = List(compare)
+
+  /** Section id of the text of a file version in the comparison. */
+  val OriginalSection: String = "original"
+
+  /** The paragraphs of a file version's Word document, filled as the filled DOCX download gives it, as one
+    * section of paragraphs and headings; empty without file.
+    */
+  private def wordContent(
+      p: Principal,
+      details: DocumentDetails,
+      v: DocumentVersion,
+      approvals: List[Approval]
+  ): ZIO[FileVersions & TenantOrganizations & UserDirectory, (StatusCode, ApiError), TemplateContent] =
+    if v.file.isEmpty then ZIO.succeed(TemplateContent(Nil))
+    else
+      val approval = FileVersions.approvalOf(v, approvals.find(_.versionId == v.id))
+      for
+        names      <- VersionViewApi.displayNames(p, WordFilling.people(details, v, approval))
+        filled     <- FileVersions.filled(details, v, names, approval).mapError(VersionViewApi.toResponse)
+        paragraphs <- ZIO
+          .fromEither(WordDocx.paragraphs(filled.toArray))
+          .mapError(m =>
+            (StatusCode.UnprocessableEntity, ApiError("invalid_docx", s"version ${v.label}: $m"))
+          )
+      yield content(paragraphs)
+
+  /** Paragraphs as the blocks of one section; line breaks inside a paragraph stay line breaks. */
+  private[app] def content(paragraphs: List[WordParagraph]): TemplateContent =
+    def inlines(text: String): List[Inline] =
+      text.split('\n').toList.flatMap(line => List(Inline.LineBreak, Inline.Text(line))).drop(1)
+    val blocks = paragraphs.map(p =>
+      p.headingLevel.fold(Block.Paragraph(inlines(p.text)))(level => Block.Heading(level, inlines(p.text)))
+    )
+    TemplateContent(
+      Option.when(blocks.nonEmpty)(Section(SectionId(OriginalSection), None, false, blocks)).toList
+    )
+
+  private def originalView(f: VersionFile): OriginalFileView = OriginalFileView(f.name, f.size, f.sha256)
 
   private def version(details: DocumentDetails, versionId: UUID): IO[DocumentError, DocumentVersion] =
     ZIO

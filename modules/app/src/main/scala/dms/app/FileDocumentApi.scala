@@ -77,9 +77,14 @@ final case class CreateWordDocument(
       Schema
 
 /** The originals of file document versions (DMS-115, ADR 0042) read back against their SHA-256 and converted
-  * by the conversion worker; for approved versions their archived rendition.
+  * by the conversion worker; for approved versions their archived rendition. Converted PDFs of versions are
+  * kept in a bounded in-memory [[PreviewCache]] (DMS-121, ADR 0044).
   */
-final class FileVersions(archive: RenditionArchive, converter: DocumentConverter):
+final class FileVersions(
+    archive: RenditionArchive,
+    converter: DocumentConverter,
+    cache: PreviewCache = PreviewCache(PreviewCache.DefaultBytes)
+):
 
   /** The bytes of the original, checked against the recorded SHA-256. */
   def original(file: VersionFile): IO[RenderingError, Chunk[Byte]] =
@@ -89,6 +94,21 @@ final class FileVersions(archive: RenditionArchive, converter: DocumentConverter
   def toPdf(bytes: Chunk[Byte], name: String): IO[RenderingError, Chunk[Byte]] =
     if DocumentConverter.isPdf(bytes) then ZIO.succeed(bytes)
     else converter.convert(bytes, name, ConversionTarget.pdf(ArchiveStandard.default)).map(_.bytes)
+
+  /** A PDF of the (filled) original of version `versionId` for previews and printed drafts and copies: as
+    * [[toPdf]], but a conversion is kept in the [[PreviewCache]] under the version and the SHA-256 of the
+    * converted bytes. The filled bytes are a function of the original's SHA-256 and the manual and automatic
+    * field values (the filler is deterministic), so a changed value, a new original or an approval gives a
+    * new key, and an unchanged draft is converted once.
+    */
+  def previewPdf(versionId: UUID, bytes: Chunk[Byte], name: String): IO[RenderingError, Chunk[Byte]] =
+    if DocumentConverter.isPdf(bytes) then ZIO.succeed(bytes)
+    else
+      val key = PreviewCache.Key(versionId, FileVersions.sha256(bytes))
+      cache.get(key).flatMap {
+        case Some(pdf) => ZIO.succeed(pdf)
+        case None      => toPdf(bytes, name).tap(cache.put(key, _))
+      }
 
   /** The archived rendition of an approved version, if it has one. */
   def archived(v: DocumentVersion): Option[IO[RenderingError, Chunk[Byte]]] =
@@ -107,6 +127,13 @@ final class FileVersions(archive: RenditionArchive, converter: DocumentConverter
 object FileVersions:
   val layer: URLayer[RenditionArchive & DocumentConverter, FileVersions] =
     ZLayer.fromFunction(FileVersions(_, _))
+
+  /** With a preview cache of at most `cacheBytes` (0 disables it). */
+  def configured(cacheBytes: Long): URLayer[RenditionArchive & DocumentConverter, FileVersions] =
+    ZLayer.fromFunction(FileVersions(_, _, PreviewCache(cacheBytes)))
+
+  private[app] def sha256(bytes: Chunk[Byte]): String =
+    HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes.toArray))
 
   /** The original of a version with its Word fields filled (DMS-115): automatic fields from the platform
     * (with the approval, if any), manual fields as entered. Other files unchanged.
@@ -192,9 +219,10 @@ object FileDocumentApi:
           "file. Stored unchanged with its SHA-256, which the approval binds. The fields of a Word document (DOCX) " +
           "are read from its content controls (tag = field key, `dms:` prefix = automatic) and `{{key}}` " +
           "placeholders. 409 for structured documents and if the version is not a draft, 413 above the size " +
-          "limit of attachments, 422 for blocked types, unreadable DOCX and types that cannot be converted into " +
-          "PDF/A (`file_not_convertible`), 422 `attachment_infected`, 503 if the virus scanner or object storage " +
-          "is unavailable."
+          "limit of attachments, 422 for blocked types, unreadable DOCX, types that cannot be converted into " +
+          "PDF/A (`file_not_convertible`) and files whose content does not fit their extension " +
+          "(`file_type_mismatch`, e.g. a PDF named .xlsx), 422 `attachment_infected`, 503 if the virus scanner " +
+          "or object storage is unavailable."
       )
       .tag("Documents")
       .serverLogic(p => (id, contentType, body) => setFile(p, DocumentId(id), contentType, body))
@@ -337,7 +365,8 @@ object FileDocumentApi:
       .description(
         "A PDF of a file document version for reading in the browser: the archived rendition of an approved " +
           "version; otherwise the original (a Word file with its fields filled) converted on request with the " +
-          "draft marking on every page. Not stored. 409 for structured documents (see …/html), 404 without file, " +
+          "draft marking on every page. Not stored; a conversion is kept in memory per version and state, so an " +
+          "unchanged draft is converted once. 409 for structured documents (see …/html), 404 without file, " +
           "503 if the conversion worker is unavailable. Requires ReadDocument on the version."
       )
       .tag("Documents")
@@ -394,7 +423,9 @@ object FileDocumentApi:
           names  <- VersionViewApi.displayNames(p, WordFilling.people(details, v, approvalFacts))
           filled <- FileVersions.filled(details, v, names, approvalFacts).mapError(VersionViewApi.toResponse)
           name = v.file.fold("original")(_.name)
-          pdf <- ZIO.serviceWithZIO[FileVersions](_.toPdf(filled, name)).mapError(VersionViewApi.toResponse)
+          pdf <- ZIO
+            .serviceWithZIO[FileVersions](_.previewPdf(v.id, filled, name))
+            .mapError(VersionViewApi.toResponse)
         yield pdf
     }
 
@@ -475,6 +506,7 @@ object FileDocumentApi:
           name     <- validName(rawName)
           _        <- uploads.check(name, spooled).mapError(AttachmentApi.toResponse)
           _        <- convertible(name)
+          _        <- contentMatches(name, spooled)
           fields   <- scanned(name, spooled, draft.file.map(_.fields).getOrElse(Nil))
           existing <- DocumentApi.inTransaction(p)(_ => service.attachmentFile(id, spooled.sha256))
           file     <- existing match
@@ -536,6 +568,28 @@ object FileDocumentApi:
         )
       )
       .unit
+
+  /** The first bytes of a received file other than a DOCX fit its extension (DMS-121); a DOCX is parsed
+    * completely by [[scanned]] instead.
+    */
+  private[app] def contentMatches(name: String, spooled: SpooledFile): IO[(StatusCode, ApiError), Unit] =
+    if name.toLowerCase(java.util.Locale.ROOT).endsWith(".docx") then ZIO.unit
+    else
+      ZIO
+        .attemptBlocking {
+          val in = Files.newInputStream(spooled.path)
+          try in.readNBytes(FileDocumentApi.HeadBytes)
+          finally in.close()
+        }
+        .orDie
+        .flatMap(head =>
+          ZIO
+            .fromEither(DocumentConverter.contentMatches(name, head))
+            .mapError(m => (StatusCode.UnprocessableEntity, ApiError("file_type_mismatch", m)))
+        )
+
+  /** Bytes read from the start of an upload to check its type. */
+  private[app] val HeadBytes: Int = 8192
 
   /** The fields of a received DOCX, with the definitions of `previous` for keys known before; none for other
     * files.

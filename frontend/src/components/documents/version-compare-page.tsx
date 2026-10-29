@@ -23,6 +23,7 @@ import { LoadingState } from '@/components/shared/states'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { formatFileSize } from '@/i18n/format'
 import { displayValue } from './draft-values'
 import { StatusBadge } from './status-badge'
 import { changeKindLabel, describeChange } from './version-labels'
@@ -124,7 +125,13 @@ function Block({ block }: { block: BlockDiff }) {
 }
 
 function sectionTitle(section: SectionDiff): string {
-  return section.titleAfter ?? section.titleBefore ?? section.id
+  return (
+    section.titleAfter ??
+    section.titleBefore ??
+    // The text of a file document's Word original is one untitled section (DMS-121).
+    tOptional(`docs.compare.sectionNames.${section.id}`) ??
+    section.id
+  )
 }
 
 function Section({ section, showUnchanged }: { section: SectionDiff; showUnchanged: boolean }) {
@@ -222,11 +229,14 @@ function ValueChanges({
   label,
   empty,
   comparison,
+  labels,
 }: {
   changes: ValueChange[]
   label: string
   empty: string
   comparison: VersionComparison
+  /** Message keys by entry key for labels the UI translates (version properties). */
+  labels?: string
 }) {
   if (changes.length === 0) return <p className="text-sm text-muted-foreground">{empty}</p>
   return (
@@ -243,7 +253,7 @@ function ValueChanges({
           {changes.map((change) => (
             <tr key={change.key}>
               <th scope="row" className="py-2 pr-4 align-top font-normal text-muted-foreground">
-                {change.label}
+                {(labels && tOptional(`${labels}.${change.key}`)) ?? change.label}
               </th>
               <ValueCell change={change} side="before" />
               <ValueCell change={change} side="after" />
@@ -252,6 +262,73 @@ function ValueChanges({
         </tbody>
       </table>
     </div>
+  )
+}
+
+type Original = NonNullable<VersionComparison['original']>
+type OriginalFile = NonNullable<Original['before']>
+
+function OriginalFileCell({ file }: { file?: OriginalFile }) {
+  if (!file)
+    return <td className="py-2 pr-4 text-muted-foreground">{t('docs.compare.noOriginal')}</td>
+  return (
+    <td className="py-2 pr-4 align-top">
+      <span className="font-medium break-all">{file.name}</span>
+      <span className="ml-1 text-muted-foreground">({formatFileSize(file.size)})</span>
+      <span className="block font-mono text-xs break-all text-muted-foreground">
+        SHA-256 {file.sha256}
+      </span>
+    </td>
+  )
+}
+
+/**
+ * The originals of two file versions (DMS-121): whether the file changed, and whether the text below is
+ * the text of the Word documents or – for other formats – not compared.
+ */
+function OriginalChanges({
+  original,
+  comparison,
+}: {
+  original: Original
+  comparison: VersionComparison
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('docs.compare.originalTitle')}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p>
+          {original.changed ? (
+            <Badge>{t('docs.compare.originalChanged')}</Badge>
+          ) : (
+            <Badge variant="secondary">{t('docs.compare.originalUnchanged')}</Badge>
+          )}
+        </p>
+        <div className="overflow-x-auto">
+          <table aria-label={t('docs.compare.originalTitle')} className="w-full text-left">
+            <thead className="text-muted-foreground">
+              <tr>
+                <th className="py-2 pr-4 font-medium">{comparison.from.version}</th>
+                <th className="py-2 pr-4 font-medium">{comparison.to.version}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <OriginalFileCell file={original.before} />
+                <OriginalFileCell file={original.after} />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="text-muted-foreground">
+          {original.textCompared
+            ? t('docs.compare.wordCompared')
+            : t('docs.compare.textNotCompared')}
+        </p>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -354,6 +431,7 @@ export function VersionComparePage({
       {data && (
         <>
           <Summaries summaries={data.summaries ?? []} />
+          {data.original && <OriginalChanges original={data.original} comparison={data} />}
           <Tabs defaultValue="text">
             <TabsList>
               <TabsTrigger value="text">
@@ -383,6 +461,7 @@ export function VersionComparePage({
                 label={t('docs.compare.changedMetadata')}
                 empty={t('docs.compare.noMetadata')}
                 comparison={data}
+                labels="docs.compare.properties"
               />
             </TabsContent>
           </Tabs>

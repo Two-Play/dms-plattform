@@ -109,6 +109,40 @@ export async function downloadVersionPdf(
   )
 }
 
+/**
+ * Downloads a structured version as Word document (DMS-121, `GET …/document.docx`): converted on request
+ * from the same page as the PDF, with the same appendices; open versions are marked as drafts. Only for
+ * versions that have a PDF (see {@link pdfKind}); file documents download their filled original instead.
+ */
+export async function downloadVersionDocx(
+  client: ApiClient,
+  documentId: string,
+  version: Pick<DocumentVersionView, 'id' | 'version'>,
+  changelog: boolean,
+  attachments = false,
+): Promise<void> {
+  const { data, error, response } = await client.GET(
+    '/api/v1/documents/{id}/versions/{versionId}/document.docx',
+    {
+      params: {
+        path: { id: documentId, versionId: version.id },
+        query: { changelog, attachments },
+      },
+      parseAs: 'blob',
+    },
+  )
+  if (!response.ok || !data) {
+    throw requestError(response, error, `The download failed with HTTP ${response.status}`)
+  }
+  saveBlob(
+    data,
+    attachmentName(
+      response.headers.get('Content-Disposition'),
+      `${documentId}-${version.version}.docx`,
+    ),
+  )
+}
+
 function saveBlob(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')

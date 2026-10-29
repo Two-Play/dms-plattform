@@ -4,8 +4,11 @@ import dms.audit.core.{AuditTrailLive, TsaTrust}
 import dms.db.Db
 import dms.db.queue.JobQueue
 import dms.documents.core.{DocumentClassService, DocumentService}
+import dms.identity.{TenantOrganizations, UserDirectories}
 import dms.kernel.TenantId
+import dms.rendering.core.DocumentConverter
 import dms.search.core.{OpenSearch, SearchIndex}
+import dms.storage.ObjectStore
 import dms.templates.core.TemplateService
 import zio.*
 import zio.config.typesafe.TypesafeConfigProvider
@@ -42,7 +45,16 @@ object SearchRebuild extends ZIOAppDefault:
         TemplateService.layer,
         DocumentTemplates.layer,
         DocumentService.layer,
-        SearchDocuments.layer,
+        // The text of Word originals (DMS-121): read from storage and filled; no conversion needed.
+        ZLayer.succeed(config.storage),
+        ObjectStore.client,
+        ObjectStore.live,
+        RenditionWiring.archive,
+        ZLayer.succeed(DocumentConverter.unavailable),
+        FileVersions.layer,
+        TenantOrganizations.layer,
+        UserDirectories.layer(config.users, config.auth.issuer),
+        SearchDocuments.withOriginals,
         SearchIndex.layer
       )
     yield ()

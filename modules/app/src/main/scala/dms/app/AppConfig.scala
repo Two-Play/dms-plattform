@@ -159,8 +159,16 @@ final case class AppConfig(
 object AppConfig:
   val config: Config[AppConfig] = deriveConfig[AppConfig].nested("dms")
 
-/** The subset [[SearchRebuild]] needs. */
-final case class SearchRebuildConfig(database: DbConfig, search: SearchConfig)
+/** The subset [[SearchRebuild]] needs: storage and the user directory for the text of Word originals
+  * (DMS-121).
+  */
+final case class SearchRebuildConfig(
+    database: DbConfig,
+    search: SearchConfig,
+    storage: StorageConfig,
+    auth: AuthConfig,
+    users: UserDirectoryConfig
+)
 
 object SearchRebuildConfig:
   val config: Config[SearchRebuildConfig] = deriveConfig[SearchRebuildConfig].nested("dms")

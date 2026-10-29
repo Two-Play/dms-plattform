@@ -15,6 +15,7 @@ export type Branch = components['schemas']['BranchView']
 export type TemplateImpact = components['schemas']['TemplateImpactView']
 export type OpenDraft = components['schemas']['OpenDraftView']
 export type StatusCount = components['schemas']['StatusCountView']
+export type TemplateClass = components['schemas']['TemplateClassView']
 
 /** Statuses of a template version (business concept 4.1). */
 export type TemplateStatus = 'Draft' | 'Testing' | 'Released' | 'Deprecated' | 'Archived'
@@ -32,6 +33,27 @@ export function templateAdminListQuery(client: ApiClient) {
           response,
           error,
           `Loading the templates failed with HTTP ${response.status}`,
+        )
+      }
+      return data
+    },
+  })
+}
+
+/**
+ * The document classes a template can be created for (DMS-121): latest version, label and path, read-only
+ * for template designers.
+ */
+export function templateClassesQuery(client: ApiClient) {
+  return queryOptions({
+    queryKey: ['template-admin', 'classes'],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET('/api/v1/admin/template-classes')
+      if (!response.ok || !data) {
+        throw requestError(
+          response,
+          error,
+          `Loading the document classes failed with HTTP ${response.status}`,
         )
       }
       return data

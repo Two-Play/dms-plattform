@@ -716,7 +716,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description Compares two versions of a document: word-level text changes per section and block (inserted, deleted, structural changes), changed field values with their origin and changed metadata, with the change summaries of the versions in between. Both versions must be readable by the caller (403 otherwise); 404 if a version does not belong to the document. */
+    /** @description Compares two versions of a document: word-level text changes per section and block (inserted, deleted, structural changes), changed field values with their origin and changed metadata, with the change summaries of the versions in between. File documents: the paragraphs of the Word documents with their fields filled, the manual Word field values and the originals (`original`); originals in other formats are compared by name and SHA-256 only. Both versions must be readable by the caller (403 otherwise); 404 if a version does not belong to the document; 503 if the original of a file version cannot be read. */
     get: operations['getApiV1DocumentsIdCompare']
     put?: never
     post?: never
@@ -1572,6 +1572,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/admin/template-classes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The document classes templates can be created for (latest profile version, label and path), read-only, sorted by path: for designers choosing the class of a new (Word) template without the configuration of document classes. Requires EditTemplates. */
+    get: operations['getApiV1AdminTemplate-classes']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/word-templates': {
     parameters: {
       query?: never
@@ -1683,7 +1700,7 @@ export interface paths {
       cookie?: never
     }
     get?: never
-    /** @description Uploads the original of a file document into its draft (the next working state), replacing the previous file. Stored unchanged with its SHA-256, which the approval binds. The fields of a Word document (DOCX) are read from its content controls (tag = field key, `dms:` prefix = automatic) and `{{key}}` placeholders. 409 for structured documents and if the version is not a draft, 413 above the size limit of attachments, 422 for blocked types, unreadable DOCX and types that cannot be converted into PDF/A (`file_not_convertible`), 422 `attachment_infected`, 503 if the virus scanner or object storage is unavailable. */
+    /** @description Uploads the original of a file document into its draft (the next working state), replacing the previous file. Stored unchanged with its SHA-256, which the approval binds. The fields of a Word document (DOCX) are read from its content controls (tag = field key, `dms:` prefix = automatic) and `{{key}}` placeholders. 409 for structured documents and if the version is not a draft, 413 above the size limit of attachments, 422 for blocked types, unreadable DOCX, types that cannot be converted into PDF/A (`file_not_convertible`) and files whose content does not fit their extension (`file_type_mismatch`, e.g. a PDF named .xlsx), 422 `attachment_infected`, 503 if the virus scanner or object storage is unavailable. */
     put: operations['putApiV1DocumentsIdFile']
     post?: never
     delete?: never
@@ -1767,7 +1784,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description A PDF of a file document version for reading in the browser: the archived rendition of an approved version; otherwise the original (a Word file with its fields filled) converted on request with the draft marking on every page. Not stored. 409 for structured documents (see …/html), 404 without file, 503 if the conversion worker is unavailable. Requires ReadDocument on the version. */
+    /** @description A PDF of a file document version for reading in the browser: the archived rendition of an approved version; otherwise the original (a Word file with its fields filled) converted on request with the draft marking on every page. Not stored; a conversion is kept in memory per version and state, so an unchanged draft is converted once. 409 for structured documents (see …/html), 404 without file, 503 if the conversion worker is unavailable. Requires ReadDocument on the version. */
     get: operations['getApiV1DocumentsIdVersionsVersionidPreview.pdf']
     put?: never
     post?: never
@@ -2961,6 +2978,20 @@ export interface components {
        */
       type: 'OrderedList'
     }
+    /** OriginalComparisonView */
+    OriginalComparisonView: {
+      changed: boolean
+      before?: components['schemas']['OriginalFileView']
+      after?: components['schemas']['OriginalFileView']
+      textCompared: boolean
+    }
+    /** OriginalFileView */
+    OriginalFileView: {
+      name: string
+      /** Format: int64 */
+      size: number
+      sha256: string
+    }
     /** Otherwise */
     Otherwise: {
       /**
@@ -3544,6 +3575,17 @@ export interface components {
       deputies?: components['schemas']['TaskDeputyView'][]
       actingFor?: string
     }
+    /** TemplateClassView */
+    TemplateClassView: {
+      /** Format: uuid */
+      id: string
+      key: string
+      /** Format: int32 */
+      version: number
+      label: string
+      description?: string
+      path?: string[]
+    }
     /** TemplateContent */
     TemplateContent: {
       sections?: components['schemas']['Section'][]
@@ -3848,6 +3890,7 @@ export interface components {
       text: components['schemas']['TextComparisonView']
       fields?: components['schemas']['ValueChangeView'][]
       metadata?: components['schemas']['ValueChangeView'][]
+      original?: components['schemas']['OriginalComparisonView']
     }
     /** VersionHtmlView */
     VersionHtmlView: {
@@ -6356,7 +6399,7 @@ export interface operations {
           'application/pdf': string
         }
       }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: query parameter changelog */
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: query parameter changelog, Invalid value for: query parameter attachments */
       400: {
         headers: {
           [name: string]: unknown
@@ -6405,7 +6448,7 @@ export interface operations {
           'application/pdf': string
         }
       }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: query parameter changelog */
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: query parameter changelog, Invalid value for: query parameter attachments */
       400: {
         headers: {
           [name: string]: unknown
@@ -8911,6 +8954,33 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WordTemplateView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminTemplate-classes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateClassView'][]
         }
       }
       default: {

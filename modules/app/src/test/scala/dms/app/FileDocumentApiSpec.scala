@@ -229,7 +229,7 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
   private type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow & TemplateService &
     ProfileSource & PdfRenderer & AuditTrail & TenantOrganizations & UserDirectory & FileVersions &
     WordTemplateService & AttachmentService & AttachmentUploads & RenditionSource & RenditionArchive &
-    ObjectStore
+    ObjectStore & DocumentClassService
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -289,7 +289,8 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
     ZioHttpInterpreter().toHttp(
       FileDocumentApi.endpoints.map(_.widen[Env]) ++ DocumentApi.endpoints.map(_.widen[Env]) ++
         WorkflowApi.endpoints.map(_.widen[Env]) ++ WordTemplateApi.endpoints.map(_.widen[Env]) ++
-        VersionViewApi.endpoints.map(_.widen[Env]) ++ AttachmentApi.endpoints.map(_.widen[Env])
+        VersionViewApi.endpoints.map(_.widen[Env]) ++ AttachmentApi.endpoints.map(_.widen[Env]) ++
+        VersionCompareApi.endpoints.map(_.widen[Env])
     )
 
   final case class Response(status: Status, headers: Headers, body: Chunk[Byte]):
@@ -437,6 +438,20 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
     )
 
   private def lastConversion = conversions.get.map(_.head)
+
+  /** Approves the draft and publishes it (valid from a past date), so that a new version can be started. */
+  private def approveAndPublish(doc: UUID): ZIO[Env, Any, Unit] =
+    for
+      _    <- approve(doc)
+      s    <- setup.await
+      jobs <- ZIO.serviceWith[DocumentService](PublicationJobs(s.app, _, PublicationScheduleConfig()))
+      _    <- jobs.enqueue(tenantId)
+      _    <- JobRunner(s.app, jobs.handlers, WorkerConfig("publication-test")).runOnce
+    yield ()
+
+  private def newVersion(doc: UUID) =
+    call(author, "POST", s"/api/v1/documents/$doc/versions", Some("""{"changeKind":"Major"}"""))
+      .map(as[DocumentVersionView])
 
   def spec = suite("File documents and Word templates")(
     test("a designer uploads a Word template, edits its fields and releases it with four eyes") {
@@ -781,6 +796,157 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
         filled.status == Status.Conflict,
         fields.fields.isEmpty,
         structPv.status == Status.Conflict
+      )
+    },
+    test("Word versions are compared by their filled text, manual values and original (DMS-121)") {
+      for
+        s       <- setup.await
+        created <- wordTemplate
+        (id, _) = created
+        _   <- release(id, 1)
+        doc <- call(
+          author,
+          "POST",
+          "/api/v1/documents/word",
+          Some(s"""{"templateId":"$id","templateVersion":1,"title":"Vertrag C","values":${values("de")}}""")
+        ).map(as[DocumentView])
+        _ <- call(
+          author,
+          "PUT",
+          s"/api/v1/documents/${doc.id}/word-fields",
+          Some("""{"values":{"customer":"ACME GmbH","deliveryDate":"2027-01-31"}}""")
+        )
+        _    <- approveAndPublish(doc.id)
+        next <- newVersion(doc.id)
+        revised = docx(
+          paragraph(textRun("Wartungsvertrag ") + control("dms:documentNumber", "Dokumentnummer", "Nummer")) +
+            paragraph(textRun("Kunde: ") + control("customer", "Customer", "Name des Kunden")) +
+            paragraph(textRun("Wartung jeden Monat vor Ort"))
+        )
+        _ <- put(author, s"/api/v1/documents/${doc.id}/file", "Wartungsvertrag.docx", revised)
+        _ <- call(
+          author,
+          "PUT",
+          s"/api/v1/documents/${doc.id}/word-fields",
+          Some("""{"values":{"customer":"Beta AG"}}""")
+        )
+        compared <- call(
+          author,
+          "GET",
+          s"/api/v1/documents/${doc.id}/compare?from=${doc.current.id}&to=${next.id}"
+        )
+          .map(as[VersionComparisonView])
+        spans = compared.text.sections.flatMap(_.blocks).flatMap(_.spans)
+        same <- call(
+          author,
+          "GET",
+          s"/api/v1/documents/${doc.id}/compare?from=${doc.current.id}&to=${doc.current.id}"
+        ).map(as[VersionComparisonView])
+        // the published version's filled text is indexed with its name
+        source  <- ZIO.environment[FileVersions & TenantOrganizations & UserDirectory]
+        indexed <- ZIO.serviceWithZIO[DocumentService](documents =>
+          ZIO.serviceWithZIO[TemplateService](templates =>
+            ZIO.serviceWithZIO[ProfileSource](profiles =>
+              s.app.transact(tenantId)(
+                SearchDocuments(documents, templates, profiles, SearchDocuments.Originals.filledWord(source))
+                  .load(tenantId, DocumentId(doc.id))
+              )
+            )
+          )
+        )
+      yield assertTrue(
+        compared.original.exists(o =>
+          o.changed && o.textCompared && o.before.exists(_.sha256 == sha256(template)) &&
+            o.after.exists(_.sha256 == sha256(revised))
+        ),
+        compared.text.changed,
+        compared.text.sections.map(_.id) == List(VersionCompareApi.OriginalSection),
+        // the filled values are part of the text: the customer changed, the delivery paragraph was removed
+        spans.exists(sp => sp.kind == "Deleted" && sp.text.contains("ACME")),
+        spans.exists(sp => sp.kind == "Inserted" && sp.text.contains("Beta")),
+        spans.exists(sp => sp.kind == "Deleted" && sp.text.contains("31.01.2027")),
+        spans.exists(sp => sp.kind == "Inserted" && sp.text.contains("jeden Monat")),
+        compared.fields.exists(f => f.key == "word:customer" && f.label == "Customer"),
+        compared.fields.exists(f => f.key == "word:deliveryDate" && f.after.isEmpty),
+        compared.metadata.exists(_.key == "originalChecksum"),
+        !same.text.changed,
+        same.original.exists(o => !o.changed && o.textCompared),
+        indexed.map(_.versionLabel) == List("1.0"),
+        indexed.exists(d => d.text.startsWith("Wartungsvertrag.docx") && d.text.contains("ACME GmbH")),
+        indexed.exists(_.text.contains("Lieferung bis 31.01.2027"))
+      )
+    },
+    test("draft previews are converted once per state; uploads must fit their extension (DMS-121)") {
+      for
+        s   <- setup.await
+        doc <- call(
+          author,
+          "POST",
+          "/api/v1/documents",
+          Some(
+            s"""{"templateId":"${s.structured.value}","templateVersion":1,"title":"Budget","values":${values(
+                "en"
+              )},"kind":"File"}"""
+          )
+        ).map(as[DocumentView])
+        upload = (name: String, bytes: Array[Byte]) =>
+          put(author, s"/api/v1/documents/${doc.id}/file", name, bytes)
+        pdfAsXlsx <- upload("Budget.xlsx", blankPdf(1).toArray)
+        zipAsPdf  <- upload("Budget.pdf", "PK\u0003\u0004 not a pdf".getBytes(UTF_8))
+        textAsDoc <- upload("Budget.doc", "plain text".getBytes(UTF_8))
+        xlsx = "PK\u0003\u0004 a spreadsheet".getBytes(UTF_8)
+        uploaded <- upload("Budget.xlsx", xlsx).map(as[DocumentVersionView])
+        preview = () =>
+          call(author, "GET", s"/api/v1/documents/${doc.id}/versions/${uploaded.id}/preview.pdf")
+        before <- conversions.get.map(_.size)
+        first  <- preview()
+        second <- preview()
+        draft  <- call(author, "GET", s"/api/v1/documents/${doc.id}/versions/${uploaded.id}/draft.pdf")
+        cached <- conversions.get.map(_.size)
+        _      <- upload("Budget.xlsx", "PK\u0003\u0004 revised".getBytes(UTF_8))
+        third  <- preview()
+        after  <- conversions.get.map(_.size)
+        // other formats: the originals are compared as files only
+        _        <- approveAndPublish(doc.id)
+        next     <- newVersion(doc.id)
+        _        <- upload("Budget 2027.xlsx", "PK\u0003\u0004 next year".getBytes(UTF_8))
+        compared <- call(
+          author,
+          "GET",
+          s"/api/v1/documents/${doc.id}/compare?from=${doc.current.id}&to=${next.id}"
+        )
+          .map(as[VersionComparisonView])
+      yield assertTrue(
+        pdfAsXlsx.status == Status.UnprocessableEntity,
+        pdfAsXlsx.error.contains("file_type_mismatch"),
+        pdfAsXlsx.text.contains("Budget.xlsx"),
+        zipAsPdf.error.contains("file_type_mismatch"),
+        textAsDoc.error.contains("file_type_mismatch"),
+        uploaded.file.exists(_.name == "Budget.xlsx"),
+        first.status == Status.Ok,
+        second.status == Status.Ok,
+        draft.status == Status.Ok,
+        first.body == second.body,
+        cached == before + 1,
+        third.status == Status.Ok,
+        after == cached + 1,
+        compared.original.exists(o =>
+          o.changed && !o.textCompared && o.after.exists(_.name == "Budget 2027.xlsx")
+        ),
+        !compared.text.changed,
+        compared.metadata.exists(m => m.key == "originalName")
+      )
+    },
+    test("designers list the document classes for new templates; readers may not (DMS-121)") {
+      for
+        s        <- setup.await
+        classes  <- call(designer, "GET", "/api/v1/admin/template-classes").map(as[List[TemplateClassView]])
+        byReader <- call(reader, "GET", "/api/v1/admin/template-classes")
+      yield assertTrue(
+        classes.exists(c =>
+          c.id == s.classId && c.key == "contract" && c.version == 1 && c.path == List("Contract")
+        ),
+        byReader.status == Status.Forbidden
       )
     },
     test("only Word template uploads and file uploads may stream large bodies") {

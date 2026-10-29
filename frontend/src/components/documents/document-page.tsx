@@ -120,7 +120,12 @@ export function DocumentPage({
                   />
                 </div>
               )}
-              <PdfDownload key={shown.id} documentId={document.data.id} version={shown} />
+              <PdfDownload
+                key={shown.id}
+                documentId={document.data.id}
+                version={shown}
+                wordExport={!fileDocument}
+              />
               <DocumentNumberAction
                 documentId={document.data.id}
                 documentNumber={document.data.documentNumber}
