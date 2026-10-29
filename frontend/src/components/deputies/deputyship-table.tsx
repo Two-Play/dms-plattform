@@ -5,7 +5,12 @@ import { useApiClient } from '@/api/context'
 import { endDeputyship, type Deputyship } from '@/api/deputyships'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { formatDateTime } from './format'
+import { cachedUserName, useUserLabel } from '@/api/users'
+import { statusLabel } from '@/components/documents/status-label'
+import { roleLabel } from '@/components/shared/role-label'
+import { UserName } from '@/components/shared/user-name'
+import { t } from '@/i18n'
+import { formatDateTime } from '@/i18n/format'
 
 const statusVariant = {
   Active: 'default',
@@ -16,16 +21,23 @@ const statusVariant = {
 function StatusBadge({ status }: { status: string }) {
   const variant =
     status in statusVariant ? statusVariant[status as keyof typeof statusVariant] : 'outline'
-  return <Badge variant={variant}>{status}</Badge>
+  return <Badge variant={variant}>{statusLabel(status)}</Badge>
 }
 
 function EndButton({ deputyship }: { deputyship: Deputyship }) {
   const client = useApiClient()
   const queryClient = useQueryClient()
+  const deputyName = useUserLabel(deputyship.deputy)
+  const principalName = useUserLabel(deputyship.principal)
   const end = useMutation({
     mutationFn: () => endDeputyship(client, deputyship.id),
     onSuccess: async () => {
-      toast(`Deputyship of ${deputyship.deputy} for ${deputyship.principal} ended.`)
+      toast(
+        t('deputies.ended', {
+          deputy: cachedUserName(queryClient, deputyship.deputy),
+          principal: cachedUserName(queryClient, deputyship.principal),
+        }),
+      )
       await queryClient.invalidateQueries({ queryKey: ['deputyships'] })
       // forwarded tasks leave the deputy's inbox
       await queryClient.invalidateQueries({ queryKey: ['workflow'] })
@@ -37,12 +49,15 @@ function EndButton({ deputyship }: { deputyship: Deputyship }) {
         size="sm"
         variant="outline"
         disabled={end.isPending}
-        aria-label={`End deputyship of ${deputyship.deputy} for ${deputyship.principal}`}
+        aria-label={t('deputies.endLabel', {
+          deputy: deputyName ?? '',
+          principal: principalName ?? '',
+        })}
         onClick={() => {
           end.mutate()
         }}
       >
-        {end.isPending ? 'Ending…' : 'End now'}
+        {end.isPending ? t('deputies.ending') : t('deputies.endNow')}
       </Button>
       {end.isError && <InlineError error={end.error} className="text-xs" />}
     </div>
@@ -57,8 +72,13 @@ function Period({ d }: { d: Deputyship }) {
       <span className="whitespace-nowrap">{formatDateTime(d.validUntil)}</span>
       {d.endedAt && (
         <div className="text-xs text-muted-foreground">
-          ended {formatDateTime(d.endedAt)}
-          {d.endedBy ? ` by ${d.endedBy}` : ''}
+          {t('deputies.endedAt', { date: formatDateTime(d.endedAt) })}
+          {d.endedBy && (
+            <>
+              {' '}
+              {t('deputies.by')} <UserName id={d.endedBy} />
+            </>
+          )}
         </div>
       )}
     </>
@@ -66,7 +86,7 @@ function Period({ d }: { d: Deputyship }) {
 }
 
 /**
- * Deputyships as a table. User ids are shown until a directory of display names exists. Running
+ * Deputyships as a table, people by display name (DMS-110). Running
  * and scheduled deputyships can be ended; the backend allows that to principal, deputy and tenant
  * administrators.
  */
@@ -89,37 +109,43 @@ export function DeputyshipTable({
         <thead className="text-left text-xs text-muted-foreground">
           <tr className="border-b">
             <th scope="col" className="py-2 pr-4 font-medium">
-              Principal
+              {t('deputies.principal')}
             </th>
             <th scope="col" className="py-2 pr-4 font-medium">
-              Deputy
+              {t('deputies.deputy')}
             </th>
             <th scope="col" className="py-2 pr-4 font-medium">
-              Period
+              {t('deputies.period')}
             </th>
             <th scope="col" className="hidden py-2 pr-4 font-medium md:table-cell">
-              Covers
+              {t('deputies.covers')}
             </th>
             <th scope="col" className="py-2 pr-4 font-medium">
-              Status
+              {t('deputies.status')}
             </th>
             <th scope="col" className="py-2 font-medium">
-              <span className="sr-only">Actions</span>
+              <span className="sr-only">{t('deputies.actions')}</span>
             </th>
           </tr>
         </thead>
         <tbody>
           {deputyships.map((d) => (
             <tr key={d.id} className="border-b align-top last:border-0">
-              <td className="py-2 pr-4 break-all">{d.principal}</td>
-              <td className="py-2 pr-4 break-all">{d.deputy}</td>
+              <td className="py-2 pr-4 break-all">
+                <UserName id={d.principal} />
+              </td>
+              <td className="py-2 pr-4 break-all">
+                <UserName id={d.deputy} />
+              </td>
               <td className="py-2 pr-4">
                 <Period d={d} />
               </td>
               <td className="hidden py-2 pr-4 md:table-cell">
-                {(d.roles ?? []).join(', ')}
+                {(d.roles ?? []).map(roleLabel).join(', ')}
                 {d.documentClass && (
-                  <div className="text-xs text-muted-foreground">class {d.documentClass}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {t('deputies.classLabel', { key: d.documentClass })}
+                  </div>
                 )}
                 {d.reason && <div className="text-xs text-muted-foreground">{d.reason}</div>}
               </td>

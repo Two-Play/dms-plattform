@@ -144,7 +144,7 @@ describe('compliance cockpit', () => {
       await screen.findByRole('link', { name: 'Overdue reviews: 3. Show the list' }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('link', { name: 'Acknowledgement rate: 25 %. Show the list' }),
+      screen.getByRole('link', { name: 'Acknowledgement rate: 25%. Show the list' }),
     ).toBeInTheDocument()
     expect(
       screen.getByRole('link', { name: 'Open acknowledgements: 9. Show the list' }),
@@ -155,7 +155,7 @@ describe('compliance cockpit', () => {
       name: 'Acknowledgement rate by organizational unit',
     })
     expect(
-      within(rateTable).getByRole('link', { name: 'Acknowledgement rate 14 % in HR' }),
+      within(rateTable).getByRole('link', { name: 'Acknowledgement rate 14% in HR' }),
     ).toBeInTheDocument()
   })
 

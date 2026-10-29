@@ -24,6 +24,7 @@ import {
 } from '@/api/templates'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
+import { t } from '@/i18n'
 import { useDebouncedValue } from '@/lib/use-debounced-value'
 import { CONFIDENTIALITY_FIELD, isRestrictedInput, withoutHiddenGroups } from './access-groups'
 import { DocumentForm } from './document-form'
@@ -54,7 +55,7 @@ export function LanguageSelect({
 }) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor="language">Document language</Label>
+      <Label htmlFor="language">{t('docs.workspace.documentLanguage')}</Label>
       <select
         id="language"
         className={selectClass}
@@ -63,8 +64,8 @@ export function LanguageSelect({
           onChange(e.target.value === 'de' ? 'de' : 'en')
         }}
       >
-        <option value="en">English</option>
-        <option value="de">German</option>
+        <option value="en">{t('docs.workspace.english')}</option>
+        <option value="de">{t('docs.workspace.german')}</option>
       </select>
     </div>
   )
@@ -116,8 +117,10 @@ export interface DocumentWorkspaceProps {
   onSubmitted?: (documentId: string, version: DocumentVersionView) => void
 }
 
-function conflictMessage(e: ApiRequestError, action: string): string {
-  return `The draft could not be ${action}: ${e.message} It may have been submitted or changed elsewhere; reload the page to see its current state.`
+function conflictMessage(e: ApiRequestError, action: 'saved' | 'submitted'): string {
+  return action === 'saved'
+    ? t('docs.workspace.conflictSaved', { message: e.message })
+    : t('docs.workspace.conflictSubmitted', { message: e.message })
 }
 
 /**
@@ -207,7 +210,7 @@ export function DocumentWorkspace({
   const save = async (submitting = false): Promise<string | undefined> => {
     const title = values.title?.type === 'Text' ? values.title.value : ''
     if (title === '') {
-      setSaveState({ kind: 'failed', message: 'Enter a title before saving the draft.' })
+      setSaveState({ kind: 'failed', message: t('docs.workspace.titleMissing') })
       return undefined
     }
     // Values taken over from the partner master are set by the server, not sent as entered values.
@@ -235,7 +238,7 @@ export function DocumentWorkspace({
         reject(e.issues, values)
         setSaveState({
           kind: 'failed',
-          message: `${e.message} Correct the marked fields and save again.`,
+          message: t('docs.workspace.correctAndSave', { message: e.message }),
         })
       } else if (e instanceof ApiRequestError && e.status === 409) {
         setSaveState({ kind: 'failed', message: conflictMessage(e, 'saved') })
@@ -261,7 +264,9 @@ export function DocumentWorkspace({
         current = { ...current, label: updated.version, applied: nextApplied }
         setSaved(current)
       } catch (e) {
-        warnings.push(`${reference.label} was not taken over: ${message(e)}`)
+        warnings.push(
+          t('docs.workspace.notTakenOver', { label: reference.label, message: message(e) }),
+        )
       }
     }
     setSaveState({
@@ -271,7 +276,7 @@ export function DocumentWorkspace({
     })
     // The list and the document page show the new title and version.
     void queryClient.invalidateQueries({ queryKey: ['documents'] })
-    if (!submitting) toast('Draft saved')
+    if (!submitting) toast(t('docs.workspace.draftSaved'))
     return current.documentId
   }
 
@@ -283,28 +288,34 @@ export function DocumentWorkspace({
       const submitted = await submitDocument(client, documentId)
       void queryClient.invalidateQueries({ queryKey: ['documents'] })
       setSaveState({ kind: 'saved', label: submitted.version })
-      toast('Submitted for review')
+      toast(t('docs.workspace.submitted'))
       onSubmitted?.(documentId, submitted)
     } catch (e) {
       if (e instanceof ApiRequestError && e.code === 'incomplete') {
         reject(e.issues, values)
         setSaveState({
           kind: 'failed',
-          message: 'The draft was saved but cannot be submitted yet. Fill in these values first:',
+          message: t('docs.workspace.incomplete'),
           missing: e.issues,
         })
       } else if (e instanceof ApiRequestError && e.issues.length > 0) {
         reject(e.issues, values)
-        setSaveState({ kind: 'failed', message: `${e.message} Correct the marked fields.` })
+        setSaveState({
+          kind: 'failed',
+          message: t('docs.workspace.correct', { message: e.message }),
+        })
       } else if (e instanceof ApiRequestError && e.code === 'invalid') {
         setSaveState({
           kind: 'failed',
-          message: `The draft was saved but cannot be submitted: ${e.message} Changes to locked sections need an authorized deviation request.`,
+          message: t('docs.workspace.invalid', { message: e.message }),
         })
       } else if (e instanceof ApiRequestError && e.status === 409) {
         setSaveState({ kind: 'failed', message: conflictMessage(e, 'submitted') })
       } else {
-        setSaveState({ kind: 'failed', message: `Submitting failed: ${message(e)}` })
+        setSaveState({
+          kind: 'failed',
+          message: t('docs.workspace.submitFailed', { message: message(e) }),
+        })
       }
     }
   }
@@ -319,7 +330,7 @@ export function DocumentWorkspace({
         {references.length > 0 && (
           <fieldset className="space-y-3">
             <legend className="mb-2 font-heading text-sm font-semibold">
-              From the partner master
+              {t('docs.workspace.fromPartnerMaster')}
             </legend>
             {references.map((reference) => (
               <PartnerPicker
@@ -350,7 +361,9 @@ export function DocumentWorkspace({
               void save()
             }}
           >
-            {saveState.kind === 'saving' ? 'Saving…' : 'Save draft'}
+            {saveState.kind === 'saving'
+              ? t('docs.workspace.saving')
+              : t('docs.workspace.saveDraft')}
           </Button>
           <Button
             type="button"
@@ -361,16 +374,17 @@ export function DocumentWorkspace({
               void submit()
             }}
           >
-            {saveState.kind === 'submitting' ? 'Submitting…' : 'Submit for review'}
+            {saveState.kind === 'submitting'
+              ? t('docs.workspace.submitting')
+              : t('docs.workspace.submit')}
           </Button>
           <div id="save-draft-note" className="space-y-1 text-xs" aria-live="polite">
             {saveState.kind === 'idle' && (
-              <p className="text-muted-foreground">
-                Saves the entered values as a draft; you can continue later. Submitting saves the
-                draft and starts the review.
-              </p>
+              <p className="text-muted-foreground">{t('docs.workspace.saveHint')}</p>
             )}
-            {saveState.kind === 'saved' && <p>Draft saved as version {saveState.label}.</p>}
+            {saveState.kind === 'saved' && (
+              <p>{t('docs.workspace.savedAs', { label: saveState.label })}</p>
+            )}
             {saveState.kind === 'saved' && saveState.warning && (
               <p role="alert" className="text-destructive">
                 {saveState.warning}

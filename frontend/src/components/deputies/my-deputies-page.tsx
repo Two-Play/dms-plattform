@@ -6,6 +6,7 @@ import { useApiClient } from '@/api/context'
 import { deputyshipsQuery } from '@/api/deputyships'
 import { useMe } from '@/api/me'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { t } from '@/i18n'
 import { DeputyshipForm } from './deputyship-form'
 import { DeputyshipTable } from './deputyship-table'
 
@@ -24,48 +25,43 @@ export function MyDeputiesPage() {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <PageHeader
-        title="Deputies"
-        description="While a deputyship is active, the deputy can complete your open review and approval tasks on your behalf. You keep your tasks as well."
-      />
+      <PageHeader title={t('deputies.title')} description={t('deputies.description')} />
       <Card>
         <CardHeader>
-          <CardTitle>Set a deputy</CardTitle>
-          <CardDescription>For a limited period, e.g. a vacation.</CardDescription>
+          <CardTitle>{t('deputies.setDeputy')}</CardTitle>
+          <CardDescription>{t('deputies.setDeputyText')}</CardDescription>
         </CardHeader>
         <CardContent>
           <DeputyshipForm />
         </CardContent>
       </Card>
-      {(list.isPending || me.isPending) && <LoadingState label="Loading your deputyships" />}
+      {(list.isPending || me.isPending) && <LoadingState label={t('deputies.loading')} />}
       {list.isError && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
       {list.data && userId !== undefined && (
         <>
           <Card>
             <CardHeader>
-              <CardTitle>My deputies</CardTitle>
-              <CardDescription>Who stands in for you.</CardDescription>
+              <CardTitle>{t('deputies.mine')}</CardTitle>
+              <CardDescription>{t('deputies.mineText')}</CardDescription>
             </CardHeader>
             <CardContent>
               <DeputyshipTable
                 deputyships={mine}
-                caption="My deputies"
-                empty="You have not set a deputy."
+                caption={t('deputies.mine')}
+                empty={t('deputies.noMine')}
               />
             </CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>I stand in for</CardTitle>
-              <CardDescription>
-                Their tasks appear in your inbox "on behalf of" them while the period runs.
-              </CardDescription>
+              <CardTitle>{t('deputies.forOthers')}</CardTitle>
+              <CardDescription>{t('deputies.forOthersText')}</CardDescription>
             </CardHeader>
             <CardContent>
               <DeputyshipTable
                 deputyships={forOthers}
-                caption="Deputyships in which I am the deputy"
-                empty="Nobody has named you as deputy."
+                caption={t('deputies.forOthersCaption')}
+                empty={t('deputies.noForOthers')}
               />
             </CardContent>
           </Card>

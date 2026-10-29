@@ -179,7 +179,8 @@ describe('Search page', () => {
       'false',
     )
     expect(within(filters).getByRole('button', { name: /In review\s*1/ })).toBeInTheDocument()
-    expect(within(filters).getByRole('button', { name: /de\s*2/ })).toBeInTheDocument()
+    // Language codes are shown by name in the active language.
+    expect(within(filters).getByRole('button', { name: /German\s*2/ })).toBeInTheDocument()
     expect(queries(get, '/api/v1/search')).toContainEqual({ q: 'glove', page: 1, size: 20 })
   })
 
@@ -246,14 +247,14 @@ describe('Search page', () => {
     fireEvent.change(screen.getByLabelText('Valid on'), { target: { value: '2027-01-15' } })
     await user.click(screen.getByRole('button', { name: 'Search' }))
 
-    const table = await screen.findByRole('table', { name: 'Versions valid on 2027-01-15' })
+    const table = await screen.findByRole('table', { name: 'Versions valid on 15 Jan 2027' })
     expect(router.state.location.search).toEqual({ q: 'glove', validOn: '2027-01-15' })
     expect(queries(get, '/api/v1/documents/valid-at')).toContainEqual({ date: '2027-01-15' })
     expect(within(table).getByRole('link', { name: 'Lab safety policy' })).toBeInTheDocument()
     expect(within(table).getByText('1.0')).toBeInTheDocument()
     expect(within(table).getByText('Superseded')).toBeInTheDocument()
     expect(within(table).getByText('deputy-1', { exact: false })).toBeInTheDocument()
-    expect(within(table).getByText('on behalf of approver-1')).toBeInTheDocument()
+    expect(within(table).getByText(/on behalf of/)).toHaveTextContent('on behalf of approver-1')
     expect(screen.getByText(/search text is not applied/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Back to search' }))

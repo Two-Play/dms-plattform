@@ -15,6 +15,8 @@ import {
   PageHeader,
 } from '@/components/shared/page-header'
 import { LoadingState } from '@/components/shared/states'
+import { UserName } from '@/components/shared/user-name'
+import { t, tOptional } from '@/i18n'
 import { allowedGroupsOf, confidentialityOf, isRestrictedLevel } from './access-groups'
 import { displayValue } from './draft-values'
 import { LanguageSelect } from './document-workspace'
@@ -50,10 +52,10 @@ function VersionValues({ document }: { document: DocumentView }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Metadata</CardTitle>
+        <CardTitle>{t('docs.page.metadata')}</CardTitle>
       </CardHeader>
       <CardContent>
-        {fields.isPending && <LoadingState label="Loading the metadata" />}
+        {fields.isPending && <LoadingState label={t('docs.page.loadingMetadata')} />}
         {fields.isError && (
           <ErrorState error={fields.error} onRetry={() => void fields.refetch()} />
         )}
@@ -62,7 +64,13 @@ function VersionValues({ document }: { document: DocumentView }) {
             {shown.map(([key, field]) => (
               <div key={key} className="contents">
                 <dt className="text-muted-foreground">{labels.get(key)}</dt>
-                <dd>{displayValue(field.value)}</dd>
+                <dd>
+                  {field.value.type === 'PersonRef' ? (
+                    <UserName id={field.value.userId} />
+                  ) : (
+                    displayValue(field.value)
+                  )}
+                </dd>
               </div>
             ))}
           </dl>
@@ -70,11 +78,6 @@ function VersionValues({ document }: { document: DocumentView }) {
       </CardContent>
     </Card>
   )
-}
-
-const levelLabels: Record<string, string> = {
-  Confidential: 'Confidential',
-  StrictlyConfidential: 'Strictly confidential',
 }
 
 /**
@@ -94,17 +97,12 @@ export function AccessNote({ document }: { document: DocumentView }) {
   const listed = keys.map((k) => names.get(k) ?? k)
   return (
     <p className="text-sm" data-testid="access-note">
-      <span className="font-medium">{levelLabels[level] ?? level}:</span>{' '}
+      <span className="font-medium">{tOptional(`docs.page.levels.${level}`) ?? level}:</span>{' '}
       {listed.length > 0
-        ? `visible to the author, the owner and members of ${listed.join(', ')}.`
-        : 'visible to the author and the owner only; name the allowed groups before submitting.'}
+        ? t('docs.page.visibleToGroups', { groups: listed.join(', ') })
+        : t('docs.page.visibleToOwners')}
     </p>
   )
-}
-
-const loadErrorTitles = {
-  notFound: 'This document does not exist.',
-  forbidden: 'You are not allowed to see this document.',
 }
 
 /**
@@ -119,13 +117,13 @@ export function DocumentPage({ documentId }: { documentId: string }) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={document.data?.title ?? 'Document'}
+        title={document.data?.title ?? t('common.document')}
         breadcrumbs={
           <Breadcrumbs>
             <Link to="/documents" className={breadcrumbLinkClass}>
-              Documents
+              {t('docs.page.breadcrumb')}
             </Link>
-            <BreadcrumbCurrent>{document.data?.title ?? 'Document'}</BreadcrumbCurrent>
+            <BreadcrumbCurrent>{document.data?.title ?? t('common.document')}</BreadcrumbCurrent>
           </Breadcrumbs>
         }
         actions={
@@ -147,18 +145,26 @@ export function DocumentPage({ documentId }: { documentId: string }) {
         {document.data && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <StatusBadge status={document.data.current.status} />
-            <span>Version {document.data.current.version}</span>
+            <span>{t('docs.page.version', { label: document.data.current.version })}</span>
             {document.data.classPath && document.data.classPath.length > 0 && (
               <span>· {document.data.classPath.join(' › ')}</span>
+            )}
+            <span>
+              · {t('docs.page.author')}: <UserName id={document.data.authorId} />
+            </span>
+            {document.data.ownerId && (
+              <span>
+                · {t('docs.page.owner')}: <UserName id={document.data.ownerId} />
+              </span>
             )}
           </div>
         )}
       </PageHeader>
-      {document.isPending && <LoadingState label="Loading the document" rows={6} />}
+      {document.isPending && <LoadingState label={t('docs.page.loading')} rows={6} />}
       {document.isError && (
         <ErrorState
           error={document.error}
-          titles={loadErrorTitles}
+          titles={{ notFound: t('docs.page.notFound'), forbidden: t('docs.page.forbidden') }}
           onRetry={() => void document.refetch()}
         />
       )}

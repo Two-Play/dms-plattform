@@ -2,11 +2,9 @@ import { AlertTriangle, Loader2 } from 'lucide-react'
 import type { MouseEvent } from 'react'
 import type { MissingValue, Preview, PreviewIssue } from '@/api/templates'
 import { Badge } from '@/components/ui/badge'
+import { t } from '@/i18n'
 // The document stylesheet shared with the PDF rendering (modules/templates, DMS-39).
 import '@dms-document/document.css'
-
-/** Label of the draft marking (business concept US-03.2). */
-export const DRAFT_LABEL = 'Draft – not valid'
 
 interface DocumentPreviewProps {
   preview: Preview | undefined
@@ -28,9 +26,7 @@ function MissingList({
   return (
     <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
       <p className="font-medium text-destructive">
-        {missing.length === 1
-          ? '1 required value is missing'
-          : `${missing.length} required values are missing`}
+        {t('docs.preview.missing', { count: missing.length })}
       </p>
       <ul className="mt-1 flex flex-wrap gap-1.5">
         {missing.map((m) => (
@@ -80,17 +76,18 @@ export function DocumentPreview({ preview, updating, error, onFocusField }: Docu
   }
 
   return (
-    <section aria-label="Preview" className="space-y-3">
+    <section aria-label={t('docs.preview.title')} className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="font-heading text-sm font-semibold">Preview</h2>
+        <h2 className="font-heading text-sm font-semibold">{t('docs.preview.title')}</h2>
         <div className="flex items-center gap-2">
           {updating && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground" role="status">
               <Loader2 className="size-3 animate-spin" aria-hidden="true" />
-              Updating…
+              {t('docs.preview.updating')}
             </span>
           )}
-          <Badge variant="destructive">{DRAFT_LABEL}</Badge>
+          {/* The draft marking (business concept US-03.2). */}
+          <Badge variant="destructive">{t('docs.preview.draftLabel')}</Badge>
         </div>
       </div>
       {error && (

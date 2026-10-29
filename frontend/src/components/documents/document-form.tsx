@@ -3,6 +3,7 @@ import { Lock } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { t } from '@/i18n'
 import { ALLOWED_GROUPS_FIELD, groupKeys, groupsInput, visibleFields } from './access-groups'
 import { fieldControlId, type FieldInput, type FormInputs } from './field-values'
 import { GroupPicker } from './group-picker'
@@ -47,7 +48,7 @@ function FieldControl({ field, input, error, onChange }: FieldProps) {
           readOnly
           aria-readonly="true"
           className="pl-8"
-          placeholder="Pick a partner above"
+          placeholder={t('docs.form.pickPartnerAbove')}
           value={text}
         />
       </div>
@@ -98,7 +99,7 @@ function FieldControl({ field, input, error, onChange }: FieldProps) {
       <Textarea
         {...common}
         rows={3}
-        placeholder="One value per line"
+        placeholder={t('docs.form.oneValuePerLine')}
         value={text}
         onChange={(e) => {
           onChange(e.target.value)
@@ -123,7 +124,7 @@ function FieldControl({ field, input, error, onChange }: FieldProps) {
           />
           {currencies.length > 0 ? (
             <select
-              aria-label={`${field.label} currency`}
+              aria-label={t('docs.form.currency', { label: field.label })}
               className={`${selectClass} w-24`}
               value={amount.currency}
               onChange={(e) => {
@@ -138,7 +139,7 @@ function FieldControl({ field, input, error, onChange }: FieldProps) {
             </select>
           ) : (
             <Input
-              aria-label={`${field.label} currency`}
+              aria-label={t('docs.form.currency', { label: field.label })}
               className="w-24"
               maxLength={3}
               value={amount.currency}
@@ -160,7 +161,7 @@ function FieldControl({ field, input, error, onChange }: FieldProps) {
             onChange(e.target.value)
           }}
         >
-          <option value="">Select…</option>
+          <option value="">{t('docs.form.select')}</option>
           {(fieldType.options ?? [])
             .filter((o) => o.active || o.code === text)
             .map((o) => (
@@ -180,9 +181,9 @@ function FieldControl({ field, input, error, onChange }: FieldProps) {
             onChange(e.target.value)
           }}
         >
-          <option value="">Select…</option>
-          <option value="true">Yes</option>
-          <option value="false">No</option>
+          <option value="">{t('docs.form.select')}</option>
+          <option value="true">{t('docs.form.yes')}</option>
+          <option value="false">{t('docs.form.no')}</option>
         </select>
       )
     case 'Date':
@@ -237,7 +238,7 @@ function FieldRow({ field, input, error, onChange }: FieldProps) {
       <Label id={`${id}-label`} htmlFor={id}>
         {field.label}
         {field.required && (
-          <span className="text-destructive" aria-hidden="true" title="Required">
+          <span className="text-destructive" aria-hidden="true" title={t('docs.form.required')}>
             *
           </span>
         )}
@@ -245,7 +246,7 @@ function FieldRow({ field, input, error, onChange }: FieldProps) {
       {field.reference && (
         <p id={`${id}-origin`} className="flex items-center gap-1 text-xs text-muted-foreground">
           <Lock aria-hidden="true" className="size-3" />
-          From partner master – taken over from the system, not editable
+          {t('docs.form.fromPartnerMaster')}
         </p>
       )}
       <FieldControl field={field} input={input} error={error} onChange={onChange} />
@@ -289,19 +290,20 @@ export function DocumentForm({ fields, inputs, errors, onChange }: DocumentFormP
         e.preventDefault()
       }}
     >
-      <p className="text-xs text-muted-foreground">
-        Fields marked <span className="text-destructive">*</span> are required before the document
-        can be approved.
-      </p>
+      <p className="text-xs text-muted-foreground">{t('docs.form.requiredHint', { star: '*' })}</p>
       {used.length > 0 && (
         <fieldset className="space-y-4">
-          <legend className="mb-2 font-heading text-sm font-semibold">Template fields</legend>
+          <legend className="mb-2 font-heading text-sm font-semibold">
+            {t('docs.form.templateFields')}
+          </legend>
           {rows(used)}
         </fieldset>
       )}
       {other.length > 0 && (
         <fieldset className="space-y-4">
-          <legend className="mb-2 font-heading text-sm font-semibold">Further metadata</legend>
+          <legend className="mb-2 font-heading text-sm font-semibold">
+            {t('docs.form.furtherMetadata')}
+          </legend>
           {rows(other)}
         </fieldset>
       )}

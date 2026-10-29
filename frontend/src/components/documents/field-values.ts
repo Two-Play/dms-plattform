@@ -1,4 +1,6 @@
 import type { FieldType, MetadataValue, TemplateField } from '@/api/templates'
+import { t } from '@/i18n'
+import { formatPlainDate } from '@/i18n/format'
 
 /**
  * Raw form input of a field, before conversion:
@@ -47,8 +49,8 @@ function range(
   min: number | undefined,
   max: number | undefined,
 ): string | undefined {
-  if (min !== undefined && value < min) return `Must be at least ${min}.`
-  if (max !== undefined && value > max) return `Must be at most ${max}.`
+  if (min !== undefined && value < min) return t('docs.validation.atLeast', { min })
+  if (max !== undefined && value > max) return t('docs.validation.atMost', { max })
   return undefined
 }
 
@@ -64,7 +66,10 @@ function convertSingle(fieldType: FieldType, text: string): Converted {
   switch (fieldType.type) {
     case 'Text': {
       if (fieldType.maxLength !== undefined && trimmed.length > fieldType.maxLength) {
-        return { kind: 'invalid', message: `At most ${fieldType.maxLength} characters.` }
+        return {
+          kind: 'invalid',
+          message: t('docs.validation.maxLength', { max: fieldType.maxLength }),
+        }
       }
       if (fieldType.pattern !== undefined) {
         let matches = true
@@ -74,49 +79,58 @@ function convertSingle(fieldType: FieldType, text: string): Converted {
           // A pattern JavaScript cannot compile is left to the backend.
         }
         if (!matches)
-          return { kind: 'invalid', message: `Does not match the format ${fieldType.pattern}.` }
+          return {
+            kind: 'invalid',
+            message: t('docs.validation.pattern', { pattern: fieldType.pattern }),
+          }
       }
       return { kind: 'value', value: { type: 'Text', value: trimmed } }
     }
     case 'Number': {
       const n = parseNumber(trimmed)
-      if (n === undefined) return { kind: 'invalid', message: 'Enter a number, e.g. 12 or 12.5.' }
+      if (n === undefined) return { kind: 'invalid', message: t('docs.validation.number') }
       const outside = range(n, fieldType.min, fieldType.max)
       if (outside) return { kind: 'invalid', message: outside }
       if (fieldType.scale !== undefined && decimals(trimmed) > fieldType.scale) {
-        return { kind: 'invalid', message: `At most ${fieldType.scale} decimal places.` }
+        return { kind: 'invalid', message: t('docs.validation.scale', { count: fieldType.scale }) }
       }
       return { kind: 'value', value: { type: 'Number', value: n } }
     }
     case 'Date': {
       if (!DATE.test(trimmed) || Number.isNaN(Date.parse(trimmed))) {
-        return { kind: 'invalid', message: 'Enter a date.' }
+        return { kind: 'invalid', message: t('docs.validation.date') }
       }
       if (fieldType.min !== undefined && trimmed < fieldType.min) {
-        return { kind: 'invalid', message: `Must not be before ${fieldType.min}.` }
+        return {
+          kind: 'invalid',
+          message: t('docs.validation.notBefore', { date: formatPlainDate(fieldType.min) }),
+        }
       }
       if (fieldType.max !== undefined && trimmed > fieldType.max) {
-        return { kind: 'invalid', message: `Must not be after ${fieldType.max}.` }
+        return {
+          kind: 'invalid',
+          message: t('docs.validation.notAfter', { date: formatPlainDate(fieldType.max) }),
+        }
       }
       return { kind: 'value', value: { type: 'Date', value: trimmed } }
     }
     case 'Selection': {
       const known = fieldType.options?.some((o) => o.code === trimmed && o.active) ?? false
-      if (!known) return { kind: 'invalid', message: 'Choose one of the options.' }
+      if (!known) return { kind: 'invalid', message: t('docs.validation.option') }
       return { kind: 'value', value: { type: 'Selection', code: trimmed } }
     }
     case 'YesNo':
       if (trimmed !== 'true' && trimmed !== 'false') {
-        return { kind: 'invalid', message: 'Choose yes or no.' }
+        return { kind: 'invalid', message: t('docs.validation.yesNo') }
       }
       return { kind: 'value', value: { type: 'YesNo', value: trimmed === 'true' } }
     case 'PersonRef':
       return { kind: 'value', value: { type: 'PersonRef', userId: trimmed } }
     case 'DocumentRef':
-      if (!UUID.test(trimmed)) return { kind: 'invalid', message: 'Enter a document id (UUID).' }
+      if (!UUID.test(trimmed)) return { kind: 'invalid', message: t('docs.validation.documentId') }
       return { kind: 'value', value: { type: 'DocumentRef', documentId: trimmed } }
     case 'Amount':
-      return { kind: 'invalid', message: 'Enter an amount.' }
+      return { kind: 'invalid', message: t('docs.validation.amountMissing') }
   }
 }
 
@@ -126,15 +140,17 @@ function convertAmount(
 ): Converted {
   if (input.amount.trim() === '') return { kind: 'empty' }
   const n = parseNumber(input.amount)
-  if (n === undefined) return { kind: 'invalid', message: 'Enter an amount, e.g. 1250.50.' }
+  if (n === undefined) return { kind: 'invalid', message: t('docs.validation.amount') }
   const outside = range(n, fieldType.min, fieldType.max)
   if (outside) return { kind: 'invalid', message: outside }
   const currency = input.currency.trim().toUpperCase()
-  if (!CURRENCY.test(currency))
-    return { kind: 'invalid', message: 'Enter a currency code, e.g. EUR.' }
+  if (!CURRENCY.test(currency)) return { kind: 'invalid', message: t('docs.validation.currency') }
   const allowed = fieldType.currencies ?? []
   if (allowed.length > 0 && !allowed.includes(currency)) {
-    return { kind: 'invalid', message: `Allowed currencies: ${allowed.join(', ')}.` }
+    return {
+      kind: 'invalid',
+      message: t('docs.validation.currencies', { currencies: allowed.join(', ') }),
+    }
   }
   return { kind: 'value', value: { type: 'Amount', value: n, currency } }
 }
@@ -154,7 +170,10 @@ export function convert(field: TemplateField, input: FieldInput | undefined): Co
     for (const [index, item] of items.entries()) {
       const single = convertSingle(fieldType, item)
       if (single.kind === 'invalid') {
-        return { kind: 'invalid', message: `Value ${index + 1}: ${single.message}` }
+        return {
+          kind: 'invalid',
+          message: t('docs.validation.nth', { index: index + 1, message: single.message }),
+        }
       }
       if (single.kind === 'value') values.push(single.value)
     }

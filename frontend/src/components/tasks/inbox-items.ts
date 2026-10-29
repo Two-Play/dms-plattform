@@ -2,6 +2,7 @@ import type { Acknowledgement } from '@/api/acknowledgements'
 import type { DocumentView } from '@/api/partners'
 import type { ReviewTask } from '@/api/reviews'
 import type { WorkflowTask } from '@/api/workflow'
+import { t } from '@/i18n'
 
 /**
  * Kinds of tasks in the inbox. `ReviewDate` is the periodic review of a valid version by the
@@ -28,11 +29,8 @@ export type InboxItem =
   | (InboxItemBase & { kind: 'Acknowledgement'; acknowledgement: Acknowledgement })
   | (InboxItemBase & { kind: 'ReviewDate'; review: ReviewTask })
 
-export const kindLabels: Record<InboxKind, string> = {
-  Review: 'Review',
-  Approval: 'Approval',
-  Acknowledgement: 'Read confirmation',
-  ReviewDate: 'Periodic review',
+export function kindLabel(kind: InboxKind): string {
+  return t(`tasks.kinds.${kind}`)
 }
 
 /** An inbox item for a workflow task, with the document's title and version if it is loaded. */
@@ -66,13 +64,6 @@ export function acknowledgementItem(ack: Acknowledgement): InboxItem {
 
 /** The decisions of a review task that need input: recertify (date, note) or withdraw (reason). */
 export type ReviewDecision = 'recertify' | 'withdraw'
-
-/** For plain dates (yyyy-mm-dd), which `Date.parse` reads as UTC midnight. */
-const plainDateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' })
-
-export function formatPlainDate(date: string): string {
-  return plainDateFormat.format(new Date(date))
-}
 
 /** An inbox item for a review task; its deadline is the review date (00:00 UTC of that day). */
 export function reviewItem(review: ReviewTask): InboxItem {

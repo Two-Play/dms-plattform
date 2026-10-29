@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   LayoutTemplate,
   LogOut,
+  Languages,
   Moon,
   Search,
   Settings,
@@ -24,6 +25,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -31,37 +34,23 @@ import { Toaster } from '@/components/shared/toaster'
 import { useOpenTaskCount } from '@/components/tasks/use-open-task-count'
 import { Input } from '@/components/ui/input'
 import { currentTheme, setTheme, type Theme } from '@/lib/theme'
-
-/** User-facing texts of the shell; one place so they can be translated later (DMS-110). */
-const texts = {
-  product: 'DMS Platform',
-  skipToContent: 'Skip to content',
-  mainNav: 'Main',
-  openMenu: 'Open menu',
-  search: 'Search documents',
-  searchPlaceholder: 'Search documents…',
-  openTasks: (count: number) => (count === 1 ? '1 open task' : `${count} open tasks`),
-  userMenu: 'User menu',
-  signedInUser: 'Signed-in user',
-  deputies: 'Deputies',
-  signOut: 'Sign out',
-  switchTo: (theme: Theme) => (theme === 'dark' ? 'Switch to dark mode' : 'Switch to light mode'),
-}
+import { LOCALES, setLocale, t, useLocale, type Locale } from '@/i18n'
+import type { Messages } from '@/i18n/locales/en'
 
 /** Navigation entries; those with `role` are shown only to holders of that business role. */
 const navItems: readonly {
   to: '/' | '/documents' | '/search' | '/tasks' | '/templates' | '/compliance' | '/admin'
-  label: string
+  label: keyof Messages['shell']['nav']
   icon: typeof LayoutDashboard
   role?: BusinessRole
 }[] = [
-  { to: '/', label: 'Home', icon: LayoutDashboard },
-  { to: '/documents', label: 'Documents', icon: FileText },
-  { to: '/search', label: 'Search', icon: Search },
-  { to: '/tasks', label: 'Tasks', icon: CheckSquare },
-  { to: '/templates', label: 'Templates', icon: LayoutTemplate, role: 'TemplateDesigner' },
-  { to: '/compliance', label: 'Compliance', icon: ShieldCheck, role: 'ComplianceOfficer' },
-  { to: '/admin', label: 'Admin', icon: Settings, role: 'TenantAdmin' },
+  { to: '/', label: 'home', icon: LayoutDashboard },
+  { to: '/documents', label: 'documents', icon: FileText },
+  { to: '/search', label: 'search', icon: Search },
+  { to: '/tasks', label: 'tasks', icon: CheckSquare },
+  { to: '/templates', label: 'templates', icon: LayoutTemplate, role: 'TemplateDesigner' },
+  { to: '/compliance', label: 'compliance', icon: ShieldCheck, role: 'ComplianceOfficer' },
+  { to: '/admin', label: 'admin', icon: Settings, role: 'TenantAdmin' },
 ]
 
 function initials(name: string): string {
@@ -79,7 +68,7 @@ function ThemeToggle() {
     <Button
       variant="ghost"
       size="icon"
-      aria-label={texts.switchTo(next)}
+      aria-label={next === 'dark' ? t('shell.switchToDark') : t('shell.switchToLight')}
       onClick={() => {
         setTheme(next)
         setState(next)
@@ -93,12 +82,13 @@ function ThemeToggle() {
 function UserMenu() {
   const auth = useAuth()
   const profile = auth.user?.profile
-  const name = displayName(profile) ?? texts.signedInUser
+  const name = displayName(profile) ?? t('shell.signedInUser')
+  const locale = useLocale()
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="gap-2 px-2" aria-label={texts.userMenu}>
+        <Button variant="ghost" className="gap-2 px-2" aria-label={t('shell.userMenu')}>
           <Avatar className="size-7">
             <AvatarFallback>{initials(name) || '?'}</AvatarFallback>
           </Avatar>
@@ -116,12 +106,30 @@ function UserMenu() {
         <DropdownMenuItem asChild>
           <Link to="/deputies">
             <UserRoundCheck />
-            {texts.deputies}
+            {t('shell.deputies')}
           </Link>
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+          <Languages aria-hidden="true" className="size-4" />
+          {t('shell.language')}
+        </DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={locale}
+          onValueChange={(value) => {
+            setLocale(value as Locale)
+          }}
+        >
+          {LOCALES.map((l) => (
+            <DropdownMenuRadioItem key={l} value={l} lang={l}>
+              {t(`shell.languages.${l}`)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={() => void auth.signoutRedirect()}>
           <LogOut />
-          {texts.signOut}
+          {t('shell.signOut')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -143,7 +151,7 @@ function TaskCount({ count, id }: { count: number | undefined; id: string }) {
         {count}
       </span>
       <span id={id} className="sr-only">
-        {texts.openTasks(count)}
+        {t('shell.openTasks', { count })}
       </span>
     </>
   )
@@ -156,7 +164,7 @@ function SidebarNav({ items, taskCount }: { items: readonly NavItem[]; taskCount
   const countId = useId()
   return (
     <nav
-      aria-label={texts.mainNav}
+      aria-label={t('shell.mainNav')}
       className="hidden border-r bg-sidebar text-sidebar-foreground md:block md:w-56 md:shrink-0"
     >
       {/* Stays in view below the header on long pages and scrolls on its own if needed. */}
@@ -170,7 +178,7 @@ function SidebarNav({ items, taskCount }: { items: readonly NavItem[]; taskCount
               className={navLinkClass}
             >
               <Icon aria-hidden="true" className="size-4" />
-              {label}
+              {t(`shell.nav.${label}`)}
               {to === '/tasks' && <TaskCount count={taskCount} id={countId} />}
             </Link>
           </li>
@@ -186,11 +194,11 @@ function MobileNav({ items, taskCount }: { items: readonly NavItem[]; taskCount?
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="md:hidden" aria-label={texts.openMenu}>
+        <Button variant="ghost" size="icon" className="md:hidden" aria-label={t('shell.openMenu')}>
           <Menu />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-56" aria-label={texts.mainNav}>
+      <DropdownMenuContent align="start" className="min-w-56" aria-label={t('shell.mainNav')}>
         {items.map(({ to, label, icon: Icon }) => (
           <DropdownMenuItem key={to} asChild>
             <Link
@@ -200,7 +208,7 @@ function MobileNav({ items, taskCount }: { items: readonly NavItem[]; taskCount?
               className="group min-h-9 data-[status=active]:font-semibold"
             >
               <Icon aria-hidden="true" />
-              {label}
+              {t(`shell.nav.${label}`)}
               {to === '/tasks' && <TaskCount count={taskCount} id={countId} />}
             </Link>
           </DropdownMenuItem>
@@ -232,8 +240,8 @@ function HeaderSearch() {
         />
         <Input
           type="search"
-          aria-label={texts.search}
-          placeholder={texts.searchPlaceholder}
+          aria-label={t('shell.search')}
+          placeholder={t('shell.searchPlaceholder')}
           value={text}
           onChange={(e) => {
             setText(e.target.value)
@@ -283,7 +291,7 @@ export function AppShell() {
           main.current?.focus()
         }}
       >
-        {texts.skipToContent}
+        {t('shell.skipToContent')}
       </a>
       <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur">
         <MobileNav items={visible} taskCount={taskCount} />
@@ -291,7 +299,7 @@ export function AppShell() {
           to="/"
           className="shrink-0 rounded-md font-heading text-lg font-semibold tracking-tight"
         >
-          {texts.product}
+          {t('common.product')}
         </Link>
         <div className="flex flex-1 justify-end sm:justify-center">
           {pathname !== '/search' && <HeaderSearch />}

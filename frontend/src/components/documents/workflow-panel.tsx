@@ -5,7 +5,11 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useApiClient } from '@/api/context'
 import { documentWorkflowQuery, type WorkflowCase } from '@/api/documents'
-import { decisionLabels, myTasksQuery, type WorkflowTask } from '@/api/workflow'
+import { decisionLabel, myTasksQuery, type WorkflowTask } from '@/api/workflow'
+import { roleLabel } from '@/components/shared/role-label'
+import { UserName, UserNames } from '@/components/shared/user-name'
+import { t } from '@/i18n'
+import { formatDateTime } from '@/i18n/format'
 import { PendingVoteNotice } from '@/components/tasks/pending-vote-notice'
 import { VoteDialog, type VoteDraft } from '@/components/tasks/vote-dialog'
 import { Button } from '@/components/ui/button'
@@ -13,76 +17,81 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { StatusBadge } from './status-badge'
 import { statusLabel } from './status-label'
 
-const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-
 function CaseDetails({ workflowCase, version }: { workflowCase: WorkflowCase; version: string }) {
-  const tasks = (workflowCase.tasks ?? []).filter((t) => t.round === workflowCase.round)
+  const tasks = (workflowCase.tasks ?? []).filter((task) => task.round === workflowCase.round)
   const votes = workflowCase.votes ?? []
-  const current = tasks.find((t) => t.step === workflowCase.currentStep)
+  const current = tasks.find((task) => task.step === workflowCase.currentStep)
   return (
     <section
       className="space-y-3 rounded-lg border p-3"
-      aria-label={`Workflow of version ${version}`}
+      aria-label={t('docPanels.workflow.caseLabel', { version })}
       data-testid="workflow-case"
     >
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <StatusBadge status={workflowCase.status} />
-        <span>Round {workflowCase.round}</span>
+        <span>{t('docPanels.workflow.round', { round: workflowCase.round })}</span>
         {workflowCase.status === 'Running' && current && (
-          <span className="text-muted-foreground">· current step: {current.stepName}</span>
+          <span className="text-muted-foreground">
+            {t('docPanels.workflow.currentStep', { step: current.stepName })}
+          </span>
         )}
         {workflowCase.status === 'Returned' && (
-          <span className="text-muted-foreground">
-            · returned to the author; change the draft and submit it again
-          </span>
+          <span className="text-muted-foreground">{t('docPanels.workflow.returned')}</span>
         )}
         {workflowCase.status === 'Rendering' && (
-          <span className="text-muted-foreground">
-            · all steps approved; the archive PDF is being produced, then the version is approved
-          </span>
+          <span className="text-muted-foreground">{t('docPanels.workflow.rendering')}</span>
         )}
         {workflowCase.approval && (
           <span className="text-muted-foreground">
-            · approved by {workflowCase.approval.approvedBy} on{' '}
-            {dateTime.format(new Date(workflowCase.approval.approvedAt))}
+            {t('docPanels.workflow.approvedBy')} <UserName id={workflowCase.approval.approvedBy} />{' '}
+            {t('docPanels.workflow.approvedOn', {
+              date: formatDateTime(workflowCase.approval.approvedAt),
+            })}
           </span>
         )}
       </div>
       {tasks.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <caption className="sr-only">Tasks of round {workflowCase.round}</caption>
+            <caption className="sr-only">
+              {t('docPanels.workflow.tasksOfRound', { round: workflowCase.round })}
+            </caption>
             <thead className="text-left text-xs text-muted-foreground">
               <tr className="border-b">
                 <th scope="col" className="py-1.5 pr-3 font-medium">
-                  Step
+                  {t('docPanels.workflow.step')}
                 </th>
                 <th scope="col" className="py-1.5 pr-3 font-medium">
-                  Role
+                  {t('docPanels.workflow.role')}
                 </th>
                 <th scope="col" className="py-1.5 pr-3 font-medium">
-                  Task
+                  {t('docPanels.workflow.task')}
                 </th>
                 <th scope="col" className="py-1.5 font-medium">
-                  Assigned to
+                  {t('docPanels.workflow.assignedTo')}
                 </th>
               </tr>
             </thead>
             <tbody>
-              {tasks.map((t) => (
-                <tr key={t.id} className="border-b last:border-0">
-                  <td className="py-1.5 pr-3">{t.stepName}</td>
-                  <td className="py-1.5 pr-3">{t.role}</td>
+              {tasks.map((task) => (
+                <tr key={task.id} className="border-b last:border-0">
+                  <td className="py-1.5 pr-3">{task.stepName}</td>
+                  <td className="py-1.5 pr-3">{roleLabel(task.role)}</td>
                   <td className="py-1.5 pr-3">
-                    {statusLabel(t.status)}
-                    {t.completedBy && (
-                      <span className="text-muted-foreground"> by {t.completedBy}</span>
+                    {statusLabel(task.status)}
+                    {task.completedBy && (
+                      <span className="text-muted-foreground">
+                        {' '}
+                        {t('docPanels.workflow.by')} <UserName id={task.completedBy} />
+                      </span>
                     )}
                   </td>
                   <td className="py-1.5 text-muted-foreground">
-                    {t.status === 'Waiting'
-                      ? 'Nobody has this role yet'
-                      : (t.candidates ?? []).join(', ')}
+                    {task.status === 'Waiting' ? (
+                      t('docPanels.workflow.nobody')
+                    ) : (
+                      <UserNames ids={task.candidates ?? []} />
+                    )}
                   </td>
                 </tr>
               ))}
@@ -94,9 +103,16 @@ function CaseDetails({ workflowCase, version }: { workflowCase: WorkflowCase; ve
         <ul className="space-y-1 text-sm">
           {votes.map((v) => (
             <li key={v.id} className={v.invalidatedAt ? 'text-muted-foreground line-through' : ''}>
-              {v.voter}: {statusLabel(v.decision)} (round {v.round}, {v.step})
+              <UserName id={v.voter} />:{' '}
+              {t('docPanels.workflow.voteDetail', {
+                decision: statusLabel(v.decision),
+                round: v.round,
+                step: v.step,
+              })}
               {v.reason && <> – {v.reason}</>}
-              {v.invalidatedAt && <span className="sr-only"> (invalidated by a later change)</span>}
+              {v.invalidatedAt && (
+                <span className="sr-only"> {t('docPanels.workflow.invalidated')}</span>
+              )}
             </li>
           ))}
         </ul>
@@ -110,7 +126,7 @@ function MyOpenTasks({ documentId, title }: { documentId: string; title: string 
   const client = useApiClient()
   const myTasks = useQuery(myTasksQuery(client))
   const [voting, setVoting] = useState<{ task: WorkflowTask; initial?: VoteDraft }>()
-  const open = (myTasks.data ?? []).filter((t) => t.documentId === documentId)
+  const open = (myTasks.data ?? []).filter((task) => task.documentId === documentId)
   return (
     <>
       <PendingVoteNotice
@@ -120,21 +136,22 @@ function MyOpenTasks({ documentId, title }: { documentId: string; title: string 
           setVoting({ task, initial: { decision: pending.decision, reason: pending.reason } })
         }}
       />
-      {open.map((t) => (
+      {open.map((task) => (
         <div
-          key={t.id}
+          key={task.id}
           className="flex flex-col gap-2 rounded-lg border border-primary/40 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
         >
           <span>
-            Your task: <strong>{t.stepName}</strong> ({t.role})
+            {t('docPanels.workflow.yourTask')} <strong>{task.stepName}</strong> (
+            {roleLabel(task.role)})
           </span>
           <Button
             size="sm"
             onClick={() => {
-              setVoting({ task: t })
+              setVoting({ task })
             }}
           >
-            Vote…
+            {t('docPanels.workflow.vote')}
           </Button>
         </div>
       ))}
@@ -147,7 +164,7 @@ function MyOpenTasks({ documentId, title }: { documentId: string; title: string 
         }}
         onVoted={(_task, decision) => {
           setVoting(undefined)
-          toast(`Vote recorded: ${decisionLabels[decision]}.`)
+          toast(t('docPanels.workflow.voteRecorded', { decision: decisionLabel(decision) }))
         }}
       />
     </>
@@ -171,17 +188,17 @@ export function WorkflowPanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Review and approval</CardTitle>
-        <CardDescription>The workflow started when the document was submitted.</CardDescription>
+        <CardTitle>{t('docPanels.workflow.title')}</CardTitle>
+        <CardDescription>{t('docPanels.workflow.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <MyOpenTasks documentId={documentId} title={title} />
-        {workflow.isPending && <LoadingState label="Loading the workflow" rows={2} />}
+        {workflow.isPending && <LoadingState label={t('docPanels.workflow.loading')} rows={2} />}
         {workflow.isError && (
           <ErrorState error={workflow.error} onRetry={() => void workflow.refetch()} />
         )}
         {workflow.data?.length === 0 && (
-          <p className="text-sm text-muted-foreground">Not submitted yet.</p>
+          <p className="text-sm text-muted-foreground">{t('docPanels.workflow.notSubmitted')}</p>
         )}
         {workflow.data
           ?.slice()
@@ -190,7 +207,7 @@ export function WorkflowPanel({
             <CaseDetails
               key={c.id}
               workflowCase={c}
-              version={versions[c.versionId] ?? 'an earlier version'}
+              version={versions[c.versionId] ?? t('docPanels.workflow.earlierVersion')}
             />
           ))}
       </CardContent>

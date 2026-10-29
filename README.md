@@ -147,7 +147,7 @@ Start local services:
 docker compose up -d --build
 ```
 
-Create the ZITADEL project and the OIDC application (idempotent; writes `.local/zitadel/dms.env`):
+Create the ZITADEL project, the OIDC application and the read-only machine user `dms-directory` that resolves user ids to names (idempotent; writes `.local/zitadel/dms.env` and the directory token `.local/zitadel/directory.pat`, DMS-110):
 
 ```bash
 scripts/zitadel-setup.sh

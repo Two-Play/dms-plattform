@@ -1,0 +1,51 @@
+import { plural } from '@/i18n/core'
+
+export const search = {
+  title: 'Search',
+  text: 'Search text',
+  placeholder: 'Title, content, metadata',
+  validOn: 'Valid on',
+  submit: 'Search',
+  validOnNote:
+    'With a “valid on” date the page lists, per document, the version that was in force on that day (in the organization’s time zone) and offers it as CSV export.',
+  validFrom: '· valid from {date}',
+  startTitle: 'Search the documents you may read',
+  startText:
+    'Enter a search text, or choose a “valid on” date to see the versions in force on that day.',
+  searching: 'Searching',
+  unavailableTitle: 'Search is not available yet',
+  unavailableText:
+    'The full-text search is not offered by this server yet. Documents are listed under “Documents”, and the “valid on” date already works.',
+  filters: 'Filters',
+  class: 'Class',
+  status: 'Status',
+  language: 'Language',
+  results: plural({ one: '{count} result', other: '{count} results' }),
+  resultList: 'Search results',
+  noMatch: 'No documents match.',
+  pages: 'Result pages',
+  previous: 'Previous',
+  next: 'Next',
+  pageOf: 'Page {page} of {pages}',
+  validOnTitle: 'Valid on {date}',
+  validOnText:
+    'Per document and validity scope the version in force at the end of that day, with its approval.',
+  validOnTextZone:
+    'Per document and validity scope the version in force at the end of that day ({zone}), with its approval.',
+  exportCsv: 'Export CSV',
+  textIgnored: 'The search text is not applied to this list; it shows every document you may read.',
+  loadingValid: 'Loading the valid versions',
+  noneValid: 'No document version you may read was valid on that day.',
+  tableCaption: 'Versions valid on {date}',
+  colTitle: 'Title',
+  colVersion: 'Version',
+  colStatus: 'Status now',
+  colScope: 'Scope',
+  colValid: 'Valid',
+  colApprovedBy: 'Approved by',
+  allScopes: 'All',
+  today: 'today',
+  onBehalfOf: 'on behalf of',
+  showing: 'Showing the versions valid on {date}.',
+  back: 'Back to search',
+} as const

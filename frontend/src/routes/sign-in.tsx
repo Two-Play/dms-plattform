@@ -10,6 +10,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { t } from '@/i18n'
+import { useDocumentTitle } from '@/lib/document-title'
 
 interface SignInSearch {
   redirect?: string
@@ -29,20 +31,19 @@ export const Route = createFileRoute('/sign-in')({
 function SignInPage() {
   const auth = useAuth()
   const { redirect: returnTo } = Route.useSearch()
+  useDocumentTitle(t('auth.signIn'))
 
   return (
     <main className="flex min-h-svh items-center justify-center bg-muted/40 p-6">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-xl">DMS Platform</CardTitle>
-          <CardDescription>
-            Document and template management with approval workflows and audit-proof archiving.
-          </CardDescription>
+          <CardTitle className="text-xl">{t('common.product')}</CardTitle>
+          <CardDescription>{t('auth.intro')}</CardDescription>
         </CardHeader>
         <CardContent>
           {auth.error && (
             <p role="alert" className="text-sm text-destructive">
-              Sign-in failed: {auth.error.message}
+              {t('auth.signInFailedWith', { message: auth.error.message })}
             </p>
           )}
         </CardContent>
@@ -54,7 +55,7 @@ function SignInPage() {
               void auth.signinRedirect({ state: { returnTo: safeReturnTo(returnTo) } })
             }
           >
-            Sign in
+            {t('auth.signIn')}
           </Button>
         </CardFooter>
       </Card>

@@ -9,14 +9,15 @@ import { PageHeader } from '@/components/shared/page-header'
 import { EmptyState, LoadingState } from '@/components/shared/states'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { t } from '@/i18n'
+import { formatDateTime } from '@/i18n/format'
 import { StatusBadge } from './status-badge'
 
-const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-
-const columns: Column<DocumentSummary>[] = [
+/** Built per render, so the headers follow the active language. */
+const columns = (): Column<DocumentSummary>[] => [
   {
     key: 'title',
-    header: 'Title',
+    header: t('docs.list.title_'),
     cell: (d) => (
       <Link
         to="/documents/$documentId"
@@ -27,28 +28,28 @@ const columns: Column<DocumentSummary>[] = [
       </Link>
     ),
   },
-  { key: 'status', header: 'Status', cell: (d) => <StatusBadge status={d.status} /> },
+  { key: 'status', header: t('docs.list.status'), cell: (d) => <StatusBadge status={d.status} /> },
   {
     key: 'version',
-    header: 'Version',
+    header: t('docs.list.version'),
     cell: (d) => <span className="font-mono text-xs">{d.version}</span>,
   },
   {
     key: 'class',
-    header: 'Class',
+    header: t('docs.list.class'),
     className: 'hidden text-muted-foreground sm:table-cell',
     cell: (d) => d.classPath?.join(' › '),
   },
   {
     key: 'changed',
-    header: 'Changed',
+    header: t('docs.list.changed'),
     className: 'hidden text-muted-foreground md:table-cell',
-    cell: (d) => dateTime.format(new Date(d.updatedAt)),
+    cell: (d) => formatDateTime(d.updatedAt),
   },
 ]
 
 function DocumentTable({ documents, caption }: { documents: DocumentSummary[]; caption: string }) {
-  return <DataTable rows={documents} columns={columns} caption={caption} rowKey={(d) => d.id} />
+  return <DataTable rows={documents} columns={columns()} caption={caption} rowKey={(d) => d.id} />
 }
 
 /** Documents: the caller's drafts to continue and the other documents they may read (DMS-90). */
@@ -61,55 +62,51 @@ export function DocumentListPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Documents"
-        description="Your drafts and the documents you may read."
+        title={t('docs.list.title')}
+        description={t('docs.list.description')}
         actions={
           <Button asChild>
             <Link to="/documents/new">
               <FilePlus />
-              New document
+              {t('docs.list.newDocument')}
             </Link>
           </Button>
         }
       />
-      {list.isPending && <LoadingState label="Loading documents" rows={5} />}
+      {list.isPending && <LoadingState label={t('docs.list.loading')} rows={5} />}
       {list.isError && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
       {list.data && (
         <>
           <Card>
             <CardHeader>
-              <CardTitle>My drafts</CardTitle>
-              <CardDescription>
-                Drafts you started; open one to continue or submit it.
-              </CardDescription>
+              <CardTitle>{t('docs.list.myDrafts')}</CardTitle>
+              <CardDescription>{t('docs.list.myDraftsText')}</CardDescription>
             </CardHeader>
             <CardContent>
               {drafts.length > 0 ? (
-                <DocumentTable documents={drafts} caption="My drafts" />
+                <DocumentTable documents={drafts} caption={t('docs.list.myDrafts')} />
               ) : (
                 <EmptyState
                   icon={FilePen}
-                  title="No drafts"
-                  description="Start one with “New document”; it is saved as your draft."
+                  title={t('docs.list.noDrafts')}
+                  description={t('docs.list.noDraftsText')}
                 />
               )}
             </CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Other documents</CardTitle>
-              <CardDescription>
-                Documents in review, approved or published, and drafts shared with you.
-              </CardDescription>
+              <CardTitle>{t('docs.list.others')}</CardTitle>
+              <CardDescription>{t('docs.list.othersText')}</CardDescription>
             </CardHeader>
             <CardContent>
               {others.length > 0 ? (
-                <DocumentTable documents={others} caption="Other documents" />
+                <DocumentTable documents={others} caption={t('docs.list.others')} />
               ) : (
                 <EmptyState
                   icon={FileText}
-                  title="No other documents yet."
-                  description="Documents in review, approved or published appear here."
+                  title={t('docs.list.noOthers')}
+                  description={t('docs.list.noOthersText')}
                 />
               )}
             </CardContent>

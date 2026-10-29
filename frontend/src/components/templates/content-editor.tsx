@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { t } from '@/i18n'
 import { contentText, errorMessage, locationLabel } from './template-lifecycle'
 
 type Parsed = { ok: true; content: TemplateContent } | { ok: false; message: string }
@@ -21,11 +22,16 @@ function parse(text: string): Parsed {
   try {
     const value: unknown = JSON.parse(text)
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-      return { ok: false, message: 'The content must be a JSON object with "sections".' }
+      return { ok: false, message: t('templates.editor.notObject') }
     }
     return { ok: true, content: value }
   } catch (e) {
-    return { ok: false, message: `Not valid JSON: ${e instanceof Error ? e.message : String(e)}` }
+    return {
+      ok: false,
+      message: t('templates.editor.invalidJson', {
+        message: e instanceof Error ? e.message : String(e),
+      }),
+    }
   }
 }
 
@@ -104,7 +110,7 @@ export function ContentEditor({ version }: { version: TemplateVersion }) {
   return (
     <div className="space-y-3">
       <div className="space-y-1.5">
-        <Label htmlFor={`${id}-content`}>Content (JSON)</Label>
+        <Label htmlFor={`${id}-content`}>{t('templates.editor.label')}</Label>
         <Textarea
           id={`${id}-content`}
           value={text}
@@ -126,7 +132,7 @@ export function ContentEditor({ version }: { version: TemplateVersion }) {
             })
           }}
         >
-          Check
+          {t('templates.editor.check')}
         </Button>
         <Button
           disabled={busy || !changed}
@@ -136,7 +142,7 @@ export function ContentEditor({ version }: { version: TemplateVersion }) {
             })
           }}
         >
-          {save.isPending ? 'Saving…' : 'Save draft'}
+          {save.isPending ? t('templates.editor.saving') : t('templates.editor.save')}
         </Button>
         {changed && (
           <Button
@@ -147,19 +153,19 @@ export function ContentEditor({ version }: { version: TemplateVersion }) {
               setOutcome(undefined)
             }}
           >
-            Discard changes
+            {t('templates.editor.discard')}
           </Button>
         )}
       </div>
       <div id={`${id}-outcome`}>
         {outcome?.kind === 'saved' && (
           <p role="status" className="text-sm text-muted-foreground">
-            Draft saved.
+            {t('templates.editor.saved')}
           </p>
         )}
         {outcome?.kind === 'valid' && (
           <p role="status" className="text-sm text-muted-foreground">
-            No issues: the content compiles against the document class.
+            {t('templates.editor.valid')}
           </p>
         )}
         {outcome?.kind === 'error' && (
@@ -173,9 +179,7 @@ export function ContentEditor({ version }: { version: TemplateVersion }) {
             className="rounded-lg border border-destructive/40 p-3 text-sm text-destructive"
           >
             <p className="font-medium">
-              {outcome.issues.length === 1
-                ? '1 issue in the content'
-                : `${String(outcome.issues.length)} issues in the content`}
+              {t('templates.editor.issues', { count: outcome.issues.length })}
             </p>
             <ul className="mt-1 list-disc space-y-1 pl-5">
               {outcome.issues.map((issue, i) => (

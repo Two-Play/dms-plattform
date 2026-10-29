@@ -50,3 +50,5 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0034](0034-evidence-reports.md) | Evidence reports: assembled on request, registered as canonical JSON with its SHA-256, PDF/A printed from the registered JSON | Accepted | medium |
 | [0035](0035-stable-addresses-and-webhooks.md) | Stable addresses of the current version resolved per request; webhooks as signed deliveries through the outbox and the job queue | Accepted | high |
 | [0036](0036-compliance-cockpit.md) | Compliance cockpit: a compliance officer role, figures computed on request, names only with a stated and audited purpose | Accepted | high |
+| [0037](0037-user-directory.md) | User directory: display names from ZITADEL's user service, resolved by the backend per tenant and cached | Accepted | high |
+| [0038](0038-ui-localization.md) | UI localization: German default with English, own typed message catalogs, Intl for formats | Accepted | high |

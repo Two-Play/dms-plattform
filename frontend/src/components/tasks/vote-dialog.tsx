@@ -4,7 +4,7 @@ import { useAuth } from 'react-oidc-context'
 import { useApiClient } from '@/api/context'
 import {
   castVote,
-  decisionLabels,
+  decisionLabel,
   decisionsFor,
   invalidateAfterVote,
   isApprovalStep,
@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { t } from '@/i18n'
 
 export interface VoteDraft {
   decision: VoteDecision
@@ -85,7 +86,7 @@ function VoteForm({ task, initial, onVoted, onCancel }: VoteFormProps) {
   return (
     <form onSubmit={submit} className="grid gap-4" noValidate>
       <fieldset className="grid gap-2" aria-describedby={`${id}-decision-error`}>
-        <legend className="mb-1 text-sm font-medium">Decision</legend>
+        <legend className="mb-1 text-sm font-medium">{t('tasks.voteDialog.decision')}</legend>
         {decisionsFor(task).map((d) => (
           <label key={d} className="flex items-center gap-2 text-sm">
             <input
@@ -98,16 +99,18 @@ function VoteForm({ task, initial, onVoted, onCancel }: VoteFormProps) {
               }}
               className="size-4 accent-primary"
             />
-            {decisionLabels[d]}
+            {decisionLabel(d)}
           </label>
         ))}
         <p id={`${id}-decision-error`} role="alert" className="text-sm text-destructive">
-          {attempted && decisionMissing ? 'Choose a decision.' : ''}
+          {attempted && decisionMissing ? t('tasks.voteDialog.chooseDecision') : ''}
         </p>
       </fieldset>
       <div className="grid gap-1.5">
         <Label htmlFor={reasonId}>
-          Reason{decision !== undefined && needsReason(decision) ? ' *' : ' (optional)'}
+          {decision !== undefined && needsReason(decision)
+            ? t('tasks.voteDialog.reasonRequired')
+            : t('tasks.voteDialog.reasonOptional')}
         </Label>
         <Textarea
           id={reasonId}
@@ -124,29 +127,21 @@ function VoteForm({ task, initial, onVoted, onCancel }: VoteFormProps) {
           className={reasonError ? 'text-sm text-destructive' : 'text-xs text-muted-foreground'}
           role={reasonError ? 'alert' : undefined}
         >
-          {reasonError
-            ? 'A reason is required for this decision.'
-            : 'Required for every decision except a plain approval.'}
+          {reasonError ? t('tasks.voteDialog.reasonMissing') : t('tasks.voteDialog.reasonHint')}
         </p>
       </div>
       {isApprovalStep(task) && (
-        <p className="text-xs text-muted-foreground">
-          Approving needs a recent sign-in. If yours is too old, you are asked to sign in again and
-          can then repeat the vote.
-        </p>
+        <p className="text-xs text-muted-foreground">{t('tasks.voteDialog.stepUpHint')}</p>
       )}
       {stepUp ? (
         <div role="alert" className="grid gap-2 rounded-lg border border-destructive/40 p-3">
-          <p className="text-sm">
-            Your vote was not recorded: approving needs a fresh sign-in. Sign in again; afterwards
-            you can repeat this vote.
-          </p>
+          <p className="text-sm">{t('tasks.voteDialog.stepUpNeeded')}</p>
           <Button
             type="button"
             className="justify-self-start"
             onClick={() => void reauthenticate((args) => auth.signinRedirect(args))}
           >
-            Sign in again
+            {t('tasks.voteDialog.signInAgain')}
           </Button>
         </div>
       ) : (
@@ -158,10 +153,10 @@ function VoteForm({ task, initial, onVoted, onCancel }: VoteFormProps) {
       )}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>
-          Cancel
+          {t('common.cancel')}
         </Button>
         <Button type="submit" disabled={vote.isPending}>
-          {vote.isPending ? 'Casting vote…' : 'Cast vote'}
+          {vote.isPending ? t('tasks.voteDialog.casting') : t('tasks.voteDialog.cast')}
         </Button>
       </DialogFooter>
     </form>
@@ -195,11 +190,12 @@ export function VoteDialog({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {task.stepName}: {documentTitle ?? 'document'}
+              {t('tasks.voteDialog.title', {
+                step: task.stepName,
+                title: documentTitle ?? t('tasks.voteDialog.document'),
+              })}
             </DialogTitle>
-            <DialogDescription>
-              Your vote applies to exactly this version; a later change invalidates it.
-            </DialogDescription>
+            <DialogDescription>{t('tasks.voteDialog.description')}</DialogDescription>
           </DialogHeader>
           <VoteForm
             task={task}

@@ -1,7 +1,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { CheckCircle2 } from 'lucide-react'
-import { useState } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import {
   acknowledge,
   markOpened,
@@ -12,19 +12,22 @@ import { useApiClient } from '@/api/context'
 import { documentQuery } from '@/api/documents'
 import type { DocumentView } from '@/api/partners'
 import { invalidateAfterReview, openReviewTasksQuery, revise, type ReviewTask } from '@/api/reviews'
-import { decisionLabels, myTasksQuery, type WorkflowTask } from '@/api/workflow'
+import { decisionLabel, myTasksQuery, type WorkflowTask } from '@/api/workflow'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ErrorState, InlineError } from '@/components/shared/error-state'
 import { PageHeader } from '@/components/shared/page-header'
 import { EmptyState, LoadingState } from '@/components/shared/states'
+import { roleLabel } from '@/components/shared/role-label'
+import { UserName, UserNames } from '@/components/shared/user-name'
+import { t } from '@/i18n'
+import { formatDate, formatDateTime, formatPlainDate } from '@/i18n/format'
 import { toast } from '@/lib/toast'
 import {
   acknowledgementItem,
-  formatPlainDate,
   isOverdue,
-  kindLabels,
+  kindLabel,
   reviewItem,
   sortInbox,
   workflowItem,
@@ -35,54 +38,65 @@ import { PendingVoteNotice } from './pending-vote-notice'
 import { ReviewDialog } from './review-dialog'
 import { VoteDialog, type VoteDraft } from './vote-dialog'
 
-const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' })
-const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-})
-
 function ItemDate({ item, overdue }: { item: InboxItem; overdue: boolean }) {
   if (item.kind === 'ReviewDate') {
     return (
       <span className={overdue ? 'font-medium text-destructive' : undefined}>
-        {overdue ? 'Review overdue since' : 'Review due'} {formatPlainDate(item.review.dueOn)}
+        {t(overdue ? 'tasks.reviewOverdueSince' : 'tasks.reviewDue', {
+          date: formatPlainDate(item.review.dueOn),
+        })}
       </span>
     )
   }
   if (item.dueAt !== undefined) {
     return (
       <span className={overdue ? 'font-medium text-destructive' : undefined}>
-        {overdue ? 'Overdue since' : 'Due'} {dateTimeFormat.format(new Date(item.dueAt))}
+        {t(overdue ? 'tasks.overdueSince' : 'tasks.due', { date: formatDateTime(item.dueAt) })}
       </span>
     )
   }
   return (
     <span className="text-muted-foreground">
-      {item.kind === 'Acknowledgement' ? 'Published' : 'Since'}{' '}
-      {dateFormat.format(new Date(item.createdAt))}
+      {t(item.kind === 'Acknowledgement' ? 'tasks.publishedOn' : 'tasks.since', {
+        date: formatDate(item.createdAt),
+      })}
     </span>
   )
 }
 
 function Context({ item }: { item: InboxItem }) {
-  const parts: string[] = []
+  const parts: ReactNode[] = []
   if (item.classPath.length > 0) parts.push(item.classPath.join(' / '))
   if (item.kind === 'Review' || item.kind === 'Approval') {
-    parts.push(`${item.task.stepName} (${item.task.role})`)
+    parts.push(`${item.task.stepName} (${roleLabel(item.task.role)})`)
     const candidates = item.task.candidates ?? []
-    // User ids until a directory of display names exists (DMS-91 follow-up).
-    if (candidates.length > 0) parts.push(`assigned to ${candidates.join(', ')}`)
+    if (candidates.length > 0) {
+      parts.push(
+        <>
+          {t('tasks.assignedTo')} <UserNames ids={candidates} />
+        </>,
+      )
+    }
   }
   if (item.kind === 'ReviewDate') {
     parts.push(
-      item.review.versionStatus === 'ReviewDue' ? 'review date reached' : 'valid, review ahead',
+      item.review.versionStatus === 'ReviewDue'
+        ? t('tasks.reviewDateReached')
+        : t('tasks.reviewAhead'),
     )
   }
   if (item.kind === 'Acknowledgement' && item.acknowledgement.validFrom) {
-    parts.push(`valid from ${formatPlainDate(item.acknowledgement.validFrom)}`)
+    parts.push(t('tasks.validFrom', { date: formatPlainDate(item.acknowledgement.validFrom) }))
   }
   return parts.length > 0 ? (
-    <p className="text-xs break-words text-muted-foreground">{parts.join(' · ')}</p>
+    <p className="text-xs break-words text-muted-foreground">
+      {parts.map((part, i) => (
+        <Fragment key={i}>
+          {i > 0 && ' · '}
+          {part}
+        </Fragment>
+      ))}
+    </p>
   ) : null
 }
 
@@ -107,7 +121,7 @@ function AcknowledgementActions({
     mutationFn: () => acknowledge(client, ack.documentId, ack.versionId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['acknowledgements'] })
-      onDone(`Read confirmed: ${ack.title} ${ack.versionLabel}.`)
+      onDone(t('tasks.readConfirmed', { title: ack.title, version: ack.versionLabel }))
     },
   })
   const error = open.error ?? confirm.error
@@ -122,7 +136,7 @@ function AcknowledgementActions({
             open.mutate()
           }}
         >
-          Open document
+          {t('tasks.openDocument')}
         </Button>
         <Button
           size="sm"
@@ -132,12 +146,12 @@ function AcknowledgementActions({
           }}
           aria-describedby={ack.opened ? undefined : `ack-hint-${ack.versionId}`}
         >
-          Confirm read
+          {t('tasks.confirmRead')}
         </Button>
       </div>
       {!ack.opened && (
         <p id={`ack-hint-${ack.versionId}`} className="text-xs text-muted-foreground">
-          Open the document first.
+          {t('tasks.openFirst')}
         </p>
       )}
       {error && <InlineError error={error} className="text-xs" />}
@@ -161,7 +175,7 @@ function ReviewActions({
     mutationFn: () => revise(client, review.id),
     onSuccess: async () => {
       await invalidateAfterReview(queryClient, review.documentId)
-      onDone(`Revision started: a new draft of ${review.title} is open.`)
+      onDone(t('tasks.revisionStarted', { title: review.title }))
       await navigate({ to: '/documents/$documentId', params: { documentId: review.documentId } })
     },
   })
@@ -174,7 +188,7 @@ function ReviewActions({
             onDecide(review, 'recertify')
           }}
         >
-          Recertify…
+          {t('tasks.recertify')}
         </Button>
         <Button
           size="sm"
@@ -184,7 +198,7 @@ function ReviewActions({
             revision.mutate()
           }}
         >
-          {revision.isPending ? 'Starting…' : 'Revise'}
+          {revision.isPending ? t('tasks.starting') : t('tasks.revise')}
         </Button>
         <Button
           size="sm"
@@ -193,7 +207,7 @@ function ReviewActions({
             onDecide(review, 'withdraw')
           }}
         >
-          Withdraw…
+          {t('tasks.withdraw')}
         </Button>
       </div>
       {revision.isError && <InlineError error={revision.error} className="text-xs" />}
@@ -215,10 +229,13 @@ function InboxRow({
   onDone: (message: string) => void
 }) {
   const overdue = isOverdue(item, now)
-  const title = item.title ?? 'Document'
+  const title = item.title ?? t('common.document')
   return (
     <li
-      aria-label={`${kindLabels[item.kind]}: ${title}${overdue ? ' (overdue)' : ''}`}
+      aria-label={t(overdue ? 'tasks.itemLabelOverdue' : 'tasks.itemLabel', {
+        kind: kindLabel(item.kind),
+        title,
+      })}
       data-overdue={overdue || undefined}
       className={`flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-start sm:justify-between ${
         overdue ? 'border-destructive/60 bg-destructive/5' : ''
@@ -228,12 +245,14 @@ function InboxRow({
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={item.kind === 'Approval' ? 'default' : 'secondary'}>
-            {kindLabels[item.kind]}
+            {kindLabel(item.kind)}
           </Badge>
-          {overdue && <Badge variant="destructive">Overdue</Badge>}
+          {overdue && <Badge variant="destructive">{t('common.overdue')}</Badge>}
           {(item.kind === 'Review' || item.kind === 'Approval') && item.task.actingFor && (
-            // Forwarded by an active deputyship (DMS-49, DMS-99); user id until display names exist.
-            <Badge variant="outline">On behalf of {item.task.actingFor}</Badge>
+            // Forwarded by an active deputyship (DMS-49, DMS-99).
+            <Badge variant="outline">
+              {t('tasks.onBehalfOf')} <UserName id={item.task.actingFor} />
+            </Badge>
           )}
         </div>
         <p className="text-sm">
@@ -245,7 +264,10 @@ function InboxRow({
             {title}
           </Link>
           {item.versionLabel && (
-            <span className="text-muted-foreground"> version {item.versionLabel}</span>
+            <span className="text-muted-foreground">
+              {' '}
+              {t('tasks.versionSuffix', { label: item.versionLabel })}
+            </span>
           )}
         </p>
         <Context item={item} />
@@ -261,7 +283,7 @@ function InboxRow({
               onVote(item.task)
             }}
           >
-            Vote…
+            {t('tasks.vote')}
           </Button>
         )}
         {item.kind === 'Acknowledgement' && (
@@ -285,7 +307,7 @@ export function TaskInboxPage() {
   const tasks = useQuery(myTasksQuery(client))
   const acknowledgements = useQuery(openAcknowledgementsQuery(client))
   const reviews = useQuery(openReviewTasksQuery(client))
-  const documentIds = [...new Set((tasks.data ?? []).map((t) => t.documentId))]
+  const documentIds = [...new Set((tasks.data ?? []).map((task) => task.documentId))]
   const documents = useQueries({
     queries: documentIds.map((id) => documentQuery(client, id)),
     combine: (results) =>
@@ -304,7 +326,7 @@ export function TaskInboxPage() {
 
   const items = sortInbox(
     [
-      ...(tasks.data ?? []).map((t) => workflowItem(t, documents.get(t.documentId))),
+      ...(tasks.data ?? []).map((task) => workflowItem(task, documents.get(task.documentId))),
       ...(acknowledgements.data ?? []).map(acknowledgementItem),
       ...(reviews.data ?? []).map(reviewItem),
     ],
@@ -316,10 +338,7 @@ export function TaskInboxPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Tasks"
-        description="Reviews, approvals, read confirmations and periodic reviews waiting for you."
-      />
+      <PageHeader title={t('tasks.title')} description={t('tasks.description')} />
       {tasks.data && (
         <PendingVoteNotice
           tasks={tasks.data}
@@ -331,11 +350,16 @@ export function TaskInboxPage() {
       )}
       <Card>
         <CardHeader>
-          <CardTitle>My tasks</CardTitle>
+          <CardTitle>{t('tasks.myTasks')}</CardTitle>
           <CardDescription>
             {loading
-              ? 'Loading…'
-              : `${items.length} open${overdueCount > 0 ? `, ${overdueCount} overdue` : ''}`}
+              ? t('common.loading')
+              : overdueCount > 0
+                ? t('tasks.summaryOverdue', {
+                    open: t('tasks.summary', { count: items.length }),
+                    overdue: overdueCount,
+                  })
+                : t('tasks.summary', { count: items.length })}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -349,16 +373,16 @@ export function TaskInboxPage() {
           {reviews.isError && (
             <ErrorState error={reviews.error} onRetry={() => void reviews.refetch()} />
           )}
-          {loading && <LoadingState label="Loading your tasks" />}
+          {loading && <LoadingState label={t('tasks.loading')} />}
           {!loading && items.length === 0 && !tasks.isError && (
             <EmptyState
               icon={CheckCircle2}
-              title="Nothing to do right now."
-              description="New reviews, approvals and read confirmations will appear here."
+              title={t('tasks.emptyTitle')}
+              description={t('tasks.emptyText')}
             />
           )}
           {items.length > 0 && (
-            <ul aria-label="Open tasks" className="space-y-2">
+            <ul aria-label={t('tasks.listLabel')} className="space-y-2">
               {items.map((item) => (
                 <InboxRow
                   key={item.key}
@@ -387,8 +411,12 @@ export function TaskInboxPage() {
           setDeciding(undefined)
           toast(
             review.status === 'Recertified'
-              ? `Recertified: ${review.title} ${review.versionLabel}, next review ${formatPlainDate(review.nextDueOn ?? review.dueOn)}.`
-              : `Withdrawn: ${review.title} ${review.versionLabel} is no longer in force.`,
+              ? t('tasks.recertified', {
+                  title: review.title,
+                  version: review.versionLabel,
+                  date: formatPlainDate(review.nextDueOn ?? review.dueOn),
+                })
+              : t('tasks.withdrawn', { title: review.title, version: review.versionLabel }),
           )
         }}
       />
@@ -401,7 +429,12 @@ export function TaskInboxPage() {
         }}
         onVoted={(task, decision) => {
           setVoting(undefined)
-          toast(`Vote recorded: ${decisionLabels[decision]} on ${titleOf(task) ?? 'the document'}.`)
+          toast(
+            t('tasks.voteRecorded', {
+              decision: decisionLabel(decision),
+              title: titleOf(task) ?? t('tasks.theDocument'),
+            }),
+          )
         }}
       />
     </div>

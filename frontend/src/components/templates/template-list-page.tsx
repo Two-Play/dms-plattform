@@ -8,44 +8,50 @@ import { ErrorState } from '@/components/shared/error-state'
 import { PageHeader } from '@/components/shared/page-header'
 import { EmptyState, LoadingState } from '@/components/shared/states'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { UserName } from '@/components/shared/user-name'
+import { t } from '@/i18n'
+import { formatDateTime } from '@/i18n/format'
 import { TemplateStatusBadge } from './template-status-badge'
 
-const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-
-const columns: Column<TemplateVersion>[] = [
+/** Built per render, so the headers follow the active language. */
+const columns = (): Column<TemplateVersion>[] => [
   {
     key: 'name',
-    header: 'Name',
-    cell: (t) => (
+    header: t('templates.list.name'),
+    cell: (tpl) => (
       <>
         <Link
           to="/templates/$templateId"
-          params={{ templateId: t.templateId }}
+          params={{ templateId: tpl.templateId }}
           className="font-medium underline-offset-4 hover:underline"
         >
-          {t.name}
+          {tpl.name}
         </Link>
-        {t.description && <p className="text-xs text-muted-foreground">{t.description}</p>}
+        {tpl.description && <p className="text-xs text-muted-foreground">{tpl.description}</p>}
       </>
     ),
   },
   {
     key: 'version',
-    header: 'Latest version',
-    cell: (t) => <span className="font-mono text-xs">{t.version}</span>,
+    header: t('templates.list.latest'),
+    cell: (tpl) => <span className="font-mono text-xs">{tpl.version}</span>,
   },
-  { key: 'status', header: 'Status', cell: (t) => <TemplateStatusBadge status={t.status} /> },
+  {
+    key: 'status',
+    header: t('templates.list.status'),
+    cell: (tpl) => <TemplateStatusBadge status={tpl.status} />,
+  },
   {
     key: 'createdBy',
-    header: 'Created by',
-    className: 'hidden font-mono text-xs sm:table-cell',
-    cell: (t) => t.createdBy,
+    header: t('templates.list.createdBy'),
+    className: 'hidden sm:table-cell',
+    cell: (tpl) => <UserName id={tpl.createdBy} />,
   },
   {
     key: 'created',
-    header: 'Created',
+    header: t('templates.list.created'),
     className: 'hidden text-muted-foreground md:table-cell',
-    cell: (t) => dateTime.format(new Date(t.createdAt)),
+    cell: (tpl) => formatDateTime(tpl.createdAt),
   },
 ]
 
@@ -57,31 +63,28 @@ export function TemplateListPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Templates"
-        description="Edit drafts, run the test mode and move versions through testing, release and deprecation."
-      />
-      {list.isPending && <LoadingState label="Loading templates" rows={5} />}
+      <PageHeader title={t('templates.list.title')} description={t('templates.list.description')} />
+      {list.isPending && <LoadingState label={t('templates.list.loading')} rows={5} />}
       {list.isError && <ErrorState error={list.error} onRetry={() => void list.refetch()} />}
       {list.data && (
         <Card>
           <CardHeader>
-            <CardTitle>All templates</CardTitle>
-            <CardDescription>Latest version of every template, in any status.</CardDescription>
+            <CardTitle>{t('templates.list.all')}</CardTitle>
+            <CardDescription>{t('templates.list.allText')}</CardDescription>
           </CardHeader>
           <CardContent>
             {templates.length === 0 ? (
               <EmptyState
                 icon={LayoutTemplate}
-                title="No templates yet."
-                description="Templates are created through the template API; they appear here with their status."
+                title={t('templates.list.empty')}
+                description={t('templates.list.emptyText')}
               />
             ) : (
               <DataTable
                 rows={templates}
-                columns={columns}
-                caption="Templates"
-                rowKey={(t) => t.templateId}
+                columns={columns()}
+                caption={t('templates.list.caption')}
+                rowKey={(tpl) => tpl.templateId}
               />
             )}
           </CardContent>

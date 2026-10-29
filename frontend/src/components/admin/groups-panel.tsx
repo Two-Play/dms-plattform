@@ -15,7 +15,10 @@ import {
   type Group,
   type GroupMember,
 } from '@/api/groups'
-import { formatDateTime } from '@/components/deputies/format'
+import { cachedUserName, useUserLabel } from '@/api/users'
+import { UserName } from '@/components/shared/user-name'
+import { t } from '@/i18n'
+import { formatDateTime } from '@/i18n/format'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -32,10 +35,8 @@ function CreateGroupForm({ onCreated }: { onCreated: (group: Group) => void }) {
   const [key, setKey] = useState('')
   const [name, setName] = useState('')
   const [attempted, setAttempted] = useState(false)
-  const keyProblem = groupKeyPattern.test(key.trim())
-    ? undefined
-    : 'Lowercase letters, digits and hyphens, starting with a letter or digit (at most 63).'
-  const nameProblem = name.trim() === '' ? 'Enter a name.' : undefined
+  const keyProblem = groupKeyPattern.test(key.trim()) ? undefined : t('groups.keyProblem')
+  const nameProblem = name.trim() === '' ? t('groups.nameMissing') : undefined
 
   const create = useMutation({
     mutationFn: () => createGroup(client, key.trim(), name.trim()),
@@ -44,7 +45,7 @@ function CreateGroupForm({ onCreated }: { onCreated: (group: Group) => void }) {
       setKey('')
       setName('')
       setAttempted(false)
-      toast(`Group ${group.name} created.`)
+      toast(t('groups.created', { name: group.name }))
       onCreated(group)
     },
   })
@@ -65,11 +66,11 @@ function CreateGroupForm({ onCreated }: { onCreated: (group: Group) => void }) {
       noValidate
     >
       <div className="grid gap-1.5">
-        <Label htmlFor={`${id}-key`}>Key *</Label>
+        <Label htmlFor={`${id}-key`}>{t('groups.key')}</Label>
         <Input
           id={`${id}-key`}
           value={key}
-          placeholder="e.g. hr-management"
+          placeholder={t('groups.keyPlaceholder')}
           onChange={(e) => {
             setKey(e.target.value)
           }}
@@ -82,11 +83,11 @@ function CreateGroupForm({ onCreated }: { onCreated: (group: Group) => void }) {
           role={keyError ? 'alert' : undefined}
           className={keyError ? 'text-sm text-destructive' : 'text-xs text-muted-foreground'}
         >
-          {keyError ?? 'Stored in documents; cannot be changed later.'}
+          {keyError ?? t('groups.keyHint')}
         </p>
       </div>
       <div className="grid gap-1.5">
-        <Label htmlFor={`${id}-name`}>Name *</Label>
+        <Label htmlFor={`${id}-name`}>{t('groups.nameRequired')}</Label>
         <Input
           id={`${id}-name`}
           value={name}
@@ -105,7 +106,7 @@ function CreateGroupForm({ onCreated }: { onCreated: (group: Group) => void }) {
       </div>
       <div className="grid gap-1.5 sm:pt-6">
         <Button type="submit" disabled={create.isPending}>
-          {create.isPending ? 'Creating…' : 'Create group'}
+          {create.isPending ? t('groups.creating') : t('groups.create')}
         </Button>
       </div>
       {create.isError && <InlineError error={create.error} className="sm:col-span-3" />}
@@ -121,7 +122,7 @@ function RenameForm({ group }: { group: Group }) {
   const rename = useMutation({
     mutationFn: () => renameGroup(client, group.key, name.trim()),
     onSuccess: async () => {
-      toast(`Group renamed to ${name.trim()}.`)
+      toast(t('groups.renamed', { name: name.trim() }))
       await queryClient.invalidateQueries({ queryKey: ['groups'] })
     },
   })
@@ -135,7 +136,7 @@ function RenameForm({ group }: { group: Group }) {
       className="flex flex-wrap items-end gap-2"
     >
       <div className="grid min-w-48 flex-1 gap-1.5">
-        <Label htmlFor={`${id}-name`}>Name</Label>
+        <Label htmlFor={`${id}-name`}>{t('groups.name')}</Label>
         <Input
           id={`${id}-name`}
           value={name}
@@ -149,7 +150,7 @@ function RenameForm({ group }: { group: Group }) {
         variant="outline"
         disabled={rename.isPending || unchanged || name.trim() === ''}
       >
-        {rename.isPending ? 'Renaming…' : 'Rename'}
+        {rename.isPending ? t('groups.renaming') : t('groups.rename')}
       </Button>
       {rename.isError && <InlineError error={rename.error} className="w-full" />}
     </form>
@@ -166,7 +167,7 @@ function useMembershipChange(
   return useMutation({
     mutationFn: change,
     onSuccess: async (members, userId) => {
-      toast(done(userId))
+      toast(done(cachedUserName(queryClient, userId)))
       queryClient.setQueryData(['groups', group.key, 'members'], members)
       await queryClient.invalidateQueries({ queryKey: ['workflow'] })
     },
@@ -180,7 +181,7 @@ function AddMemberForm({ group }: { group: Group }) {
   const add = useMembershipChange(
     group,
     (user) => addGroupMember(client, group.key, user),
-    (user) => `${user} added to ${group.name}.`,
+    (user) => t('groups.added', { user, group: group.name }),
   )
   return (
     <form
@@ -197,7 +198,7 @@ function AddMemberForm({ group }: { group: Group }) {
       className="flex flex-wrap items-end gap-2"
     >
       <div className="grid min-w-48 flex-1 gap-1.5">
-        <Label htmlFor={`${id}-user`}>User id</Label>
+        <Label htmlFor={`${id}-user`}>{t('groups.userId')}</Label>
         <Input
           id={`${id}-user`}
           value={userId}
@@ -207,10 +208,36 @@ function AddMemberForm({ group }: { group: Group }) {
         />
       </div>
       <Button type="submit" disabled={add.isPending || userId.trim() === ''}>
-        {add.isPending ? 'Adding…' : 'Add member'}
+        {add.isPending ? t('groups.adding') : t('groups.add')}
       </Button>
       {add.isError && <InlineError error={add.error} className="w-full" />}
     </form>
+  )
+}
+
+/** "Remove", labelled with the member's name for screen readers. */
+function RemoveButton({
+  userId,
+  group,
+  disabled,
+  onRemove,
+}: {
+  userId: string
+  group: Group
+  disabled: boolean
+  onRemove: () => void
+}) {
+  const name = useUserLabel(userId) ?? userId
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={disabled}
+      aria-label={t('groups.removeLabel', { user: name, group: group.name })}
+      onClick={onRemove}
+    >
+      {t('groups.remove')}
+    </Button>
   )
 }
 
@@ -219,14 +246,14 @@ function MemberTable({ group, members }: { group: Group; members: GroupMember[] 
   const remove = useMembershipChange(
     group,
     (user) => removeGroupMember(client, group.key, user),
-    (user) => `${user} removed from ${group.name}.`,
+    (user) => t('groups.removed', { user, group: group.name }),
   )
   if (members.length === 0) {
     return (
       <EmptyState
         icon={Users}
-        title="The group has no members yet."
-        description="Add members by their user id."
+        title={t('groups.noMembers')}
+        description={t('groups.noMembersText')}
       />
     )
   }
@@ -235,20 +262,20 @@ function MemberTable({ group, members }: { group: Group; members: GroupMember[] 
       {remove.isError && <InlineError error={remove.error} />}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <caption className="sr-only">Members of {group.name}, current ones first</caption>
+          <caption className="sr-only">{t('groups.membersCaption', { group: group.name })}</caption>
           <thead className="text-left text-xs text-muted-foreground">
             <tr className="border-b">
               <th scope="col" className="py-2 pr-4 font-medium">
-                User
+                {t('groups.user')}
               </th>
               <th scope="col" className="py-2 pr-4 font-medium">
-                Added
+                {t('groups.addedCol')}
               </th>
               <th scope="col" className="py-2 pr-4 font-medium">
-                Removed
+                {t('groups.removedCol')}
               </th>
               <th scope="col" className="py-2 font-medium">
-                <span className="sr-only">Actions</span>
+                <span className="sr-only">{t('groups.actions')}</span>
               </th>
             </tr>
           </thead>
@@ -261,38 +288,39 @@ function MemberTable({ group, members }: { group: Group; members: GroupMember[] 
                   className={`border-b align-top last:border-0 ${current ? '' : 'text-muted-foreground'}`}
                 >
                   <td className="py-2 pr-4 break-all">
-                    {m.userId}{' '}
+                    <UserName id={m.userId} />{' '}
                     {!current && (
                       <Badge variant="outline" className="ml-1">
-                        Former
+                        {t('groups.former')}
                       </Badge>
                     )}
                   </td>
                   <td className="py-2 pr-4">
                     {formatDateTime(m.addedAt)}
-                    <div className="text-xs text-muted-foreground">by {m.addedBy}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {t('groups.by')} <UserName id={m.addedBy} />
+                    </div>
                   </td>
                   <td className="py-2 pr-4">
                     {m.removedAt && (
                       <>
                         {formatDateTime(m.removedAt)}
-                        <div className="text-xs text-muted-foreground">by {m.removedBy}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {t('groups.by')} {m.removedBy && <UserName id={m.removedBy} />}
+                        </div>
                       </>
                     )}
                   </td>
                   <td className="py-2">
                     {current && (
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <RemoveButton
+                        userId={m.userId}
+                        group={group}
                         disabled={remove.isPending}
-                        aria-label={`Remove ${m.userId} from ${group.name}`}
-                        onClick={() => {
+                        onRemove={() => {
                           remove.mutate(m.userId)
                         }}
-                      >
-                        Remove
-                      </Button>
+                      />
                     )}
                   </td>
                 </tr>
@@ -314,15 +342,12 @@ function GroupDetail({ group }: { group: Group }) {
         <CardTitle>
           <h2>{group.name}</h2>
         </CardTitle>
-        <CardDescription>
-          Key <code>{group.key}</code>. Members see the confidential documents naming the group.
-          Open review and approval tasks of those documents are updated when members join or leave.
-        </CardDescription>
+        <CardDescription>{t('groups.detail', { key: group.key })}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <RenameForm key={group.name} group={group} />
         <AddMemberForm group={group} />
-        {members.isPending && <LoadingState label="Loading the members" />}
+        {members.isPending && <LoadingState label={t('groups.loadingMembers')} />}
         {members.isError && (
           <ErrorState error={members.error} onRetry={() => void members.refetch()} />
         )}
@@ -343,10 +368,8 @@ export function GroupsPanel() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>New group</CardTitle>
-          <CardDescription>
-            Groups are not deleted, since document versions keep naming them.
-          </CardDescription>
+          <CardTitle>{t('groups.newGroup')}</CardTitle>
+          <CardDescription>{t('groups.newGroupText')}</CardDescription>
         </CardHeader>
         <CardContent>
           <CreateGroupForm
@@ -356,18 +379,18 @@ export function GroupsPanel() {
           />
         </CardContent>
       </Card>
-      {groups.isPending && <LoadingState label="Loading the access groups" rows={4} />}
+      {groups.isPending && <LoadingState label={t('groups.loadingGroups')} rows={4} />}
       {groups.isError && <ErrorState error={groups.error} onRetry={() => void groups.refetch()} />}
       {groups.data && groups.data.length === 0 && (
         <EmptyState
           icon={Users}
-          title="No access groups yet."
-          description="Create a group above, then add members to it."
+          title={t('groups.noGroups')}
+          description={t('groups.noGroupsText')}
         />
       )}
       {groups.data && selected && (
         <div className="grid gap-6 md:grid-cols-[14rem_1fr]">
-          <nav aria-label="Access groups">
+          <nav aria-label={t('groups.nav')}>
             <ul className="flex gap-1 overflow-x-auto md:flex-col">
               {groups.data.map((g) => (
                 <li key={g.key}>

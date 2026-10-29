@@ -1,5 +1,6 @@
 import { queryOptions } from '@tanstack/react-query'
 import type { ApiClient } from './client'
+import { formatPercent } from '@/i18n/format'
 import { requestError } from './errors'
 import type { components } from './schema'
 
@@ -111,5 +112,5 @@ export async function fetchOpenAcknowledgements(
 
 /** A rate (0 to 1) as a whole percentage, or a dash without audience. */
 export function formatRate(rate: number | undefined): string {
-  return rate === undefined ? '–' : `${String(Math.round(rate * 100))} %`
+  return rate === undefined ? '–' : formatPercent(rate)
 }

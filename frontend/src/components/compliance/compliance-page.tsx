@@ -29,17 +29,34 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { useUserLabel } from '@/api/users'
+import { UserName } from '@/components/shared/user-name'
+import { t } from '@/i18n'
+import { formatPlainDate as formatDate } from '@/i18n/format'
 import { groupLabel, type CompliancePageSearch } from './compliance-params'
 
-const NO_UNIT = 'No unit'
-const NO_OWNER = 'No owner'
 const MAX_REASON = 500
 
-const dateOnly = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' })
+const noUnit = () => t('compliance.noUnit')
 
-/** A YYYY-MM-DD date without shifting it into the browser's time zone. */
-function formatDate(date: string): string {
-  return dateOnly.format(new Date(`${date}T00:00:00Z`))
+/** An owner (user id) by display name; "No owner" for versions without one. */
+function OwnerName({ owner }: { owner: string | undefined }) {
+  return owner ? <UserName id={owner} /> : <>{t('compliance.noOwner')}</>
+}
+
+/** The link to the overdue reviews of an owner, labelled with the owner's name. */
+function OwnerCountLink({ owner, count }: { owner: string | undefined; count: number }) {
+  const name = useUserLabel(owner) ?? t('compliance.noOwner')
+  return (
+    <Link
+      to="/compliance"
+      search={{ view: 'reviews', owner: owner ?? '' }}
+      className={linkClass}
+      aria-label={t('compliance.overdueOf', { count, owner: name })}
+    >
+      {count}
+    </Link>
+  )
 }
 
 const th = 'py-2 pr-4 font-medium'
@@ -90,7 +107,7 @@ function KeyFigure({
     <Link
       to="/compliance"
       search={search}
-      aria-label={`${label}: ${value}. Show the list`}
+      aria-label={t('compliance.showList', { label, value })}
       className="block rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     >
       <Card className="h-full transition-colors hover:bg-accent/50">
@@ -108,7 +125,7 @@ function Overview() {
   const client = useApiClient()
   const overview = useQuery(complianceOverviewQuery(client))
 
-  if (overview.isPending) return <LoadingState label="Loading the compliance overview" />
+  if (overview.isPending) return <LoadingState label={t('compliance.loadingOverview')} />
   if (overview.isError) {
     return <ErrorState error={overview.error} onRetry={() => void overview.refetch()} />
   }
@@ -119,46 +136,58 @@ function Overview() {
   const ratesByUnit = o.acknowledgementsByUnit ?? []
   return (
     <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">As of {formatDate(o.today)}</p>
+      <p className="text-sm text-muted-foreground">
+        {t('compliance.asOf', { date: formatDate(o.today) })}
+      </p>
       <div className="grid gap-4 sm:grid-cols-3">
         <KeyFigure
-          label="Overdue reviews"
+          label={t('compliance.overdueReviews')}
           value={String(o.overdueReviews)}
-          detail="Valid versions whose review date has passed without recertification"
+          detail={t('compliance.overdueDetail')}
           search={{ view: 'reviews' }}
         />
         <KeyFigure
-          label="Acknowledgement rate"
+          label={t('compliance.ackRate')}
           value={formatRate(acks.rate)}
-          detail={`${String(acks.acknowledged)} of ${String(acks.audience)} readers across ${String(acks.versions)} versions`}
+          detail={t('compliance.ackRateDetail', {
+            acknowledged: acks.acknowledged,
+            audience: acks.audience,
+            versions: acks.versions,
+          })}
           search={{ view: 'acknowledgements' }}
         />
         <KeyFigure
-          label="Open acknowledgements"
+          label={t('compliance.openAcks')}
           value={String(acks.open)}
-          detail="Readers who have not acknowledged a valid version yet"
+          detail={t('compliance.openAcksDetail')}
           search={{ view: 'acknowledgements' }}
         />
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardTitle>Overdue reviews by unit</CardTitle>
+            <CardTitle>{t('compliance.byUnit')}</CardTitle>
           </CardHeader>
           <CardContent>
             {byUnit.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No overdue reviews.</p>
+              <p className="text-sm text-muted-foreground">{t('compliance.noOverdue')}</p>
             ) : (
-              <Table caption="Overdue reviews by organizational unit" head={['Unit', 'Overdue']}>
+              <Table
+                caption={t('compliance.byUnitCaption')}
+                head={[t('compliance.unit'), t('compliance.overdue')]}
+              >
                 {byUnit.map((u) => (
                   <tr key={u.unit ?? ''} className="border-b last:border-0">
-                    <td className={td}>{groupLabel(u.unit, NO_UNIT)}</td>
+                    <td className={td}>{groupLabel(u.unit, noUnit())}</td>
                     <td className={td}>
                       <Link
                         to="/compliance"
                         search={{ view: 'reviews', unit: u.unit ?? '' }}
                         className={linkClass}
-                        aria-label={`${String(u.count)} overdue in ${groupLabel(u.unit, NO_UNIT)}`}
+                        aria-label={t('compliance.overdueIn', {
+                          count: u.count,
+                          unit: groupLabel(u.unit, noUnit()),
+                        })}
                       >
                         {u.count}
                       </Link>
@@ -171,25 +200,23 @@ function Overview() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Overdue reviews by owner</CardTitle>
+            <CardTitle>{t('compliance.byOwner')}</CardTitle>
           </CardHeader>
           <CardContent>
             {byOwner.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No overdue reviews.</p>
+              <p className="text-sm text-muted-foreground">{t('compliance.noOverdue')}</p>
             ) : (
-              <Table caption="Overdue reviews by owner" head={['Owner', 'Overdue']}>
+              <Table
+                caption={t('compliance.byOwner')}
+                head={[t('compliance.owner'), t('compliance.overdue')]}
+              >
                 {byOwner.map((u) => (
                   <tr key={u.owner ?? ''} className="border-b last:border-0">
-                    <td className={td}>{groupLabel(u.owner, NO_OWNER)}</td>
                     <td className={td}>
-                      <Link
-                        to="/compliance"
-                        search={{ view: 'reviews', owner: u.owner ?? '' }}
-                        className={linkClass}
-                        aria-label={`${String(u.count)} overdue of ${groupLabel(u.owner, NO_OWNER)}`}
-                      >
-                        {u.count}
-                      </Link>
+                      <OwnerName owner={u.owner || undefined} />
+                    </td>
+                    <td className={td}>
+                      <OwnerCountLink owner={u.owner || undefined} count={u.count} />
                     </td>
                   </tr>
                 ))}
@@ -199,25 +226,28 @@ function Overview() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Acknowledgements by unit</CardTitle>
+            <CardTitle>{t('compliance.acksByUnit')}</CardTitle>
           </CardHeader>
           <CardContent>
             {ratesByUnit.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No versions require acknowledgement.</p>
+              <p className="text-sm text-muted-foreground">{t('compliance.noAckVersions')}</p>
             ) : (
               <Table
-                caption="Acknowledgement rate by organizational unit"
-                head={['Unit', 'Rate', 'Open']}
+                caption={t('compliance.ratesCaption')}
+                head={[t('compliance.unit'), t('compliance.rate'), t('compliance.open')]}
               >
                 {ratesByUnit.map((u) => (
                   <tr key={u.unit ?? ''} className="border-b last:border-0">
-                    <td className={td}>{groupLabel(u.unit, NO_UNIT)}</td>
+                    <td className={td}>{groupLabel(u.unit, noUnit())}</td>
                     <td className={td}>
                       <Link
                         to="/compliance"
                         search={{ view: 'acknowledgements', unit: u.unit ?? '' }}
                         className={linkClass}
-                        aria-label={`Acknowledgement rate ${formatRate(u.rate.rate)} in ${groupLabel(u.unit, NO_UNIT)}`}
+                        aria-label={t('compliance.rateIn', {
+                          rate: formatRate(u.rate.rate),
+                          unit: groupLabel(u.unit, noUnit()),
+                        })}
                       >
                         {formatRate(u.rate.rate)}
                       </Link>
@@ -236,9 +266,13 @@ function Overview() {
 
 function filterText(search: CompliancePageSearch): string | undefined {
   const parts = [
-    search.unit !== undefined ? `unit ${groupLabel(search.unit, NO_UNIT)}` : undefined,
-    search.owner !== undefined ? `owner ${groupLabel(search.owner, NO_OWNER)}` : undefined,
-    search.document !== undefined ? 'one document' : undefined,
+    search.unit !== undefined
+      ? t('compliance.filterUnit', { unit: groupLabel(search.unit, noUnit()) })
+      : undefined,
+    search.owner !== undefined
+      ? t('compliance.filterOwner', { owner: groupLabel(search.owner, t('compliance.noOwner')) })
+      : undefined,
+    search.document !== undefined ? t('compliance.filterDocument') : undefined,
   ].filter((p) => p !== undefined)
   return parts.length === 0 ? undefined : parts.join(', ')
 }
@@ -252,14 +286,16 @@ function ListHeader({ title, search }: { title: string; search: CompliancePageSe
       </CardTitle>
       {filter && (
         <CardDescription className="flex flex-wrap items-center gap-2">
-          <span>Filtered by {filter}</span>
+          <span>
+            {t('compliance.filteredBy')} {filter}
+          </span>
           <Link
             to="/compliance"
             search={{ view: search.view }}
             className="inline-flex items-center gap-1 underline-offset-4 hover:underline"
           >
             <X className="size-3" aria-hidden />
-            Clear filter
+            {t('compliance.clearFilter')}
           </Link>
         </CardDescription>
       )}
@@ -272,22 +308,29 @@ function OverdueReviewList({ search }: { search: CompliancePageSearch }) {
   const list = useQuery(overdueReviewsQuery(client, search.unit, search.owner))
   return (
     <Card>
-      <ListHeader title="Overdue reviews" search={search} />
+      <ListHeader title={t('compliance.overdueReviews')} search={search} />
       <CardContent>
         {list.isPending ? (
-          <LoadingState label="Loading the list" />
+          <LoadingState label={t('compliance.loadingList')} />
         ) : list.isError ? (
           <ErrorState error={list.error} onRetry={() => void list.refetch()} />
         ) : list.data.length === 0 ? (
           <EmptyState
             icon={CheckCircle2}
-            title="No overdue reviews."
-            description="All periodic reviews in this selection are on time."
+            title={t('compliance.noOverdue')}
+            description={t('compliance.noOverdueText')}
           />
         ) : (
           <Table
-            caption="Overdue reviews"
-            head={['Document', 'Version', 'Unit', 'Owner', 'Review date', 'Overdue']}
+            caption={t('compliance.overdueReviews')}
+            head={[
+              t('compliance.document'),
+              t('compliance.version'),
+              t('compliance.unit'),
+              t('compliance.owner'),
+              t('compliance.reviewDate'),
+              t('compliance.overdue'),
+            ]}
           >
             {list.data.map((r) => (
               <tr key={r.versionId} className="border-b last:border-0">
@@ -304,11 +347,15 @@ function OverdueReviewList({ search }: { search: CompliancePageSearch }) {
                   {r.versionLabel}
                   <span className="sr-only">, {statusLabel(r.status)}</span>
                 </td>
-                <td className={td}>{groupLabel(r.unit, NO_UNIT)}</td>
-                <td className={td}>{groupLabel(r.owner, NO_OWNER)}</td>
+                <td className={td}>{groupLabel(r.unit, noUnit())}</td>
+                <td className={td}>
+                  <OwnerName owner={r.owner || undefined} />
+                </td>
                 <td className={td}>{formatDate(r.dueOn)}</td>
                 <td className={td}>
-                  {r.daysOverdue === 0 ? 'Due today' : `${String(r.daysOverdue)} days`}
+                  {r.daysOverdue === 0
+                    ? t('compliance.dueToday')
+                    : t('compliance.days', { count: r.daysOverdue })}
                 </td>
               </tr>
             ))}
@@ -368,41 +415,46 @@ function OpenAcknowledgementsDialog({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              Who has not acknowledged: {version.title} {version.versionLabel}
+              {t('compliance.dialog.title', {
+                title: version.title,
+                version: version.versionLabel,
+              })}
             </DialogTitle>
-            <DialogDescription>
-              Names are shown only for a stated purpose. Your purpose and reason are recorded in the
-              audit trail; do not use the list to monitor performance or behaviour.
-            </DialogDescription>
+            <DialogDescription>{t('compliance.dialog.description')}</DialogDescription>
           </DialogHeader>
           {result ? (
             <div className="grid gap-3">
               <p className="text-sm">
-                {(result.open ?? []).length} of {result.audience} readers have not acknowledged yet.
+                {t('compliance.dialog.summary', {
+                  open: (result.open ?? []).length,
+                  audience: result.audience,
+                })}
               </p>
               {(result.open ?? []).length > 0 && (
-                <ul aria-label="Readers without acknowledgement" className="grid gap-1 text-sm">
+                <ul aria-label={t('compliance.dialog.readers')} className="grid gap-1 text-sm">
                   {(result.open ?? []).map((user) => (
-                    <li key={user} className="font-mono text-xs">
-                      {user}
+                    <li key={user}>
+                      <UserName id={user} />
                     </li>
                   ))}
                 </ul>
               )}
               <DialogFooter>
                 <Button type="button" onClick={close}>
-                  Close
+                  {t('common.close')}
                 </Button>
               </DialogFooter>
             </div>
           ) : (
             <form onSubmit={submit} className="grid gap-4" noValidate>
               <fieldset className="grid gap-2">
-                <legend className="mb-1 text-sm font-medium">Purpose *</legend>
+                <legend className="mb-1 text-sm font-medium">
+                  {t('compliance.dialog.purpose')}
+                </legend>
                 {(
                   [
-                    ['escalation', 'Escalation to the responsible management'],
-                    ['reminder', 'Reminder to the readers'],
+                    ['escalation', t('compliance.dialog.escalation')],
+                    ['reminder', t('compliance.dialog.reminder')],
                   ] as const
                 ).map(([value, label]) => (
                   <label key={value} className="flex items-center gap-2 text-sm">
@@ -420,7 +472,7 @@ function OpenAcknowledgementsDialog({
                 ))}
               </fieldset>
               <div className="grid gap-1.5">
-                <Label htmlFor={`${id}-reason`}>Reason *</Label>
+                <Label htmlFor={`${id}-reason`}>{t('compliance.dialog.reason')}</Label>
                 <Textarea
                   id={`${id}-reason`}
                   value={reason}
@@ -440,17 +492,17 @@ function OpenAcknowledgementsDialog({
                   }
                 >
                   {reasonError
-                    ? 'State why you need the names.'
-                    : `Up to ${String(MAX_REASON)} characters, without personal data.`}
+                    ? t('compliance.dialog.reasonMissing')
+                    : t('compliance.dialog.reasonHint', { max: MAX_REASON })}
                 </p>
               </div>
               {mutation.isError && <InlineError error={mutation.error} />}
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={close}>
-                  Cancel
+                  {t('common.cancel')}
                 </Button>
                 <Button type="submit" disabled={mutation.isPending}>
-                  {mutation.isPending ? 'Loading…' : 'Show names'}
+                  {mutation.isPending ? t('common.loading') : t('compliance.dialog.show')}
                 </Button>
               </DialogFooter>
             </form>
@@ -467,22 +519,30 @@ function AcknowledgementList({ search }: { search: CompliancePageSearch }) {
   const [names, setNames] = useState<VersionRate | undefined>(undefined)
   return (
     <Card>
-      <ListHeader title="Acknowledgements" search={search} />
+      <ListHeader title={t('compliance.acknowledgements')} search={search} />
       <CardContent>
         {list.isPending ? (
-          <LoadingState label="Loading the list" />
+          <LoadingState label={t('compliance.loadingList')} />
         ) : list.isError ? (
           <ErrorState error={list.error} onRetry={() => void list.refetch()} />
         ) : list.data.length === 0 ? (
           <EmptyState
             icon={CheckCircle2}
-            title="No versions require acknowledgement."
-            description="Versions that ask readers for a read confirmation appear here."
+            title={t('compliance.noAckVersions')}
+            description={t('compliance.noAckText')}
           />
         ) : (
           <Table
-            caption="Acknowledgement rate per version"
-            head={['Document', 'Version', 'Unit', 'Acknowledged', 'Rate', 'Open', '']}
+            caption={t('compliance.perVersion')}
+            head={[
+              t('compliance.document'),
+              t('compliance.version'),
+              t('compliance.unit'),
+              t('compliance.acknowledged'),
+              t('compliance.rate'),
+              t('compliance.open'),
+              '',
+            ]}
           >
             {list.data.map((r) => (
               <tr key={r.versionId} className="border-b last:border-0">
@@ -496,9 +556,12 @@ function AcknowledgementList({ search }: { search: CompliancePageSearch }) {
                   </Link>
                 </td>
                 <td className={`${td} font-mono text-xs`}>{r.versionLabel}</td>
-                <td className={td}>{groupLabel(r.unit, NO_UNIT)}</td>
+                <td className={td}>{groupLabel(r.unit, noUnit())}</td>
                 <td className={td}>
-                  {r.acknowledged} of {r.audience}
+                  {t('compliance.ofAudience', {
+                    acknowledged: r.acknowledged,
+                    audience: r.audience,
+                  })}
                 </td>
                 <td className={td}>{formatRate(r.rate)}</td>
                 <td className={td}>{r.open}</td>
@@ -507,12 +570,15 @@ function AcknowledgementList({ search }: { search: CompliancePageSearch }) {
                     <Button
                       variant="outline"
                       size="sm"
-                      aria-label={`Who has not acknowledged ${r.title} ${r.versionLabel}`}
+                      aria-label={t('compliance.whoLabel', {
+                        title: r.title,
+                        version: r.versionLabel,
+                      })}
                       onClick={() => {
                         setNames(r)
                       }}
                     >
-                      Who has not acknowledged
+                      {t('compliance.who')}
                     </Button>
                   )}
                 </td>
@@ -536,10 +602,7 @@ export function CompliancePage() {
   const search = useSearch({ from: '/_app/compliance' })
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Compliance cockpit"
-        description="Overdue periodic reviews and read confirmation rates per unit and owner."
-      />
+      <PageHeader title={t('compliance.title')} description={t('compliance.description')} />
       <Overview />
       {search.view === 'reviews' && <OverdueReviewList search={search} />}
       {search.view === 'acknowledgements' && <AcknowledgementList search={search} />}

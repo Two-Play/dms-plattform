@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-/** Product name shown in the browser tab after the page title. */
+/** Product name shown in the browser tab after the page title (the same in every language). */
 export const APP_NAME = 'DMS'
 
 export function documentTitle(title: string | undefined): string {
