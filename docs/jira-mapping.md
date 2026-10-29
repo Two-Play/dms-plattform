@@ -148,3 +148,15 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | US-07.1 | DMS-104 | Task | Backlog (MVP) | – | DMS-55: review notifications, inherited class settings, recompute review dates |
 | F-06.2 | DMS-105 | Task | Backlog (MVP) | – | DMS-101: access group administration UI, automatic task re-resolution |
 | US-08.1 | DMS-106 | Task | Backlog (MVP) | – | DMS-56: legal hold UI, badge, exact search confirmation |
+| US-14.1 | DMS-107 | Task | Backlog (MVP) | – | DMS-58: webhook admin UI, test ping, secret encryption, document number as stable key |
+| US-12.1 | DMS-108 | Task | Backlog (MVP) | – | DMS-57/59: cache chain verification, retention, export, notifications |
+| – | DMS-109 | Task | Sprint 11 | – | UI/UX refactor: personal dashboard, navigation, consistent page states |
+| – | DMS-110 | Task | Sprint 11 | – | German UI (de/en) and display names instead of user ids |
+| – | DMS-111 | Task | Backlog (MVP) | – | DMS-110: pick people by name instead of user id (group members, deputyships) |
+| – | DMS-112 | Story | Sprint 11 | – | Document view: rendered content of every version, draft PDF, metadata panel |
+| – | DMS-113 | Story | Sprint 11 | – | Number ranges: automatic and manual document numbers |
+| – | DMS-114 | Story | Sprint 11 | – | Document attachments |
+| – | DMS-115 | Story | Sprint 11 | – | File-based (Word) documents, Word download, optional change history in Word/PDF |
+| – | DMS-116 | Story | Backlog (MVP) | – | DMS-113: number existing documents, number in search hits and list |
+| – | DMS-117 | Story | Backlog (MVP) | – | DMS-114: ClamAV virus scan for production |
+| – | DMS-118 | Story | Backlog (MVP) | – | DMS-112: limits and a plain PDF variant for on-demand PDFs |
