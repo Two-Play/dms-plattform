@@ -33,20 +33,38 @@ import java.util.{HexFormat, UUID}
 /** Documentation of the multipart upload of a file: one part `file`. */
 final case class FileUpload(file: Array[Byte]) derives Schema
 
-/** A field of a Word document with its value (DMS-115). */
+/** A column of a field of type Rows (DMS-122): a manual field inside the repeating section. */
+final case class WordColumnView(
+    key: String,
+    label: String,
+    /** Text, Date, Number, Checkbox or Choice. */
+    `type`: String,
+    required: Boolean,
+    /** Allowed values of a Choice column. */
+    options: List[String]
+) derives JsonCodec,
+      Schema
+
+/** A field of a Word document (or of an Excel or PowerPoint file) with its value (DMS-115, DMS-122). */
 final case class WordFieldView(
     /** Field key without the `dms:` prefix. */
     key: String,
     label: String,
-    /** Text, Date or Number. */
+    /** Text, Date, Number, Checkbox, Choice or Rows. */
     `type`: String,
     required: Boolean,
     /** Automatic (filled by the platform) or Manual (entered by the author). */
     source: String,
-    /** Manual fields: the value entered (dates as yyyy-MM-dd). Automatic fields: the value the platform fills
-      * now, if it has one.
+    /** Manual fields: the value entered (dates as yyyy-MM-dd, check boxes `true`/`false`, rows as JSON array
+      * of objects by column key). Automatic fields: the value the platform fills now, if it has one.
       */
-    value: Option[String]
+    value: Option[String],
+    /** Allowed values of a Choice field (the items of a drop-down list or combo box). */
+    options: List[String],
+    /** Columns of a Rows field (repeating section). */
+    columns: List[WordColumnView],
+    /** What the platform cannot fill as the file shows it (e.g. a nested repeating section). */
+    warning: Option[String]
 ) derives JsonCodec,
       Schema
 
@@ -148,9 +166,12 @@ object FileVersions:
       file <- ZIO.fromOption(v.file).orElseFail(RenderingError.Invalid(s"version ${v.label} has no file yet"))
       bytes <- ZIO.serviceWithZIO[FileVersions](_.original(file))
       out   <-
-        if file.isWord && file.fields.nonEmpty then
+        if OfficeFields.fillable(file.name) && file.fields.nonEmpty then
           ZIO
-            .fromEither(WordDocx.fill(bytes.toArray, WordFilling.values(details, v, file, names, approval)))
+            .fromEither(
+              OfficeFields
+                .fill(file.name, bytes.toArray, WordFilling.values(details, v, file, names, approval))
+            )
             .mapBoth(m => RenderingError.Invalid(s"version ${v.label}: $m"), Chunk.fromArray)
         else ZIO.succeed(bytes)
     yield out
@@ -170,13 +191,15 @@ object FileVersions:
   *   - `PUT /api/v1/documents/{id}/file`: uploads the original into the draft (`EditDraft`), replacing the
   *     previous file as the next working state. Streamed like attachment uploads (size limit while receiving,
   *     blocklist, virus scan, stored once per document and SHA-256); only types the conversion worker
-  *     converts into PDF/A are accepted. The fields of a DOCX are read from its content controls and
-  *     `{{key}}` placeholders; definitions of keys known before (from the template or the previous file) are
-  *     kept.
+  *     converts into PDF/A are accepted. The fields of a DOCX are read from its content controls (typed check
+  *     boxes, date pickers, drop-down lists, repeating sections) and `{{key}}` placeholders, those of an XLSX
+  *     or PPTX from its placeholders (DMS-122); definitions of keys known before (from the template or the
+  *     previous file) are kept.
   *   - `GET …/versions/{versionId}/word-fields`, `PUT /api/v1/documents/{id}/word-fields`: the fields with
   *     their values; manual values are entered into the draft.
   *   - `GET …/versions/{versionId}/file`: the original unchanged; `GET …/versions/{versionId}/filled.docx`
-  *     the Word document with its fields filled (audited like a draft PDF).
+  *     the Word document with its fields filled (audited like a draft PDF);
+  *     `GET …/versions/{versionId}/filled` the same for Word, Excel and PowerPoint files (DMS-122).
   *   - `GET …/versions/{versionId}/preview.pdf`: the archived rendition of an approved version, otherwise the
   *     filled original converted on request with the draft marking on every page. Not audited, like reading.
   */
@@ -186,6 +209,18 @@ object FileDocumentApi:
 
   /** Audit action of a downloaded filled Word document. */
   val FilledDocxAction: String = "document.filled-docx-downloaded"
+
+  /** Audit action of a downloaded filled Word, Excel or PowerPoint file (DMS-122). */
+  val FilledFileAction: String = "document.filled-file-downloaded"
+
+  /** The media type of a file whose fields are filled. */
+  private[app] def mediaType(name: String): String =
+    OfficeFields.format(name) match
+      case Some(OfficeFields.Format.Xlsx) =>
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      case Some(OfficeFields.Format.Pptx) =>
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+      case _ => VersionViewApi.DocxMediaType
 
   private val documents  = "api" / "v1" / "documents"
   private val documentId = path[UUID]("id").description("Document id")
@@ -217,9 +252,11 @@ object FileDocumentApi:
       .description(
         "Uploads the original of a file document into its draft (the next working state), replacing the previous " +
           "file. Stored unchanged with its SHA-256, which the approval binds. The fields of a Word document (DOCX) " +
-          "are read from its content controls (tag = field key, `dms:` prefix = automatic) and `{{key}}` " +
-          "placeholders. 409 for structured documents and if the version is not a draft, 413 above the size " +
-          "limit of attachments, 422 for blocked types, unreadable DOCX, types that cannot be converted into " +
+          "are read from its content controls (tag = field key, `dms:` prefix = automatic; check boxes, date " +
+          "pickers, drop-down lists and repeating sections typed) and `{{key}}` placeholders, those of an Excel " +
+          "workbook (XLSX) or PowerPoint presentation (PPTX) from its `{{key}}` placeholders. 409 for structured documents and if the version is not a draft, 413 above the size " +
+          "limit of attachments, 422 for blocked types, unreadable DOCX (`invalid_docx`), XLSX or PPTX " +
+          "(`invalid_office_file`), types that cannot be converted into " +
           "PDF/A (`file_not_convertible`) and files whose content does not fit their extension " +
           "(`file_type_mismatch`, e.g. a PDF named .xlsx), 422 `attachment_infected`, 503 if the virus scanner " +
           "or object storage is unavailable."
@@ -259,7 +296,11 @@ object FileDocumentApi:
                 f.fieldType.toString,
                 f.required,
                 f.source.toString,
-                if f.source == WordFieldSource.Manual then file.values.get(f.key) else auto.get(f.key)
+                if f.source == WordFieldSource.Manual then file.values.get(f.key) else auto.get(f.key),
+                f.options,
+                f.columns
+                  .map(c => WordColumnView(c.key, c.label, c.fieldType.toString, c.required, c.options)),
+                f.warning
               )
             )
           )
@@ -272,8 +313,9 @@ object FileDocumentApi:
       .out(jsonBody[DocumentVersionView])
       .description(
         "Enters the values of the manual fields of the draft's Word file (the next working state). 422 for unknown " +
-          "keys and invalid values (dates yyyy-MM-dd, numbers); required fields are checked on submission. 409 if " +
-          "the version is not a draft."
+          "keys and invalid values (dates yyyy-MM-dd, numbers, check boxes true/false, one of the options of a " +
+          "choice, rows as JSON array of objects by column key with at most 200 rows); required fields and " +
+          "required columns are checked on submission. 409 if the version is not a draft."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -354,6 +396,42 @@ object FileDocumentApi:
           yield (VersionViewApi.DocxMediaType, AttachmentApi.contentDisposition(file.name), bytes.toArray)
       )
 
+  val filledFile: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(version / "filled")
+      .out(header[String]("Content-Type"))
+      .out(header[String]("Content-Disposition"))
+      .out(header("Cache-Control", "private, no-store"))
+      .out(header("X-Content-Type-Options", "nosniff"))
+      .out(byteArrayBody)
+      .description(
+        "The original of a version with its fields filled (DMS-122): a Word document (DOCX), Excel workbook " +
+          "(XLSX) or PowerPoint presentation (PPTX), named and typed like the original. Automatic fields from the " +
+          "platform (with the approval once approved), manual fields as entered; filled on request, not stored, " +
+          "the download is audited with the SHA-256 of the bytes. 409 if the original is of another type. " +
+          "Requires reading the version."
+      )
+      .tag("Documents")
+      .serverLogic(p =>
+        (id, versionId) =>
+          for
+            found <- readable(p, id, versionId)
+            (details, v, _, approval) = found
+            file <- ZIO
+              .fromOption(v.file.filter(f => OfficeFields.fillable(f.name)))
+              .orElseFail(
+                (
+                  StatusCode.Conflict,
+                  ApiError("conflict", s"version ${v.label} has no Word, Excel or PowerPoint file")
+                )
+              )
+            approvalFacts = FileVersions.approvalOf(v, approval)
+            names <- VersionViewApi.displayNames(p, WordFilling.people(details, v, approvalFacts))
+            bytes <- FileVersions.filled(details, v, names, approvalFacts).mapError(VersionViewApi.toResponse)
+            _     <- audit(p, v, FilledFileAction, bytes.toArray)
+          yield (mediaType(file.name), AttachmentApi.contentDisposition(file.name), bytes.toArray)
+      )
+
   val preview: ZServerEndpoint[Env, Any] =
     SecuredApi.base.get
       .in(version / "preview.pdf")
@@ -397,7 +475,7 @@ object FileDocumentApi:
       )
 
   def endpoints: List[ZServerEndpoint[Env, ZioStreams]] =
-    List(createFromWord, upload, fields, setValues, download, filledDocx, preview)
+    List(createFromWord, upload, fields, setValues, download, filledDocx, filledFile, preview)
 
   private val UploadPath = "/api/v1/documents/[0-9a-fA-F-]{36}/file/?".r
 
@@ -591,23 +669,25 @@ object FileDocumentApi:
   /** Bytes read from the start of an upload to check its type. */
   private[app] val HeadBytes: Int = 8192
 
-  /** The fields of a received DOCX, with the definitions of `previous` for keys known before; none for other
-    * files.
+  /** The fields of a received DOCX, XLSX or PPTX (DMS-122), with the definitions of `previous` for keys known
+    * before; none for other files.
     */
   private[app] def scanned(
       name: String,
       spooled: SpooledFile,
       previous: List[WordField]
   ): IO[(StatusCode, ApiError), List[WordField]] =
-    if !name.toLowerCase(java.util.Locale.ROOT).endsWith(".docx") then ZIO.succeed(Nil)
+    if !OfficeFields.fillable(name) then ZIO.succeed(Nil)
     else
+      val code = if OfficeFields.format(name).contains(OfficeFields.Format.Docx) then "invalid_docx"
+      else "invalid_office_file"
       ZIO
         .attemptBlocking(Files.readAllBytes(spooled.path))
         .orDie
         .flatMap(bytes =>
           ZIO
-            .fromEither(WordDocx.scan(bytes))
-            .mapError(m => (StatusCode.UnprocessableEntity, ApiError("invalid_docx", m)))
+            .fromEither(OfficeFields.scan(name, bytes))
+            .mapError(m => (StatusCode.UnprocessableEntity, ApiError(code, m)))
         )
         .map(WordFields.merge(_, previous))
 

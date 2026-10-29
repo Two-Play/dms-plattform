@@ -20,6 +20,7 @@ export const word = {
     takenOver: 'Taken over from the previous version.',
     downloadOriginal: 'Download original',
     downloadWord: 'Download Word (filled)',
+    downloadFilled: 'Download filled file',
     downloadFailed: 'The download failed: {message}',
     preview: 'Preview (PDF)',
     previewLoad: 'Show preview',
@@ -45,6 +46,15 @@ export const word = {
     saved: 'Field values saved.',
     failed: 'The field values could not be saved: {message}',
     readOnly: 'The field values are frozen with the version.',
+    yes: 'Yes',
+    no: 'No',
+    choose: 'Choose…',
+    noRows: 'No rows yet.',
+    addRow: 'Add row',
+    removeRow: 'Remove row {row}',
+    cell: '{column}, row {row}',
+    actions: 'Actions',
+    warning: 'Not filled as shown in the file: {message}',
   },
   help: {
     title: 'How to mark fields in Word',
@@ -53,8 +63,14 @@ export const word = {
     automatic:
       'Tag dms:<key> is filled by the platform, e.g. dms:documentNumber, dms:version, dms:title, dms:author, dms:owner, dms:issuingUnit, dms:validFrom, dms:validUntil, dms:status, dms:approvedAt, dms:approvedBy, or any metadata field of the class (dms:<field key>).',
     manual: 'Any other tag, e.g. customer, is a manual field the author fills in.',
+    types:
+      'Check boxes, date pickers and drop-down lists become a check box, a date and a selection of the list’s entries in the form; a date picker prints the date in its own format.',
+    repeating:
+      'A repeating section (e.g. around a table row) with a tag becomes a list of rows: its content controls are the columns, and the section is repeated once per row entered. Nested repeating sections are not supported and are reported.',
     placeholders:
-      'Alternatively write {manual} or {automatic} in the text; it must not be split by formatting or spelling marks.',
+      'Alternatively write {manual} or {automatic} in the text; a placeholder split by formatting is still found and takes the formatting of its first part.',
+    office:
+      'Excel (.xlsx) and PowerPoint (.pptx) files: placeholders in cells and on slides are filled as text.',
   },
   templates: {
     badge: 'Word',
@@ -84,7 +100,19 @@ export const word = {
     type: 'Type',
     requiredColumn: 'Required',
     source: 'Source',
-    types: { Text: 'Text', Date: 'Date', Number: 'Number' },
+    types: {
+      Text: 'Text',
+      Date: 'Date',
+      Number: 'Number',
+      Checkbox: 'Check box',
+      Choice: 'Choice',
+      Rows: 'Rows (repeating section)',
+    },
+    options: 'Options (one per line): {key}',
+    optionsLabel: 'Options (one per line)',
+    columns: 'Columns',
+    columnOf: '{key}.{column}',
+    warning: 'Not filled as shown in the Word file: {message}',
     sources: { Automatic: 'Automatic', Manual: 'Manual' },
     saveFields: 'Save field definitions',
     fieldsSaved: 'Field definitions saved.',

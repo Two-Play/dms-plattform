@@ -15,11 +15,19 @@ export type WordTemplate = components['schemas']['WordTemplateView']
 export type WordFieldDefinition = components['schemas']['WordFieldDefinition']
 export type WordFields = components['schemas']['WordFieldsView']
 export type WordField = components['schemas']['WordFieldView']
+export type WordColumn = components['schemas']['WordColumnView']
+export type WordColumnDefinition = components['schemas']['WordColumnDefinition']
 export type VersionFile = components['schemas']['VersionFileView']
 export type CreateWordDocument = components['schemas']['CreateWordDocument']
 
-/** Field types of manual fields. */
-export const WORD_FIELD_TYPES = ['Text', 'Date', 'Number'] as const
+/**
+ * Field types of manual fields (DMS-115, DMS-122). `Rows` belongs to repeating sections of the Word file only;
+ * designers cannot choose it for other fields.
+ */
+export const WORD_FIELD_TYPES = ['Text', 'Date', 'Number', 'Checkbox', 'Choice', 'Rows'] as const
+export type WordFieldType = (typeof WORD_FIELD_TYPES)[number]
+/** Types a designer can choose for a field that is not a repeating section, and for columns of rows. */
+export const WORD_SIMPLE_TYPES = ['Text', 'Date', 'Number', 'Checkbox', 'Choice'] as const
 /** Where a field's value comes from. */
 export const WORD_FIELD_SOURCES = ['Automatic', 'Manual'] as const
 
@@ -60,9 +68,52 @@ export const CONVERTIBLE_EXTENSIONS = [
   'pdf',
 ] as const
 
-/** Whether a file is a Word document whose fields are filled (DOCX). */
+/** Whether a file is a Word document (DOCX). */
 export function isWordFile(name: string): boolean {
   return name.toLowerCase().endsWith('.docx')
+}
+
+/** Whether the fields of a file are filled: Word (DOCX), Excel (XLSX) and PowerPoint (PPTX), DMS-122. */
+export function isFillableFile(name: string): boolean {
+  return /\.(docx|xlsx|pptx)$/i.test(name)
+}
+
+/** Values of a check box field. */
+export const CHECKED = 'true'
+export const UNCHECKED = 'false'
+
+/** A row of a `Rows` field: the value of each column by key. */
+export type WordRow = Record<string, string>
+
+/**
+ * The rows of a `Rows` field from its value, a JSON array of objects by column key (DMS-122); an empty or
+ * unreadable value has no rows.
+ */
+export function parseRows(value: string | undefined): WordRow[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.map((row) => {
+      const entries =
+        typeof row === 'object' && row !== null
+          ? Object.entries(row as Record<string, unknown>)
+          : []
+      return Object.fromEntries(
+        entries.filter((e): e is [string, string] => typeof e[1] === 'string'),
+      )
+    })
+  } catch {
+    return []
+  }
+}
+
+/** The value of a `Rows` field; empty without rows. Empty rows are kept while editing (the backend drops them). */
+export function serializeRows(rows: WordRow[]): string {
+  if (rows.length === 0) return ''
+  return JSON.stringify(
+    rows.map((row) => Object.fromEntries(Object.entries(row).filter(([, v]) => v !== ''))),
+  )
 }
 
 /** Word templates of every status, for designers (GET /api/v1/admin/word-templates). */
@@ -244,14 +295,14 @@ export async function downloadOriginal(
   saveBlob(data, file.name)
 }
 
-/** Downloads the Word document with its fields filled. */
+/** Downloads the Word, Excel or PowerPoint file with its fields filled (DMS-122: `…/filled`). */
 export async function downloadFilled(
   client: ApiClient,
   documentId: string,
   file: Pick<VersionFile, 'versionId' | 'name'>,
 ): Promise<void> {
   const { data, error, response } = await client.GET(
-    '/api/v1/documents/{id}/versions/{versionId}/filled.docx',
+    '/api/v1/documents/{id}/versions/{versionId}/filled',
     { params: { path: { id: documentId, versionId: file.versionId } }, parseAs: 'blob' },
   )
   if (!response.ok || !data) {

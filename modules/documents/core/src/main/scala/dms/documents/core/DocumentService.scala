@@ -12,6 +12,7 @@ import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
 import dms.templates.{
   WordField,
   WordFieldSource,
+  WordFieldType,
   WordFields,
   DeviationReport,
   DeviationRequest,
@@ -727,7 +728,7 @@ final class DocumentService(
           case None =>
             ZIO.fail(DocumentError.Invalid(List("upload the file of the document before submitting it")))
           case Some(file) =>
-            val problems = WordFields.check(file.fields, file.values, complete = true)
+            val problems = WordFields.check(file.fields, file.values, complete = true, DocumentJson.readRows)
             ZIO.unless(problems.isEmpty)(ZIO.fail(DocumentError.Invalid(problems)))
       )
       updated <- transition(document, current, LifecycleEvent.Submit, actor)
@@ -966,9 +967,15 @@ final class DocumentService(
             .someOrFail(DocumentError.Conflict("the stored file vanished"))
       next = current.copy(workingState = current.workingState + 1, rendition = None)
       _ <- sql(DocumentStore.updateDraft(next, templates)).filterOrFail(identity)(changedConcurrently(next))
-      // Values entered for fields that stay manual fields are kept.
+      // Values entered for fields that stay manual fields are kept while they fit the field's (new) type.
       manual = fields.filter(_.source == WordFieldSource.Manual).map(_.key).toSet
-      kept   = current.file.fold(Map.empty[String, String])(_.values.filter((k, _) => manual.contains(k)))
+      kept   = current.file.fold(Map.empty[String, String])(
+        _.values.filter((k, v) =>
+          manual.contains(k) && WordFields
+            .check(fields, Map(k -> v), complete = false, DocumentJson.readRows)
+            .isEmpty
+        )
+      )
       _ <- sql {
         VersionFileStore.set(current.id, stored.id, name, fields, kept, actor, None)
         DocumentStore.insertWorkingState(next, actor, templates)
@@ -992,6 +999,17 @@ final class DocumentService(
       )
     yield (updated, inserted)
 
+  /** Manual Word values as stored: trimmed, empty ones left out, rows (DMS-122) in their canonical JSON form
+    * (unreadable rows are kept as sent, so the check reports them).
+    */
+  private def cleanWordValues(fields: List[WordField], values: Map[String, String]): Map[String, String] =
+    values.flatMap { (k, v) =>
+      fields.find(f => f.key == k && f.fieldType == WordFieldType.Rows) match
+        case Some(f) =>
+          DocumentJson.readRows(v).fold(_ => Some(v.trim), DocumentJson.writeRows(f, _)).map(k -> _)
+        case None => Option.when(v.trim.nonEmpty)(k -> v.trim)
+    }
+
   /** Stores the values of the manual fields of the draft's Word file (DMS-115) as its next working state.
     * Values are checked against the field definitions; required fields are checked on submission.
     */
@@ -1012,8 +1030,8 @@ final class DocumentService(
       file <- ZIO
         .fromOption(current.file)
         .orElseFail(DocumentError.Conflict(s"version ${current.label} has no file with fields"))
-      cleaned  = values.map((k, v) => k -> v.trim).filter(_._2.nonEmpty)
-      problems = WordFields.check(file.fields, cleaned, complete = false)
+      cleaned  = cleanWordValues(file.fields, values)
+      problems = WordFields.check(file.fields, cleaned, complete = false, DocumentJson.readRows)
       _ <- ZIO.unless(problems.isEmpty)(ZIO.fail(DocumentError.Invalid(problems)))
       next = current.copy(workingState = current.workingState + 1, rendition = None)
       _ <- sql(DocumentStore.updateDraft(next, templates)).filterOrFail(identity)(changedConcurrently(next))

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { Download, Upload } from 'lucide-react'
-import { useId, useRef, useState } from 'react'
+import { Fragment, useId, useRef, useState } from 'react'
 import { useApiClient } from '@/api/context'
 import { createTemplate, templateClassesQuery, type TemplateVersion } from '@/api/template-admin'
 import {
@@ -11,7 +11,9 @@ import {
   uploadTemplateWord,
   WORD_FIELD_SOURCES,
   WORD_FIELD_TYPES,
+  WORD_SIMPLE_TYPES,
   type UploadFile,
+  type WordColumnDefinition,
   type WordFieldDefinition,
   type WordTemplate,
 } from '@/api/word'
@@ -192,76 +194,85 @@ export function WordTemplatePanel({
                 </thead>
                 <tbody>
                   {fields.map((f) => (
-                    <tr key={f.key} className="border-b last:border-0">
-                      <td className="p-2 font-mono text-xs">{f.key}</td>
-                      <td className="p-2">
-                        {editable ? (
-                          <Input
-                            aria-label={`${t('word.templates.label')}: ${f.key}`}
-                            value={f.label}
+                    <Fragment key={f.key}>
+                      <tr className={details(f) ? '' : 'border-b last:border-0'}>
+                        <td className="p-2 font-mono text-xs">{f.key}</td>
+                        <td className="p-2">
+                          {editable ? (
+                            <Input
+                              aria-label={`${t('word.templates.label')}: ${f.key}`}
+                              value={f.label}
+                              onChange={(event) => {
+                                update(f.key, { label: event.target.value })
+                              }}
+                            />
+                          ) : (
+                            f.label
+                          )}
+                        </td>
+                        <td className="p-2">
+                          {editable && f.type !== 'Rows' ? (
+                            <TypeSelect
+                              label={`${t('word.templates.type')}: ${f.key}`}
+                              value={f.type}
+                              onChange={(type) => {
+                                update(f.key, { type })
+                              }}
+                            />
+                          ) : (
+                            typeLabel(f.type)
+                          )}
+                        </td>
+                        <td className="p-2">
+                          <input
+                            type="checkbox"
+                            className="size-4"
+                            aria-label={`${t('word.templates.requiredColumn')}: ${f.key}`}
+                            checked={f.required}
+                            disabled={!editable}
                             onChange={(event) => {
-                              update(f.key, { label: event.target.value })
+                              update(f.key, { required: event.target.checked })
                             }}
                           />
-                        ) : (
-                          f.label
-                        )}
-                      </td>
-                      <td className="p-2">
-                        {editable ? (
-                          <select
-                            aria-label={`${t('word.templates.type')}: ${f.key}`}
-                            className={selectClass}
-                            value={f.type}
-                            onChange={(event) => {
-                              update(f.key, { type: event.target.value })
-                            }}
-                          >
-                            {WORD_FIELD_TYPES.map((type) => (
-                              <option key={type} value={type}>
-                                {t(`word.templates.types.${type}`)}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          t(`word.templates.types.${f.type as (typeof WORD_FIELD_TYPES)[number]}`)
-                        )}
-                      </td>
-                      <td className="p-2">
-                        <input
-                          type="checkbox"
-                          className="size-4"
-                          aria-label={`${t('word.templates.requiredColumn')}: ${f.key}`}
-                          checked={f.required}
-                          disabled={!editable}
-                          onChange={(event) => {
-                            update(f.key, { required: event.target.checked })
-                          }}
-                        />
-                      </td>
-                      <td className="p-2">
-                        {editable ? (
-                          <select
-                            aria-label={`${t('word.templates.source')}: ${f.key}`}
-                            className={selectClass}
-                            value={f.source}
-                            onChange={(event) => {
-                              update(f.key, { source: event.target.value })
-                            }}
-                          >
-                            {WORD_FIELD_SOURCES.map((source) => (
-                              <option key={source} value={source}>
-                                {t(`word.templates.sources.${source}`)}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          t(
-                            `word.templates.sources.${f.source as (typeof WORD_FIELD_SOURCES)[number]}`,
-                          )
-                        )}
-                      </td>
-                    </tr>
+                        </td>
+                        <td className="p-2">
+                          {editable ? (
+                            <select
+                              aria-label={`${t('word.templates.source')}: ${f.key}`}
+                              className={selectClass}
+                              value={f.source}
+                              onChange={(event) => {
+                                update(f.key, { source: event.target.value })
+                              }}
+                            >
+                              {WORD_FIELD_SOURCES.map((source) => (
+                                <option key={source} value={source}>
+                                  {t(`word.templates.sources.${source}`)}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            t(
+                              `word.templates.sources.${f.source as (typeof WORD_FIELD_SOURCES)[number]}`,
+                            )
+                          )}
+                        </td>
+                      </tr>
+                      {details(f) && (
+                        <tr className="border-b last:border-0">
+                          <td />
+                          <td colSpan={4} className="space-y-2 p-2 pt-0">
+                            <FieldDetails
+                              field={f}
+                              editable={editable}
+                              onChange={(change) => {
+                                update(f.key, change)
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -286,6 +297,181 @@ export function WordTemplatePanel({
           <WordFieldHelp />
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+/** The label of a field type; unknown types as they are. */
+function typeLabel(type: string): string {
+  return (WORD_FIELD_TYPES as readonly string[]).includes(type)
+    ? t(`word.templates.types.${type as (typeof WORD_FIELD_TYPES)[number]}`)
+    : type
+}
+
+/** The types a designer can choose (not Rows, which only repeating sections of the Word file have). */
+function TypeSelect({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (type: string) => void
+}) {
+  return (
+    <select
+      aria-label={label}
+      className={selectClass}
+      value={value}
+      onChange={(event) => {
+        onChange(event.target.value)
+      }}
+    >
+      {WORD_SIMPLE_TYPES.map((type) => (
+        <option key={type} value={type}>
+          {t(`word.templates.types.${type}`)}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+/** Whether a field has details below its row: options, columns or a warning of the scan (DMS-122). */
+function details(f: WordFieldDefinition): boolean {
+  return f.type === 'Choice' || f.type === 'Rows' || Boolean(f.warning)
+}
+
+/** The options of a Choice field, the columns of a Rows field and the warning of the scan (DMS-122). */
+function FieldDetails({
+  field,
+  editable,
+  onChange,
+}: {
+  field: WordFieldDefinition
+  editable: boolean
+  onChange: (change: Partial<WordFieldDefinition>) => void
+}) {
+  const columns = field.columns ?? []
+  const updateColumn = (key: string, change: Partial<WordColumnDefinition>) => {
+    onChange({ columns: columns.map((c) => (c.key === key ? { ...c, ...change } : c)) })
+  }
+  return (
+    <>
+      {field.warning && (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          {t('word.templates.warning', { message: field.warning })}
+        </p>
+      )}
+      {field.type === 'Choice' && (
+        <OptionsInput
+          label={t('word.templates.options', { key: field.key })}
+          options={field.options ?? []}
+          editable={editable}
+          onChange={(options) => {
+            onChange({ options })
+          }}
+        />
+      )}
+      {field.type === 'Rows' && (
+        <div className="space-y-1">
+          <p className="text-xs font-medium">{t('word.templates.columns')}</p>
+          <table className="w-full text-xs">
+            <caption className="sr-only">
+              {t('word.templates.columns')}: {field.key}
+            </caption>
+            <tbody>
+              {columns.map((c) => {
+                const name = t('word.templates.columnOf', { key: field.key, column: c.key })
+                return (
+                  <tr key={c.key} className="align-top">
+                    <td className="p-1 font-mono">{c.key}</td>
+                    <td className="p-1">
+                      {editable ? (
+                        <Input
+                          aria-label={`${t('word.templates.label')}: ${name}`}
+                          value={c.label}
+                          onChange={(event) => {
+                            updateColumn(c.key, { label: event.target.value })
+                          }}
+                        />
+                      ) : (
+                        c.label
+                      )}
+                    </td>
+                    <td className="space-y-1 p-1">
+                      {editable ? (
+                        <TypeSelect
+                          label={`${t('word.templates.type')}: ${name}`}
+                          value={c.type}
+                          onChange={(type) => {
+                            updateColumn(c.key, { type })
+                          }}
+                        />
+                      ) : (
+                        typeLabel(c.type)
+                      )}
+                      {c.type === 'Choice' && (
+                        <OptionsInput
+                          label={t('word.templates.options', { key: name })}
+                          options={c.options ?? []}
+                          editable={editable}
+                          onChange={(options) => {
+                            updateColumn(c.key, { options })
+                          }}
+                        />
+                      )}
+                    </td>
+                    <td className="p-1">
+                      <input
+                        type="checkbox"
+                        className="size-4"
+                        aria-label={`${t('word.templates.requiredColumn')}: ${name}`}
+                        checked={c.required}
+                        disabled={!editable}
+                        onChange={(event) => {
+                          updateColumn(c.key, { required: event.target.checked })
+                        }}
+                      />
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  )
+}
+
+/** Options one per line; empty lines are dropped by the backend. */
+function OptionsInput({
+  label,
+  options,
+  editable,
+  onChange,
+}: {
+  label: string
+  options: string[]
+  editable: boolean
+  onChange: (options: string[]) => void
+}) {
+  const id = useId()
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={id} className="text-xs">
+        {t('word.templates.optionsLabel')}
+      </Label>
+      <textarea
+        id={id}
+        aria-label={label}
+        className="min-h-16 w-full rounded-md border bg-transparent px-2 py-1 text-sm"
+        value={options.join('\n')}
+        readOnly={!editable}
+        onChange={(event) => {
+          onChange(event.target.value.split('\n'))
+        }}
+      />
     </div>
   )
 }

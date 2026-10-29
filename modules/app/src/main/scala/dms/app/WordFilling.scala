@@ -4,7 +4,8 @@ import dms.documents.metadata.MetadataValue
 import dms.documents.core.DocumentDetails
 import dms.documents.{DocumentVersion, VersionFile}
 import dms.kernel.UserId
-import dms.templates.{WordFieldSource, WordFieldType}
+import dms.documents.core.DocumentJson
+import dms.templates.{WordField, WordFieldSource, WordFieldType, WordFields}
 
 import java.time.{Instant, LocalDate}
 import scala.util.Try
@@ -56,8 +57,25 @@ object WordFilling:
     ).flatten.toMap
     metadata ++ system
 
-  /** The values to fill into the version's Word file: automatic fields from [[automatic]], manual ones as
-    * entered (dates formatted in the document language). Fields without value are left out.
+  /** The automatic values as filled: dates (metadata dates, the approval date) as [[FieldValue.Date]], so
+    * that date picker controls print them in their own format (DMS-122), everything else as text.
+    */
+  def automaticValues(
+      details: DocumentDetails,
+      v: DocumentVersion,
+      names: Map[UserId, String],
+      approval: Option[ApprovalFacts]
+  ): Map[String, FieldValue] =
+    val texts    = automatic(details, v, names, approval)
+    val approved =
+      approval.orElse(v.releasedAt.zip(v.releasedBy).map((at, by) => ApprovalFacts(at, by, None)))
+    val dates = v.metadata.collect { case (k, MetadataValue.Date(d)) => k -> d } ++
+      approved.map(a => "approvedAt" -> a.at.atZone(details.zone).toLocalDate)
+    texts.map((k, text) => k -> dates.get(k).fold(FieldValue.Text(text))(FieldValue.Date(_, text)))
+
+  /** The values to fill into the version's file: automatic fields from [[automaticValues]], manual ones as
+    * entered (dates formatted in the document language, check boxes checked or not, rows with their typed
+    * columns). Fields without value are left out.
     */
   def values(
       details: DocumentDetails,
@@ -65,22 +83,42 @@ object WordFilling:
       file: VersionFile,
       names: Map[UserId, String],
       approval: Option[ApprovalFacts]
-  ): Map[String, String] =
+  ): Map[String, FieldValue] =
     val language = DocumentRenditions.language(v).code
-    val auto     = automatic(details, v, names, approval)
+    val auto     = automaticValues(details, v, names, approval)
     file.fields.flatMap { f =>
       val value = f.source match
-        case WordFieldSource.Automatic => auto.get(f.key)
+        case WordFieldSource.Automatic => auto.get(f.key).filter(_.printed.nonEmpty)
         case WordFieldSource.Manual    =>
-          file.values
-            .get(f.key)
-            .map(raw =>
-              if f.fieldType == WordFieldType.Date then
-                Try(LocalDate.parse(raw)).toOption.fold(raw)(VersionPrintLayout.date(_, language))
-              else raw
-            )
-      value.filter(_.nonEmpty).map(f.key -> _)
+          file.values.get(f.key).filter(_.nonEmpty).flatMap(manual(f, _, language))
+      value.map(f.key -> _)
     }.toMap
+
+  /** A manual value as filled. */
+  private def manual(field: WordField, raw: String, language: String): Option[FieldValue] =
+    field.fieldType match
+      case WordFieldType.Date =>
+        Some(
+          Try(LocalDate.parse(raw)).toOption
+            .fold(FieldValue.Text(raw))(d => FieldValue.Date(d, VersionPrintLayout.date(d, language)))
+        )
+      case WordFieldType.Checkbox => Some(FieldValue.Check(raw == WordFields.Checked))
+      case WordFieldType.Rows     =>
+        DocumentJson
+          .readRows(raw)
+          .toOption
+          .map(rows =>
+            FieldValue.Rows(
+              rows.map(row =>
+                field.columns
+                  .flatMap(c =>
+                    row.get(c.key).filter(_.nonEmpty).flatMap(manual(c, _, language)).map(c.key -> _)
+                  )
+                  .toMap
+              )
+            )
+          )
+      case _ => Some(FieldValue.Text(raw))
 
   /** The persons whose names the automatic values may print. */
   def people(details: DocumentDetails, v: DocumentVersion, approval: Option[ApprovalFacts]): Set[UserId] =

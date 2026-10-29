@@ -109,13 +109,17 @@ final class DocumentRenditions(
       .flatMap { file =>
         import DocumentRenditions.currentTenant
         val approval = WordFilling.ApprovalFacts(request.approvedAt, request.approver, request.onBehalfOf)
-        // A Word original is filled with the field values and the approval before it is converted (DMS-115).
+        // A Word, Excel or PowerPoint original is filled with the field values and the approval before it is converted (DMS-115).
         val fill: Option[Map[UserId, String] => Chunk[Byte] => IO[RenderingError, Chunk[Byte]]] =
-          Option.when(file.isWord && file.fields.nonEmpty)(people =>
+          Option.when(OfficeFields.fillable(file.name) && file.fields.nonEmpty)(people =>
             bytes =>
               ZIO
                 .fromEither(
-                  WordDocx.fill(bytes.toArray, WordFilling.values(details, v, file, people, Some(approval)))
+                  OfficeFields.fill(
+                    file.name,
+                    bytes.toArray,
+                    WordFilling.values(details, v, file, people, Some(approval))
+                  )
                 )
                 .mapBoth(m => RenderingError.Invalid(s"version ${v.label}: $m"), Chunk.fromArray)
           )
