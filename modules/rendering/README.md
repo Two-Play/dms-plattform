@@ -20,7 +20,9 @@ Layout: `api` holds public types and interfaces, `core` the implementation. Othe
     (attach rendition, complete approval).
   - `DocumentConverter` / `LibreOfficeConverter`: HTTP client of the conversion worker (`workers/conversion`, ADR 0042):
     office files → PDF/A-2b, HTML → DOCX. A PDF original that conforms to PDF/A-2b is archived unchanged.
+    `DocumentConverter.contentMatches` checks that the first bytes of an upload fit its extension (DMS-121, ADR 0044).
 
 Tests: `RenditionLayoutSpec` (pure), `PdfRenditionSpec` (worker image built by Testcontainers, veraPDF, PDFBox text checks),
-`ConversionWorkerSpec` (conversion worker image built by Testcontainers: DOCX → valid PDF/A-2b, HTML → DOCX);
+`ConversionWorkerSpec` (conversion worker image built by Testcontainers: DOCX → valid PDF/A-2b, HTML → DOCX),
+`ContentSignatureSpec` (pure);
 end to end with workflow, database, SeaweedFS and download in `modules/app` (`RenditionApiSpec`).

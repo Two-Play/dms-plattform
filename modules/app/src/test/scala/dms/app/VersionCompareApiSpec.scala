@@ -21,10 +21,11 @@ import dms.kernel.{TemplateId, TenantId, UserId}
 import dms.templates.*
 import dms.templates.core.ContentJson.given
 import dms.templates.core.{TemplateDraft, TemplateService}
-import dms.rendering.core.RenditionSource
+import dms.rendering.core.{DocumentConverter, RenderingError, RenditionArchive, RenditionSource}
 import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
+import sttp.tapir.ztapir.RichZServerEndpoint
 import zio.*
 import zio.http.{Body, Header, Headers, MediaType, Request, Status, URL}
 import zio.json.*
@@ -147,7 +148,13 @@ object VersionCompareApiSpec extends ZIOSpecDefault:
     Authenticator(verifier, tenants)
   }
 
-  private type Env = DocumentApi.Env & WorkflowApi.Env & RenditionSource & AuditTrail
+  private type Env = DocumentApi.Env & WorkflowApi.Env & RenditionSource & AuditTrail & VersionCompareApi.Env
+
+  /** Structured documents only: originals of file documents are never read here (see FileDocumentApiSpec). */
+  private val noArchive: RenditionArchive = new RenditionArchive:
+    def store(key: String, pdf: Chunk[Byte]) = ZIO.fail(RenderingError.Unavailable("no archive in this test"))
+    def read(rendition: dms.documents.Rendition) =
+      ZIO.fail(RenderingError.Unavailable("no archive in this test"))
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -170,7 +177,12 @@ object VersionCompareApiSpec extends ZIOSpecDefault:
       ZLayer.succeed(WorkflowConfig.default),
       WorkflowRendition.layer,
       ApprovalWorkflow.layer,
-      DocumentRenditions.layer
+      DocumentRenditions.layer,
+      ZLayer.succeed(noArchive),
+      ZLayer.succeed(DocumentConverter.unavailable),
+      FileVersions.layer,
+      ZLayer.succeed(UserDirectory.none),
+      ZLayer.succeed[TenantOrganizations](_ => ZIO.none)
     )
 
   /** `signedInSecondsAgo` sets `auth_time`; by default the sign-in is one hour old. */
@@ -194,7 +206,10 @@ object VersionCompareApiSpec extends ZIOSpecDefault:
     jwt.serialize()
 
   private val routes =
-    ZioHttpInterpreter().toHttp(DocumentApi.endpoints ++ VersionCompareApi.endpoints ++ WorkflowApi.endpoints)
+    ZioHttpInterpreter().toHttp(
+      DocumentApi.endpoints.map(_.widen[Env]) ++ VersionCompareApi.endpoints.map(_.widen[Env]) ++
+        WorkflowApi.endpoints.map(_.widen[Env])
+    )
 
   private def call(
       user: UserId,

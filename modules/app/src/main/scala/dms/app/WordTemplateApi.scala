@@ -3,7 +3,7 @@ package dms.app
 import dms.authz.{AccessDenied, Action, Authorizer, Resource}
 import dms.db.{Db, DbError}
 import dms.documents.WordTemplateFile
-import dms.documents.core.{AttachmentUploads, DocumentError, WordTemplateService}
+import dms.documents.core.{AttachmentUploads, DocumentClassService, DocumentError, WordTemplateService}
 import dms.identity.Principal
 import dms.kernel.TemplateId
 import dms.storage.Sha256
@@ -58,6 +58,19 @@ final case class WordTemplateView(
 
 final case class WordFieldDefinitions(fields: List[WordFieldDefinition]) derives JsonCodec, Schema
 
+/** A document class a template can be created for (DMS-121): its latest profile version, read-only. */
+final case class TemplateClassView(
+    id: UUID,
+    key: String,
+    /** Latest profile version; templates bind it. */
+    version: Int,
+    label: String,
+    description: Option[String],
+    /** Labels of the ancestors and the class itself, root first, e.g. `Contract › Service contract`. */
+    path: List[String]
+) derives JsonCodec,
+      Schema
+
 /** Word templates (DMS-115, ADR 0042): template versions with a Word file whose fields (content controls,
   * `{{key}}` placeholders) are filled for each document. Created like every template (name, class), then the
   * DOCX is uploaded into the draft; the field definitions (label, type, required, automatic or manual) are
@@ -65,7 +78,7 @@ final case class WordFieldDefinitions(fields: List[WordFieldDefinition]) derives
   * requires `EditTemplates`, the list of released Word templates `ReadTemplateCatalog`.
   */
 object WordTemplateApi:
-  type Env = TemplateApi.Env & WordTemplateService & AttachmentUploads
+  type Env = TemplateApi.Env & WordTemplateService & AttachmentUploads & DocumentClassService
 
   private val admin      = "api" / "v1" / "admin" / "templates"
   private val templateId = path[UUID]("id").description("Template id")
@@ -79,6 +92,45 @@ object WordTemplateApi:
       .description("The Word files of all template versions that are Word templates, in any status")
       .tag("Templates")
       .serverLogic(p => _ => inTransaction(p, Action.EditTemplates)(all(_ => true)))
+
+  val classes: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in("api" / "v1" / "admin" / "template-classes")
+      .out(jsonBody[List[TemplateClassView]])
+      .description(
+        "The document classes templates can be created for (latest profile version, label and path), read-only, " +
+          "sorted by path: for designers choosing the class of a new (Word) template without the configuration " +
+          "of document classes. Requires EditTemplates."
+      )
+      .tag("Templates")
+      .serverLogic(p =>
+        _ =>
+          (for
+            db      <- ZIO.service[Db]
+            authz   <- ZIO.service[Authorizer]
+            classes <- ZIO.service[DocumentClassService]
+            latest  <- db.transact(p.tenantId)(
+              authz.subject(p).flatMap(authz.check(_, Action.EditTemplates, Resource(p.tenantId))) *>
+                classes.listClasses
+            )
+          yield classViews(latest)).mapError(DocumentClassApi.toResponse)
+      )
+
+  /** The classes with the labels of their ancestors, sorted by that path. */
+  private[app] def classViews(
+      latest: List[dms.documents.metadata.DocumentClassVersion]
+  ): List[TemplateClassView] =
+    val byId = latest.map(c => c.classId -> c).toMap
+    def path(c: dms.documents.metadata.DocumentClassVersion, seen: Set[UUID]): List[String] =
+      c.parent
+        .flatMap(ref => byId.get(ref.id))
+        .filterNot(parent => seen.contains(parent.classId.value))
+        .fold(Nil)(parent => path(parent, seen + c.classId.value)) :+ c.label
+    latest
+      .map(c =>
+        TemplateClassView(c.classId.value, c.key.value, c.version, c.label, c.description, path(c, Set.empty))
+      )
+      .sortBy(_.path.mkString(" › ").toLowerCase(java.util.Locale.ROOT))
 
   val catalog: ZServerEndpoint[Env, Any] =
     SecuredApi.base.get
@@ -213,7 +265,7 @@ object WordTemplateApi:
       )
 
   def endpoints: List[ZServerEndpoint[Env, ZioStreams]] =
-    List(list, catalog, get, upload, setFields, download, newVersion)
+    List(list, classes, catalog, get, upload, setFields, download, newVersion)
 
   /** Empty structured content of a Word template version (its content is the Word file). */
   val EmptyContent: TemplateContent = TemplateContent(Nil)

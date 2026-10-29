@@ -84,6 +84,62 @@ object DocumentConverter:
     "pdf"
   )
 
+  /** What the first bytes of a file must look like to be what its extension says (DMS-121). */
+  private enum Signature(val describe: String):
+    case Zip      extends Signature("a ZIP package (Office Open XML or OpenDocument)")
+    case Ole      extends Signature("a Microsoft Office binary file (OLE compound document)")
+    case OleOrRtf extends Signature("a Microsoft Office binary file (OLE compound document) or RTF")
+    case Pdf      extends Signature("a PDF file")
+    case Rtf      extends Signature("an RTF file")
+    case Text     extends Signature("a text file")
+
+  private val signatures: Map[String, Signature] =
+    List("docx", "docm", "dotx", "dotm", "xlsx", "xlsm", "xltx", "pptx", "ppsx", "potx", "vsdx")
+      .map(_ -> Signature.Zip)
+      .toMap ++
+      List("odt", "ott", "ods", "ots", "odp", "otp", "odg", "otg").map(_ -> Signature.Zip) ++
+      List("dot", "xls", "xlt", "ppt", "pps", "pot", "vsd").map(_ -> Signature.Ole) ++
+      // Word can save RTF content under .doc; such files are common in older stocks.
+      Map("doc" -> Signature.OleOrRtf, "pdf" -> Signature.Pdf, "rtf" -> Signature.Rtf) ++
+      List("txt", "csv", "html", "htm").map(_ -> Signature.Text)
+
+  private val ZipMagic = Array[Byte](0x50, 0x4b, 0x03, 0x04)
+  private val OleMagic = Array(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1).map(_.toByte)
+  private val RtfMagic = "{\\rtf".getBytes(StandardCharsets.US_ASCII)
+  private val PdfMagic = "%PDF-".getBytes(StandardCharsets.US_ASCII)
+  private val Utf16Le  = Array(0xff, 0xfe).map(_.toByte)
+  private val Utf16Be  = Array(0xfe, 0xff).map(_.toByte)
+
+  /** Whether the first bytes of a file (at least its first KiB, if it is that long) fit the extension of
+    * `name` (DMS-121), checked before an upload is accepted and handed to the import filter the extension
+    * selects: ZIP for Office Open XML and OpenDocument, OLE for the binary Office formats, `%PDF-` within the
+    * first KiB for PDF, `{\rtf` for RTF; text formats must neither contain NUL bytes (unless they start with
+    * a UTF-16 byte order mark) nor start like one of the binary formats. `Left` says what was expected.
+    * Extensions that are not convertible are not checked here.
+    */
+  def contentMatches(name: String, head: Array[Byte]): Either[String, Unit] =
+    val dot                        = name.lastIndexOf('.')
+    val ext                        = if dot > 0 then name.substring(dot + 1).toLowerCase(Locale.ROOT) else ""
+    def starts(magic: Array[Byte]) =
+      head.length >= magic.length && head.take(magic.length).sameElements(magic)
+    def binary = starts(ZipMagic) || starts(OleMagic) || starts(PdfMagic)
+    def pdf    = head.take(1024 + PdfMagic.length).indexOfSlice(PdfMagic.toSeq) >= 0
+    def text   = !binary && (starts(Utf16Le) || starts(Utf16Be) || !head.contains(0.toByte))
+    signatures.get(ext).fold(Right(())) { expected =>
+      val fits = expected match
+        case Signature.Zip      => starts(ZipMagic)
+        case Signature.Ole      => starts(OleMagic)
+        case Signature.OleOrRtf => starts(OleMagic) || starts(RtfMagic)
+        case Signature.Pdf      => pdf
+        case Signature.Rtf      => starts(RtfMagic)
+        case Signature.Text     => text
+      Either.cond(
+        fits,
+        (),
+        s"the content of $name does not match its extension .$ext: expected ${expected.describe}"
+      )
+    }
+
   /** Whether the worker can convert a file of this name into PDF/A. */
   def convertible(name: String): Boolean =
     val dot = name.lastIndexOf('.')
@@ -91,8 +147,10 @@ object DocumentConverter:
 
 /** @param url
   *   base URL of the conversion worker, e.g. `http://localhost:9181`
+  * @param previewCacheMegabytes
+  *   in-memory budget for converted previews of file versions (DMS-121, ADR 0044); 0 disables the cache
   */
-final case class ConverterConfig(url: String, timeoutSeconds: Int = 120)
+final case class ConverterConfig(url: String, timeoutSeconds: Int = 120, previewCacheMegabytes: Int = 64)
 
 /** The conversion worker (`workers/conversion`) over HTTP: `POST /convert?target=…&name=…` with the file as
   * body.

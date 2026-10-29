@@ -29,6 +29,9 @@ import scala.collection.mutable.ListBuffer
   * Fields without value keep their content (e.g. Word's placeholder text). Deterministic: equal input gives
   * equal bytes (fixed entry times), so a filled document of an approved version can be reproduced.
   */
+/** A paragraph of a Word document as text (DMS-121); `headingLevel` for paragraphs in a heading style. */
+final case class WordParagraph(text: String, headingLevel: Option[Int] = None)
+
 object WordDocx:
 
   private val W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -65,6 +68,65 @@ object WordDocx:
       }.toMap
       bytes <- attempt(zip(entries.map((name, data) => name -> changed.getOrElse(name, data))))
     yield bytes
+
+  /** The paragraphs of the main document part in document order (paragraphs in tables and text boxes
+    * included), for comparing versions (DMS-121): the text of every run (`w:t`; tabs as spaces, breaks as
+    * `\n`), without deleted text of tracked changes and without field codes. Empty paragraphs are left out.
+    * Headers, footers and notes are not part of it.
+    */
+  def paragraphs(docx: Array[Byte]): Either[String, List[WordParagraph]] =
+    for
+      entries <- unzip(docx)
+      parts   <- parse(entries.filter(_._1 == "word/document.xml"))
+    yield parts.flatMap((_, doc) => paragraphsOf(doc))
+
+  /** The plain text of a DOCX for the search index (DMS-121): the paragraphs of the main document part, then
+    * those of headers, footers, footnotes and endnotes, one per line.
+    */
+  def text(docx: Array[Byte]): Either[String, String] =
+    for
+      entries <- unzip(docx)
+      parts   <- parse(entries)
+    yield parts
+      .sortBy((name, _) => if name == "word/document.xml" then 0 else 1)
+      .flatMap((_, doc) => paragraphsOf(doc))
+      .map(_.text)
+      .mkString("\n")
+
+  private val HeadingStyle = "(?i)(?:heading|überschrift|berschrift)\\s*([1-6])".r
+
+  private def paragraphsOf(doc: Document): List[WordParagraph] =
+    val found                       = ListBuffer.empty[WordParagraph]
+    def paragraph(p: Element): Unit =
+      val text                      = StringBuilder()
+      def collect(e: Element): Unit =
+        children(e).foreach { c =>
+          if isW(c, "p") then paragraph(c)
+          else if isW(c, "t") then text.append(c.getTextContent)
+          else if isW(c, "tab") then text.append(' ')
+          else if isW(c, "br") || isW(c, "cr") then text.append('\n')
+          else if !skipped(c) then collect(c)
+        }
+      collect(p)
+      val style = child(p, "pPr").flatMap(child(_, "pStyle")).flatMap(attr(_, "val"))
+      val level = style.flatMap {
+        case HeadingStyle(n)                  => n.toIntOption
+        case s if s.equalsIgnoreCase("Title") => Some(1)
+        case _                                => None
+      }
+      val value = text.toString.split('\n').map(_.strip).mkString("\n").strip
+      if value.nonEmpty then found += WordParagraph(value, level)
+    def visit(e: Element): Unit =
+      children(e).foreach(c => if isW(c, "p") then paragraph(c) else if !skipped(c) then visit(c))
+    visit(doc.getDocumentElement)
+    found.toList
+
+  /** Properties and the fallback copy of drawings (text boxes are written twice, for old and new readers). */
+  private def skipped(e: Element): Boolean =
+    isW(e, "pPr") || isW(e, "rPr") || isW(e, "sdtPr") ||
+      (e.getLocalName == "Fallback" && e.getNamespaceURI == MarkupCompatibility)
+
+  private val MarkupCompatibility = "http://schemas.openxmlformats.org/markup-compatibility/2006"
 
   private def fieldsOf(doc: Document): List[WordField] =
     val found = ListBuffer.empty[WordField]

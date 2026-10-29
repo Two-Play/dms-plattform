@@ -108,9 +108,8 @@ Filled Word document:
 
 ## Follow-ups
 
-- Must be done: frontend button for the Word export of structured documents (backend exists).
-- Should be done: version comparison for file documents (original SHA-256, changed field values, text diff of the filled documents); text extraction of originals for search (OCR worker, ADR 0041 follow-up).
-- Should be done: cache converted previews per version and working state; rate limits for conversions.
+- Done in DMS-121 (ADR 0044): frontend button for the Word export of structured documents; version comparison for file documents (original SHA-256, changed manual values, text diff of the filled Word documents); text of Word originals in search; in-memory cache of converted previews per version and state; content signature check of uploads; class list for designers creating Word templates.
+- Should be done: text extraction of PDF and other originals for search (OCR worker, ADR 0041 follow-up); rate limits for conversions.
 - Should be done: approval note (and page numbers) stamped into the archived rendition of file versions, if auditors require it beyond the fields of the document.
 - Later: check boxes, date pickers and drop-down lists as typed fields; repeating sections; Excel/PowerPoint field filling; Word templates with structured sections (hybrid).
 - Ruled out: altering the uploaded original; storing filled documents per working state.

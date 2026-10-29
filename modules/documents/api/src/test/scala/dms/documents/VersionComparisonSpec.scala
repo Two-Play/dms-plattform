@@ -3,7 +3,19 @@ package dms.documents
 import dms.documents.DocumentStatus.*
 import dms.documents.metadata.*
 import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
-import dms.templates.{Block, DiffStatus, Inline, Section, SectionId, SpanKind, TemplateContent, TextSpan}
+import dms.templates.{
+  Block,
+  DiffStatus,
+  Inline,
+  Section,
+  SectionId,
+  SpanKind,
+  TemplateContent,
+  TextSpan,
+  WordField,
+  WordFieldSource,
+  WordFieldType
+}
 import zio.test.*
 
 import java.time.Instant
@@ -148,6 +160,78 @@ object VersionComparisonSpec extends ZIOSpecDefault:
         ),
         backward.summaries == forward.summaries,
         unread.summaries.map(_.label) == List("2.0")
+      )
+    },
+    test("file versions: given texts, changed manual Word values and the original are compared (DMS-121)") {
+      def file(v: DocumentVersion, name: String, sha: String, values: Map[String, String]) =
+        v.copy(file =
+          Some(
+            VersionFile(
+              v.id,
+              UUID.randomUUID(),
+              name,
+              "application/octet-stream",
+              1,
+              sha,
+              "key",
+              "1",
+              ScanStatus.Clean,
+              "test",
+              UserId("author"),
+              at(0),
+              None,
+              List(
+                WordField("customer", "Kunde", WordFieldType.Text, required = true, WordFieldSource.Manual),
+                WordField(
+                  "delivery",
+                  "Liefertermin",
+                  WordFieldType.Date,
+                  required = false,
+                  WordFieldSource.Manual
+                ),
+                WordField("title", "Titel", WordFieldType.Text, required = false, WordFieldSource.Automatic)
+              ),
+              values
+            )
+          )
+        )
+      val v1 = file(
+        version(number(1, 0), Superseded, 0),
+        "Contract.docx",
+        "a" * 64,
+        Map("customer" -> "ACME", "delivery" -> "2027-01-31")
+      )
+      val v2 =
+        file(version(number(2, 0), Draft, 100), "Contract v2.docx", "b" * 64, Map("customer" -> "Beta"))
+      val c = VersionComparison.compare(
+        profile,
+        v1,
+        v2,
+        List(v1, v2),
+        Some((content("Delivery is monthly"), content("Delivery is weekly")))
+      )
+      val same = VersionComparison.compare(profile, v1, v1, List(v1), Some((content("x"), content("x"))))
+      assertTrue(
+        // the given texts, not the (equal) structured content
+        c.text.changed,
+        c.text.insertedWords == 1,
+        c.fields.map(f => (f.key, f.label, f.before, f.after)) == List(
+          ("word:customer", "Kunde", Some(text("ACME")), Some(text("Beta"))),
+          (
+            "word:delivery",
+            "Liefertermin",
+            Some(MetadataValue.Date(java.time.LocalDate.of(2027, 1, 31))),
+            None
+          )
+        ),
+        c.fields.forall(_.originBefore.forall(_ == ValueOrigin.Manual)),
+        c.metadata.exists(m =>
+          m.key == "originalName" && m.label == "Original file" && m.after.contains(text("Contract v2.docx"))
+        ),
+        c.metadata.exists(m => m.key == "originalChecksum" && m.before.contains(text("a" * 64))),
+        !same.text.changed,
+        same.fields.isEmpty,
+        same.metadata.isEmpty
       )
     }
   )

@@ -100,6 +100,48 @@ object WordDocxSpec extends ZIOSpecDefault:
         WordDocx.fill(evil, Map.empty).isLeft
       )
     },
+    test(
+      "paragraphs: text of the runs with headings, line breaks and tables, without deleted text (DMS-121)"
+    ) {
+      val mc       = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+      val document = docx(
+        """<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Scope</w:t></w:r></w:p>""" +
+          """<w:p><w:pPr><w:pStyle w:val="berschrift1"/></w:pPr><w:r><w:t>Umfang</w:t></w:r></w:p>""" +
+          paragraph(
+            textRun("Maintenance") + """<w:r><w:tab/><w:t>monthly</w:t><w:br/><w:t>on site</w:t></w:r>""" +
+              """<w:del><w:r><w:delText>weekly</w:delText></w:r></w:del>""" +
+              """<w:r><w:instrText> PAGE </w:instrText></w:r>"""
+          ) +
+          paragraph("") +
+          """<w:tbl><w:tr><w:tc>""" + paragraph(textRun("Cell A")) + """</w:tc><w:tc>""" +
+          paragraph(textRun("Cell B")) + """</w:tc></w:tr></w:tbl>""" +
+          paragraph(
+            s"""<w:r><mc:AlternateContent xmlns:mc="$mc"><mc:Choice Requires="wps"><w:txbxContent>""" +
+              paragraph(textRun("Box")) +
+              """</w:txbxContent></mc:Choice><mc:Fallback><w:txbxContent>""" + paragraph(textRun("Box")) +
+              "</w:txbxContent></mc:Fallback></mc:AlternateContent></w:r>"
+          ) +
+          paragraph(textRun("Customer: ") + control("customer", "Kunde", "Name")),
+        header = Some(paragraph(textRun("Header text")))
+      )
+      val filled = WordDocx.fill(document, Map("customer" -> "ACME")).toOption.get
+      assertTrue(
+        WordDocx.paragraphs(filled) == Right(
+          List(
+            WordParagraph("Scope", Some(2)),
+            WordParagraph("Umfang", Some(1)),
+            WordParagraph("Maintenance monthly\non site"),
+            WordParagraph("Cell A"),
+            WordParagraph("Cell B"),
+            WordParagraph("Box"),
+            WordParagraph("Customer: ACME")
+          )
+        ),
+        // the search text also has headers and footers, body first
+        WordDocx.text(filled).exists(t => t.startsWith("Scope\n") && t.endsWith("\nHeader text")),
+        WordDocx.paragraphs("not a zip".getBytes("UTF-8")).isLeft
+      )
+    },
     test("definitions of known keys are kept; manual values are checked") {
       val previous =
         List(WordField("customer", "Kunde", WordFieldType.Text, required = true, WordFieldSource.Manual))
