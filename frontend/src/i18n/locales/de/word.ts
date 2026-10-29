@@ -23,6 +23,7 @@ export const word: Translation<typeof en.word> = {
     takenOver: 'Aus der vorherigen Version übernommen.',
     downloadOriginal: 'Original herunterladen',
     downloadWord: 'Word herunterladen (befüllt)',
+    downloadFilled: 'Befüllte Datei herunterladen',
     downloadFailed: 'Das Herunterladen ist fehlgeschlagen: {message}',
     preview: 'Vorschau (PDF)',
     previewLoad: 'Vorschau anzeigen',
@@ -48,6 +49,15 @@ export const word: Translation<typeof en.word> = {
     saved: 'Feldwerte gespeichert.',
     failed: 'Die Feldwerte konnten nicht gespeichert werden: {message}',
     readOnly: 'Die Feldwerte sind mit der Version eingefroren.',
+    yes: 'Ja',
+    no: 'Nein',
+    choose: 'Bitte wählen …',
+    noRows: 'Noch keine Zeilen.',
+    addRow: 'Zeile hinzufügen',
+    removeRow: 'Zeile {row} entfernen',
+    cell: '{column}, Zeile {row}',
+    actions: 'Aktionen',
+    warning: 'Wird nicht so befüllt, wie die Datei es zeigt: {message}',
   },
   help: {
     title: 'So kennzeichnen Sie Felder in Word',
@@ -57,8 +67,14 @@ export const word: Translation<typeof en.word> = {
       'Das Tag dms:<Schlüssel> füllt die Plattform, z. B. dms:documentNumber, dms:version, dms:title, dms:author, dms:owner, dms:issuingUnit, dms:validFrom, dms:validUntil, dms:status, dms:approvedAt, dms:approvedBy oder jedes Metadatenfeld der Klasse (dms:<Feldschlüssel>).',
     manual:
       'Jedes andere Tag, z. B. customer, ist ein manuelles Feld, das die Autorin oder der Autor ausfüllt.',
+    types:
+      'Kontrollkästchen, Datumsauswahl und Dropdownlisten werden im Formular zu einem Kontrollkästchen, einem Datum und einer Auswahl der Listeneinträge; die Datumsauswahl druckt das Datum in ihrem eigenen Format.',
+    repeating:
+      'Ein Wiederholungsabschnitt (z. B. um eine Tabellenzeile) mit Tag wird zu einer Liste von Zeilen: Seine Inhaltssteuerelemente sind die Spalten, und der Abschnitt wird für jede eingetragene Zeile wiederholt. Verschachtelte Wiederholungsabschnitte werden nicht unterstützt und gemeldet.',
     placeholders:
-      'Alternativ {manual} oder {automatic} in den Text schreiben; der Platzhalter darf nicht durch Formatierung oder Rechtschreibmarkierungen geteilt sein.',
+      'Alternativ {manual} oder {automatic} in den Text schreiben; auch ein durch Formatierung geteilter Platzhalter wird gefunden und übernimmt die Formatierung seines ersten Teils.',
+    office:
+      'Excel- (.xlsx) und PowerPoint-Dateien (.pptx): Platzhalter in Zellen und auf Folien werden als Text befüllt.',
   },
   templates: {
     badge: 'Word',
@@ -89,7 +105,19 @@ export const word: Translation<typeof en.word> = {
     type: 'Typ',
     requiredColumn: 'Pflicht',
     source: 'Quelle',
-    types: { Text: 'Text', Date: 'Datum', Number: 'Zahl' },
+    types: {
+      Text: 'Text',
+      Date: 'Datum',
+      Number: 'Zahl',
+      Checkbox: 'Kontrollkästchen',
+      Choice: 'Auswahl',
+      Rows: 'Zeilen (Wiederholungsabschnitt)',
+    },
+    options: 'Auswahlwerte (einer pro Zeile): {key}',
+    optionsLabel: 'Auswahlwerte (einer pro Zeile)',
+    columns: 'Spalten',
+    columnOf: '{key}.{column}',
+    warning: 'Wird nicht so befüllt, wie die Word-Datei es zeigt: {message}',
     sources: { Automatic: 'Automatisch', Manual: 'Manuell' },
     saveFields: 'Felddefinitionen speichern',
     fieldsSaved: 'Felddefinitionen gespeichert.',

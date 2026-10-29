@@ -6,6 +6,7 @@ import type { ApiClient } from '@/api/client'
 import { ApiClientProvider } from '@/api/context'
 import type { DocumentVersionView } from '@/api/partners'
 import type { UploadFile, WordFields } from '@/api/word'
+import { setLocale } from '@/i18n'
 import { FileContentPanel } from './file-content-panel'
 
 const documentId = '7c1e2f0a-0000-4000-8000-0000000000d2'
@@ -76,14 +77,55 @@ type Reply = Promise<{ data: unknown; error: unknown; response: Response }>
 const ok = (data: unknown, status = 200): Reply =>
   Promise.resolve({ data, error: undefined, response: new Response(null, { status }) })
 
+const typedFields = (editable: boolean, values: Record<string, string> = {}): WordFields => ({
+  versionId,
+  version: '1.0-draft.2',
+  status: editable ? 'Draft' : 'Published',
+  editable,
+  fields: [
+    {
+      key: 'agreed',
+      label: 'Agreed',
+      type: 'Checkbox',
+      required: false,
+      source: 'Manual',
+      value: values.agreed,
+    },
+    {
+      key: 'priority',
+      label: 'Priority',
+      type: 'Choice',
+      required: false,
+      source: 'Manual',
+      options: ['High', 'Low'],
+      value: values.priority,
+    },
+    {
+      key: 'positions',
+      label: 'Positions',
+      type: 'Rows',
+      required: true,
+      source: 'Manual',
+      columns: [
+        { key: 'item', label: 'Item', type: 'Text', required: true },
+        { key: 'due', label: 'Due', type: 'Date', required: false },
+        { key: 'ok', label: 'Checked', type: 'Checkbox', required: false },
+      ],
+      value: values.positions,
+      warning: 'nested repeating sections are not supported',
+    },
+  ],
+})
+
 function renderPanel(
   v: DocumentVersionView,
   editable: boolean,
   upload?: UploadFile<DocumentVersionView>,
+  wordFields: WordFields = fields(editable),
 ) {
   const get = vi.fn((path: string) => {
     if (path === '/api/v1/users') return ok([{ id: 'author-1', name: 'Ada Author' }])
-    if (path.endsWith('/word-fields')) return ok(fields(editable))
+    if (path.endsWith('/word-fields')) return ok(wordFields)
     return ok(new Blob(['%PDF-1.7']))
   })
   const put = vi.fn(() => ok(v))
@@ -163,5 +205,86 @@ describe('Content of a file document (DMS-115)', () => {
     expect(await screen.findByText('VT-2026-0007')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Save field values' })).not.toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: /Kunde/ })).not.toBeInTheDocument()
+  })
+
+  it('typed fields: check box, choice and rows that can be added and removed (DMS-122)', async () => {
+    const { put, user } = renderPanel(
+      version('Draft'),
+      true,
+      undefined,
+      typedFields(true, { positions: JSON.stringify([{ item: 'Pump' }]) }),
+    )
+
+    const agreed = await screen.findByRole('checkbox', { name: /Agreed/ })
+    expect(agreed).not.toBeChecked()
+    await user.click(agreed)
+    const priority = screen.getByRole('combobox', { name: /Priority/ })
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Choose…',
+      'High',
+      'Low',
+    ])
+    await user.selectOptions(priority, 'Low')
+    expect(
+      screen.getByText(/Not filled as shown in the file: nested repeating sections/),
+    ).toBeInTheDocument()
+
+    const rows = screen.getByRole('group', { name: 'Positions' })
+    expect(screen.getByRole('textbox', { name: 'Item, row 1' })).toHaveValue('Pump')
+    await user.click(screen.getByRole('button', { name: 'Add row' }))
+    await user.type(screen.getByRole('textbox', { name: 'Item, row 2' }), 'Valve')
+    await user.click(screen.getByRole('checkbox', { name: 'Checked, row 2' }))
+    expect(rows.querySelectorAll('input[type="date"]')).toHaveLength(2)
+    await user.click(screen.getByRole('button', { name: 'Add row' }))
+    await user.click(screen.getByRole('button', { name: 'Remove row 1' }))
+    expect(screen.getByRole('textbox', { name: 'Item, row 1' })).toHaveValue('Valve')
+    await user.click(screen.getByRole('button', { name: 'Save field values' }))
+
+    await waitFor(() => {
+      expect(put).toHaveBeenCalledWith('/api/v1/documents/{id}/word-fields', {
+        params: { path: { id: documentId } },
+        body: {
+          values: {
+            agreed: 'true',
+            priority: 'Low',
+            positions: JSON.stringify([{ item: 'Valve', ok: 'true' }, {}]),
+          },
+        },
+      })
+    })
+  })
+
+  it('shows typed values read-only and speaks German', async () => {
+    setLocale('de')
+    renderPanel(
+      version('Published', 'Budget.xlsx'),
+      false,
+      undefined,
+      typedFields(false, {
+        agreed: 'true',
+        priority: 'High',
+        positions: JSON.stringify([{ item: 'Pumpe', due: '2027-01-31', ok: 'false' }]),
+      }),
+    )
+
+    expect(await screen.findByText('Ja')).toBeInTheDocument()
+    expect(screen.getByText('High')).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: 'Positions' })).toBeInTheDocument()
+    expect(screen.getByText('Pumpe')).toBeInTheDocument()
+    expect(screen.getByText('31.01.2027')).toBeInTheDocument()
+    expect(screen.getByText('Nein')).toBeInTheDocument()
+    // an Excel file has fields and a filled download, but no Word download
+    expect(screen.getByRole('button', { name: 'Befüllte Datei herunterladen' })).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
+
+  it('German labels of the inputs for rows', async () => {
+    setLocale('de')
+    const { user } = renderPanel(version('Draft'), true, undefined, typedFields(true))
+    expect(await screen.findByText('Noch keine Zeilen.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Zeile hinzufügen' }))
+    expect(screen.getByRole('textbox', { name: 'Item, Zeile 1' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Zeile 1 entfernen' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Bitte wählen …' })).toBeInTheDocument()
   })
 })

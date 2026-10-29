@@ -10,6 +10,7 @@ import {
   downloadFilled,
   downloadOriginal,
   fetchPreview,
+  isFillableFile,
   isWordFile,
   saveWordValues,
   uploadOriginal,
@@ -23,12 +24,12 @@ import { UserName } from '@/components/shared/user-name'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { t } from '@/i18n'
 import { formatDateTime, formatFileSize } from '@/i18n/format'
 import { toast } from '@/lib/toast'
 import { WordFieldHelp } from './word-field-help'
+import { WordFieldInput, WordFieldValue } from './word-field-input'
 
 const convertible = new Set<string>(CONVERTIBLE_EXTENSIONS)
 
@@ -133,7 +134,7 @@ export function FileContentPanel({
                 {t('word.file.downloadOriginal')}
               </Button>
             )}
-            {file && isWordFile(file.name) && (
+            {file && isFillableFile(file.name) && (
               <Button
                 size="sm"
                 variant="outline"
@@ -143,7 +144,9 @@ export function FileContentPanel({
                 }}
               >
                 <FileDown className="size-4" aria-hidden />
-                {t('word.file.downloadWord')}
+                {isWordFile(file.name)
+                  ? t('word.file.downloadWord')
+                  : t('word.file.downloadFilled')}
               </Button>
             )}
             {editable && (
@@ -189,7 +192,7 @@ export function FileContentPanel({
           )}
         </CardContent>
       </Card>
-      {file && isWordFile(file.name) && (
+      {file && isFillableFile(file.name) && (
         <WordFieldsCard
           key={`${version.id}-${String(version.workingState)}`}
           documentId={documentId}
@@ -300,8 +303,8 @@ function FieldRow({
   const id = useId()
   const manual = field.source === 'Manual'
   return (
-    <div className="grid gap-1.5 sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-center">
-      <Label htmlFor={id} className="flex flex-wrap items-center gap-1.5">
+    <div className="grid gap-1.5 sm:grid-cols-[12rem_minmax(0,1fr)] sm:items-start">
+      <Label htmlFor={id} className="flex flex-wrap items-center gap-1.5 sm:pt-1.5">
         {field.label}
         {manual && field.required && (
           <span className="text-destructive" aria-label={t('word.fields.required')}>
@@ -312,23 +315,20 @@ function FieldRow({
           {manual ? t('word.fields.manual') : t('word.fields.automatic')}
         </Badge>
       </Label>
-      {manual && editable ? (
-        <Input
-          id={id}
-          type={field.type === 'Date' ? 'date' : field.type === 'Number' ? 'number' : 'text'}
-          value={value}
-          required={field.required}
-          onChange={(event) => {
-            onChange(event.target.value)
-          }}
-        />
-      ) : (
-        <p id={id} className="text-sm">
-          {(manual ? value : field.value) || (
-            <span className="text-muted-foreground">{t('word.fields.notSet')}</span>
-          )}
-        </p>
-      )}
+      <div className="min-w-0 space-y-1">
+        {manual && editable ? (
+          <WordFieldInput id={id} field={field} value={value} onChange={onChange} />
+        ) : (
+          <div id={id} className="text-sm">
+            <WordFieldValue field={field} value={manual ? value : field.value} />
+          </div>
+        )}
+        {field.warning && (
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            {t('word.fields.warning', { message: field.warning })}
+          </p>
+        )}
+      </div>
     </div>
   )
 }

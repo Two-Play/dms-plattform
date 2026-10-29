@@ -21,18 +21,38 @@ import zio.stream.ZStream
 import java.time.Instant
 import java.util.UUID
 
-/** Definition of a field of a Word template (DMS-115). */
+/** Definition of a column of a Rows field of a Word template (DMS-122). */
+final case class WordColumnDefinition(
+    /** Column key, as found in the repeating section of the Word file. */
+    key: String,
+    label: String,
+    /** Text, Date, Number, Checkbox or Choice. */
+    `type`: String,
+    /** Required in every row before submission. */
+    required: Boolean,
+    /** Allowed values of a Choice column. */
+    options: Option[List[String]] = None
+) derives JsonCodec,
+      Schema
+
+/** Definition of a field of a Word template (DMS-115, DMS-122). */
 final case class WordFieldDefinition(
     /** Field key without the `dms:` prefix, as found in the Word file. */
     key: String,
     /** Label in the form. */
     label: String,
-    /** Text, Date or Number. */
+    /** Text, Date, Number, Checkbox, Choice or Rows (repeating sections only). */
     `type`: String,
     /** Required before submission (manual fields). */
     required: Boolean,
     /** Automatic (filled by the platform from the system value or metadata field with this key) or Manual. */
-    source: String
+    source: String,
+    /** Allowed values of a Choice field: the items of a drop-down list, or defined by the designer. */
+    options: Option[List[String]] = None,
+    /** Columns of a Rows field; their keys are those of the Word file. */
+    columns: Option[List[WordColumnDefinition]] = None,
+    /** Read-only: what the platform cannot fill as the Word file shows it. */
+    warning: Option[String] = None
 ) derives JsonCodec,
       Schema
 
@@ -177,7 +197,9 @@ object WordTemplateApi:
       .in(jsonBody[WordFieldDefinitions])
       .out(jsonBody[WordTemplateView])
       .description(
-        "Changes the field definitions of a draft Word template: label, type (Text, Date, Number), required and " +
+        "Changes the field definitions of a draft Word template: label, type (Text, Date, Number, Checkbox, " +
+          "Choice with options; Rows only for repeating sections, with the columns' label, type, required and " +
+          "options), required and " +
           "source (Automatic, Manual). The keys are those of the Word file. 409 unless the version is a draft."
       )
       .tag("Templates")
@@ -343,17 +365,42 @@ object WordTemplateApi:
     )
 
   private[app] def definitionView(f: WordField): WordFieldDefinition =
-    WordFieldDefinition(f.key, f.label, f.fieldType.toString, f.required, f.source.toString)
+    WordFieldDefinition(
+      f.key,
+      f.label,
+      f.fieldType.toString,
+      f.required,
+      f.source.toString,
+      Option.when(f.options.nonEmpty)(f.options),
+      Option.when(f.columns.nonEmpty)(
+        f.columns.map(c =>
+          WordColumnDefinition(
+            c.key,
+            c.label,
+            c.fieldType.toString,
+            c.required,
+            Option.when(c.options.nonEmpty)(c.options)
+          )
+        )
+      ),
+      f.warning
+    )
+
+  private def fieldType(key: String, name: String): IO[String, WordFieldType] =
+    ZIO.fromOption(WordFieldType.values.find(_.toString == name)).orElseFail(s"$key: unknown type")
 
   private def definition(d: WordFieldDefinition): IO[String, WordField] =
     for
-      kind <- ZIO
-        .fromOption(WordFieldType.values.find(_.toString == d.`type`))
-        .orElseFail(s"${d.key}: unknown type")
+      kind   <- fieldType(d.key, d.`type`)
       source <- ZIO
         .fromOption(WordFieldSource.values.find(_.toString == d.source))
         .orElseFail(s"${d.key}: unknown source")
-    yield WordField(d.key, d.label.trim, kind, d.required, source)
+      columns <- ZIO.foreach(d.columns.getOrElse(Nil))(c =>
+        fieldType(s"${d.key}.${c.key}", c.`type`).map(t =>
+          WordField(c.key, c.label.trim, t, c.required, WordFieldSource.Manual, c.options.getOrElse(Nil))
+        )
+      )
+    yield WordField(d.key, d.label.trim, kind, d.required, source, d.options.getOrElse(Nil), columns)
 
   private def invalid(message: String) = (StatusCode.UnprocessableEntity, ApiError("invalid", message))
 

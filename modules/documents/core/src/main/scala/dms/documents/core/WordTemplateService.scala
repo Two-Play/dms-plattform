@@ -6,7 +6,7 @@ import dms.db.{Db, Jsonb}
 import dms.documents.core.DocumentJson.given
 import dms.documents.{ScanStatus, WordTemplateFile}
 import dms.kernel.{TemplateId, UserId}
-import dms.templates.WordField
+import dms.templates.{WordField, WordFields}
 import zio.*
 import zio.json.*
 import zio.json.ast.Json
@@ -53,8 +53,9 @@ final class WordTemplateService(audit: AuditTrail):
       )
     yield file
 
-  /** Changes the definitions of the fields of a draft's Word file (label, type, required, source). The keys
-    * are those found in the file; they change only with a new file.
+  /** Changes the definitions of the fields of a draft's Word file (label, type, required, source, options and
+    * the columns of repeating sections, see [[WordFields.edit]]). The keys are those found in the file; they
+    * change only with a new file.
     */
   def setFields(
       template: TemplateId,
@@ -73,10 +74,11 @@ final class WordTemplateService(audit: AuditTrail):
           )
         )
       )
-      _ <- ZIO.foreachDiscard(fields.find(_.label.trim.isEmpty))(f =>
-        ZIO.fail(DocumentError.Invalid(List(s"${f.key}: the label must not be empty")))
+      edited = current.fields.flatMap(c => fields.find(_.key == c.key).map(WordFields.edit(c, _)))
+      _ <- ZIO.unless(edited.forall(_.isRight))(
+        ZIO.fail(DocumentError.Invalid(edited.collect { case Left(m) => m }))
       )
-      ordered = current.fields.flatMap(c => fields.find(_.key == c.key))
+      ordered = edited.collect { case Right(f) => f }
       updated = current.copy(fields = ordered, setBy = actor)
       _ <- sql {
         Store.upsert(updated)

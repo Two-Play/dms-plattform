@@ -70,9 +70,13 @@ type Reply = Promise<{ data: unknown; error: unknown; response: Response }>
 const ok = (data: unknown, status = 200): Reply =>
   Promise.resolve({ data, error: undefined, response: new Response(null, { status }) })
 
-function renderPanel(v: TemplateVersion, upload?: UploadFile<WordTemplate>) {
+function renderPanel(
+  v: TemplateVersion,
+  upload?: UploadFile<WordTemplate>,
+  w: WordTemplate = word,
+) {
   const put = vi.fn((_path: string, init: { body: { fields: WordTemplate['fields'] } }) =>
-    ok({ ...word, fields: init.body.fields }),
+    ok({ ...w, fields: init.body.fields }),
   )
   const get = vi.fn((path: string) =>
     path === '/api/v1/users'
@@ -84,7 +88,7 @@ function renderPanel(v: TemplateVersion, upload?: UploadFile<WordTemplate>) {
   render(
     <QueryClientProvider client={queryClient}>
       <ApiClientProvider client={client}>
-        <WordTemplatePanel version={v} word={word} upload={upload} />
+        <WordTemplatePanel version={v} word={w} upload={upload} />
       </ApiClientProvider>
     </QueryClientProvider>,
   )
@@ -120,6 +124,72 @@ describe('Word templates (DMS-115)', () => {
       )
     })
     expect(screen.getByText('How to mark fields in Word')).toBeInTheDocument()
+  })
+
+  it('choices get options; the columns of a repeating section are edited (DMS-122)', async () => {
+    const typed: WordTemplate = {
+      ...word,
+      fields: [
+        {
+          key: 'priority',
+          label: 'Priority',
+          type: 'Choice',
+          required: false,
+          source: 'Manual',
+          options: ['High'],
+        },
+        {
+          key: 'positions',
+          label: 'Positions',
+          type: 'Rows',
+          required: true,
+          source: 'Manual',
+          columns: [{ key: 'item', label: 'item', type: 'Text', required: false }],
+          warning: 'nested repeating sections are not supported',
+        },
+      ],
+    }
+    const { put, user } = renderPanel(version('Draft'), undefined, typed)
+
+    // a repeating section stays a list of rows; other fields cannot become one
+    expect(screen.queryByRole('combobox', { name: 'Type: positions' })).not.toBeInTheDocument()
+    expect(screen.getByText('Rows (repeating section)')).toBeInTheDocument()
+    expect(
+      screen
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+        .includes('Rows (repeating section)'),
+    ).toBe(false)
+    expect(screen.getByText(/nested repeating sections are not supported/)).toBeInTheDocument()
+    const options = screen.getByRole('textbox', { name: 'Options (one per line): priority' })
+    await user.type(options, '{Enter}Low')
+    const column = screen.getByRole('textbox', { name: 'Label: positions.item' })
+    await user.clear(column)
+    await user.type(column, 'Item')
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Type: positions.item' }),
+      'Number',
+    )
+    await user.click(screen.getByRole('checkbox', { name: 'Required: positions.item' }))
+    await user.click(screen.getByRole('button', { name: 'Save field definitions' }))
+
+    await waitFor(() => {
+      expect(put).toHaveBeenCalledWith(
+        '/api/v1/admin/templates/{id}/versions/{version}/word/fields',
+        {
+          params: { path: { id: templateId, version: 1 } },
+          body: {
+            fields: [
+              { ...typed.fields?.[0], options: ['High', 'Low'] },
+              {
+                ...typed.fields?.[1],
+                columns: [{ key: 'item', label: 'Item', type: 'Number', required: true }],
+              },
+            ],
+          },
+        },
+      )
+    })
   })
 
   it('a released Word template is read-only', () => {

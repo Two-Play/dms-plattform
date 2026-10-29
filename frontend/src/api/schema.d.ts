@@ -210,6 +210,112 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/admin/number-ranges/preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Checks a pattern and shows the first number of a period this year, e.g. while typing */
+    post: operations['postApiV1AdminNumber-rangesPreview']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/number-ranges': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The number ranges of the tenant by key, each with the number the next document would get */
+    get: operations['getApiV1AdminNumber-ranges']
+    put?: never
+    /** @description Creates a number range. 422 for an invalid key, name, pattern or start value, or a yearly reset without year in the pattern; 409 for a taken key. */
+    post: operations['postApiV1AdminNumber-ranges']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/number-ranges/{id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description A number range */
+    get: operations['getApiV1AdminNumber-rangesId']
+    /** @description Changes name, pattern, start value and yearly reset. Numbers already assigned stay; the change applies to the next number. */
+    put: operations['putApiV1AdminNumber-rangesId']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/number-range-assignments': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Every document class with its own and its effective number range, by key */
+    get: operations['getApiV1AdminNumber-range-assignments']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/number-range-assignments/{classId}/backfill': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description How many existing documents of the class (and of its subclasses with the same number range) have no number yet and would be numbered by `POST …/backfill`. 409 if the class has no number range. */
+    get: operations['getApiV1AdminNumber-range-assignmentsClassidBackfill']
+    put?: never
+    /** @description Numbers the existing documents without number of the class and of its subclasses with the same number range (DMS-116), oldest first, each in its own transaction like on creation (counter of the year the document was created in). At most 500 per run; `remaining` tells how many are left. Documents with a version in review or approval, or without the organizational unit a `{OU}` pattern needs, are skipped. Idempotent: numbered documents are never renumbered. Each number is audited (`document.number-assigned` with `backfill`) and the documents are reindexed for the search. */
+    post: operations['postApiV1AdminNumber-range-assignmentsClassidBackfill']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/number-range-assignments/{classId}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Assigns a number range to a class; subclasses inherit it unless they have their own. Without `numberRangeId` the class explicitly gets no number range. */
+    put: operations['putApiV1AdminNumber-range-assignmentsClassid']
+    post?: never
+    /** @description Removes the class's own assignment: it inherits the number range of its parent again */
+    delete: operations['deleteApiV1AdminNumber-range-assignmentsClassid']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/admin/templates': {
     parameters: {
       query?: never
@@ -416,6 +522,126 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/admin/word-templates': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The Word files of all template versions that are Word templates, in any status */
+    get: operations['getApiV1AdminWord-templates']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/template-classes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The document classes templates can be created for (latest profile version, label and path), read-only, sorted by path: for designers choosing the class of a new (Word) template without the configuration of document classes. Requires EditTemplates. */
+    get: operations['getApiV1AdminTemplate-classes']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/word-templates': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Released Word templates for authors, with their fields: create documents from them with POST /api/v1/documents/word. */
+    get: operations['getApiV1Word-templates']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/templates/{id}/versions/{version}/word': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The Word file of a template version; 404 if it is not a Word template */
+    get: operations['getApiV1AdminTemplatesIdVersionsVersionWord']
+    /** @description Uploads the Word file (DOCX) of a draft template version, which makes it a Word template, or replaces it. Its fields are read from the content controls (tag = key; `dms:` prefix = automatic) and `{{key}}` placeholders; definitions of keys known before are kept. 409 unless the version is a draft, 422 for files that are not a readable DOCX or are blocked, 413 above the size limit of attachments. */
+    put: operations['putApiV1AdminTemplatesIdVersionsVersionWord']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/templates/{id}/versions/{version}/word/fields': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Changes the field definitions of a draft Word template: label, type (Text, Date, Number, Checkbox, Choice with options; Rows only for repeating sections, with the columns' label, type, required and options), required and source (Automatic, Manual). The keys are those of the Word file. 409 unless the version is a draft. */
+    put: operations['putApiV1AdminTemplatesIdVersionsVersionWordFields']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/templates/{id}/versions/{version}/word/file': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Downloads the Word file of a template version (to adapt it in Word and upload it again) */
+    get: operations['getApiV1AdminTemplatesIdVersionsVersionWordFile']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/templates/{id}/word-versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Starts the next version of a Word template as a draft: name, description and class of the latest version, its Word file and field definitions taken over (no bytes copied). 409 while another version is in Draft or Testing or if the latest version has no Word file. */
+    post: operations['postApiV1AdminTemplatesIdWord-versions']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/valid-at': {
     parameters: {
       query?: never
@@ -588,6 +814,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/number': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Assigns a document number manually (DMS-113), e.g. one taken over from a previous system. The reason is required (422) and recorded in the audit trail; the number must be free in the tenant (409). A document without number gets one at any time except while a version is in review or approval; an existing number can only be replaced while every version is a draft (409). */
+    post: operations['postApiV1DocumentsIdNumber']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/{id}/attachments': {
     parameters: {
       query?: never
@@ -639,6 +882,142 @@ export interface paths {
     head?: never
     /** @description Renames an attachment of the draft. 409 if the version is not a draft or the name is taken (names are unique per version, ignoring case); 422 for an invalid name. */
     patch: operations['patchApiV1DocumentsIdAttachmentsAttachmentid']
+    trace?: never
+  }
+  '/api/v1/documents/word': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Creates a file document from a released Word template version: version 1.0 as a draft whose original is a copy of the template's Word file with the template's field definitions. Values as for creating a document; 409 if the template version has no Word file. */
+    post: operations['postApiV1DocumentsWord']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/file': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Uploads the original of a file document into its draft (the next working state), replacing the previous file. Stored unchanged with its SHA-256, which the approval binds. The fields of a Word document (DOCX) are read from its content controls (tag = field key, `dms:` prefix = automatic; check boxes, date pickers, drop-down lists and repeating sections typed) and `{{key}}` placeholders, those of an Excel workbook (XLSX) or PowerPoint presentation (PPTX) from its `{{key}}` placeholders. 409 for structured documents and if the version is not a draft, 413 above the size limit of attachments, 422 for blocked types, unreadable DOCX (`invalid_docx`), XLSX or PPTX (`invalid_office_file`), types that cannot be converted into PDF/A (`file_not_convertible`) and files whose content does not fit their extension (`file_type_mismatch`, e.g. a PDF named .xlsx), 422 `attachment_infected`, 503 if the virus scanner or object storage is unavailable. */
+    put: operations['putApiV1DocumentsIdFile']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/word-fields': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The fields of the version's Word file with their values: manual fields as entered, automatic fields as the platform fills them now. Requires reading the version; 404 without file. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidWord-fields']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/word-fields': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Enters the values of the manual fields of the draft's Word file (the next working state). 422 for unknown keys and invalid values (dates yyyy-MM-dd, numbers, check boxes true/false, one of the options of a choice, rows as JSON array of objects by column key with at most 200 rows); required fields and required columns are checked on submission. 409 if the version is not a draft. */
+    put: operations['putApiV1DocumentsIdWord-fields']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/file': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Downloads the original of a file document version unchanged (e.g. the Word file as uploaded), as attachment with its SHA-256 as Repr-Digest and ETag; requires reading the version. 404 if the version has no file. The stored object is checked against the recorded SHA-256 before it is sent. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidFile']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/filled.docx': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The Word document of a version with its fields filled: automatic fields from the platform (with the approval once approved), manual fields as entered. The editable artifact; filled on request, not stored, the download is audited with the SHA-256 of the bytes. 409 if the original is not a DOCX. Requires reading the version. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidFilled.docx']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/filled': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The original of a version with its fields filled (DMS-122): a Word document (DOCX), Excel workbook (XLSX) or PowerPoint presentation (PPTX), named and typed like the original. Automatic fields from the platform (with the approval once approved), manual fields as entered; filled on request, not stored, the download is audited with the SHA-256 of the bytes. 409 if the original is of another type. Requires reading the version. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidFilled']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/preview.pdf': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description A PDF of a file document version for reading in the browser: the archived rendition of an approved version; otherwise the original (a Word file with its fields filled) converted on request with the draft marking on every page. Not stored; a conversion is kept in memory per version and state, so an unchanged draft is converted once. 409 for structured documents (see …/html), 404 without file, 503 if the conversion worker is unavailable. Requires ReadDocument on the version. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidPreview.pdf']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
     trace?: never
   }
   '/api/v1/documents/by-number/{number}/current': {
@@ -837,6 +1216,23 @@ export interface paths {
     }
     /** @description A copy of an approved version printed on demand, e.g. with the change history appended; header and footer as in the archive rendition plus the note that the archived rendition is authoritative. The archived PDF/A is not altered. Not stored; the download is audited. 409 for versions that were never approved. Requires ReadDocument on the version. */
     get: operations['getApiV1DocumentsIdVersionsVersionidCopy.pdf']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/document.docx': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description A structured version as Word document (DOCX), converted on demand by the conversion worker from the same page as the PDFs: open versions are marked "Draft – not valid", approved versions name the archived rendition as authoritative. Not stored; the download is audited. 409 for file documents (download the original) and for withdrawn drafts, 503 without conversion worker. Requires ReadDocument on the version. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidDocument.docx']
     put?: never
     post?: never
     delete?: never
@@ -1501,385 +1897,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/v1/admin/number-ranges': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The number ranges of the tenant by key, each with the number the next document would get */
-    get: operations['getApiV1AdminNumber-ranges']
-    put?: never
-    /** @description Creates a number range. 422 for an invalid key, name, pattern or start value, or a yearly reset without year in the pattern; 409 for a taken key. */
-    post: operations['postApiV1AdminNumber-ranges']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/admin/number-ranges/preview': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** @description Checks a pattern and shows the first number of a period this year, e.g. while typing */
-    post: operations['postApiV1AdminNumber-rangesPreview']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/admin/number-ranges/{id}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description A number range */
-    get: operations['getApiV1AdminNumber-rangesId']
-    /** @description Changes name, pattern, start value and yearly reset. Numbers already assigned stay; the change applies to the next number. */
-    put: operations['putApiV1AdminNumber-rangesId']
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/admin/number-range-assignments': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Every document class with its own and its effective number range, by key */
-    get: operations['getApiV1AdminNumber-range-assignments']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/admin/number-range-assignments/{classId}/backfill': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description How many existing documents of the class (and of its subclasses with the same number range) have no number yet and would be numbered by `POST …/backfill`. 409 if the class has no number range. */
-    get: operations['getApiV1AdminNumber-range-assignmentsClassidBackfill']
-    put?: never
-    /** @description Numbers the existing documents without number of the class and of its subclasses with the same number range (DMS-116), oldest first, each in its own transaction like on creation (counter of the year the document was created in). At most 500 per run; `remaining` tells how many are left. Documents with a version in review or approval, or without the organizational unit a `{OU}` pattern needs, are skipped. Idempotent: numbered documents are never renumbered. Each number is audited (`document.number-assigned` with `backfill`) and the documents are reindexed for the search. */
-    post: operations['postApiV1AdminNumber-range-assignmentsClassidBackfill']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/admin/number-range-assignments/{classId}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    /** @description Assigns a number range to a class; subclasses inherit it unless they have their own. Without `numberRangeId` the class explicitly gets no number range. */
-    put: operations['putApiV1AdminNumber-range-assignmentsClassid']
-    post?: never
-    /** @description Removes the class's own assignment: it inherits the number range of its parent again */
-    delete: operations['deleteApiV1AdminNumber-range-assignmentsClassid']
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/documents/{id}/number': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** @description Assigns a document number manually (DMS-113), e.g. one taken over from a previous system. The reason is required (422) and recorded in the audit trail; the number must be free in the tenant (409). A document without number gets one at any time except while a version is in review or approval; an existing number can only be replaced while every version is a draft (409). */
-    post: operations['postApiV1DocumentsIdNumber']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/admin/word-templates': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The Word files of all template versions that are Word templates, in any status */
-    get: operations['getApiV1AdminWord-templates']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/admin/template-classes': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The document classes templates can be created for (latest profile version, label and path), read-only, sorted by path: for designers choosing the class of a new (Word) template without the configuration of document classes. Requires EditTemplates. */
-    get: operations['getApiV1AdminTemplate-classes']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/word-templates': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Released Word templates for authors, with their fields: create documents from them with POST /api/v1/documents/word. */
-    get: operations['getApiV1Word-templates']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/admin/templates/{id}/versions/{version}/word': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The Word file of a template version; 404 if it is not a Word template */
-    get: operations['getApiV1AdminTemplatesIdVersionsVersionWord']
-    /** @description Uploads the Word file (DOCX) of a draft template version, which makes it a Word template, or replaces it. Its fields are read from the content controls (tag = key; `dms:` prefix = automatic) and `{{key}}` placeholders; definitions of keys known before are kept. 409 unless the version is a draft, 422 for files that are not a readable DOCX or are blocked, 413 above the size limit of attachments. */
-    put: operations['putApiV1AdminTemplatesIdVersionsVersionWord']
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/admin/templates/{id}/versions/{version}/word/fields': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    /** @description Changes the field definitions of a draft Word template: label, type (Text, Date, Number), required and source (Automatic, Manual). The keys are those of the Word file. 409 unless the version is a draft. */
-    put: operations['putApiV1AdminTemplatesIdVersionsVersionWordFields']
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/admin/templates/{id}/versions/{version}/word/file': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Downloads the Word file of a template version (to adapt it in Word and upload it again) */
-    get: operations['getApiV1AdminTemplatesIdVersionsVersionWordFile']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/admin/templates/{id}/word-versions': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** @description Starts the next version of a Word template as a draft: name, description and class of the latest version, its Word file and field definitions taken over (no bytes copied). 409 while another version is in Draft or Testing or if the latest version has no Word file. */
-    post: operations['postApiV1AdminTemplatesIdWord-versions']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/documents/word': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** @description Creates a file document from a released Word template version: version 1.0 as a draft whose original is a copy of the template's Word file with the template's field definitions. Values as for creating a document; 409 if the template version has no Word file. */
-    post: operations['postApiV1DocumentsWord']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/documents/{id}/file': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    /** @description Uploads the original of a file document into its draft (the next working state), replacing the previous file. Stored unchanged with its SHA-256, which the approval binds. The fields of a Word document (DOCX) are read from its content controls (tag = field key, `dms:` prefix = automatic) and `{{key}}` placeholders. 409 for structured documents and if the version is not a draft, 413 above the size limit of attachments, 422 for blocked types, unreadable DOCX, types that cannot be converted into PDF/A (`file_not_convertible`) and files whose content does not fit their extension (`file_type_mismatch`, e.g. a PDF named .xlsx), 422 `attachment_infected`, 503 if the virus scanner or object storage is unavailable. */
-    put: operations['putApiV1DocumentsIdFile']
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/documents/{id}/versions/{versionId}/word-fields': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The fields of the version's Word file with their values: manual fields as entered, automatic fields as the platform fills them now. Requires reading the version; 404 without file. */
-    get: operations['getApiV1DocumentsIdVersionsVersionidWord-fields']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/documents/{id}/word-fields': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    /** @description Enters the values of the manual fields of the draft's Word file (the next working state). 422 for unknown keys and invalid values (dates yyyy-MM-dd, numbers); required fields are checked on submission. 409 if the version is not a draft. */
-    put: operations['putApiV1DocumentsIdWord-fields']
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/documents/{id}/versions/{versionId}/file': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description Downloads the original of a file document version unchanged (e.g. the Word file as uploaded), as attachment with its SHA-256 as Repr-Digest and ETag; requires reading the version. 404 if the version has no file. The stored object is checked against the recorded SHA-256 before it is sent. */
-    get: operations['getApiV1DocumentsIdVersionsVersionidFile']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/documents/{id}/versions/{versionId}/filled.docx': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The Word document of a version with its fields filled: automatic fields from the platform (with the approval once approved), manual fields as entered. The editable artifact; filled on request, not stored, the download is audited with the SHA-256 of the bytes. 409 if the original is not a DOCX. Requires reading the version. */
-    get: operations['getApiV1DocumentsIdVersionsVersionidFilled.docx']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/documents/{id}/versions/{versionId}/preview.pdf': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description A PDF of a file document version for reading in the browser: the archived rendition of an approved version; otherwise the original (a Word file with its fields filled) converted on request with the draft marking on every page. Not stored; a conversion is kept in memory per version and state, so an unchanged draft is converted once. 409 for structured documents (see …/html), 404 without file, 503 if the conversion worker is unavailable. Requires ReadDocument on the version. */
-    get: operations['getApiV1DocumentsIdVersionsVersionidPreview.pdf']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/documents/{id}/versions/{versionId}/document.docx': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description A structured version as Word document (DOCX), converted on demand by the conversion worker from the same page as the PDFs: open versions are marked "Draft – not valid", approved versions name the archived rendition as authoritative. Not stored; the download is audited. 409 for file documents (download the original) and for withdrawn drafts, 503 without conversion worker. Requires ReadDocument on the version. */
-    get: operations['getApiV1DocumentsIdVersionsVersionidDocument.docx']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -1977,6 +1994,16 @@ export interface components {
       /** Format: date-time */
       approvedAt: string
       actingFor?: string
+    }
+    /** AssignDocumentNumber */
+    AssignDocumentNumber: {
+      number: string
+      reason: string
+    }
+    /** AssignNumberRange */
+    AssignNumberRange: {
+      /** Format: uuid */
+      numberRangeId?: string
     }
     /** AttachmentUpload */
     AttachmentUpload: {
@@ -2143,6 +2170,14 @@ export interface components {
       fieldType: components['schemas']['FieldType']
       multiple?: boolean
     }
+    /** ChangeNumberRange */
+    ChangeNumberRange: {
+      name: string
+      pattern: string
+      /** Format: int64 */
+      startValue: number
+      yearlyReset: boolean
+    }
     /** ChangeSummaryView */
     ChangeSummaryView: {
       /** Format: uuid */
@@ -2170,6 +2205,22 @@ export interface components {
       /** Format: int32 */
       documentClassVersion: number
       content: components['schemas']['TemplateContent']
+    }
+    /** ClassNumberRangeView */
+    ClassNumberRangeView: {
+      /** Format: uuid */
+      classId: string
+      classKey: string
+      label: string
+      /** Format: uuid */
+      parentId?: string
+      mode: string
+      /** Format: uuid */
+      numberRangeId?: string
+      /** Format: uuid */
+      effectiveRangeId?: string
+      /** Format: uuid */
+      inheritedFrom?: string
     }
     /** ClauseChanged */
     ClauseChanged: {
@@ -2323,6 +2374,24 @@ export interface components {
       documentIds?: string[]
       searchFilter?: components['schemas']['HoldSearchFilter']
     }
+    /** CreateNumberRange */
+    CreateNumberRange: {
+      key: string
+      name: string
+      pattern: string
+      /** Format: int64 */
+      startValue?: number
+      yearlyReset?: boolean
+    }
+    /** CreateWordDocument */
+    CreateWordDocument: {
+      /** Format: uuid */
+      templateId: string
+      /** Format: int32 */
+      templateVersion: number
+      title: string
+      values: components['schemas']['Map_MetadataValue']
+    }
     /** CurrentLinks */
     CurrentLinks: {
       self: string
@@ -2471,6 +2540,13 @@ export interface components {
       description?: string
       fields?: components['schemas']['FieldBindingView'][]
       review: components['schemas']['ReviewSettingsView']
+    }
+    /** DocumentNumberView */
+    DocumentNumberView: {
+      /** Format: uuid */
+      documentId: string
+      documentNumber: string
+      previous?: string
     }
     /** DocumentRef */
     DocumentRef: {
@@ -2664,6 +2740,11 @@ export interface components {
       value: components['schemas']['MetadataValue']
       origin: string
       source?: string
+    }
+    /** FileUpload */
+    FileUpload: {
+      /** Format: binary */
+      file: string
     }
     /** FormattingChanged */
     FormattingChanged: {
@@ -2913,6 +2994,10 @@ export interface components {
     Map_MetadataValue: {
       [key: string]: components['schemas']['MetadataValue']
     }
+    /** Map_String */
+    Map_String: {
+      [key: string]: string
+    }
     /**
      * Mark
      * @enum {string}
@@ -2980,6 +3065,78 @@ export interface components {
        * @enum {string}
        */
       type: 'Number'
+    }
+    /** NumberBackfillEntry */
+    NumberBackfillEntry: {
+      /** Format: uuid */
+      documentId: string
+      outcome: string
+      number?: string
+      reason?: string
+    }
+    /** NumberBackfillPreview */
+    NumberBackfillPreview: {
+      /** Format: uuid */
+      classId: string
+      /** Format: uuid */
+      numberRangeId: string
+      numberRangeKey: string
+      classIds?: string[]
+      /** Format: int32 */
+      documents: number
+      /** Format: int32 */
+      maxPerRun: number
+      nextNumber: string
+    }
+    /** NumberBackfillResult */
+    NumberBackfillResult: {
+      /** Format: uuid */
+      classId: string
+      /** Format: uuid */
+      numberRangeId: string
+      numberRangeKey: string
+      /** Format: int32 */
+      numbered: number
+      /** Format: int32 */
+      skipped: number
+      /** Format: int32 */
+      failed: number
+      /** Format: int32 */
+      remaining: number
+      entries?: components['schemas']['NumberBackfillEntry'][]
+    }
+    /** NumberRangePreview */
+    NumberRangePreview: {
+      valid: boolean
+      problems?: string[]
+      example?: string
+    }
+    /** NumberRangePreviewRequest */
+    NumberRangePreviewRequest: {
+      pattern: string
+      /** Format: int64 */
+      startValue?: number
+      yearlyReset?: boolean
+    }
+    /** NumberRangeView */
+    NumberRangeView: {
+      /** Format: uuid */
+      id: string
+      key: string
+      name: string
+      pattern: string
+      /** Format: int64 */
+      startValue: number
+      yearlyReset: boolean
+      nextNumber: string
+      /** Format: int64 */
+      nextCounter: number
+      classIds?: string[]
+      createdBy: string
+      /** Format: date-time */
+      createdAt: string
+      /** Format: date-time */
+      updatedAt: string
     }
     /** OpenAcknowledgementsView */
     OpenAcknowledgementsView: {
@@ -3951,6 +4108,24 @@ export interface components {
       metadata?: components['schemas']['ValueChangeView'][]
       original?: components['schemas']['OriginalComparisonView']
     }
+    /** VersionFileView */
+    VersionFileView: {
+      /** Format: uuid */
+      versionId: string
+      name: string
+      contentType: string
+      /** Format: int64 */
+      size: number
+      sha256: string
+      scanStatus: string
+      uploadedBy: string
+      /** Format: date-time */
+      uploadedAt: string
+      /** Format: uuid */
+      basedOn?: string
+      downloadUrl: string
+      previewUrl: string
+    }
     /** VersionHtmlView */
     VersionHtmlView: {
       /** Format: uuid */
@@ -4058,6 +4233,81 @@ export interface components {
     WithdrawVersion: {
       reason: string
     }
+    /** WordColumnDefinition */
+    WordColumnDefinition: {
+      key: string
+      label: string
+      type: string
+      required: boolean
+      options?: string[]
+    }
+    /** WordColumnView */
+    WordColumnView: {
+      key: string
+      label: string
+      type: string
+      required: boolean
+      options?: string[]
+    }
+    /** WordFieldDefinition */
+    WordFieldDefinition: {
+      key: string
+      label: string
+      type: string
+      required: boolean
+      source: string
+      options?: string[]
+      columns?: components['schemas']['WordColumnDefinition'][]
+      warning?: string
+    }
+    /** WordFieldDefinitions */
+    WordFieldDefinitions: {
+      fields?: components['schemas']['WordFieldDefinition'][]
+    }
+    /** WordFieldView */
+    WordFieldView: {
+      key: string
+      label: string
+      type: string
+      required: boolean
+      source: string
+      value?: string
+      options?: string[]
+      columns?: components['schemas']['WordColumnView'][]
+      warning?: string
+    }
+    /** WordFieldsView */
+    WordFieldsView: {
+      /** Format: uuid */
+      versionId: string
+      version: string
+      status: string
+      editable: boolean
+      fields?: components['schemas']['WordFieldView'][]
+    }
+    /** WordTemplateView */
+    WordTemplateView: {
+      /** Format: uuid */
+      templateId: string
+      /** Format: int32 */
+      version: number
+      status: string
+      templateName: string
+      name: string
+      /** Format: int64 */
+      size: number
+      sha256: string
+      scanStatus: string
+      fields?: components['schemas']['WordFieldDefinition'][]
+      uploadedBy: string
+      /** Format: date-time */
+      uploadedAt: string
+      downloadUrl: string
+    }
+    /** WordValues */
+    WordValues: {
+      values: components['schemas']['Map_String']
+    }
     /** WorkflowCaseView */
     WorkflowCaseView: {
       /** Format: uuid */
@@ -4101,217 +4351,6 @@ export interface components {
        * @enum {string}
        */
       type: 'YesNo'
-    }
-    /** NumberRangeView */
-    NumberRangeView: {
-      /** Format: uuid */
-      id: string
-      key: string
-      name: string
-      pattern: string
-      /** Format: int64 */
-      startValue: number
-      yearlyReset: boolean
-      nextNumber: string
-      /** Format: int64 */
-      nextCounter: number
-      classIds?: string[]
-      createdBy: string
-      /** Format: date-time */
-      createdAt: string
-      /** Format: date-time */
-      updatedAt: string
-    }
-    /** CreateNumberRange */
-    CreateNumberRange: {
-      key: string
-      name: string
-      pattern: string
-      /** Format: int64 */
-      startValue?: number
-      yearlyReset?: boolean
-    }
-    /** ChangeNumberRange */
-    ChangeNumberRange: {
-      name: string
-      pattern: string
-      /** Format: int64 */
-      startValue: number
-      yearlyReset: boolean
-    }
-    /** NumberRangePreviewRequest */
-    NumberRangePreviewRequest: {
-      pattern: string
-      /** Format: int64 */
-      startValue?: number
-      yearlyReset?: boolean
-    }
-    /** NumberBackfillEntry */
-    NumberBackfillEntry: {
-      /** Format: uuid */
-      documentId: string
-      outcome: string
-      number?: string
-      reason?: string
-    }
-    /** NumberBackfillPreview */
-    NumberBackfillPreview: {
-      /** Format: uuid */
-      classId: string
-      /** Format: uuid */
-      numberRangeId: string
-      numberRangeKey: string
-      classIds?: string[]
-      /** Format: int32 */
-      documents: number
-      /** Format: int32 */
-      maxPerRun: number
-      nextNumber: string
-    }
-    /** NumberBackfillResult */
-    NumberBackfillResult: {
-      /** Format: uuid */
-      classId: string
-      /** Format: uuid */
-      numberRangeId: string
-      numberRangeKey: string
-      /** Format: int32 */
-      numbered: number
-      /** Format: int32 */
-      skipped: number
-      /** Format: int32 */
-      failed: number
-      /** Format: int32 */
-      remaining: number
-      entries?: components['schemas']['NumberBackfillEntry'][]
-    }
-    /** NumberRangePreview */
-    NumberRangePreview: {
-      valid: boolean
-      problems?: string[]
-      example?: string
-    }
-    /** ClassNumberRangeView */
-    ClassNumberRangeView: {
-      /** Format: uuid */
-      classId: string
-      classKey: string
-      label: string
-      /** Format: uuid */
-      parentId?: string
-      mode: string
-      /** Format: uuid */
-      numberRangeId?: string
-      /** Format: uuid */
-      effectiveRangeId?: string
-      /** Format: uuid */
-      inheritedFrom?: string
-    }
-    /** AssignNumberRange */
-    AssignNumberRange: {
-      /** Format: uuid */
-      numberRangeId?: string
-    }
-    /** AssignDocumentNumber */
-    AssignDocumentNumber: {
-      number: string
-      reason: string
-    }
-    /** DocumentNumberView */
-    DocumentNumberView: {
-      /** Format: uuid */
-      documentId: string
-      documentNumber: string
-      previous?: string
-    }
-    /** CreateWordDocument */
-    CreateWordDocument: {
-      /** Format: uuid */
-      templateId: string
-      /** Format: int32 */
-      templateVersion: number
-      title: string
-      values: components['schemas']['Map_MetadataValue']
-    }
-    /** FileUpload */
-    FileUpload: {
-      /** Format: binary */
-      file: string
-    }
-    /** Map_String */
-    Map_String: {
-      [key: string]: string
-    }
-    /** VersionFileView */
-    VersionFileView: {
-      /** Format: uuid */
-      versionId: string
-      name: string
-      contentType: string
-      /** Format: int64 */
-      size: number
-      sha256: string
-      scanStatus: string
-      uploadedBy: string
-      /** Format: date-time */
-      uploadedAt: string
-      /** Format: uuid */
-      basedOn?: string
-      downloadUrl: string
-      previewUrl: string
-    }
-    /** WordFieldDefinition */
-    WordFieldDefinition: {
-      key: string
-      label: string
-      type: string
-      required: boolean
-      source: string
-    }
-    /** WordFieldDefinitions */
-    WordFieldDefinitions: {
-      fields?: components['schemas']['WordFieldDefinition'][]
-    }
-    /** WordFieldView */
-    WordFieldView: {
-      key: string
-      label: string
-      type: string
-      required: boolean
-      source: string
-      value?: string
-    }
-    /** WordFieldsView */
-    WordFieldsView: {
-      /** Format: uuid */
-      versionId: string
-      version: string
-      status: string
-      editable: boolean
-      fields?: components['schemas']['WordFieldView'][]
-    }
-    /** WordTemplateView */
-    WordTemplateView: {
-      /** Format: uuid */
-      templateId: string
-      /** Format: int32 */
-      version: number
-      status: string
-      templateName: string
-      name: string
-      /** Format: int64 */
-      size: number
-      sha256: string
-      scanStatus: string
-      fields?: components['schemas']['WordFieldDefinition'][]
-      uploadedBy: string
-      /** Format: date-time */
-      uploadedAt: string
-      downloadUrl: string
-    }
-    /** WordValues */
-    WordValues: {
-      values: components['schemas']['Map_String']
     }
   }
   responses: never
@@ -4804,6 +4843,382 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1AdminNumber-rangesPreview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['NumberRangePreviewRequest']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberRangePreview']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminNumber-ranges': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberRangeView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1AdminNumber-ranges': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateNumberRange']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberRangeView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminNumber-rangesId': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Number range id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberRangeView']
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'putApiV1AdminNumber-rangesId': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Number range id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ChangeNumberRange']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberRangeView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminNumber-range-assignments': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ClassNumberRangeView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminNumber-range-assignmentsClassidBackfill': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        classId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberBackfillPreview']
+        }
+      }
+      /** @description Invalid value for: path parameter classId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1AdminNumber-range-assignmentsClassidBackfill': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        classId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NumberBackfillResult']
+        }
+      }
+      /** @description Invalid value for: path parameter classId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'putApiV1AdminNumber-range-assignmentsClassid': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        classId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AssignNumberRange']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ClassNumberRangeView']
+        }
+      }
+      /** @description Invalid value for: path parameter classId, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'deleteApiV1AdminNumber-range-assignmentsClassid': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class id */
+        classId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ClassNumberRangeView']
+        }
+      }
+      /** @description Invalid value for: path parameter classId */
       400: {
         headers: {
           [name: string]: unknown
@@ -5382,6 +5797,308 @@ export interface operations {
       }
     }
   }
+  'getApiV1AdminWord-templates': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WordTemplateView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminTemplate-classes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateClassView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1Word-templates': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WordTemplateView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1AdminTemplatesIdVersionsVersionWord: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+        /** @description Template version number */
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WordTemplateView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1AdminTemplatesIdVersionsVersionWord: {
+    parameters: {
+      query?: never
+      header?: {
+        'Content-Type'?: string
+      }
+      path: {
+        /** @description Template id */
+        id: string
+        /** @description Template version number */
+        version: number
+      }
+      cookie?: never
+    }
+    /** @description multipart/form-data with one part `file`: the DOCX */
+    requestBody: {
+      content: {
+        'multipart/form-data': components['schemas']['FileUpload']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WordTemplateView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1AdminTemplatesIdVersionsVersionWordFields: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+        /** @description Template version number */
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WordFieldDefinitions']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WordTemplateView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1AdminTemplatesIdVersionsVersionWordFile: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+        /** @description Template version number */
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          'Content-Length': number
+          ETag: string
+          /** @description SHA-256 of the file (RFC 9530) */
+          'Repr-Digest': string
+          'X-Content-Type-Options': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': string
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1AdminTemplatesIdWord-versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WordTemplateView']
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   'getApiV1DocumentsValid-at': {
     parameters: {
       query?: {
@@ -5877,6 +6594,49 @@ export interface operations {
       }
     }
   }
+  postApiV1DocumentsIdNumber: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AssignDocumentNumber']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentNumberView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   postApiV1DocumentsIdAttachments: {
     parameters: {
       query?: never
@@ -6096,6 +6856,359 @@ export interface operations {
       }
     }
   }
+  postApiV1DocumentsWord: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateWordDocument']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1DocumentsIdFile: {
+    parameters: {
+      query?: never
+      header?: {
+        'Content-Type'?: string
+      }
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    /** @description multipart/form-data with one part `file`; its file name is kept with the original */
+    requestBody: {
+      content: {
+        'multipart/form-data': components['schemas']['FileUpload']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsIdVersionsVersionidWord-fields': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WordFieldsView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'putApiV1DocumentsIdWord-fields': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WordValues']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdVersionsVersionidFile: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          'Content-Length': number
+          ETag: string
+          /** @description SHA-256 of the original (RFC 9530) */
+          'Repr-Digest': string
+          'X-Content-Type-Options': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': string
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsIdVersionsVersionidFilled.docx': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          'Cache-Control': string
+          'X-Content-Type-Options': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': string
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdVersionsVersionidFilled: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          'Cache-Control': string
+          'X-Content-Type-Options': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': string
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsIdVersionsVersionidPreview.pdf': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          'Cache-Control': string
+          'X-Content-Type-Options': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/pdf': string
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   'getApiV1DocumentsBy-numberNumberCurrent': {
     parameters: {
       query?: {
@@ -6122,6 +7235,107 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['CurrentVersionView']
+        }
+      }
+      304: {
+        headers: {
+          ETag: string
+          'Cache-Control': string
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsBy-numberNumberCurrent.pdf': {
+    parameters: {
+      query?: {
+        /** @description Validity scope, e.g. DE. Without it: the version without restriction, or the only valid one. */
+        scope?: string
+      }
+      header?: {
+        /** @description ETag of a copy the client holds; 304 if it is current */
+        'If-None-Match'?: string
+      }
+      path: {
+        /** @description Document number */
+        number: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          ETag: string
+          'Cache-Control': string
+          /** @description The rendition of exactly this version */
+          'Content-Location': string
+          'Content-Type': string
+          'Content-Disposition': string
+          /** @description SHA-256 of the PDF (RFC 9530) */
+          'Repr-Digest': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/pdf': string
+        }
+      }
+      304: {
+        headers: {
+          ETag: string
+          'Cache-Control': string
+          /** @description The rendition of exactly this version */
+          'Content-Location': string
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsBy-numberNumberCurrent.html': {
+    parameters: {
+      query?: {
+        /** @description Validity scope, e.g. DE. Without it: the version without restriction, or the only valid one. */
+        scope?: string
+      }
+      header?: {
+        /** @description ETag of a copy the client holds; 304 if it is current */
+        'If-None-Match'?: string
+      }
+      path: {
+        /** @description Document number */
+        number: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          ETag: string
+          'Cache-Control': string
+          'Content-Security-Policy': string
+          [name: string]: unknown
+        }
+        content: {
+          'text/html': string
         }
       }
       304: {
@@ -6585,6 +7799,55 @@ export interface operations {
         }
         content: {
           'application/pdf': string
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: query parameter changelog, Invalid value for: query parameter attachments */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsIdVersionsVersionidDocument.docx': {
+    parameters: {
+      query?: {
+        /** @description Append the change history (default false) */
+        changelog?: boolean
+        /** @description Append the list of attachments with name, size and SHA-256 (default false) */
+        attachments?: boolean
+      }
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          'Cache-Control': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/octet-stream': string
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: query parameter changelog, Invalid value for: query parameter attachments */
@@ -8421,1529 +9684,6 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter deliveryId */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1AdminNumber-ranges': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['NumberRangeView'][]
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'postApiV1AdminNumber-ranges': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['CreateNumberRange']
-      }
-    }
-    responses: {
-      201: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['NumberRangeView']
-        }
-      }
-      /** @description Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'postApiV1AdminNumber-rangesPreview': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['NumberRangePreviewRequest']
-      }
-    }
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['NumberRangePreview']
-        }
-      }
-      /** @description Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1AdminNumber-rangesId': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Number range id */
-        id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['NumberRangeView']
-        }
-      }
-      /** @description Invalid value for: path parameter id */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'putApiV1AdminNumber-rangesId': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Number range id */
-        id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ChangeNumberRange']
-      }
-    }
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['NumberRangeView']
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1AdminNumber-range-assignments': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ClassNumberRangeView'][]
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1AdminNumber-range-assignmentsClassidBackfill': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document class id */
-        classId: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['NumberBackfillPreview']
-        }
-      }
-      /** @description Invalid value for: path parameter classId */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'postApiV1AdminNumber-range-assignmentsClassidBackfill': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document class id */
-        classId: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['NumberBackfillResult']
-        }
-      }
-      /** @description Invalid value for: path parameter classId */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'putApiV1AdminNumber-range-assignmentsClassid': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document class id */
-        classId: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['AssignNumberRange']
-      }
-    }
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ClassNumberRangeView']
-        }
-      }
-      /** @description Invalid value for: path parameter classId, Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'deleteApiV1AdminNumber-range-assignmentsClassid': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document class id */
-        classId: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ClassNumberRangeView']
-        }
-      }
-      /** @description Invalid value for: path parameter classId */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  postApiV1DocumentsIdNumber: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document id */
-        id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['AssignDocumentNumber']
-      }
-    }
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['DocumentNumberView']
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'postApiV1AdminNumber-rangesPreview': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['NumberRangePreviewRequest']
-      }
-    }
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['NumberRangePreview']
-        }
-      }
-      /** @description Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1AdminNumber-ranges': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['NumberRangeView'][]
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'postApiV1AdminNumber-ranges': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['CreateNumberRange']
-      }
-    }
-    responses: {
-      201: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['NumberRangeView']
-        }
-      }
-      /** @description Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1AdminNumber-rangesId': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Number range id */
-        id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['NumberRangeView']
-        }
-      }
-      /** @description Invalid value for: path parameter id */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'putApiV1AdminNumber-rangesId': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Number range id */
-        id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ChangeNumberRange']
-      }
-    }
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['NumberRangeView']
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1AdminNumber-range-assignments': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ClassNumberRangeView'][]
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'putApiV1AdminNumber-range-assignmentsClassid': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document class id */
-        classId: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['AssignNumberRange']
-      }
-    }
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ClassNumberRangeView']
-        }
-      }
-      /** @description Invalid value for: path parameter classId, Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'deleteApiV1AdminNumber-range-assignmentsClassid': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document class id */
-        classId: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ClassNumberRangeView']
-        }
-      }
-      /** @description Invalid value for: path parameter classId */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1AdminWord-templates': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WordTemplateView'][]
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1AdminTemplate-classes': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['TemplateClassView'][]
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1Word-templates': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WordTemplateView'][]
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  getApiV1AdminTemplatesIdVersionsVersionWord: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Template id */
-        id: string
-        /** @description Template version number */
-        version: number
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WordTemplateView']
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  putApiV1AdminTemplatesIdVersionsVersionWord: {
-    parameters: {
-      query?: never
-      header?: {
-        'Content-Type'?: string
-      }
-      path: {
-        /** @description Template id */
-        id: string
-        /** @description Template version number */
-        version: number
-      }
-      cookie?: never
-    }
-    /** @description multipart/form-data with one part `file`: the DOCX */
-    requestBody: {
-      content: {
-        'multipart/form-data': components['schemas']['FileUpload']
-      }
-    }
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WordTemplateView']
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version, Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  putApiV1AdminTemplatesIdVersionsVersionWordFields: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Template id */
-        id: string
-        /** @description Template version number */
-        version: number
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['WordFieldDefinitions']
-      }
-    }
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WordTemplateView']
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version, Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  getApiV1AdminTemplatesIdVersionsVersionWordFile: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Template id */
-        id: string
-        /** @description Template version number */
-        version: number
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          'Content-Type': string
-          'Content-Disposition': string
-          'Content-Length': number
-          ETag: string
-          /** @description SHA-256 of the file (RFC 9530) */
-          'Repr-Digest': string
-          'X-Content-Type-Options': string
-          [name: string]: unknown
-        }
-        content: {
-          'application/octet-stream': string
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'postApiV1AdminTemplatesIdWord-versions': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Template id */
-        id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      201: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WordTemplateView']
-        }
-      }
-      /** @description Invalid value for: path parameter id */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  postApiV1DocumentsWord: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['CreateWordDocument']
-      }
-    }
-    responses: {
-      201: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['DocumentView']
-        }
-      }
-      /** @description Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  putApiV1DocumentsIdFile: {
-    parameters: {
-      query?: never
-      header?: {
-        'Content-Type'?: string
-      }
-      path: {
-        /** @description Document id */
-        id: string
-      }
-      cookie?: never
-    }
-    /** @description multipart/form-data with one part `file`; its file name is kept with the original */
-    requestBody: {
-      content: {
-        'multipart/form-data': components['schemas']['FileUpload']
-      }
-    }
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['DocumentVersionView']
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1DocumentsIdVersionsVersionidWord-fields': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document id */
-        id: string
-        /** @description Version id */
-        versionId: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WordFieldsView']
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'putApiV1DocumentsIdWord-fields': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document id */
-        id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['WordValues']
-      }
-    }
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['DocumentVersionView']
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  getApiV1DocumentsIdVersionsVersionidFile: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document id */
-        id: string
-        /** @description Version id */
-        versionId: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          'Content-Type': string
-          'Content-Disposition': string
-          'Content-Length': number
-          ETag: string
-          /** @description SHA-256 of the original (RFC 9530) */
-          'Repr-Digest': string
-          'X-Content-Type-Options': string
-          [name: string]: unknown
-        }
-        content: {
-          'application/octet-stream': string
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1DocumentsIdVersionsVersionidFilled.docx': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document id */
-        id: string
-        /** @description Version id */
-        versionId: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          'Content-Type': string
-          'Content-Disposition': string
-          'Cache-Control': string
-          'X-Content-Type-Options': string
-          [name: string]: unknown
-        }
-        content: {
-          'application/octet-stream': string
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1DocumentsIdVersionsVersionidPreview.pdf': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document id */
-        id: string
-        /** @description Version id */
-        versionId: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          'Content-Type': string
-          'Content-Disposition': string
-          'Cache-Control': string
-          'X-Content-Type-Options': string
-          [name: string]: unknown
-        }
-        content: {
-          'application/pdf': string
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1DocumentsBy-numberNumberCurrent': {
-    parameters: {
-      query?: {
-        /** @description Validity scope, e.g. DE. Without it: the version without restriction, or the only valid one. */
-        scope?: string
-      }
-      header?: {
-        /** @description ETag of a copy the client holds; 304 if it is current */
-        'If-None-Match'?: string
-      }
-      path: {
-        /** @description Document number */
-        number: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          ETag: string
-          'Cache-Control': string
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['CurrentVersionView']
-        }
-      }
-      304: {
-        headers: {
-          ETag: string
-          'Cache-Control': string
-          [name: string]: unknown
-        }
-        content?: never
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1DocumentsBy-numberNumberCurrent.pdf': {
-    parameters: {
-      query?: {
-        /** @description Validity scope, e.g. DE. Without it: the version without restriction, or the only valid one. */
-        scope?: string
-      }
-      header?: {
-        /** @description ETag of a copy the client holds; 304 if it is current */
-        'If-None-Match'?: string
-      }
-      path: {
-        /** @description Document number */
-        number: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          ETag: string
-          'Cache-Control': string
-          /** @description The rendition of exactly this version */
-          'Content-Location': string
-          'Content-Type': string
-          'Content-Disposition': string
-          /** @description SHA-256 of the PDF (RFC 9530) */
-          'Repr-Digest': string
-          [name: string]: unknown
-        }
-        content: {
-          'application/pdf': string
-        }
-      }
-      304: {
-        headers: {
-          ETag: string
-          'Cache-Control': string
-          /** @description The rendition of exactly this version */
-          'Content-Location': string
-          [name: string]: unknown
-        }
-        content?: never
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1DocumentsBy-numberNumberCurrent.html': {
-    parameters: {
-      query?: {
-        /** @description Validity scope, e.g. DE. Without it: the version without restriction, or the only valid one. */
-        scope?: string
-      }
-      header?: {
-        /** @description ETag of a copy the client holds; 304 if it is current */
-        'If-None-Match'?: string
-      }
-      path: {
-        /** @description Document number */
-        number: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          ETag: string
-          'Cache-Control': string
-          'Content-Security-Policy': string
-          [name: string]: unknown
-        }
-        content: {
-          'text/html': string
-        }
-      }
-      304: {
-        headers: {
-          ETag: string
-          'Cache-Control': string
-          [name: string]: unknown
-        }
-        content?: never
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1DocumentsIdVersionsVersionidDocument.docx': {
-    parameters: {
-      query?: {
-        /** @description Append the change history (default false) */
-        changelog?: boolean
-        /** @description Append the list of attachments with name, size and SHA-256 (default false) */
-        attachments?: boolean
-      }
-      header?: never
-      path: {
-        /** @description Document id */
-        id: string
-        /** @description Version id */
-        versionId: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          'Content-Type': string
-          'Content-Disposition': string
-          'Cache-Control': string
-          [name: string]: unknown
-        }
-        content: {
-          'application/octet-stream': string
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: query parameter changelog, Invalid value for: query parameter attachments */
       400: {
         headers: {
           [name: string]: unknown

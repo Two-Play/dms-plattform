@@ -1,5 +1,6 @@
 package dms.app
 
+import dms.documents.core.DocumentJson
 import dms.rendering.core.WordFixtures.*
 import dms.templates.{WordField, WordFieldSource, WordFieldType, WordFields}
 import zio.test.*
@@ -149,10 +150,13 @@ object WordDocxSpec extends ZIOSpecDefault:
       val merged = WordFields.merge(found, previous)
       assertTrue(
         merged.find(_.key == "customer").contains(previous.head),
-        WordFields.check(merged, Map.empty, complete = true) == List("Kunde: required"),
-        WordFields.check(merged, Map("signingDate" -> "31.12.2026"), complete = false) ==
+        WordFields.check(merged, Map.empty, complete = true, DocumentJson.readRows) == List(
+          "Kunde: required"
+        ),
+        WordFields
+          .check(merged, Map("signingDate" -> "31.12.2026"), complete = false, DocumentJson.readRows) ==
           List("signingDate: a date (yyyy-MM-dd)"),
-        WordFields.check(merged, Map("documentNumber" -> "x"), complete = false) ==
+        WordFields.check(merged, Map("documentNumber" -> "x"), complete = false, DocumentJson.readRows) ==
           List("documentNumber: not a manual field")
       )
     }

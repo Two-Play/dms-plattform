@@ -894,7 +894,7 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
         pdfAsXlsx <- upload("Budget.xlsx", blankPdf(1).toArray)
         zipAsPdf  <- upload("Budget.pdf", "PK\u0003\u0004 not a pdf".getBytes(UTF_8))
         textAsDoc <- upload("Budget.doc", "plain text".getBytes(UTF_8))
-        xlsx = "PK\u0003\u0004 a spreadsheet".getBytes(UTF_8)
+        xlsx = WordFieldTypesSpec.workbook("a spreadsheet")
         uploaded <- upload("Budget.xlsx", xlsx).map(as[DocumentVersionView])
         preview = () =>
           call(author, "GET", s"/api/v1/documents/${doc.id}/versions/${uploaded.id}/preview.pdf")
@@ -903,13 +903,13 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
         second <- preview()
         draft  <- call(author, "GET", s"/api/v1/documents/${doc.id}/versions/${uploaded.id}/draft.pdf")
         cached <- conversions.get.map(_.size)
-        _      <- upload("Budget.xlsx", "PK\u0003\u0004 revised".getBytes(UTF_8))
+        _      <- upload("Budget.xlsx", WordFieldTypesSpec.workbook("revised"))
         third  <- preview()
         after  <- conversions.get.map(_.size)
         // other formats: the originals are compared as files only
         _        <- approveAndPublish(doc.id)
         next     <- newVersion(doc.id)
-        _        <- upload("Budget 2027.xlsx", "PK\u0003\u0004 next year".getBytes(UTF_8))
+        _        <- upload("Budget 2027.xlsx", WordFieldTypesSpec.workbook("next year"))
         compared <- call(
           author,
           "GET",
@@ -948,6 +948,112 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
         ),
         byReader.status == Status.Forbidden
       )
+    },
+    test("typed Word fields, rows and Excel placeholders are filled; the approval binds the rows (DMS-122)") {
+      import WordFieldTypesSpec.{checkbox, datePicker, dropDown, positionRow, section, xlsx}
+      val typed = docx(
+        paragraph(textRun("Agreed: ") + checkbox("agreed", checked = false)) +
+          paragraph(textRun("Start: ") + datePicker("startDate", Some("d. MMMM yyyy"))) +
+          paragraph(textRun("Priority: ") + dropDown("priority")) +
+          section(Some("positions"), positionRow) +
+          paragraph(
+            """<w:r><w:rPr><w:b/></w:rPr><w:t>Contact: {{con</w:t></w:r><w:r><w:t>tact}}</w:t></w:r>"""
+          )
+      )
+      val setValues = (doc: UUID, json: String) =>
+        call(author, "PUT", s"/api/v1/documents/$doc/word-fields", Some(s"""{"values":$json}"""))
+      for
+        s   <- setup.await
+        doc <- call(
+          author,
+          "POST",
+          "/api/v1/documents",
+          Some(
+            s"""{"templateId":"${s.structured.value}","templateVersion":1,"title":"Order","values":${values(
+                "de"
+              )},"kind":"File"}"""
+          )
+        ).map(as[DocumentView])
+        uploaded <- put(author, s"/api/v1/documents/${doc.id}/file", "Order.docx", typed)
+          .map(as[DocumentVersionView])
+        fieldsUrl = s"/api/v1/documents/${doc.id}/versions/${uploaded.id}/word-fields"
+        fields    <- call(author, "GET", fieldsUrl).map(as[WordFieldsView])
+        badCheck  <- setValues(doc.id, """{"agreed":"yes"}""")
+        badChoice <- setValues(doc.id, """{"priority":"Medium"}""")
+        badRows   <- setValues(doc.id, """{"positions":"[{\"colour\":\"red\"}]"}""")
+        notRows   <- setValues(doc.id, """{"positions":"Pump"}""")
+        saved     <- setValues(
+          doc.id,
+          """{"agreed":"true","startDate":"2027-03-01","priority":"High","contact":"Ada",""" +
+            """"positions":"[{\"quantity\":\" 2 \",\"item\":\"Pump\"},{\"item\":\" \"},{\"item\":\"Valve\"}]"}"""
+        ).map(as[DocumentVersionView])
+        stored <- call(author, "GET", fieldsUrl.replace(uploaded.id.toString, saved.id.toString))
+          .map(as[WordFieldsView])
+        filled <- call(author, "GET", s"/api/v1/documents/${doc.id}/versions/${saved.id}/filled")
+        body = part(filled.body.toArray, "word/document.xml")
+        details <- ZIO.serviceWithZIO[DocumentService](svc =>
+          s.app.transact(tenantId)(svc.get(DocumentId(doc.id)))
+        )
+        version = details.versions.head
+        // Excel: placeholders are fields; the filled workbook is downloaded as XLSX
+        workbook <- put(author, s"/api/v1/documents/${doc.id}/file", "Budget.xlsx", xlsx)
+          .map(as[DocumentVersionView])
+        xlsxFields <- call(author, "GET", s"/api/v1/documents/${doc.id}/versions/${workbook.id}/word-fields")
+          .map(as[WordFieldsView])
+        _          <- setValues(doc.id, """{"customer":"ACME","startDate":"2027-03-01"}""")
+        filledXlsx <- call(author, "GET", s"/api/v1/documents/${doc.id}/versions/${workbook.id}/filled")
+        asDocx     <- call(author, "GET", s"/api/v1/documents/${doc.id}/versions/${workbook.id}/filled.docx")
+        brokenXlsx <- put(
+          author,
+          s"/api/v1/documents/${doc.id}/file",
+          "broken.xlsx",
+          WordFixtures.docx(paragraph(textRun("not a workbook")))
+        )
+        audit <- actions(doc.id)
+      yield
+        val byKey = fields.fields.map(f => f.key -> f).toMap
+        assertTrue(
+          byKey("agreed").`type` == "Checkbox",
+          byKey("startDate").`type` == "Date",
+          byKey("priority").`type` == "Choice",
+          byKey("priority").options == List("High", "Low"),
+          byKey("positions").`type` == "Rows",
+          byKey("positions").columns.map(c => (c.key, c.`type`)) ==
+            List("item" -> "Text", "quantity" -> "Text", "dueDate" -> "Date"),
+          byKey("documentNumber").source == "Automatic",
+          byKey("contact").`type` == "Text",
+          badCheck.status == Status.UnprocessableEntity,
+          badCheck.text.contains("true or false"),
+          badChoice.text.contains("one of High, Low"),
+          badRows.text.contains("colour is not a column"),
+          notRows.text.contains("a list of rows"),
+          // rows are stored canonically: trimmed, empty rows left out, columns in the order of the definition
+          stored.fields.find(_.key == "positions").flatMap(_.value) ==
+            Some("""[{"item":"Pump","quantity":"2"},{"item":"Valve"}]"""),
+          filled.status == Status.Ok,
+          filled.header("Content-Disposition").exists(_.contains("Order.docx")),
+          body.contains("""w14:checked w14:val="1""""),
+          body.contains("\u2612"),
+          body.contains("1. März 2027"),
+          body.contains("""w:fullDate="2027-03-01T00:00:00Z""""),
+          body.contains(">High<"),
+          ">Pump<".r.findAllIn(body).size == 1,
+          ">Valve<".r.findAllIn(body).size == 1,
+          "<w:tr>".r.findAllIn(body).size == 2,
+          body.contains("Contact: Ada"),
+          // the approval checksum covers the rows
+          WorkflowDocuments.contentSha256(version) != WorkflowDocuments.contentSha256(
+            version.copy(file = version.file.map(f => f.copy(values = f.values + ("positions" -> "[]"))))
+          ),
+          xlsxFields.fields.map(_.key) == List("customer", "documentNumber", "unknown", "startDate"),
+          filledXlsx.status == Status.Ok,
+          filledXlsx.header("Content-Type").exists(_.contains("spreadsheetml")),
+          part(filledXlsx.body.toArray, "xl/sharedStrings.xml").contains("Customer: ACME"),
+          part(filledXlsx.body.toArray, "xl/worksheets/sheet1.xml").contains("Start 01.03.2027"),
+          asDocx.status == Status.Conflict,
+          brokenXlsx.error.contains("invalid_office_file"),
+          audit.contains(FileDocumentApi.FilledFileAction)
+        )
     },
     test("only Word template uploads and file uploads may stream large bodies") {
       val streamed = Body.fromStreamChunked(ZStream.fromIterable(Array.fill(10)('x'.toByte)))
