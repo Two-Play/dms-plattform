@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-10-29, implemented in DMS-110) |
+| Status | Accepted (2026-10-29, implemented in DMS-110; addendum DMS-111: people picker) |
 | Date | 2026-10-29 |
 | Decided by | Philippe |
 
@@ -59,3 +59,32 @@ Given:
 ## Reversibility
 
 **high**: The directory is one port behind one endpoint and one UI component; replacing the adapter (e.g. by a synchronized table) or switching it off changes no stored data.
+
+## Addendum (DMS-111, 2026-10-29): people picker, search by name
+
+**Context.** The follow-up "a user picker for deputyships and group members" (see Negative / Cost: "inputs still take user ids"): admins added group members and everyone set deputies by typing ZITADEL user ids; person fields of documents (`PersonRef`, e.g. the owner) took ids too. Nobody knows these ids. ZITADEL's ListUsers (`POST /v2/users`) also takes text queries per field (`firstNameQuery`, `lastNameQuery`, `displayNameQuery`, `emailQuery`, `userNameQuery` with `TEXT_QUERY_METHOD_STARTS_WITH_IGNORE_CASE`), `typeQuery`, `notQuery`/`stateQuery`, `orQuery`, a limit and `sortingColumn` (verified against the local ZITADEL with the `dms-directory` token). Searching must not let anyone browse the people of another tenant, nor let a user without any role in the tenant list its people.
+
+**Decision.**
+
+1. **Port.** `UserDirectory.search(organization, query, limit)`: active human users of the organization whose first name, last name, display name, email or user name starts with every word of the query; sorted by display name, at most `limit`. `UserQuery.parse` normalizes and bounds the query: 2 to 100 characters, at most 4 words, lower-cased. A directory that cannot search fails with `Unavailable`; `UserDirectory.none` (no token) fails with "no user directory is configured", so the UI can say why it finds nobody.
+2. **Adapter.** One `POST /v2/users` with the organization (`organizationIdQuery`), `TYPE_HUMAN`, not `USER_STATE_INACTIVE`, one `orQuery` per word over the five fields, the limit and `USER_FIELD_NAME_DISPLAY_NAME`. Like the lookup, the adapter drops answers of other organizations, machine users and inactive or deleted users itself and sorts and cuts again, should ZITADEL ignore a filter. No paging: the picker shows the best hits only.
+3. **Endpoint** `GET /api/v1/users/search?q=…&limit=…` → `[{id, displayName, email?}]` (`UserMatch`), `limit` 1 to 20, default 10. New authorization action `SearchUsers`: any active role in the tenant, the tenant administrator included; denied without a role (403) and for documents. The check runs in the tenant's transaction; the organization comes from `dms.tenant` under row-level security as before; ZITADEL is asked outside the transaction. 400 `invalid_query` / `invalid_limit`, 503 `user_directory_unavailable`.
+4. **Cache.** `CachedUserDirectory` keeps answers per organization, normalized query and limit for `dms.users.searchCacheSeconds` (default 60; short, so new colleagues show up soon), at most 1,000 answers (the oldest go first); failures are not cached. The people found go into the name cache, so their names show without another lookup.
+5. **Frontend.** `PersonPicker` ("Person auswählen"): an accessible combobox (WAI-ARIA combobox with list box; arrow keys, Enter, Escape; loading, empty and error states in a live region; German and English) that shows name and email and stores the user id. Used for group members, principal and deputy of deputyships and person fields of the document form (single; `PeoplePicker` for multiple). When the directory is unavailable the typed text can be taken as user id, as before.
+
+**Alternatives considered.**
+
+| Criterion | Chosen: search through ZITADEL per request, short cache | Load all users of the organization once and filter in the browser | Own user table synchronized from ZITADEL with SQL search | Search only among people known to the platform (role assignments, group members) |
+|---|---|---|---|---|
+| Tenant isolation | Backend filters by the caller's organization (and checks the answer) | Same, but the whole directory goes to every browser | RLS on the table | RLS on existing tables |
+| Who can be found | Every active person of the organization | Same | Same, after the next sync | Only people who already have a role or membership; new colleagues cannot be named as deputy |
+| Data sent to the browser | At most 20 people per query | The whole organization (names and emails) | At most 20 | At most 20 |
+| Effort | One port method, adapter, cache, endpoint, component | Paging through ZITADEL, large payloads | Migration, sync job, deletion handling (ADR 0037 ruled it out) | Joins over several modules, still needs names from ZITADEL |
+| Load on ZITADEL | One request per typed prefix and minute | One large request per page view | Sync only | Lookup of names only |
+
+**Consequences.**
+
+- Positive: nobody types user ids any more; existing endpoints, stored values and legal records are unchanged (ids are stored as before); a tenant still learns only its own people, and only callers with a role may search.
+- Negative: every search is a request to ZITADEL (debounced in the UI, cached a minute); the read-only service token now also serves searches, so it must be able to list users of every tenant's organization (unchanged requirement); results are limited to 20 without paging; prefix search only (no fuzzy matching, "Mayer" does not find "Meier"). Newly added people show up after at most a minute.
+- Follow-ups: optional "exclude" of people already in the list (e.g. current group members); fuzzy search if users ask for it.
+- Reversibility: **high**. The search is one port method behind one endpoint and one component; removing it brings back the id fields.

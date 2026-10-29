@@ -1,6 +1,7 @@
 import type { TemplateField } from '@/api/templates'
 import { Lock } from 'lucide-react'
 import { Input } from '@/components/ui/input'
+import { PeoplePicker, PersonPicker } from '@/components/shared/person-picker'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
@@ -93,6 +94,28 @@ function FieldControl({ field, input, error, onChange }: FieldProps) {
         ))}
       </div>
     )
+  }
+  if (fieldType.type === 'PersonRef') {
+    // People are picked by name; the field stores their user ids (DMS-111).
+    const picker = {
+      id,
+      describedBy: describedBy || undefined,
+      invalid: Boolean(error),
+      required: field.required,
+    }
+    if (field.multiple) {
+      const ids = text.split('\n').filter((line) => line.trim() !== '')
+      return (
+        <PeoplePicker
+          {...picker}
+          value={ids}
+          onChange={(userIds) => {
+            onChange(userIds.join('\n'))
+          }}
+        />
+      )
+    }
+    return <PersonPicker {...picker} value={text.trim()} onChange={onChange} />
   }
   if (field.multiple) {
     return (

@@ -67,6 +67,23 @@ export const shared = {
   dismiss: 'Dismiss notification',
 } as const
 
+/** The people picker (DMS-111): search a person by name or email instead of typing a user id. */
+export const people = {
+  label: 'Select a person',
+  placeholder: 'Name or email…',
+  hint: 'Type at least {count} characters of the name or email.',
+  results: 'People found',
+  searching: 'Searching…',
+  found: plural({ one: '{count} person found.', other: '{count} people found.' }),
+  none: 'Nobody found for “{query}”.',
+  clear: 'Clear selection',
+  picked: 'Selected people',
+  remove: 'Remove {name}',
+  useId: 'Use “{id}” as user id',
+  unavailable: 'People cannot be searched right now.',
+  unavailableHint: 'You can enter the user id instead.',
+} as const
+
 export const system = {
   title: 'System status',
   description: 'Backend health check',

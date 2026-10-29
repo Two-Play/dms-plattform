@@ -50,9 +50,12 @@ object ZitadelUserDirectorySpec extends ZIOSpecDefault:
             )
             .flatMap(_.asArray.toList.flatten.flatMap(_.asString))
             .toSet
-          // Like ZITADEL: filters by id (the organization filter is left to the adapter's own check here).
-          val answer = users.filter(u => ids.exists(id => u.contains(s"\"userId\":\"$id\"")))
-          val bytes  = s"""{"details":{"totalResult":"${answer.size}"},"result":[${answer.mkString(",")}]}"""
+          // Like ZITADEL: filters by id (the organization filter is left to the adapter's own check here); a
+          // search (no ids) answers every user, so the adapter's own checks are tested.
+          val answer =
+            if !body.contains("inUserIdsQuery") then users
+            else users.filter(u => ids.exists(id => u.contains(s"\"userId\":\"$id\"")))
+          val bytes = s"""{"details":{"totalResult":"${answer.size}"},"result":[${answer.mkString(",")}]}"""
             .getBytes(StandardCharsets.UTF_8)
           exchange.getResponseHeaders.add("Content-Type", "application/json")
           exchange.sendResponseHeaders(status, bytes.length.toLong)
@@ -71,9 +74,17 @@ object ZitadelUserDirectorySpec extends ZIOSpecDefault:
       .acquireRelease(ZIO.succeed(FakeZitadel(users, status, delayMillis)))(s => ZIO.succeed(s.stop()))
       .flatMap(f)
 
-  private def human(id: String, first: String, family: String, display: String = "", owner: String = org) =
-    s"""{"userId":"$id","details":{"resourceOwner":"$owner"},"username":"user-$id","human":{"profile":""" +
-      s"""{"givenName":"$first","familyName":"$family","displayName":"$display"},"email":{"email":"$id@example.com"}}}"""
+  private def human(
+      id: String,
+      first: String,
+      family: String,
+      display: String = "",
+      owner: String = org,
+      state: String = "USER_STATE_ACTIVE"
+  ) =
+    s"""{"userId":"$id","details":{"resourceOwner":"$owner"},"state":"$state","username":"user-$id","human":""" +
+      s"""{"profile":{"givenName":"$first","familyName":"$family","displayName":"$display"},""" +
+      s""""email":{"email":"$id@example.com"}}}"""
 
   private def machine(id: String, name: String) =
     s"""{"userId":"$id","details":{"resourceOwner":"$org"},"username":"svc-$id","machine":{"name":"$name"}}"""
@@ -109,6 +120,62 @@ object ZitadelUserDirectorySpec extends ZIOSpecDefault:
           body.contains(""""inUserIdsQuery":{"userIds":["1","2","3","404","9"]}""")
         )
       })
+    },
+    test("searches people: the organization, human users, active ones and every word as prefix (DMS-111)") {
+      val users = List(
+        human("1", "Anna", "Author", "Anna Author"),
+        human("2", "Andreas", "Approver", "andreas Approver"),
+        machine("3", "Analytics"),
+        human("8", "Anke", "Gone", "Anke Gone", state = "USER_STATE_DELETED"),
+        human("9", "Andrea", "Other", "Andrea Other", owner = "org-2")
+      )
+      ZIO.scoped(withZitadel(users) { zitadel =>
+        for
+          d     <- directory(zitadel.url)
+          query <- ZIO.fromEither(UserQuery.parse("  AN  Au "))
+          found <- d.search(org, query, 1)
+          more  <- d.search(org, query, 10)
+          none  <- d.search(org, query, 0)
+          body = zitadel.requests.asScala.head._2
+        yield assertTrue(
+          found.map(_.id) == List(UserId("2")),
+          more.map(_.displayName) == List("andreas Approver", "Anna Author"),
+          more.map(_.email) == List(Some("2@example.com"), Some("1@example.com")),
+          none == Nil,
+          zitadel.hits.get == 2,
+          body.contains(s""""organizationIdQuery":{"organizationId":"$org"}"""),
+          body.contains(""""typeQuery":{"type":"TYPE_HUMAN"}"""),
+          body.contains(""""notQuery":{"query":{"stateQuery":{"state":"USER_STATE_INACTIVE"}}}"""),
+          body.contains(
+            """"lastNameQuery":{"lastName":"an","method":"TEXT_QUERY_METHOD_STARTS_WITH_IGNORE_CASE"}"""
+          ),
+          body.contains(
+            """"emailQuery":{"emailAddress":"au","method":"TEXT_QUERY_METHOD_STARTS_WITH_IGNORE_CASE"}"""
+          ),
+          body.contains(""""sortingColumn":"USER_FIELD_NAME_DISPLAY_NAME""""),
+          body.contains(""""query":{"limit":1,"asc":true}""")
+        )
+      })
+    },
+    test("search queries are normalized and bounded") {
+      assertTrue(
+        UserQuery.parse(" Anna   AUTHOR ").map(_.words) == Right(List("anna", "author")),
+        UserQuery.parse("a").isLeft,
+        UserQuery.parse(" a ").isLeft,
+        UserQuery.parse("a b").isRight,
+        UserQuery.parse("x" * (UserQuery.MaxLength + 1)).isLeft,
+        UserQuery.parse("aa bb cc dd ee").isLeft
+      )
+    },
+    test("without a directory searching fails with a reason, resolving does not") {
+      for
+        query    <- ZIO.fromEither(UserQuery.parse("anna"))
+        searched <- UserDirectory.none.search(org, query, 10).flip
+        resolved <- UserDirectory.none.lookup(org, Set(UserId("1")))
+      yield assertTrue(
+        searched == UserDirectoryError.Unavailable(UserDirectory.NotConfigured),
+        resolved.isEmpty
+      )
     },
     test("asks in batches of at most 100 ids") {
       ZIO.scoped(withZitadel(known) { zitadel =>
@@ -170,6 +237,53 @@ object ZitadelUserDirectorySpec extends ZIOSpecDefault:
             Set(UserId("1")),
             Set(UserId("1"))
           )
+        )
+      },
+      test("keeps search answers per organization, query and limit for a short while; found people resolve") {
+        val searches = Unsafe.unsafe(implicit u => Ref.unsafe.make(List.empty[(String, String, Int)]))
+        val lookups  = Unsafe.unsafe(implicit u => Ref.unsafe.make(0))
+        val failing  = Unsafe.unsafe(implicit u => Ref.unsafe.make(false))
+        val inner    = new UserDirectory:
+          def lookup(organizationId: String, ids: Set[UserId]) = lookups.update(_ + 1).as(Map.empty)
+          override def search(organizationId: String, query: UserQuery, limit: Int) =
+            searches.update(_ :+ (organizationId, query.text, limit)) *> failing.get.flatMap(fail =>
+              if fail then ZIO.fail(UserDirectoryError.Unavailable("down"))
+              else ZIO.succeed(List(UserInfo(UserId("1"), s"Anna $organizationId", None)))
+            )
+        for
+          cached <- CachedUserDirectory.make(inner, 10.minutes, 100, searchTtl = 1.minute)
+          lower  <- ZIO.fromEither(UserQuery.parse("anna"))
+          upper  <- ZIO.fromEither(UserQuery.parse(" ANNA "))
+          first  <- cached.search(org, lower, 10)
+          again  <- cached.search(org, upper, 10)
+          other  <- cached.search("org-2", lower, 10)
+          fewer  <- cached.search(org, lower, 5)
+          name   <- cached.lookup(org, Set(UserId("1")))
+          _      <- TestClock.adjust(2.minutes)
+          _      <- failing.set(true)
+          failed <- cached.search(org, lower, 10).either
+          _      <- failing.set(false)
+          later  <- cached.search(org, lower, 10)
+          asked  <- searches.get
+          looked <- lookups.get
+          kept   <- cached.searchesKept
+        yield assertTrue(
+          first.map(_.displayName) == List("Anna org-1"),
+          again == first,
+          other.map(_.displayName) == List("Anna org-2"),
+          fewer == first,
+          name.get(UserId("1")).map(_.displayName).contains("Anna org-1"),
+          looked == 0,
+          failed.isLeft,
+          later == first,
+          asked == List(
+            (org, "anna", 10),
+            ("org-2", "anna", 10),
+            (org, "anna", 5),
+            (org, "anna", 10),
+            (org, "anna", 10)
+          ),
+          kept == 1
         )
       },
       test("keeps at most the configured number of users") {

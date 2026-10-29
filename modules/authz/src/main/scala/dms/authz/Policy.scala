@@ -205,6 +205,12 @@ object Policy:
           "assigning a document number requires the records manager role or being the document's owner"
         )
 
+      case SearchUsers =>
+        grantIf(
+          !resource.isDocument && resource.configurationArea.isEmpty,
+          "searching people is a tenant-wide action, not one on a document"
+        )
+
       case Configure =>
         resource.configurationArea match
           case None       => Decision.Deny("not a configuration resource")

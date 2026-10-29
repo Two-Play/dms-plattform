@@ -1,4 +1,4 @@
-import { useQuery, type QueryClient } from '@tanstack/react-query'
+import { queryOptions, useQuery, type QueryClient } from '@tanstack/react-query'
 import type { ApiClient } from './client'
 import { useApiClient } from './context'
 import { requestError } from './errors'
@@ -106,4 +106,50 @@ export function cachedUserName(queryClient: QueryClient, id: string): string {
 export function useUserLabel(id: string | undefined): string | undefined {
   const user = useUser(id)
   return user.data?.displayName ?? id
+}
+
+/** A person found by the people picker (DMS-111): the user id to store, name and email to show. */
+export type UserMatch = components['schemas']['UserMatch']
+
+/** Characters (without blanks) a search for people needs; the backend rejects shorter ones. */
+export const MIN_PERSON_QUERY = 2
+
+/** Words the backend accepts per search; more do not narrow down a person further. */
+const MAX_PERSON_QUERY_WORDS = 4
+
+/** People per search in the picker; the backend allows up to 20. */
+export const PERSON_SEARCH_LIMIT = 10
+
+/** The search text as the backend expects it, or undefined if it is too short to search yet. */
+export function personQuery(text: string): string | undefined {
+  const words = text.trim().split(/\s+/).filter(Boolean).slice(0, MAX_PERSON_QUERY_WORDS)
+  return words.join('').length >= MIN_PERSON_QUERY ? words.join(' ') : undefined
+}
+
+/**
+ * People of the caller's tenant whose name or email starts with every word of `query`
+ * (`GET /api/v1/users/search`). The people found go into the name cache, so `UserName` shows the
+ * picked person without another request.
+ */
+export function personSearchQuery(client: ApiClient, queryClient: QueryClient, query: string) {
+  return queryOptions({
+    queryKey: ['users', 'search', query],
+    queryFn: async ({ signal }) => {
+      const { data, error, response } = await client.GET('/api/v1/users/search', {
+        params: { query: { q: query, limit: PERSON_SEARCH_LIMIT } },
+        signal,
+      })
+      if (!response.ok || !data) {
+        throw requestError(response, error, `Searching people failed with HTTP ${response.status}`)
+      }
+      const found = Array.isArray(data) ? data : []
+      for (const person of found) {
+        queryClient.setQueryData<UserView>(['users', person.id], person)
+      }
+      return found
+    },
+    // The backend keeps answers for a minute as well.
+    staleTime: 60_000,
+    retry: false,
+  })
 }

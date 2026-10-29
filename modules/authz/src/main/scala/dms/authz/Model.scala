@@ -41,13 +41,17 @@ enum Role:
   * `AssignDocumentNumber` is assigning a document number manually instead of (or in addition to) the number
   * range of the class (DMS-113, ADR 0040): records managers ("Registratur") and the document's owner, who
   * holds the owner role. The reason is required and recorded in the audit trail.
+  *
+  * `SearchUsers` is finding people of the own tenant by name or email, to pick a group member, a deputy or a
+  * person in a metadata field (DMS-111, ADR 0037 addendum): every role of the tenant, the tenant
+  * administrator included; users without any role assignment may not browse the directory.
   */
 enum Action:
   case ReadPublished, ReadDocument, CreateFromTemplate, EditDraft, CommentInReview, Review, Approve, Publish,
     Withdraw, Recertify,
     EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
     ManageRetention, Destroy, ViewHistory, Configure,
-    MonitorCompliance, ViewAcknowledgementPersons, GenerateEvidenceReport, AssignDocumentNumber
+    MonitorCompliance, ViewAcknowledgementPersons, GenerateEvidenceReport, AssignDocumentNumber, SearchUsers
 
 /** Areas of tenant configuration (matrix row "Configuration"). `Search` is the operation of the tenant's
   * search index, e.g. rebuilding it (DMS-51, ADR 0029). `Groups` is the administration of access groups and

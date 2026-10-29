@@ -67,6 +67,22 @@ export const shared: Translation<typeof en.shared> = {
   dismiss: 'Benachrichtigung schließen',
 }
 
+export const people: Translation<typeof en.people> = {
+  label: 'Person auswählen',
+  placeholder: 'Name oder E-Mail …',
+  hint: 'Mindestens {count} Zeichen des Namens oder der E-Mail eingeben.',
+  results: 'Gefundene Personen',
+  searching: 'Suche läuft …',
+  found: plural({ one: '{count} Person gefunden.', other: '{count} Personen gefunden.' }),
+  none: 'Niemand gefunden für „{query}“.',
+  clear: 'Auswahl entfernen',
+  picked: 'Ausgewählte Personen',
+  remove: '{name} entfernen',
+  useId: '„{id}“ als Benutzer-ID übernehmen',
+  unavailable: 'Personen können gerade nicht gesucht werden.',
+  unavailableHint: 'Sie können stattdessen die Benutzer-ID eingeben.',
+}
+
 export const system: Translation<typeof en.system> = {
   title: 'Systemstatus',
   description: 'Zustandsprüfung des Backends',
