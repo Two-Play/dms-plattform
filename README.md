@@ -113,6 +113,7 @@ Demo content:
 
 - Field definitions and the document classes `contract` (partner number, name and address, monthly fee, term, start and end date, notice period, services, service level) and `policy` (policy area, applies to).
 - Workflows: `contract` with a legal review (Reviewer) and an approval (Approver); `policy` with one approval (Approver).
+- Number ranges (DMS-113): `contracts` (`VTR-{YYYY}-{NNNN}`, yearly reset) assigned to `contract` and `policies` (`RL-{NNN}`) assigned to `policy`; new documents of these classes get the next number. Manage them as `admin` under Admin → Number ranges.
 - Released templates "Service contract" (partner from the partner master, computed annual fee and total contract value, conditional term clause, repeated service list, locked sections) and "Policy", created by `designer` and released by `designer2`.
 - A draft "Service contract Nordlicht Logistik" of `author` with the partner P-10001 taken over from the partner master.
 

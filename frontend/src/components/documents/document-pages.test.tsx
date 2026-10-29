@@ -91,6 +91,7 @@ function draftDocument(values: Record<string, FieldValue>, status = 'Draft'): Do
     templateVersion: 1,
     createdAt: '2026-10-20T10:00:00Z',
     legalHold: false,
+    canAssignNumber: false,
     current: {
       id: 'v1',
       version: status === 'Draft' ? '1.0-draft.2' : '1.0-draft.3',

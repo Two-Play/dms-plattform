@@ -32,6 +32,9 @@ object CoreFields:
   private def selection(codes: String*): FieldType.Selection =
     FieldType.Selection(codes.map(c => SelectOption(c, c)).toList)
 
+  /** Key of the document number field (DMS-113, ADR 0040). */
+  val DocumentNumber = "documentNumber"
+
   /** Key of the confidentiality level field. */
   val Confidentiality = "confidentiality"
 
@@ -66,6 +69,17 @@ object CoreFields:
   /** The root profile, in display order. */
   val fields: List[ProfileField] = List(
     field("documentId", "Document ID", FieldType.Text(maxLength = Some(64)), System, fromDraft),
+    field(
+      DocumentNumber,
+      "Document number",
+      FieldType.Text(maxLength = Some(64)),
+      System,
+      Set.empty,
+      description = Some(
+        "Assigned from the number range of the class on creation (DMS-113) or manually with a reason; the same " +
+          "in every version of the document"
+      )
+    ),
     field("title", "Title", FieldType.Text(maxLength = Some(500)), Core, fromDraft),
     field("documentClass", "Document class", FieldType.Text(maxLength = Some(63)), System, fromDraft),
     field("version", "Version", FieldType.Text(pattern = Some("""\d+\.\d+""")), System, fromDraft),

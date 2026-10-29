@@ -120,6 +120,13 @@ final case class DocumentDetails(
 ):
   def open: Option[DocumentVersion] = versions.find(v => Versioning.isOpen(v.status))
 
+  /** Whether a number can be assigned manually now (see [[DocumentService.assignNumber]]): no version is in
+    * review or approval, and an existing number is not frozen in a submitted version yet.
+    */
+  def numberAssignable: Boolean =
+    open.forall(_.status == DocumentStatus.Draft) &&
+      (document.number.isEmpty || versions.forall(_.status == DocumentStatus.Draft))
+
   /** The version readers of `v` are pointed to (see [[Publication.successor]]). */
   def successor(v: DocumentVersion): Option[DocumentVersion] = Publication.successor(v, versions)
 
@@ -243,8 +250,18 @@ final class DocumentService(
       (template, profile) <- templateContext(request.templateId, request.templateVersion)
       id     = DocumentId.random()
       number = Versioning.first
-      values <- prepare(profile, template, template.content, request.values, request.title, id, number)
-      now    <- Clock.instant
+      now      <- Clock.instant
+      numbered <- documentNumber(profile, request.values, now)
+      values   <- prepare(
+        profile,
+        template,
+        template.content,
+        request.values,
+        request.title,
+        id,
+        number,
+        numbered.map(_._2)
+      )
       document = Document(
         id,
         profile.classId,
@@ -254,7 +271,8 @@ final class DocumentService(
         actor,
         template.templateId,
         template.version,
-        now
+        now,
+        numbered.map(_._2)
       )
       version = DocumentVersion(
         UUID.randomUUID(),
@@ -293,11 +311,126 @@ final class DocumentService(
           "templateVersion" -> Json.Num(template.version),
           "classId"         -> Json.Str(profile.classId.value.toString),
           "classVersion"    -> Json.Num(profile.version),
-          "origins"         -> origins(values)
+          "origins"         -> origins(values),
+          "documentNumber"  -> numbered.fold[Json](Json.Null)(n => Json.Str(n._2)),
+          "numberRange"     -> numbered.fold[Json](Json.Null)(n => Json.Str(n._1.key))
         )
       )
       _ <- publish("document.created", document, version)
     yield (document, version)
+
+  /** The number of a new document from the number range of its class (DMS-113), with that range; `None` if
+    * the class has none. Takes the counter inside the creating transaction (see [[DocumentNumbering.next]]).
+    */
+  private def documentNumber(
+      profile: MetadataProfile,
+      entered: Map[String, FieldEntry],
+      now: Instant
+  ): IO[DocumentError, Option[(NumberRange, String)]] =
+    sql(DocumentNumbering.rangeOf(profile)).flatMap {
+      case None        => ZIO.none
+      case Some(range) =>
+        val unit = entered.get(UnitField).collect { case FieldEntry(MetadataValue.Text(t), _) => t }
+        for
+          zone <- sql(DocumentStore.tenantZone)
+          _    <- ZIO.when(range.pattern.usesUnit && unit.forall(NumberPattern.unitSegment(_).isEmpty))(
+            ZIO.fail(
+              DocumentError.InvalidValues(
+                List(
+                  FieldIssue(
+                    UnitField,
+                    profile.field(UnitField).fold(UnitField)(_.definition.label),
+                    IssueKind.MissingRequired(DocumentStatus.Draft)
+                  )
+                )
+              )
+            )
+          )
+          number <- sql(DocumentNumbering.next(range, zone, now, unit))
+            .flatMap(r => ZIO.fromEither(r).mapError(p => DocumentError.Invalid(List(p))))
+        yield Some(range -> number)
+    }
+
+  /** Assigns a document number manually (DMS-113): for a document without number at any time (except while a
+    * version is in review or approval, whose values are frozen), and replacing a number only while every
+    * version is a draft, because a submitted or approved version carries it. The number must be free in the
+    * tenant (409) and a reason is required (422). The open draft gets the number as a new working state;
+    * later versions take it over. Recorded in the audit trail with reason, previous and new number.
+    */
+  def assignNumber(
+      id: DocumentId,
+      number: String,
+      reason: String,
+      actor: UserId
+  ): IO[DocumentError, Document] =
+    val why = reason.trim
+    for
+      valid <- ZIO
+        .fromEither(DocumentNumber.validate(number.trim))
+        .mapError(m => DocumentError.Invalid(List(m)))
+      _ <- ZIO.when(why.isEmpty)(ZIO.fail(DocumentError.Invalid(List("a reason is required"))))
+      _ <- ZIO.when(why.length > MaxReasonLength)(
+        ZIO.fail(DocumentError.Invalid(List(s"the reason must have at most $MaxReasonLength characters")))
+      )
+      document <- sql(DocumentStore.lockDocument(id)).someOrFail(documentNotFound(id))
+      versions <- sql(DocumentStore.versions(id, templates))
+      _        <- ZIO.when(document.number.contains(valid))(
+        ZIO.fail(DocumentError.Invalid(List(s"the document already has the number $valid")))
+      )
+      _ <- ZIO.when(document.number.isDefined && versions.exists(_.status != DocumentStatus.Draft))(
+        ZIO.fail(
+          DocumentError.Conflict(
+            s"the number ${document.number.getOrElse("")} is frozen: a version of the document was submitted"
+          )
+        )
+      )
+      open = versions.find(v => Versioning.isOpen(v.status))
+      _ <- ZIO.foreachDiscard(open.filter(_.status != DocumentStatus.Draft))(v =>
+        ZIO.fail(
+          DocumentError.Conflict(
+            s"version ${v.label} is ${v.status}; its values cannot change until it is decided"
+          )
+        )
+      )
+      taken <- sql(NumberRangeStore.documentWithNumber(valid))
+      _     <- ZIO.when(taken.exists(_ != id))(
+        ZIO.fail(DocumentError.Conflict(s"the number $valid is already assigned to another document"))
+      )
+      _ <- sql(NumberRangeStore.setDocumentNumber(id, valid))
+        .mapError(conflict(s"the number $valid is already assigned to another document"))
+      draft <- ZIO.foreach(open)(o =>
+        for
+          current <- sql(DocumentStore.lockVersion(o.id, templates)).someOrFail(versionNotFound(o.id))
+          entry = FieldEntry(MetadataValue.Text(valid), ValueOrigin.Platform)
+          next  = current.copy(
+            workingState = current.workingState + 1,
+            values = current.values + (CoreFields.DocumentNumber -> entry),
+            rendition = None
+          )
+          _ <- sql(DocumentStore.updateDraft(next, templates))
+            .filterOrFail(identity)(changedConcurrently(next))
+          _ <- sql(DocumentStore.insertWorkingState(next, actor, templates))
+        yield next
+      )
+      _ <- ZIO.foreachDiscard(draft.orElse(versions.lastOption))(v =>
+        record(
+          actor,
+          "document.number-assigned",
+          v,
+          Json.Obj(
+            "before" -> document.number.fold[Json](Json.Null)(Json.Str(_)),
+            "after"  -> Json.Str(valid),
+            "reason" -> Json.Str(why),
+            "manual" -> Json.Bool(true)
+          ),
+          Some(why)
+        )
+      )
+    yield document.copy(number = Some(valid))
+
+  /** The document with `number`, if any (stable address by number, DMS-113). */
+  def findByNumber(number: String): IO[DocumentError, Option[DocumentId]] =
+    sql(NumberRangeStore.documentWithNumber(number.trim))
 
   /** A document with all versions, oldest first. */
   def get(id: DocumentId): IO[DocumentError, DocumentDetails] =
@@ -475,7 +608,7 @@ final class DocumentService(
       _ <- ZIO.when(change.content.exists(_ != current.content))(checkContent(template, content, requests))
       title = change.title.getOrElse(titleOf(current).getOrElse(document.title))
       entered <- protectSystemValues(profile, current, change.values)
-      values  <- prepare(profile, template, content, entered, title, id, current.number)
+      values  <- prepare(profile, template, content, entered, title, id, current.number, document.number)
       next = current.copy(
         workingState = current.workingState + 1,
         content = content,
@@ -655,7 +788,7 @@ final class DocumentService(
         status = DocumentStatus.Draft,
         changeKind = kind,
         changeReason = changeReason,
-        values = base.values ++ systemValues(id, profile, number, template),
+        values = base.values ++ systemValues(id, profile, number, template, document.number),
         metadataSnapshot = None,
         rendition = None,
         createdBy = actor,
@@ -854,10 +987,11 @@ final class DocumentService(
       entered: Map[String, FieldEntry],
       title: String,
       id: DocumentId,
-      number: VersionNo
+      number: VersionNo,
+      documentNumber: Option[String]
   ): IO[DocumentError, Map[String, FieldEntry]] =
     val input  = entered + (TitleField -> FieldEntry(MetadataValue.Text(title.trim), ValueOrigin.Manual))
-    val system = systemValues(id, profile, number, template)
+    val system = systemValues(id, profile, number, template, documentNumber)
     // A field filled by a reference field only takes values from its source (ADR 0023).
     def fromReference(key: String, origin: ValueOrigin) =
       TemplateContent.referenceOf(content, key).exists((r, _) => origin != ValueOrigin.System(r.source.key))
@@ -1098,7 +1232,13 @@ final class DocumentService(
       )
     yield ()
 
-  private def record(actor: UserId, action: String, v: DocumentVersion, details: Json.Obj) =
+  private def record(
+      actor: UserId,
+      action: String,
+      v: DocumentVersion,
+      details: Json.Obj,
+      reason: Option[String] = None
+  ) =
     val automated = isPlatform(actor)
     audit
       .record(
@@ -1107,7 +1247,8 @@ final class DocumentService(
           action,
           AuditObject("document", Some(v.documentId.value), Some(v.label)),
           if automated then Channel.Automation else Channel.Api,
-          Jsonb(details.merge(Json.Obj("versionId" -> Json.Str(v.id.toString))).toJson)
+          Jsonb(details.merge(Json.Obj("versionId" -> Json.Str(v.id.toString))).toJson),
+          reason
         )
       )
       .mapError(DocumentError.Database(_))
@@ -1139,6 +1280,7 @@ final class DocumentService(
         "changeKind"              -> Json.Str(v.changeKind.toString),
         "requiresAcknowledgement" -> Json.Bool(v.requiresAcknowledgement)
       ) ++ v.validFrom.map(d => "validFrom" -> Json.Str(d.toString)) ++
+        document.number.map(n => "documentNumber" -> Json.Str(n)) ++
         previous.map(p => "previousStatus" -> Json.Str(p.toString)))*
     )
     Outbox
@@ -1168,6 +1310,7 @@ object DocumentService:
   private val StatusField     = "status"
   private val OwnerField      = "owner"
   private val NextReviewField = "nextReview"
+  private val UnitField       = "organizationalUnit"
   private val Sha256          = "[0-9a-f]{64}".r
 
   /** Longest accepted reason of a deviation request. */
@@ -1179,6 +1322,7 @@ object DocumentService:
   private val PlatformFields: Set[String] =
     Set(
       "documentId",
+      CoreFields.DocumentNumber,
       "documentClass",
       "version",
       "template",
@@ -1201,20 +1345,24 @@ object DocumentService:
     */
   private val databaseNow: UIO[Instant] = Clock.instant.map(_.truncatedTo(ChronoUnit.MICROS))
 
-  /** Values the platform sets: identifiers, class, version number and template. */
+  /** Values the platform sets: identifiers (and the document number, if any), class, version number and
+    * template.
+    */
   private def systemValues(
       id: DocumentId,
       profile: MetadataProfile,
       number: VersionNo,
-      template: TemplateVersion
+      template: TemplateVersion,
+      documentNumber: Option[String]
   ): Map[String, FieldEntry] =
-    Map(
+    (Map(
       "documentId"      -> id.value.toString,
       "documentClass"   -> profile.classKey.value,
       "version"         -> number.show,
       "template"        -> template.templateId.value.toString,
       "templateVersion" -> template.version.toString
-    ).map((k, v) => k -> FieldEntry(MetadataValue.Text(v), ValueOrigin.Platform))
+    ) ++ documentNumber.map(CoreFields.DocumentNumber -> _))
+      .map((k, v) => k -> FieldEntry(MetadataValue.Text(v), ValueOrigin.Platform))
 
   /** A value set by a business system rather than by the platform. */
   private def isExternal(origin: ValueOrigin): Boolean = origin match

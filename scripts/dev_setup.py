@@ -5,8 +5,8 @@ Subcommands:
   tenant          ensure the tenant of the local ZITADEL organization (SQL as schema owner, idempotent)
   users           ensure the demo users in ZITADEL and their role assignments (idempotent)
   token USER      print an access token for a demo user (e.g. `author`)
-  seed --api URL  create demo field definitions, classes, workflows, templates, an access group and a draft
-                  through the API
+  seed --api URL  create demo field definitions, classes, workflows, number ranges, templates, an access group
+                  and a draft through the API
   approve-tasks USER --api URL  approve all open workflow tasks of a demo user (until the UI can vote, DMS-91)
   search-rebuild --api URL      rebuild the tenant's search index from the database (DMS-51, idempotent)
   intranet        ensure the intranet's technical user: a ZITADEL machine user with the platform role Reader
@@ -620,6 +620,36 @@ def ensure_groups(admin: Api, users: dict[str, str]) -> None:
         print(f"  group {key}: members {', '.join(members)}")
 
 
+# Number ranges (DMS-113): key -> (name, pattern, start value, yearly reset, classes they are assigned to).
+NUMBER_RANGES = {
+    "contracts": ("Contracts", "VTR-{YYYY}-{NNNN}", 1, True, ["contract"]),
+    "policies": ("Policies", "RL-{NNN}", 1, False, ["policy"]),
+}
+
+
+def ensure_number_ranges(admin: Api, classes: dict[str, dict]) -> None:
+    """Creates the demo number ranges and assigns them to their classes; skips what exists (idempotent)."""
+    existing = {r["key"]: r for r in admin("GET", "/api/v1/admin/number-ranges")}
+    assignments = {a["classKey"]: a for a in admin("GET", "/api/v1/admin/number-range-assignments")}
+    for key, (name, pattern, start, yearly, class_keys) in NUMBER_RANGES.items():
+        if key in existing:
+            print(f"  number range {key}: exists (next {existing[key]['nextNumber']})")
+        else:
+            existing[key] = admin("POST", "/api/v1/admin/number-ranges", {
+                "key": key, "name": name, "pattern": pattern, "startValue": start, "yearlyReset": yearly})
+            print(f"  number range {key}: created ({pattern})")
+        for class_key in class_keys:
+            current = assignments.get(class_key)
+            if current and current["mode"] == "range" and current.get("numberRangeId") == existing[key]["id"]:
+                continue
+            if current and current["mode"] != "inherit":
+                print(f"  number range of class {class_key}: kept ({current['mode']})")
+                continue
+            admin("PUT", f"/api/v1/admin/number-range-assignments/{classes[class_key]['id']}",
+                  {"numberRangeId": existing[key]["id"]})
+            print(f"  number range {key}: assigned to class {class_key}")
+
+
 def ensure_template(designer: Api, designer2: Api, spec: dict, cls: dict) -> dict:
     """Creates the template as `designer`, moves it to Testing and releases it as `designer2` (four eyes)."""
     latest = {v["name"]: v for v in designer("GET", "/api/v1/admin/templates")}.get(spec["name"])
@@ -682,6 +712,7 @@ def cmd_seed(api_base: str) -> None:
         classes = ensure_classes(admin, versions)
         ensure_workflows(admin)
         ensure_groups(admin, users)
+        ensure_number_ranges(admin, classes)
         contract = ensure_template(designer, designer2, SERVICE_CONTRACT, classes["contract"])
         ensure_template(designer, designer2, POLICY, classes["policy"])
         if contract["status"] == "Released":

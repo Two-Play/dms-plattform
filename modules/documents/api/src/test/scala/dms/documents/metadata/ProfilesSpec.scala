@@ -13,6 +13,7 @@ object ProfilesSpec extends ZIOSpecDefault:
         val profile = resolveOrFail(contract)
         val core    = List(
           "documentId",
+          "documentNumber",
           "title",
           "documentClass",
           "version",

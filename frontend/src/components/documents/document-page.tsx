@@ -24,6 +24,7 @@ import { StatusBadge } from './status-badge'
 import { WorkflowPanel } from './workflow-panel'
 import { AcknowledgementPanel } from './acknowledgement-panel'
 import { EvidenceReportAction } from './evidence-report-panel'
+import { DocumentNumberAction } from './document-number-action'
 import { VersionHistory } from './version-history'
 import { PdfDownload } from './pdf-download'
 import { VersionContent } from './version-content'
@@ -116,6 +117,11 @@ export function DocumentPage({
                 </div>
               )}
               <PdfDownload key={shown.id} documentId={document.data.id} version={shown} />
+              <DocumentNumberAction
+                documentId={document.data.id}
+                documentNumber={document.data.documentNumber}
+                canAssign={document.data.canAssignNumber}
+              />
               <EvidenceReportAction documentId={document.data.id} />
             </>
           )

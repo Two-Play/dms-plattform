@@ -19,3 +19,5 @@ Document resources and search (DMS-51/52, ADR 0029 and addendum to ADR 0018): `D
 Legal holds (DMS-56, ADR 0031 and addendum to ADR 0018): `ManageRetention` (records managers, matrix row "Retention / legal hold") covers legal holds. Hold-level operations check it on the tenant resource (records manager for the whole tenant), each document put under a hold on its `DocumentResource`.
 
 Single module without an `api`/`core` split.
+
+Document numbers (DMS-113, ADR 0040): `AssignDocumentNumber` (manual document number with reason) is granted on a document (any status but `Destroyed`) to records managers in scope and to holders of the owner role who are the document's owner; tenant administrators manage number ranges with `Configure` on `ConfigurationArea.NumberRanges`.

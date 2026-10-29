@@ -37,21 +37,26 @@ enum Role:
   *
   * `GenerateEvidenceReport` is creating and reading the evidence report of a document (US-12.1, DMS-57, ADR
   * 0034): internal audit (auditor) and records managers, in any status of the document.
+  *
+  * `AssignDocumentNumber` is assigning a document number manually instead of (or in addition to) the number
+  * range of the class (DMS-113, ADR 0040): records managers ("Registratur") and the document's owner, who
+  * holds the owner role. The reason is required and recorded in the audit trail.
   */
 enum Action:
   case ReadPublished, ReadDocument, CreateFromTemplate, EditDraft, CommentInReview, Review, Approve, Publish,
     Withdraw, Recertify,
     EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
     ManageRetention, Destroy, ViewHistory, Configure,
-    MonitorCompliance, ViewAcknowledgementPersons, GenerateEvidenceReport
+    MonitorCompliance, ViewAcknowledgementPersons, GenerateEvidenceReport, AssignDocumentNumber
 
 /** Areas of tenant configuration (matrix row "Configuration"). `Search` is the operation of the tenant's
   * search index, e.g. rebuilding it (DMS-51, ADR 0029). `Groups` is the administration of access groups and
   * their members (DMS-101, ADR 0032). `Webhooks` is the administration of webhook subscriptions of connected
-  * systems (DMS-58, ADR 0035).
+  * systems (DMS-58, ADR 0035). `NumberRanges` is the administration of number ranges and their assignment to
+  * document classes (DMS-113, ADR 0040).
   */
 enum ConfigurationArea:
-  case DocumentClasses, Workflows, Taxonomies, Retention, Search, Groups, Webhooks
+  case DocumentClasses, Workflows, Taxonomies, Retention, Search, Groups, Webhooks, NumberRanges
 
 enum Confidentiality:
   case Public, Internal, Confidential, StrictlyConfidential

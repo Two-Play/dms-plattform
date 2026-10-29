@@ -32,7 +32,8 @@ private[core] object DocumentStore:
     // Null-safe: the Option codec reads the value first and checks for SQL NULL afterwards.
     DbCodec[java.sql.Date].biMap(d => if d == null then null else d.toLocalDate, java.sql.Date.valueOf)
 
-  private type DocumentRow = (UUID, UUID, Int, String, Option[String], String, UUID, Int, OffsetDateTime)
+  private type DocumentRow =
+    (UUID, UUID, Int, String, Option[String], String, UUID, Int, OffsetDateTime, Option[String])
 
   final case class VersionRow(
       id: UUID,
@@ -78,13 +79,24 @@ private[core] object DocumentStore:
   ) derives DbCodec
 
   def document(id: DocumentId)(using DbTx): Option[Document] =
-    sql"""select id, class_id, class_version, title, owner_id, author_id, template_id, template_version, created_at
+    sql"""select id, class_id, class_version, title, owner_id, author_id, template_id, template_version, created_at,
+                 document_number
           from dms.document where id = ${id.value}""".query[DocumentRow].run().headOption.map(toDocument)
+
+  /** A document, locked for a change of its number (DMS-113). */
+  def lockDocument(id: DocumentId)(using DbTx): Option[Document] =
+    sql"""select id, class_id, class_version, title, owner_id, author_id, template_id, template_version, created_at,
+                 document_number
+          from dms.document where id = ${id.value} for update"""
+      .query[DocumentRow]
+      .run()
+      .headOption
+      .map(toDocument)
 
   /** The documents of the tenant, the most recently changed first (by their latest version). */
   def recentDocuments(limit: Int)(using DbTx): List[Document] =
     sql"""select d.id, d.class_id, d.class_version, d.title, d.owner_id, d.author_id, d.template_id,
-                 d.template_version, d.created_at
+                 d.template_version, d.created_at, d.document_number
           from dms.document d
           order by greatest(d.updated_at,
                             (select max(v.updated_at) from dms.document_version v where v.document_id = d.id))
@@ -187,10 +199,10 @@ private[core] object DocumentStore:
   def insertDocument(d: Document)(using DbTx): Unit =
     val _ =
       sql"""insert into dms.document (id, tenant_id, class_id, class_version, title, owner_id, author_id,
-                                            template_id, template_version)
+                                            template_id, template_version, document_number)
                   values (${d.id.value}, dms.current_tenant(), ${d.classId.value}, ${d.classVersion}, ${d.title},
                           ${d.ownerId.map(_.value)}, ${d.authorId.value}, ${d.templateId.value},
-                          ${d.templateVersion})""".update.run()
+                          ${d.templateVersion}, ${d.number})""".update.run()
 
   def updateDocument(id: DocumentId, title: String, owner: Option[UserId])(using DbTx): Unit =
     val _ = sql"""update dms.document set title = $title, owner_id = ${owner.map(_.value)}, updated_at = now()
@@ -455,7 +467,8 @@ private[core] object DocumentStore:
           where id = $id and status in ('Draft', 'InReview', 'InApproval')""".update.run() == 1
 
   private def toDocument(row: DocumentRow): Document =
-    val (id, classId, classVersion, title, owner, author, templateId, templateVersion, createdAt) = row
+    val (id, classId, classVersion, title, owner, author, templateId, templateVersion, createdAt, number) =
+      row
     Document(
       DocumentId(id),
       DocumentClassId(classId),
@@ -465,7 +478,8 @@ private[core] object DocumentStore:
       UserId(author),
       TemplateId(templateId),
       templateVersion,
-      createdAt.toInstant
+      createdAt.toInstant,
+      number
     )
 
   private def toVersion(r: VersionRow, codec: ContentCodec): DocumentVersion =

@@ -233,3 +233,27 @@ HTTP (module `app`, `ComplianceApi`):
 
 `documents-api`, `CurrentVersion.resolve(versions, scope)`: the version a stable address stands for, among the versions the caller may read: `Found` (the valid version of the scope: exact scope key, else the only scope key containing the value; without scope the unrestricted version, else the only valid one), `Ambiguous(scopes)`, `Withdrawn` (the last valid version was withdrawn or archived without successor) or `NotFound`. Served by `app`, `CurrentDocumentApi`: `GET /api/v1/documents/{id}/current`, `/current.pdf`, `/current.html` with `?scope=`, `ETag`, `Cache-Control: private, no-cache` and `If-None-Match` (304); 404, 410 `withdrawn`, 409 `scope_required`.
 
+
+## Number ranges and document numbers (DMS-113, ADR 0040)
+
+Documents of a class with a number range get a unique number on creation (e.g. `POL-2026-0042`); records managers and owners can assign one manually with a reason.
+
+- `api`, `Numbering.scala` (pure): `NumberPattern.parse/format` (`{YYYY}`, `{YY}`, `{OU}`, exactly one counter `{N}`…`{NNNNNNNNNN}` with that minimum number of digits; literal text of letters, digits, `.`, `_`, `-`), `NumberPattern.unitSegment` (organizational unit as part of a number: other characters become `-`), `DocumentNumber.validate` (at most 64 characters, starting with a letter or digit), `NumberRange` (`period`: the year with yearly reset, else 0; `nextCounter`: the stored counter, at least the start value; `check`). `Document.number`. Core field `documentNumber` (system, not enterable, not required).
+- `core`: `NumberRangeService` (inside `Db.transact(tenant)`, audited: `number-range.created|changed|assigned|unassigned`): `list`/`get` with the next number (`{OU}` kept as placeholder), `create`, `update` (only future numbers change), `preview`, `classes` (own and effective assignment per class, inherited from the nearest ancestor with an own one), `assign(classId, Some(range) | None)` (None: explicitly no range), `unassign` (inherit again). `DocumentNumbering.next` takes a number in the creating transaction: counter row per range and period created if missing and locked with `select … for update`, numbers already taken skipped, next value stored; a rollback restores it (gap-free).
+- `DocumentService.create` numbers the document if its class has a range (422 `missing_required` on `organizationalUnit` if the pattern uses `{OU}` and none was entered); the number is in the version values (`System("dms")`), in the metadata snapshot on approval, carried into new versions and draft changes from `dms.document`, in the `document.created` audit entry and in every document outbox event (`documentNumber`). `assignNumber(id, number, reason, actor)`: reason required (at most 4000 characters), number valid and free in the tenant (409), a document without number at any time except while a version is in review or approval (409), an existing number only while every version is a draft (409, also enforced by trigger); the open draft gets it as a new working state; audit `document.number-assigned` with before, after and reason. `findByNumber`. `DocumentDetails.numberAssignable`.
+- Migration V25: `dms.number_range` (key unique per tenant), `dms.number_range_counter` (PK range, period), `dms.document_class_number_range` (PK class), `dms.document.document_number` (unique per tenant where set) with guard trigger `document_number_guard`; RLS with `dms.current_tenant()`, column grants for `dms_app`.
+
+HTTP (module `app`):
+
+| Method | Path | Purpose | Authorization |
+|---|---|---|---|
+| GET | `/api/v1/admin/number-ranges` | Ranges by key with `nextNumber`, `nextCounter`, directly assigned `classIds` | `Configure` on `NumberRanges` (tenant administrator) |
+| POST | `/api/v1/admin/number-ranges` | Create `{key, name, pattern, startValue?, yearlyReset?}`; 422 invalid, 409 key taken | as above |
+| GET/PUT | `/api/v1/admin/number-ranges/{id}` | Read; change `{name, pattern, startValue, yearlyReset}` (future numbers only) | as above |
+| POST | `/api/v1/admin/number-ranges/preview` | `{pattern, startValue?, yearlyReset?}` → `{valid, problems, example}` | as above |
+| GET | `/api/v1/admin/number-range-assignments` | Every class: `{classId, classKey, label, parentId, mode: inherit\|none\|range, numberRangeId, effectiveRangeId, inheritedFrom}` | as above |
+| PUT/DELETE | `/api/v1/admin/number-range-assignments/{classId}` | Assign `{numberRangeId?}` (empty: explicitly none) / inherit again | as above |
+| POST | `/api/v1/documents/{id}/number` | Manual number `{number, reason}` → `{documentId, documentNumber, previous}` | `AssignDocumentNumber` (records manager in scope, or the document's owner with the owner role) |
+| GET | `/api/v1/documents/by-number/{number}/current` | Stable address by number, like `/documents/{id}/current` | `ReadDocument` |
+
+`DocumentView` carries `documentNumber` and `canAssignNumber`, `DocumentSummaryView` and `CurrentVersionView` carry `documentNumber`. Search: an exact number matches through `metadata.keyword.documentNumber` (no mapping change). Existing documents keep no number until one is assigned manually (backfill: follow-up in ADR 0040).

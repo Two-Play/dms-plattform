@@ -61,7 +61,9 @@ final case class CurrentVersionView(
     renditionSha256: Option[String],
     /** The metadata of the version as approved. */
     metadata: Map[String, MetadataValue],
-    links: CurrentLinks
+    links: CurrentLinks,
+    /** The document number (DMS-113); `/api/v1/documents/by-number/{number}/current` resolves it. */
+    documentNumber: Option[String] = None
 ) derives JsonCodec,
       Schema
 
@@ -208,7 +210,40 @@ object CurrentDocumentApi:
           yield (tag, Option.unless(matches(etags, tag))(page))
       )
 
-  def endpoints: List[ZServerEndpoint[Env, Any]] = List(metadata, pdf, html)
+  val byNumber: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in("api" / "v1" / "documents" / "by-number" / path[String]("number").description("Document number"))
+      .in("current")
+      .in(scope)
+      .in(ifNoneMatch)
+      .out(header[String]("ETag"))
+      .out(header("Cache-Control", CacheControl))
+      .out(conditional(jsonBody[CurrentVersionView]))
+      .description(
+        "Stable address by document number (DMS-113): the same as `/documents/{id}/current` for the document " +
+          "with this number. 404 if no document has the number or the caller may not read a valid version."
+      )
+      .tag("Current documents")
+      .serverLogic(p =>
+        (number, scope, etags) =>
+          DocumentApi
+            .inTransaction(p)(_.service.findByNumber(number))
+            .flatMap(ZIO.fromOption(_).orElseFail(notFound(s"no document with number $number you may read")))
+            .flatMap(id =>
+              current(p, id.value, scope).mapError {
+                case (StatusCode.NotFound, _) =>
+                  notFound(s"no document with number $number you may read")
+                case other => other
+              }
+            )
+            .map { (details, v) =>
+              val view = viewOf(details, v)
+              val tag  = etag(view.toJson.getBytes(StandardCharsets.UTF_8))
+              (tag, Option.unless(matches(etags, tag))(view))
+            }
+      )
+
+  def endpoints: List[ZServerEndpoint[Env, Any]] = List(byNumber, metadata, pdf, html)
 
   /** The current version the caller may read, resolved now. Versions the caller may not read do not count, as
     * if they did not exist; the withdrawn version is reported only to callers who could read it while it was
@@ -294,7 +329,8 @@ object CurrentDocumentApi:
         s"$stable/current.pdf$query",
         s"$stable/current.html$query",
         s"$stable/versions/${v.id}/rendition"
-      )
+      ),
+      details.document.number
     )
 
   private def missing(id: UUID) = s"document $id has no valid version you may read"
