@@ -50,6 +50,48 @@ export const docPanels: Translation<typeof en.docPanels> = {
     downloadPdf: 'PDF herunterladen',
     downloadJson: 'JSON herunterladen',
   },
+  attachments: {
+    title: 'Anlagen',
+    description: 'Dateien, die mit dieser Version geprüft, freigegeben und archiviert werden.',
+    descriptionDraft:
+      'Dateien, die mit dieser Version geprüft, freigegeben und archiviert werden. Solange die Version ein Entwurf ist, können sie geändert werden.',
+    loading: 'Anlagen werden geladen',
+    dropHere: 'Dateien hierher ziehen oder',
+    choose: 'Dateien auswählen…',
+    limits: 'Beliebige Dateitypen bis {max}; Programme und Skripte werden nicht angenommen.',
+    uploads: 'Uploads',
+    progress: 'Upload von {name}',
+    list: 'Anlagen',
+    none: 'Keine Anlagen',
+    noneDraft:
+      'Zugehörige Unterlagen wie Anhänge, Preislisten oder unterschriebene Scans hinzufügen.',
+    addedBy: 'hinzugefügt von',
+    download: 'Herunterladen',
+    downloadLabel: '{name} herunterladen',
+    renameLabel: '{name} umbenennen',
+    removeLabel: '{name} entfernen',
+    readOnly: 'Die Anlagen sind mit der Version eingefroren und können nicht mehr geändert werden.',
+    added: '{name} angehängt',
+    renamed: 'Umbenannt in {name}',
+    removed: '{name} entfernt',
+    renameTitle: 'Anlage umbenennen',
+    newName: 'Neuer Name',
+    removeTitle: '{name} entfernen?',
+    removeText:
+      'Die Datei wird aus diesem Entwurf entfernt. Frühere Versionen, die sie enthalten, behalten sie unverändert.',
+    remove: 'Entfernen',
+    empty: 'Die Datei ist leer.',
+    tooLarge: 'Die Datei ist größer als {max}.',
+    blockedType: 'Dateien vom Typ .{extension} (Programme und Skripte) werden nicht angenommen.',
+    blocked: 'Diese Datei wird nicht angenommen: {message}',
+    infected:
+      'Der Virenscanner hat Schadsoftware in dieser Datei gefunden; sie wurde nicht gespeichert.',
+    scannerUnavailable:
+      'Der Virenscanner ist gerade nicht erreichbar. Bitte später erneut versuchen.',
+    conflict: 'Nicht angehängt: {message}',
+    uploadFailed:
+      'Der Upload ist fehlgeschlagen. Bitte die Verbindung prüfen und erneut versuchen.',
+  },
   history: {
     title: 'Versionshistorie',
     description: 'Zwei Versionen auswählen, um die Änderungen zwischen ihnen zu sehen.',
