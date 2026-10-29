@@ -41,6 +41,7 @@ const doc = (over: Partial<DocumentSummary>): DocumentSummary => ({
   mine: true,
   ...over,
   kind: over.kind ?? 'Structured',
+  legalHold: over.legalHold ?? false,
 })
 
 let state: {

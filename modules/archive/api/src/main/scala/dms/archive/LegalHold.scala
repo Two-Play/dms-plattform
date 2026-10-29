@@ -27,7 +27,7 @@ final case class HoldRelease(by: UserId, at: Instant, reason: String)
   * @param matterReference
   *   reference of the matter in the legal department's systems, e.g. a case number
   * @param documentCount
-  *   number of documents the hold covers
+  *   number of documents the hold covers now (removed documents not counted)
   */
 final case class LegalHold(
     id: LegalHoldId,
@@ -41,15 +41,22 @@ final case class LegalHold(
 ):
   def isActive: Boolean = release.isEmpty
 
-/** A document a hold covers, with who added it how and why. */
+/** The removal of a single document from an active hold (DMS-106): who removed it when and why. */
+final case class HoldRemoval(by: UserId, at: Instant, reason: String)
+
+/** A document a hold covers or covered, with who added it how and why. A removed document (`removal`) no
+  * longer counts as covered by the hold; its entry stays as history.
+  */
 final case class HeldDocument(
     holdId: LegalHoldId,
     documentId: DocumentId,
     source: HoldSource,
     reason: String,
     addedBy: UserId,
-    addedAt: Instant
-)
+    addedAt: Instant,
+    removal: Option[HoldRemoval] = None
+):
+  def isCurrent: Boolean = removal.isEmpty
 
 /** What a new hold is set for. */
 final case class NewLegalHold(name: String, matterReference: Option[String], reason: String)
@@ -98,13 +105,18 @@ object LegalHoldEvents:
   /** Documents were added to a hold. Payload: `holdId`, `reason`, `documentIds` (the newly added ones). */
   val DocumentsAdded: String = "legal-hold.documents-added"
 
+  /** A document was removed from an active hold (DMS-106). Payload: `holdId`, `documentId`, `reason` and
+    * `underLegalHold` (whether another active hold still covers the document).
+    */
+  val DocumentRemoved: String = "legal-hold.document-removed"
+
   /** A hold was released. Payload: `holdId`, `reason`, `documentIds` (all documents of the hold) and
     * `releasedDocumentIds` (those no other active hold covers any more).
     */
   val Released: String = "legal-hold.released"
 
   /** Job that brings the object legal hold of a document's renditions in line with its holds. Payload:
-    * `documentId`. Enqueued when documents are added to or released from a hold and when a rendition is
-    * attached to a version of a document under legal hold (migration V19).
+    * `documentId`. Enqueued when documents are added to, removed from or released with a hold and when a
+    * rendition is attached to a version of a document under legal hold (migration V19).
     */
   val SyncJobKind: String = "archive.legal-hold-sync"

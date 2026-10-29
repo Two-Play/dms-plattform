@@ -1,9 +1,11 @@
 package dms.app
 
+import dms.archive.core.LegalHoldStore
 import dms.authz.{AccessDenied, Action, Authorizer, ConfigurationArea, Resource}
 import dms.db.{Db, DbError}
 import dms.documents.DocumentStatus
 import dms.identity.{Authenticator, Principal}
+import dms.kernel.DocumentId
 import dms.search.*
 import dms.search.core.SearchIndex
 import sttp.model.StatusCode
@@ -38,7 +40,9 @@ final case class SearchHitView(
     /** Relevance; absent for a listing without query text. */
     score: Option[Double],
     /** The document number (DMS-113), if the version has one. */
-    documentNumber: Option[String] = None
+    documentNumber: Option[String] = None,
+    /** True while an active legal hold covers the document (DMS-106); which holds is not shown here. */
+    legalHold: Boolean = false
 ) derives JsonCodec,
       Schema
 
@@ -135,7 +139,12 @@ object SearchApi:
               )
               .tapError(logFailure)
               .mapError(toResponse)
-          yield view(result)
+            held <- ZIO
+              .serviceWithZIO[Db](
+                _.transact(p.tenantId)(LegalHoldStore.heldAmong(result.hits.map(_.documentId).toSet))
+              )
+              .mapError(toResponse)
+          yield view(result, held)
       )
 
   val rebuild: ZServerEndpoint[Env, Any] =
@@ -183,7 +192,7 @@ object SearchApi:
       subject <- db.transact(p.tenantId)(authz.subject(p)).mapError(toResponse)
     yield subject
 
-  private def view(r: SearchResult): SearchResultView =
+  private def view(r: SearchResult, held: Set[DocumentId]): SearchResultView =
     def counts(fs: List[FacetCount]) = fs.map(f => FacetCountView(f.value, f.count))
     SearchResultView(
       r.total,
@@ -203,7 +212,8 @@ object SearchApi:
           h.language,
           h.organizationalUnit,
           h.score.filterNot(_.isNaN),
-          h.documentNumber
+          h.documentNumber,
+          held.contains(h.documentId)
         )
       ),
       SearchFacetsView(counts(r.facets.classes), counts(r.facets.statuses), counts(r.facets.languages))

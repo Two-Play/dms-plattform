@@ -43,7 +43,9 @@ final case class LibraryItem(
     /** Whether the version asks its readers for an acknowledgement (ADR 0027). */
     requiresAcknowledgement: Boolean,
     /** The caller is asked to acknowledge the version and has not done so yet. */
-    acknowledgementPending: Boolean
+    acknowledgementPending: Boolean,
+    /** An active legal hold covers the document (DMS-106). */
+    legalHold: Boolean = false
 )
 
 /** Sort orders of the library. */

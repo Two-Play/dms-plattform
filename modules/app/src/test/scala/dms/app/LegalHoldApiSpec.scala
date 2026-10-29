@@ -147,7 +147,7 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
   }
 
   private type Env = DocumentApi.Env & WorkflowApi.Env & LegalHoldService & SearchIndex & RenditionSource &
-    AuditTrail
+    AuditTrail & LibraryApi.Env
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -176,7 +176,8 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
       OpenSearch.layer,
       SearchDocuments.layer,
       SearchIndex.layer,
-      LegalHoldService.layer
+      LegalHoldService.layer,
+      AcknowledgementService.layer
     )
 
   private def token(user: UserId): String =
@@ -200,7 +201,8 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
 
   private val routes = ZioHttpInterpreter().toHttp(
     DocumentApi.endpoints.map(_.widen[Env]) ++ WorkflowApi.endpoints.map(_.widen[Env]) ++
-      SearchApi.endpoints.map(_.widen[Env]) ++ LegalHoldApi.endpoints.map(_.widen[Env])
+      SearchApi.endpoints.map(_.widen[Env]) ++ LegalHoldApi.endpoints.map(_.widen[Env]) ++
+      LibraryApi.endpoints.map(_.widen[Env])
   )
 
   private def call(user: UserId, method: String, path: String, body: Option[String] = None) =
@@ -322,7 +324,9 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
         docs.paths.pathItems.contains("/api/v1/legal-holds"),
         docs.paths.pathItems.contains("/api/v1/legal-holds/{id}"),
         docs.paths.pathItems.contains("/api/v1/legal-holds/{id}/documents"),
-        docs.paths.pathItems.contains("/api/v1/legal-holds/{id}/release")
+        docs.paths.pathItems.contains("/api/v1/legal-holds/{id}/release"),
+        docs.paths.pathItems.contains("/api/v1/legal-holds/search-preview"),
+        docs.paths.pathItems.contains("/api/v1/legal-holds/{id}/documents/{documentId}/remove")
       )
     },
     test(
@@ -513,6 +517,117 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
         badStatus._1 == Status.BadRequest,
         docAudit.collect { case ("document.legal-hold-released", reason) => reason } ==
           List(Some("Settled"), Some("Proceedings closed"))
+      )
+    },
+    test(
+      "the search preview lists the documents of a search; the fingerprint confirms exactly these (DMS-106)"
+    ) {
+      for
+        a <- validDocument("Werkvertrag Gamma Montage")
+        b <- validDocument("Werkvertrag Gamma Wartung")
+        filter = """{"q":"Gamma"}"""
+        preview <- call(records, "POST", "/api/v1/legal-holds/search-preview", Some(filter))
+          .map(as[HoldSearchPreviewView])
+        byReader <- call(reader, "POST", "/api/v1/legal-holds/search-preview", Some(filter))
+        byHr     <- call(recordsHr, "POST", "/api/v1/legal-holds/search-preview", Some(filter))
+        body = (fp: String) =>
+          s"""{"name":"Gamma","reason":"Construction dispute",
+             |"searchFilter":{"q":"Gamma","expectedCount":${preview.total},"expectedFingerprint":"$fp"}}""".stripMargin
+        wrong     <- create(records, body(LegalHoldApi.fingerprint(List(dms.kernel.DocumentId(a.id)))))
+        confirmed <- create(records, body(preview.fingerprint)).map(as[LegalHoldView])
+        again     <- call(records, "POST", "/api/v1/legal-holds/search-preview", Some(filter))
+          .map(as[HoldSearchPreviewView])
+      yield assertTrue(
+        preview.total == 2L,
+        preview.documents.map(_.documentId).toSet == Set(a.id, b.id),
+        preview.documents.forall(d => d.manageable && !d.underLegalHold),
+        preview.documents.map(_.title).toSet == Set("Werkvertrag Gamma Montage", "Werkvertrag Gamma Wartung"),
+        preview.fingerprint == LegalHoldApi.fingerprint(List(b.id, a.id).map(dms.kernel.DocumentId(_))),
+        byReader._1 == Status.Forbidden,
+        byHr._1 == Status.Forbidden,
+        wrong._1 == Status.Conflict,
+        code(wrong).contains("result_changed"),
+        confirmed.addedDocumentIds.exists(_.toSet == Set(a.id, b.id)),
+        again.documents.forall(_.underLegalHold),
+        again.fingerprint == preview.fingerprint
+      )
+    },
+    test("a single document is removed from a hold with a reason; the entry stays as history (DMS-106)") {
+      for
+        doc    <- validDocument("Liefervertrag Mitte")
+        other  <- validDocument("Liefervertrag Rand")
+        first  <- create(records, hold("Removal", List(doc.id, other.id))).map(as[LegalHoldView])
+        second <- create(records, hold("Keeps", List(other.id))).map(as[LegalHoldView])
+        remove = (user: UserId, hold: UUID, d: UUID, body: String) =>
+          call(user, "POST", s"/api/v1/legal-holds/$hold/documents/$d/remove", Some(body))
+        noReason  <- remove(records, first.id, doc.id, "{}")
+        byReader  <- remove(reader, first.id, doc.id, """{"reason":"Wrong"}""")
+        removed   <- remove(records, first.id, doc.id, """{"reason":"Added by mistake"}""")
+        twice     <- remove(records, first.id, doc.id, """{"reason":"Again"}""")
+        freed     <- document(reader, doc.id)
+        keeps     <- remove(records, first.id, other.id, """{"reason":"Other hold covers it"}""")
+        stillHeld <- document(records, other.id)
+        single    <- call(records, "GET", s"/api/v1/legal-holds/${first.id}").map(as[LegalHoldView])
+        readded   <- call(
+          records,
+          "POST",
+          s"/api/v1/legal-holds/${first.id}/documents",
+          Some(s"""{"reason":"Relevant after all","documentIds":["${doc.id}"]}""")
+        ).map(as[LegalHoldView])
+        heldAgain <- document(reader, doc.id)
+        history   <- call(records, "GET", s"/api/v1/legal-holds/${first.id}").map(as[LegalHoldView])
+        _         <- release(records, second.id)
+        _         <- release(records, first.id)
+        late      <- remove(records, first.id, doc.id, """{"reason":"Too late"}""")
+        holdAudit <- auditActions(first.id)
+        docAudit  <- auditActions(doc.id)
+      yield assertTrue(
+        noReason._1 == Status.UnprocessableEntity,
+        byReader._1 == Status.Forbidden,
+        removed._1 == Status.Ok,
+        as[LegalHoldView](removed).documentCount == 1,
+        twice._1 == Status.NotFound,
+        !freed.legalHold,
+        keeps._1 == Status.Ok,
+        stillHeld.legalHold,
+        stillHeld.legalHolds.exists(_.map(_.id) == List(second.id)),
+        single.documentCount == 0,
+        single.documents.exists(
+          _.map(d => (d.documentId, d.removalReason, d.removedBy)) == List(
+            (doc.id, Some("Added by mistake"), Some(records.value)),
+            (other.id, Some("Other hold covers it"), Some(records.value))
+          )
+        ),
+        readded.addedDocumentIds.contains(List(doc.id)),
+        heldAgain.legalHold,
+        history.documents.exists(_.count(_.documentId == doc.id) == 2),
+        history.documentCount == 1,
+        late._1 == Status.Conflict,
+        holdAudit.contains(("legal-hold.document-removed", Some("Added by mistake"))),
+        docAudit.contains(("document.legal-hold-removed", Some("Added by mistake")))
+      )
+    },
+    test("lists, search hits and the library mark held documents for every reader, without hold details") {
+      for
+        doc     <- validDocument("Kaufvertrag Delta Geheimsache")
+        free    <- validDocument("Kaufvertrag Delta offen")
+        _       <- create(records, hold("Hold name Delta-Secret", List(doc.id)))
+        listed  <- call(reader, "GET", "/api/v1/documents?limit=200")
+        search  <- call(reader, "GET", "/api/v1/search?q=Delta")
+        library <- call(reader, "GET", "/api/v1/library?q=Delta")
+        docs  = as[List[DocumentSummaryView]](listed)
+        hits  = as[SearchResultView](search).hits
+        items = as[LibraryView](library).items
+      yield assertTrue(
+        docs.find(_.id == doc.id).exists(_.legalHold),
+        docs.find(_.id == free.id).exists(!_.legalHold),
+        hits.find(_.documentId == doc.id).exists(_.legalHold),
+        hits.find(_.documentId == free.id).exists(!_.legalHold),
+        items.find(_.documentId == doc.id).exists(_.legalHold),
+        items.find(_.documentId == free.id).exists(!_.legalHold),
+        !listed._2.contains("Delta-Secret"),
+        !search._2.contains("Delta-Secret"),
+        !library._2.contains("Delta-Secret")
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock @@ TestAspect.timeout(10.minutes)

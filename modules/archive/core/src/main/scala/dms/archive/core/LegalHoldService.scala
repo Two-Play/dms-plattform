@@ -125,7 +125,7 @@ final class LegalHoldService(audit: AuditTrail):
       _ <- ZIO.when(updated == 0)(
         ZIO.fail(LegalHoldError.Released(s"legal hold ${id.value} was released concurrently"))
       )
-      members   <- documents(id).map(_.map(_.documentId))
+      members   <- documents(id).map(_.filter(_.isCurrent).map(_.documentId))
       stillHeld <- sql(heldDocuments).map(_.toSet)
       freed = members.filterNot(stillHeld.contains)
       _ <- record(
@@ -161,6 +161,62 @@ final class LegalHoldService(audit: AuditTrail):
       released <- get(id)
     yield released
 
+  /** Removes a single document from an active hold (DMS-106), e.g. one added by mistake. The entry stays as
+    * history with who removed it when and why; the document is no longer under legal hold unless another
+    * active hold covers it. `NotFound` if the hold does not cover the document (any more).
+    */
+  def removeDocument(
+      id: LegalHoldId,
+      document: DocumentId,
+      reason: String,
+      actor: UserId
+  ): IO[LegalHoldError, LegalHold] =
+    for
+      why  <- requireReason(reason)
+      hold <- get(id)
+      _    <- ZIO.foreachDiscard(hold.release)(_ =>
+        ZIO.fail(LegalHoldError.Released(s"legal hold ${id.value} is released; documents cannot be removed"))
+      )
+      updated <- sql(
+        sql"""update dms.legal_hold_document
+              set removed_at = now(), removed_by = ${actor.value}, removal_reason = $why
+              where hold_id = ${id.value} and document_id = ${document.value} and removed_at is null""".update
+          .run()
+      )
+      _ <- ZIO.when(updated == 0)(
+        ZIO.fail(
+          LegalHoldError.NotFound(s"legal hold ${id.value} does not cover document ${document.value}")
+        )
+      )
+      stillHeld <- sql(heldDocuments).map(_.contains(document))
+      _         <- record(
+        actor,
+        "legal-hold.document-removed",
+        AuditObject("legal-hold", Some(id.value)),
+        why,
+        Json.Obj("documentId" -> Json.Str(document.value.toString))
+      )
+      _ <- record(
+        actor,
+        "document.legal-hold-removed",
+        AuditObject("document", Some(document.value)),
+        why,
+        Json.Obj("holdId" -> Json.Str(id.value.toString), "underLegalHold" -> Json.Bool(stillHeld))
+      )
+      _ <- publish(
+        id,
+        LegalHoldEvents.DocumentRemoved,
+        Json.Obj(
+          "holdId"         -> Json.Str(id.value.toString),
+          "documentId"     -> Json.Str(document.value.toString),
+          "reason"         -> Json.Str(why),
+          "underLegalHold" -> Json.Bool(stillHeld)
+        )
+      )
+      _       <- ZIO.unless(stillHeld)(enqueueSync(List(document)))
+      changed <- get(id)
+    yield changed
+
   /** A hold, or `NotFound`. */
   def get(id: LegalHoldId): IO[LegalHoldError, LegalHold] =
     sql(holds(id = Some(id.value)).headOption)
@@ -170,29 +226,36 @@ final class LegalHoldService(audit: AuditTrail):
   def list(active: Option[Boolean]): IO[LegalHoldError, List[LegalHold]] =
     sql(holds(active = active))
 
-  /** Every hold that covers or covered `document`, active and released, the latest first (evidence reports,
-    * DMS-57).
+  /** Every hold that covers or covered `document` (also if it was removed from the hold), active and
+    * released, the latest first (evidence reports, DMS-57).
     */
   def holdsOf(document: DocumentId): IO[LegalHoldError, List[LegalHold]] =
     sql(holds(document = Some(document.value)))
 
-  /** The documents a hold covers, in the order they were added. */
+  /** The documents a hold covers or covered (removed ones with their removal), in the order they were added.
+    */
   def documents(id: LegalHoldId): IO[LegalHoldError, List[HeldDocument]] =
     sql(
-      sql"""select hold_id, document_id, added_via, reason, added_by, added_at
+      sql"""select hold_id, document_id, added_via, reason, added_by, added_at, removed_at, removed_by,
+                   removal_reason
             from dms.legal_hold_document where hold_id = ${id.value}
-            order by added_at, document_id"""
-        .query[(UUID, UUID, String, String, String, OffsetDateTime)]
+            order by added_at, entry_id"""
+        .query[DocumentRow]
         .run()
         .toList
-        .map((hold, doc, via, reason, by, at) =>
+        .map((hold, doc, via, reason, by, at, removedAt, removedBy, removalReason) =>
           HeldDocument(
             LegalHoldId(hold),
             DocumentId(doc),
             HoldSource.valueOf(via),
             reason,
             UserId(by),
-            at.toInstant
+            at.toInstant,
+            for
+              a <- removedAt
+              b <- removedBy
+              w <- removalReason
+            yield HoldRemoval(UserId(b), a.toInstant, w)
           )
         )
     )
@@ -209,7 +272,7 @@ final class LegalHoldService(audit: AuditTrail):
         sql(
           sql"""insert into dms.legal_hold_document (tenant_id, hold_id, document_id, added_via, reason, added_by)
                 values (dms.current_tenant(), ${id.value}, ${d.value}, ${source.toString}, $reason, ${actor.value})
-                on conflict (hold_id, document_id) do nothing
+                on conflict (hold_id, document_id) where removed_at is null do nothing
                 returning document_id""".query[UUID].run().headOption.map(DocumentId(_))
         )
       )
@@ -274,6 +337,19 @@ object LegalHoldService:
         Long
     )
 
+  private type DocumentRow =
+    (
+        UUID,
+        UUID,
+        String,
+        String,
+        String,
+        OffsetDateTime,
+        Option[OffsetDateTime],
+        Option[String],
+        Option[String]
+    )
+
   private def sql[A](f: DbTx ?=> A): IO[LegalHoldError, A] =
     Db.sql(f).mapError(LegalHoldError.Database(_))
 
@@ -324,25 +400,27 @@ object LegalHoldService:
     sql"""select distinct m.document_id
           from dms.legal_hold_document m
           join dms.legal_hold h on h.id = m.hold_id
-          where h.released_at is null""".query[UUID].run().toList.map(DocumentId(_))
+          where h.released_at is null and m.removed_at is null""".query[UUID].run().toList.map(DocumentId(_))
 
   /** Holds, the latest first, restricted to one hold, to active or released ones, or to those covering a
-    * document.
+    * document: now (`current`), or at any time including documents removed from the hold.
     */
   private[core] def holds(
       id: Option[UUID] = None,
       active: Option[Boolean] = None,
-      document: Option[UUID] = None
+      document: Option[UUID] = None,
+      current: Boolean = false
   )(using DbTx): List[LegalHold] =
     sql"""select h.id, h.name, h.matter_reference, h.reason, h.created_by, h.created_at, h.released_at,
                  h.released_by, h.release_reason,
-                 (select count(*) from dms.legal_hold_document m where m.hold_id = h.id)
+                 (select count(*) from dms.legal_hold_document m where m.hold_id = h.id and m.removed_at is null)
           from dms.legal_hold h
           where (cast($id as uuid) is null or h.id = cast($id as uuid))
             and (cast($active as boolean) is null or (h.released_at is null) = cast($active as boolean))
             and (cast($document as uuid) is null
                  or exists (select 1 from dms.legal_hold_document m
-                            where m.hold_id = h.id and m.document_id = cast($document as uuid)))
+                            where m.hold_id = h.id and m.document_id = cast($document as uuid)
+                              and (not cast($current as boolean) or m.removed_at is null)))
           order by h.created_at desc, h.id""".query[HoldRow].run().toList.map(toHold)
 
   private def toHold(r: HoldRow): LegalHold =
@@ -376,6 +454,6 @@ object LegalHoldStore extends LegalHoldLookup:
     else Db.sql(heldDocuments.filter(documents.contains).toSet)
 
   def activeHolds(document: DocumentId): IO[DbError, List[LegalHold]] =
-    Db.sql(holds(active = Some(true), document = Some(document.value)).reverse)
+    Db.sql(holds(active = Some(true), document = Some(document.value), current = true).reverse)
 
   val layer: ULayer[LegalHoldLookup] = ZLayer.succeed(LegalHoldStore)

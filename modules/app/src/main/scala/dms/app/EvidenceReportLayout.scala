@@ -264,8 +264,13 @@ object EvidenceReportLayout:
             h.name + h.matterReference.fold("")(m => s" ($m)"),
             h.reason,
             s"${at(h.createdAt)} by ${h.createdBy}",
-            h.releasedAt.fold("active")(t =>
-              s"${at(t)} by ${h.releasedBy.getOrElse("")}: ${h.releaseReason.getOrElse("")}"
+            h.documentRemovedAt.fold(
+              h.releasedAt.fold("active")(t =>
+                s"${at(t)} by ${h.releasedBy.getOrElse("")}: ${h.releaseReason.getOrElse("")}"
+              )
+            )(t =>
+              s"document removed ${at(t)} by ${h.documentRemovedBy.getOrElse("")}: " +
+                h.documentRemovalReason.getOrElse("")
             )
           )
         )

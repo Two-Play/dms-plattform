@@ -42,6 +42,7 @@ export const shell: Translation<typeof en.shell> = {
     tasks: 'Aufgaben',
     templates: 'Vorlagen',
     compliance: 'Compliance',
+    legalHolds: 'Legal Holds',
     admin: 'Administration',
   },
 }

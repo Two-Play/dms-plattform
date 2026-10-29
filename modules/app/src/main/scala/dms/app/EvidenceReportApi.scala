@@ -204,7 +204,15 @@ object EvidenceReportApi:
           audience <- audiences(p.tenantId, details, assignments, groups).mapError(DocumentError.Database(_))
           tasks    <- reviews.tasksOfDocument(id)
           held     <- holds.holdsOf(id).mapError(legalHoldError)
-          entries  <- evidence.entriesOf(id.value).mapError(DocumentError.Database(_))
+          removals <- ZIO.foreach(held)(h =>
+            holds
+              .documents(h.id)
+              .mapBoth(
+                legalHoldError,
+                _.filter(_.documentId == id).lastOption.flatMap(_.removal).map(h.id.value -> _)
+              )
+          )
+          entries <- evidence.entriesOf(id.value).mapError(DocumentError.Database(_))
         yield EvidenceFacts(
           details,
           cases,
@@ -214,7 +222,8 @@ object EvidenceReportApi:
           tasks,
           held,
           entries,
-          details.versions.map(v => v.id -> WorkflowDocuments.contentSha256(v)).toMap
+          details.versions.map(v => v.id -> WorkflowDocuments.contentSha256(v)).toMap,
+          removals.flatten.toMap
         )
       }
       // Outside the transaction: the chain verification opens its own, the renditions come from object storage.

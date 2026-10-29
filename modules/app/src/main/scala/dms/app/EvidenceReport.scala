@@ -1,6 +1,6 @@
 package dms.app
 
-import dms.archive.LegalHold
+import dms.archive.{HoldRemoval, LegalHold}
 import dms.audit.{ChainIntegrity, RecordedEntry}
 import dms.documents.core.DocumentDetails
 import dms.documents.{Acknowledgement, DocumentVersion, RecordedDeviationRequest, ReviewTask, Validity}
@@ -160,7 +160,11 @@ final case class EvidenceLegalHold(
     createdAt: Instant,
     releasedAt: Option[Instant],
     releasedBy: Option[String],
-    releaseReason: Option[String]
+    releaseReason: Option[String],
+    /** Set if the document was removed from this hold (DMS-106) and not added again. */
+    documentRemovedAt: Option[Instant] = None,
+    documentRemovedBy: Option[String] = None,
+    documentRemovalReason: Option[String] = None
 ) derives JsonCodec
 
 /** An audit chain entry about the document, with its stored hash. */
@@ -247,7 +251,9 @@ final case class EvidenceFacts(
     reviews: List[ReviewTask],
     holds: List[LegalHold],
     entries: List[RecordedEntry],
-    contentSha256: Map[UUID, String]
+    contentSha256: Map[UUID, String],
+    /** Holds the document was removed from (and not added to again), by hold id (DMS-106). */
+    holdRemovals: Map[UUID, HoldRemoval] = Map.empty
 )
 
 /** Result of re-reading a stored rendition. */
@@ -352,7 +358,10 @@ object EvidenceReport:
           h.createdAt,
           h.release.map(_.at),
           h.release.map(_.by.value),
-          h.release.map(_.reason)
+          h.release.map(_.reason),
+          facts.holdRemovals.get(h.id.value).map(_.at),
+          facts.holdRemovals.get(h.id.value).map(_.by.value),
+          facts.holdRemovals.get(h.id.value).map(_.reason)
         )
       ),
       auditTrail = facts.entries.map(e =>
