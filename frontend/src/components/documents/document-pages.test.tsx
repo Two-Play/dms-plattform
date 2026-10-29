@@ -93,6 +93,7 @@ function draftDocument(values: Record<string, FieldValue>, status = 'Draft'): Do
     legalHold: false,
     canAssignNumber: false,
     canStartVersion: false,
+    canDiscardDraft: false,
     kind: 'Structured',
     current: {
       id: 'v1',

@@ -833,6 +833,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/draft/discard': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Discards the open draft (DMS-129), e.g. one created by accident; requires DiscardDraft (the draft's author, the document's owner or a tenant administrator). Only a draft that is not submitted (409 otherwise: submitted, approved and published versions are withdrawn or destroyed). The version is kept as a record in status Discarded and is no longer readable. A first version takes the document out of lists, search, library and task inbox; for a new version the valid version stays and a new version can be started again. Attachment links and the original of the draft are removed; files no version references any more are deleted unless the document is under legal hold. Pending workflow tasks of the draft are cancelled. The optional reason (at most 4000 characters) is recorded in the audit trail; an assigned document number stays reserved. */
+    post: operations['postApiV1DocumentsIdDraftDiscard']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/{id}/deviation-requests': {
     parameters: {
       query?: never
@@ -2741,6 +2758,30 @@ export interface components {
       requests?: components['schemas']['DeviationRequestView'][]
       deviations?: components['schemas']['DeviationView'][]
     }
+    /** DiscardDraft */
+    DiscardDraft: {
+      reason?: string
+    }
+    /** DiscardedDraftView */
+    DiscardedDraftView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      version: string
+      documentDiscarded: boolean
+      /** Format: uuid */
+      validVersionId?: string
+      validVersion?: string
+      /** Format: int32 */
+      removedAttachments: number
+      /** Format: int32 */
+      releasedFiles: number
+      /** Format: int32 */
+      keptFiles: number
+      /** Format: int32 */
+      cancelledTasks: number
+    }
     /** DocumentClassView */
     DocumentClassView: {
       /** Format: uuid */
@@ -2790,6 +2831,7 @@ export interface components {
       | 'Approved'
       | 'Archived'
       | 'Destroyed'
+      | 'Discarded'
       | 'Draft'
       | 'InApproval'
       | 'InReview'
@@ -2888,6 +2930,7 @@ export interface components {
       kind: string
       canStartVersion: boolean
       startVersionBlocked?: string
+      canDiscardDraft: boolean
     }
     /** EditorialCheckView */
     EditorialCheckView: {
@@ -6994,6 +7037,49 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['DocumentVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1DocumentsIdDraftDiscard: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DiscardDraft']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DiscardedDraftView']
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: body */

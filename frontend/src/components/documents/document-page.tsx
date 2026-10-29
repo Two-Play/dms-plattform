@@ -34,6 +34,7 @@ import { VersionContent } from './version-content'
 import { VersionMetadata } from './version-metadata'
 import { FileContentPanel } from './file-content-panel'
 import { NewVersionAction } from './new-version-action'
+import { DiscardDraftAction } from './discard-draft-action'
 import { ChangeSummaryPanel } from './change-summary-panel'
 
 /** Whether the page shows the acknowledgement card for a version: valid and requiring it. */
@@ -145,6 +146,7 @@ export function DocumentPage({
                 canAssign={document.data.canAssignNumber}
               />
               <NewVersionAction document={document.data} />
+              {!showingOther && <DiscardDraftAction document={document.data} />}
               <EvidenceReportAction documentId={document.data.id} />
             </>
           )

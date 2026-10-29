@@ -151,6 +151,7 @@ export const status = {
   Withdrawn: 'Withdrawn',
   Archived: 'Archived',
   Destroyed: 'Destroyed',
+  Discarded: 'Discarded',
   Running: 'Running',
   Returned: 'Returned',
   Rendering: 'Rendering',

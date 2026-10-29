@@ -95,6 +95,7 @@ function documentWith(
     legalHold: false,
     canAssignNumber: false,
     canStartVersion: true,
+    canDiscardDraft: false,
     kind: 'Structured',
     current,
     ...extra,

@@ -74,6 +74,7 @@ const document: DocumentView = {
   legalHold: false,
   canAssignNumber: false,
   canStartVersion: false,
+  canDiscardDraft: false,
   kind: 'Structured',
   current: published,
 }
