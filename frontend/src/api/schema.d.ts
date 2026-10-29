@@ -1880,6 +1880,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/admin/webhooks/{id}/test': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Sends a signed test event (`webhook.test`) to the receiver right away and returns the outcome; also for paused subscriptions. Not part of the delivery log and not retried (tenant administrators). */
+    post: operations['postApiV1AdminWebhooksIdTest']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/admin/webhooks/{id}/deliveries': {
     parameters: {
       query?: never
@@ -4211,6 +4228,7 @@ export interface components {
       eventType: string
       /** Format: uuid */
       documentId?: string
+      documentNumber?: string
       status: string
       /** Format: int32 */
       attempts: number
@@ -4231,6 +4249,16 @@ export interface components {
       documentClasses?: string[]
       description?: string
       active?: boolean
+    }
+    /** WebhookTestResult */
+    WebhookTestResult: {
+      webhookId: string
+      delivered: boolean
+      /** Format: int32 */
+      statusCode?: number
+      error?: string
+      /** Format: int64 */
+      durationMillis: number
     }
     /** WebhookView */
     WebhookView: {
@@ -9662,6 +9690,45 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WebhookWithSecret']
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1AdminWebhooksIdTest: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Webhook subscription id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WebhookTestResult']
         }
       }
       /** @description Invalid value for: path parameter id */

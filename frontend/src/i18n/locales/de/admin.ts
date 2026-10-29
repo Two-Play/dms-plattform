@@ -4,12 +4,13 @@ import type * as en from '@/i18n/locales/en/admin'
 export const admin: Translation<typeof en.admin> = {
   title: 'Administration',
   description:
-    'Zugriffsgruppen für vertrauliche Dokumente, Nummernkreise, Stellvertretungen und der Systemstatus.',
+    'Zugriffsgruppen für vertrauliche Dokumente, Nummernkreise, Stellvertretungen, Webhooks und der Systemstatus.',
   loading: 'Wird geladen',
   onlyAdmins: 'Die Administration steht nur der Mandanten-Administration zur Verfügung.',
   tabGroups: 'Zugriffsgruppen',
   tabNumberRanges: 'Nummernkreise',
   tabDeputyships: 'Stellvertretungen',
+  tabWebhooks: 'Webhooks',
   tabSystem: 'Systemstatus',
   setDeputy: 'Stellvertretung festlegen',
   setDeputyText: 'Für sich selbst oder, als Mandanten-Administration, für andere.',
