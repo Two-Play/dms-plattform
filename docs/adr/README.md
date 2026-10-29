@@ -53,3 +53,4 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0037](0037-user-directory.md) | User directory: display names from ZITADEL's user service, resolved by the backend per tenant and cached | Accepted | high |
 | [0038](0038-ui-localization.md) | UI localization: German default with English, own typed message catalogs, Intl for formats | Accepted | high |
 | [0039](0039-document-view-and-on-demand-pdfs.md) | Document view and on-demand PDFs: every readable version rendered as HTML, draft PDFs and copies with change history printed on request and never stored | Accepted | high |
+| [0040](0040-number-ranges.md) | Number ranges: counter row locked in the creating transaction (gap-free on rollback), the document number as frozen core field and stable key | Accepted | medium |
