@@ -450,14 +450,21 @@ private[core] object DocumentStore:
       validFrom: Option[LocalDate],
       publishedAt: Option[OffsetDateTime],
       reviewDueOn: Option[LocalDate],
-      requiresAcknowledgement: Boolean
+      requiresAcknowledgement: Boolean,
+      scope: String,
+      documentNumber: Option[String],
+      firstPublishedAt: Option[OffsetDateTime]
   ) derives DbCodec
 
-  /** Every version of the tenant valid now, by title. */
+  /** Every version of the tenant valid now, by title, with the first publication of any version of its
+    * document (library, DMS-119).
+    */
   def currentlyValid(using DbTx): List[CurrentRow] =
     sql"""select d.id, d.class_id, d.class_version, d.title, d.owner_id, d.author_id, d.template_id,
                  d.template_version, d.created_at, v.id, v.major, v.minor, v.status, v.field_values, v.created_by,
-                 v.released_by, v.valid_from, v.published_at, v.review_due_on, v.requires_acknowledgement
+                 v.released_by, v.valid_from, v.published_at, v.review_due_on, v.requires_acknowledgement,
+                 v.scope, d.document_number,
+                 (select min(p.published_at) from dms.document_version p where p.document_id = d.id)
           from dms.document_version v
           join dms.document d on d.id = v.document_id
           where v.status in ('Published', 'ReviewDue')

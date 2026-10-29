@@ -16,6 +16,7 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
 import { Route as AppComplianceRouteImport } from './routes/_app/compliance'
 import { Route as AppDeputiesRouteImport } from './routes/_app/deputies'
+import { Route as AppLibraryRouteImport } from './routes/_app/library'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppTasksRouteImport } from './routes/_app/tasks'
 import { Route as AppDocumentsIndexRouteImport } from './routes/_app/documents/index'
@@ -57,6 +58,11 @@ const AppComplianceRoute = AppComplianceRouteImport.update({
 const AppDeputiesRoute = AppDeputiesRouteImport.update({
   id: '/deputies',
   path: '/deputies',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLibraryRoute = AppLibraryRouteImport.update({
+  id: '/library',
+  path: '/library',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSearchRoute = AppSearchRouteImport.update({
@@ -108,6 +114,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AppAdminRoute
   '/compliance': typeof AppComplianceRoute
   '/deputies': typeof AppDeputiesRoute
+  '/library': typeof AppLibraryRoute
   '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
   '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
@@ -123,6 +130,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AppAdminRoute
   '/compliance': typeof AppComplianceRoute
   '/deputies': typeof AppDeputiesRoute
+  '/library': typeof AppLibraryRoute
   '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
   '/': typeof AppIndexRoute
@@ -141,6 +149,7 @@ export interface FileRoutesById {
   '/_app/admin': typeof AppAdminRoute
   '/_app/compliance': typeof AppComplianceRoute
   '/_app/deputies': typeof AppDeputiesRoute
+  '/_app/library': typeof AppLibraryRoute
   '/_app/search': typeof AppSearchRoute
   '/_app/tasks': typeof AppTasksRoute
   '/_app/': typeof AppIndexRoute
@@ -160,6 +169,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/compliance'
     | '/deputies'
+    | '/library'
     | '/search'
     | '/tasks'
     | '/documents/$documentId'
@@ -175,6 +185,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/compliance'
     | '/deputies'
+    | '/library'
     | '/search'
     | '/tasks'
     | '/'
@@ -192,6 +203,7 @@ export interface FileRouteTypes {
     | '/_app/admin'
     | '/_app/compliance'
     | '/_app/deputies'
+    | '/_app/library'
     | '/_app/search'
     | '/_app/tasks'
     | '/_app/'
@@ -260,6 +272,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDeputiesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/library': {
+      id: '/_app/library'
+      path: '/library'
+      fullPath: '/library'
+      preLoaderRoute: typeof AppLibraryRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/search': {
       id: '/_app/search'
       path: '/search'
@@ -323,6 +342,7 @@ interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
   AppComplianceRoute: typeof AppComplianceRoute
   AppDeputiesRoute: typeof AppDeputiesRoute
+  AppLibraryRoute: typeof AppLibraryRoute
   AppSearchRoute: typeof AppSearchRoute
   AppTasksRoute: typeof AppTasksRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -338,6 +358,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
   AppComplianceRoute: AppComplianceRoute,
   AppDeputiesRoute: AppDeputiesRoute,
+  AppLibraryRoute: AppLibraryRoute,
   AppSearchRoute: AppSearchRoute,
   AppTasksRoute: AppTasksRoute,
   AppIndexRoute: AppIndexRoute,

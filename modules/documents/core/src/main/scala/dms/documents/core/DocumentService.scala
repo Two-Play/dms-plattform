@@ -194,6 +194,10 @@ final case class ValidVersion(
   *   the review date (ADR 0030); `None` if the version has no periodic review
   * @param requiresAcknowledgement
   *   whether its readers are asked to acknowledge it (ADR 0027)
+  * @param scope
+  *   validity scope of the version; empty: unrestricted
+  * @param firstPublishedAt
+  *   the first publication of any version of the document (library, DMS-119: "new" documents)
   */
 final case class CurrentVersion(
     document: Document,
@@ -207,7 +211,9 @@ final case class CurrentVersion(
     validFrom: Option[java.time.LocalDate],
     publishedAt: Option[Instant],
     reviewDueOn: Option[java.time.LocalDate],
-    requiresAcknowledgement: Boolean
+    requiresAcknowledgement: Boolean,
+    scope: String = "",
+    firstPublishedAt: Option[Instant] = None
 ):
   def label: String = Versioning.label(number, status, 1)
 
@@ -515,7 +521,8 @@ final class DocumentService(
     }
 
   /** Every version valid now (Published or ReviewDue), by title, with its class path, review date and whether
-    * it asks for acknowledgement (compliance cockpit, DMS-59). The caller decides which of them may be seen.
+    * it asks for acknowledgement (compliance cockpit, DMS-59; library, DMS-119). The caller decides which of
+    * them may be seen.
     */
   def currentlyValid: IO[DocumentError, List[CurrentVersion]] =
     for
@@ -535,7 +542,8 @@ final class DocumentService(
           UserId(r.authorId),
           TemplateId(r.templateId),
           r.templateVersion,
-          r.documentCreatedAt.toInstant
+          r.documentCreatedAt.toInstant,
+          r.documentNumber
         ),
         byClass((r.classId, r.classVersion)),
         r.versionId,
@@ -552,7 +560,9 @@ final class DocumentService(
         r.validFrom,
         r.publishedAt.map(_.toInstant),
         r.reviewDueOn,
-        r.requiresAcknowledgement
+        r.requiresAcknowledgement,
+        r.scope,
+        r.firstPublishedAt.map(_.toInstant)
       )
     )
 

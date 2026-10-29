@@ -5,6 +5,7 @@ import {
   FileText,
   LayoutDashboard,
   LayoutTemplate,
+  Library,
   LogOut,
   Languages,
   Moon,
@@ -39,13 +40,15 @@ import type { Messages } from '@/i18n/locales/en'
 
 /** Navigation entries; those with `role` are shown only to holders of that business role. */
 const navItems: readonly {
-  to: '/' | '/documents' | '/search' | '/tasks' | '/templates' | '/compliance' | '/admin'
+  to:
+    '/' | '/documents' | '/library' | '/search' | '/tasks' | '/templates' | '/compliance' | '/admin'
   label: keyof Messages['shell']['nav']
   icon: typeof LayoutDashboard
   role?: BusinessRole
 }[] = [
   { to: '/', label: 'home', icon: LayoutDashboard },
   { to: '/documents', label: 'documents', icon: FileText },
+  { to: '/library', label: 'library', icon: Library },
   { to: '/search', label: 'search', icon: Search },
   { to: '/tasks', label: 'tasks', icon: CheckSquare },
   { to: '/templates', label: 'templates', icon: LayoutTemplate, role: 'TemplateDesigner' },

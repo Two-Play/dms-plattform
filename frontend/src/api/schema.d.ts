@@ -624,6 +624,23 @@ export interface paths {
     patch: operations['patchApiV1DocumentsIdAttachmentsAttachmentid']
     trace?: never
   }
+  '/api/v1/documents/by-number/{number}/current': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Stable address by document number (DMS-113): the same as `/documents/{id}/current` for the document with this number. 404 if no document has the number or the caller may not read a valid version. */
+    get: operations['getApiV1DocumentsBy-numberNumberCurrent']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/{id}/current': {
     parameters: {
       query?: never
@@ -667,6 +684,23 @@ export interface paths {
     }
     /** @description Stable address of the HTML page of the version that is valid now: its content resolved with its field values, as printed into the archive rendition. Self-contained (no scripts, no external resources). */
     get: operations['getApiV1DocumentsIdCurrent.html']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/library': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The library: the versions valid now that the caller may read, one per document and validity scope, filtered by free text, class, issuing unit, tag and confidentiality, with facet counts, markers for documents new or changed since a date and the caller's open acknowledgements. */
+    get: operations['getApiV1Library']
     put?: never
     post?: never
     delete?: never
@@ -734,7 +768,7 @@ export interface paths {
       cookie?: never
     }
     /** @description A PDF of an open version (draft, in review, in approval), printed on demand from its saved state and marked "Draft – not valid" in the header and as watermark on every page. Not archived and not stored; the download is audited. 409 for approved versions (download their rendition). Requires ReadDocument on the version. */
-    get: operations['getApiV1DocumentsIdVersionsVersionidDraftPdf']
+    get: operations['getApiV1DocumentsIdVersionsVersionidDraft.pdf']
     put?: never
     post?: never
     delete?: never
@@ -751,7 +785,7 @@ export interface paths {
       cookie?: never
     }
     /** @description A copy of an approved version printed on demand, e.g. with the change history appended; header and footer as in the archive rendition plus the note that the archived rendition is authoritative. The archived PDF/A is not altered. Not stored; the download is audited. 409 for versions that were never approved. Requires ReadDocument on the version. */
-    get: operations['getApiV1DocumentsIdVersionsVersionidCopyPdf']
+    get: operations['getApiV1DocumentsIdVersionsVersionidCopy.pdf']
     put?: never
     post?: never
     delete?: never
@@ -1424,10 +1458,10 @@ export interface paths {
       cookie?: never
     }
     /** @description The number ranges of the tenant by key, each with the number the next document would get */
-    get: operations['getApiV1AdminNumberRanges']
+    get: operations['getApiV1AdminNumber-ranges']
     put?: never
     /** @description Creates a number range. 422 for an invalid key, name, pattern or start value, or a yearly reset without year in the pattern; 409 for a taken key. */
-    post: operations['postApiV1AdminNumberRanges']
+    post: operations['postApiV1AdminNumber-ranges']
     delete?: never
     options?: never
     head?: never
@@ -1444,7 +1478,7 @@ export interface paths {
     get?: never
     put?: never
     /** @description Checks a pattern and shows the first number of a period this year, e.g. while typing */
-    post: operations['postApiV1AdminNumberRangesPreview']
+    post: operations['postApiV1AdminNumber-rangesPreview']
     delete?: never
     options?: never
     head?: never
@@ -1459,9 +1493,9 @@ export interface paths {
       cookie?: never
     }
     /** @description A number range */
-    get: operations['getApiV1AdminNumberRangesId']
+    get: operations['getApiV1AdminNumber-rangesId']
     /** @description Changes name, pattern, start value and yearly reset. Numbers already assigned stay; the change applies to the next number. */
-    put: operations['putApiV1AdminNumberRangesId']
+    put: operations['putApiV1AdminNumber-rangesId']
     post?: never
     delete?: never
     options?: never
@@ -1477,7 +1511,7 @@ export interface paths {
       cookie?: never
     }
     /** @description Every document class with its own and its effective number range, by key */
-    get: operations['getApiV1AdminNumberRangeAssignments']
+    get: operations['getApiV1AdminNumber-range-assignments']
     put?: never
     post?: never
     delete?: never
@@ -1495,10 +1529,10 @@ export interface paths {
     }
     get?: never
     /** @description Assigns a number range to a class; subclasses inherit it unless they have their own. Without `numberRangeId` the class explicitly gets no number range. */
-    put: operations['putApiV1AdminNumberRangeAssignmentsClassid']
+    put: operations['putApiV1AdminNumber-range-assignmentsClassid']
     post?: never
     /** @description Removes the class's own assignment: it inherits the number range of its parent again */
-    delete: operations['deleteApiV1AdminNumberRangeAssignmentsClassid']
+    delete: operations['deleteApiV1AdminNumber-range-assignmentsClassid']
     options?: never
     head?: never
     patch?: never
@@ -2452,6 +2486,68 @@ export interface components {
       documentCount: number
       documents?: components['schemas']['HeldDocumentView'][]
       addedDocumentIds?: string[]
+    }
+    /** LibraryFacetView */
+    LibraryFacetView: {
+      value: string
+      label?: string
+      /** Format: int32 */
+      count: number
+    }
+    /** LibraryFacetsView */
+    LibraryFacetsView: {
+      class?: components['schemas']['LibraryFacetView'][]
+      unit?: components['schemas']['LibraryFacetView'][]
+      tag?: components['schemas']['LibraryFacetView'][]
+      confidentiality?: components['schemas']['LibraryFacetView'][]
+      /** Format: int32 */
+      changed: number
+      /** Format: int32 */
+      pending: number
+    }
+    /** LibraryItemView */
+    LibraryItemView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title: string
+      documentNumber?: string
+      version: string
+      status: string
+      classPath?: string[]
+      classLabel: string
+      organizationalUnit?: string
+      confidentiality: string
+      tags?: string[]
+      scope: string
+      summary?: string
+      /** Format: date */
+      validFrom?: string
+      /** Format: date-time */
+      validSince: string
+      /** Format: date-time */
+      publishedAt: string
+      isNew: boolean
+      changed: boolean
+      requiresAcknowledgement: boolean
+      acknowledgementPending: boolean
+    }
+    /** LibraryView */
+    LibraryView: {
+      /** Format: int32 */
+      total: number
+      /** Format: int32 */
+      page: number
+      /** Format: int32 */
+      size: number
+      sort: string
+      order: string
+      /** Format: date */
+      since: string
+      timeZone: string
+      items?: components['schemas']['LibraryItemView'][]
+      facets: components['schemas']['LibraryFacetsView']
     }
     /** LineBreak */
     LineBreak: {
@@ -3497,14 +3593,10 @@ export interface components {
     VersionHtmlView: {
       /** Format: uuid */
       versionId: string
-      /** @description `1.1-draft.3` while open, `1.1` from approval on. */
       version: string
       status: string
-      /** @description "Draft – not valid" (in the document language) for versions that were never approved; shown as banner and watermark in the HTML. Empty for approved versions, which are rendered from their frozen package. */
       draftMarking?: string
-      /** @description Language of the document, e.g. `de`. */
       language: string
-      /** @description HTML fragment: one `article.dms-document`, styled by the shared document stylesheet (`document.css`). All text is escaped; no scripts, ids, inline styles or external references. */
       html: string
     }
     /** VersionRateView */
@@ -5473,6 +5565,52 @@ export interface operations {
       }
     }
   }
+  'getApiV1DocumentsBy-numberNumberCurrent': {
+    parameters: {
+      query?: {
+        /** @description Validity scope, e.g. DE. Without it: the version without restriction, or the only valid one. */
+        scope?: string
+      }
+      header?: {
+        /** @description ETag of a copy the client holds; 304 if it is current */
+        'If-None-Match'?: string
+      }
+      path: {
+        /** @description Document number */
+        number: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          ETag: string
+          'Cache-Control': string
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CurrentVersionView']
+        }
+      }
+      304: {
+        headers: {
+          ETag: string
+          'Cache-Control': string
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   getApiV1DocumentsIdCurrent: {
     parameters: {
       query?: {
@@ -5647,6 +5785,67 @@ export interface operations {
       }
     }
   }
+  getApiV1Library: {
+    parameters: {
+      query?: {
+        /** @description Free text: every word must occur in title, document number, description, class, unit, tags or scope (case-insensitive). */
+        q?: string
+        /** @description Class keys; a class includes its subclasses. Repeat or separate with commas. */
+        class?: string[]
+        /** @description Issuing units (organizational units). Repeat or separate with commas. */
+        unit?: string[]
+        /** @description Tags; a document matches if it has one of them. Repeat or separate with commas. */
+        tag?: string[]
+        /** @description Public, Internal, Confidential, StrictlyConfidential. Repeat or separate with commas. */
+        confidentiality?: string[]
+        /** @description Reference date (YYYY-MM-DD, tenant time zone) of `isNew` and `changed`; default 30 days ago. */
+        since?: string
+        /** @description Only documents new or changed since `since`. */
+        changed?: boolean
+        /** @description Only documents the caller has yet to acknowledge. */
+        pending?: boolean
+        /** @description title (default), number, validFrom or lastChanged (publication of the valid version). */
+        sort?: string
+        /** @description asc or desc; default ascending for title and number, descending for dates. */
+        order?: string
+        /** @description 1-based page, default 1 */
+        page?: number
+        /** @description Documents per page, 1 to 200, default 24 */
+        size?: number
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LibraryView']
+        }
+      }
+      /** @description Invalid value for: query parameter since, Invalid value for: query parameter changed, Invalid value for: query parameter pending, Invalid value for: query parameter page, Invalid value for: query parameter size */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   getApiV1DocumentsIdCompare: {
     parameters: {
       query: {
@@ -5778,7 +5977,7 @@ export interface operations {
       }
     }
   }
-  getApiV1DocumentsIdVersionsVersionidDraftPdf: {
+  'getApiV1DocumentsIdVersionsVersionidDraft.pdf': {
     parameters: {
       query?: {
         /** @description Append the change history (default false) */
@@ -5825,7 +6024,7 @@ export interface operations {
       }
     }
   }
-  getApiV1DocumentsIdVersionsVersionidCopyPdf: {
+  'getApiV1DocumentsIdVersionsVersionidCopy.pdf': {
     parameters: {
       query?: {
         /** @description Append the change history (default false) */
@@ -7705,7 +7904,7 @@ export interface operations {
       }
     }
   }
-  getApiV1AdminNumberRanges: {
+  'getApiV1AdminNumber-ranges': {
     parameters: {
       query?: never
       header?: never
@@ -7722,15 +7921,6 @@ export interface operations {
           'application/json': components['schemas']['NumberRangeView'][]
         }
       }
-      /** @description Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
       default: {
         headers: {
           [name: string]: unknown
@@ -7741,7 +7931,7 @@ export interface operations {
       }
     }
   }
-  postApiV1AdminNumberRanges: {
+  'postApiV1AdminNumber-ranges': {
     parameters: {
       query?: never
       header?: never
@@ -7781,7 +7971,7 @@ export interface operations {
       }
     }
   }
-  postApiV1AdminNumberRangesPreview: {
+  'postApiV1AdminNumber-rangesPreview': {
     parameters: {
       query?: never
       header?: never
@@ -7821,7 +8011,7 @@ export interface operations {
       }
     }
   }
-  getApiV1AdminNumberRangesId: {
+  'getApiV1AdminNumber-rangesId': {
     parameters: {
       query?: never
       header?: never
@@ -7841,7 +8031,7 @@ export interface operations {
           'application/json': components['schemas']['NumberRangeView']
         }
       }
-      /** @description Invalid value for: body */
+      /** @description Invalid value for: path parameter id */
       400: {
         headers: {
           [name: string]: unknown
@@ -7860,7 +8050,7 @@ export interface operations {
       }
     }
   }
-  putApiV1AdminNumberRangesId: {
+  'putApiV1AdminNumber-rangesId': {
     parameters: {
       query?: never
       header?: never
@@ -7884,7 +8074,7 @@ export interface operations {
           'application/json': components['schemas']['NumberRangeView']
         }
       }
-      /** @description Invalid value for: body */
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown
@@ -7903,7 +8093,7 @@ export interface operations {
       }
     }
   }
-  getApiV1AdminNumberRangeAssignments: {
+  'getApiV1AdminNumber-range-assignments': {
     parameters: {
       query?: never
       header?: never
@@ -7920,15 +8110,6 @@ export interface operations {
           'application/json': components['schemas']['ClassNumberRangeView'][]
         }
       }
-      /** @description Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
       default: {
         headers: {
           [name: string]: unknown
@@ -7939,7 +8120,7 @@ export interface operations {
       }
     }
   }
-  putApiV1AdminNumberRangeAssignmentsClassid: {
+  'putApiV1AdminNumber-range-assignmentsClassid': {
     parameters: {
       query?: never
       header?: never
@@ -7963,7 +8144,7 @@ export interface operations {
           'application/json': components['schemas']['ClassNumberRangeView']
         }
       }
-      /** @description Invalid value for: body */
+      /** @description Invalid value for: path parameter classId, Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown
@@ -7982,7 +8163,7 @@ export interface operations {
       }
     }
   }
-  deleteApiV1AdminNumberRangeAssignmentsClassid: {
+  'deleteApiV1AdminNumber-range-assignmentsClassid': {
     parameters: {
       query?: never
       header?: never
@@ -8002,7 +8183,7 @@ export interface operations {
           'application/json': components['schemas']['ClassNumberRangeView']
         }
       }
-      /** @description Invalid value for: body */
+      /** @description Invalid value for: path parameter classId */
       400: {
         headers: {
           [name: string]: unknown
@@ -8045,7 +8226,7 @@ export interface operations {
           'application/json': components['schemas']['DocumentNumberView']
         }
       }
-      /** @description Invalid value for: body */
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown

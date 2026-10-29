@@ -37,6 +37,7 @@ export const shell: Translation<typeof en.shell> = {
   nav: {
     home: 'Start',
     documents: 'Dokumente',
+    library: 'Bibliothek',
     search: 'Suche',
     tasks: 'Aufgaben',
     templates: 'Vorlagen',
