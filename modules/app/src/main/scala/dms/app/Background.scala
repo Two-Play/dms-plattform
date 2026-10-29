@@ -7,6 +7,7 @@ import dms.authz.{Groups, RoleAssignments}
 import dms.documents.core.{
   AcknowledgementService,
   DocumentService,
+  FileCleanupJobs,
   PublicationJobs,
   PublicationScheduleConfig,
   ReviewJobs,
@@ -27,9 +28,9 @@ import java.lang.management.ManagementFactory
 import java.net.http.HttpClient
 
 /** Background processing of this instance: the job runner (audit, publication, review, rendition, search,
-  * legal hold, deputyship and acknowledgement reminder jobs), the outbox relay and the schedulers of periodic
-  * audit jobs, scheduled publications, the periodic review check, the search synchronization, the deputyship
-  * check and the acknowledgement reminder check.
+  * legal hold, file clean-up, deputyship and acknowledgement reminder jobs), the outbox relay and the schedulers
+  * of periodic audit jobs, scheduled publications, the periodic review check, the search synchronization, the
+  * deputyship check and the acknowledgement reminder check.
   *
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
   * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029) and the webhooks
@@ -84,8 +85,10 @@ object Background:
       reviewJobs = ReviewJobs(db, reviews, ReviewScheduleConfig(config.documents.reviewCheckSeconds.seconds))
       searchJobs = SearchJobs(db, search, config.search.settings)
       legalHolds = LegalHoldSync(db, S3ObjectStore(s3, config.storage.bucket))
-      webhooks   = WebhookJobs(db, DocumentWebhookEvents(documents), sender, hooks)
-      deputyJobs = DeputyshipJobs(
+      // Objects of files released by discarded drafts (DMS-129, ADR 0050).
+      fileCleanup = FileCleanupJobs(db, S3ObjectStore(s3, config.storage.bucket))
+      webhooks    = WebhookJobs(db, DocumentWebhookEvents(documents), sender, hooks)
+      deputyJobs  = DeputyshipJobs(
         db,
         deputies,
         DeputyshipScheduleConfig(config.workflow.deputyshipCheckSeconds.seconds)
@@ -94,7 +97,8 @@ object Background:
       runner    = JobRunner(
         db,
         jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers ++
-          legalHolds.handlers ++ webhooks.handlers ++ deputyJobs.handlers ++ reminders.handlers +
+          legalHolds.handlers ++ fileCleanup.handlers ++ webhooks.handlers ++ deputyJobs.handlers ++
+          reminders.handlers +
           (RenditionRequest.JobKind -> rendering.handle),
         WorkerConfig(s"${workerName(config)}-jobs")
       )

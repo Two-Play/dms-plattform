@@ -2,14 +2,19 @@ package dms.documents
 
 import dms.kernel.UserId
 
-/** Status of a document version (business concept 5.1). */
+/** Status of a document version (business concept 5.1). `Discarded` (DMS-129, ADR 0050) ends a draft that was
+  * never submitted, e.g. one created by accident: the version is kept as a record (audit trail, number
+  * ranges), but nobody reads it any more and it is never valid, archived or destroyed.
+  */
 enum DocumentStatus:
-  case Draft, InReview, InApproval, Approved, Published, ReviewDue, Superseded, Withdrawn, Archived, Destroyed
+  case Draft, InReview, InApproval, Approved, Published, ReviewDue, Superseded, Withdrawn, Archived,
+    Destroyed,
+    Discarded
 
 /** Domain events that trigger a status change. */
 enum LifecycleEvent:
   case Submit, RequestChanges, ReviewPassed, Reject, Approve, Publish, ReviewDueReached, Recertify, Supersede,
-    Withdraw, Archive, Destroy
+    Withdraw, Archive, Destroy, Discard
 
 enum LifecycleError:
   case TransitionNotAllowed(from: DocumentStatus, event: LifecycleEvent)
@@ -22,8 +27,10 @@ object Lifecycle:
   import LifecycleEvent.*
 
   private val transitions: Map[(DocumentStatus, LifecycleEvent), DocumentStatus] = Map(
-    (Draft, Submit)               -> InReview,
-    (Draft, Withdraw)             -> Withdrawn,
+    (Draft, Submit)   -> InReview,
+    (Draft, Withdraw) -> Withdrawn,
+    // A draft not submitted yet is discarded by its author, the owner or a tenant administrator (DMS-129).
+    (Draft, Discard)              -> Discarded,
     (InReview, RequestChanges)    -> Draft,
     (InReview, ReviewPassed)      -> InApproval,
     (InApproval, Reject)          -> Draft,

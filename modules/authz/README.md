@@ -21,3 +21,5 @@ Legal holds (DMS-56, ADR 0031 and addendum to ADR 0018): `ManageRetention` (reco
 Single module without an `api`/`core` split.
 
 Document numbers (DMS-113, ADR 0040): `AssignDocumentNumber` (manual document number with reason) is granted on a document (any status but `Destroyed`) to records managers in scope and to holders of the owner role who are the document's owner; tenant administrators manage number ranges with `Configure` on `ConfigurationArea.NumberRanges`.
+
+Discarding drafts (DMS-129, ADR 0050): `DiscardDraft` is granted only in status `Draft` to the version's author (holding the author or owner role), to holders of the owner role who are the document's owner, and to tenant administrators (clean-up of drafts created by accident, without reading their content). Submitted, approved and published versions are never discarded (withdrawal and destruction exist for them). Nobody reads a `Discarded` version (`ReadDocument` denies it like `Destroyed`).

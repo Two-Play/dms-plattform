@@ -92,7 +92,7 @@ object Policy:
           case Some(Superseded) =>
             readable(roles.exists(_ != TenantAdmin))
           case Some(Withdrawn | Archived) => readable(has(Owner) || has(RecordsManager) || has(Auditor))
-          case Some(Destroyed) | None     => Decision.Deny("there is no readable document version")
+          case Some(Destroyed | Discarded) | None => Decision.Deny("there is no readable document version")
 
       case CreateFromTemplate =>
         grantIf(has(Author) || has(Owner), "creating documents requires the author or owner role")
@@ -203,6 +203,15 @@ object Policy:
           resource.isDocument && !statusIn(Destroyed) &&
             (has(RecordsManager) || (has(Owner) && resource.ownerId.contains(subject.userId))),
           "assigning a document number requires the records manager role or being the document's owner"
+        )
+
+      case DiscardDraft =>
+        requireStatus(Draft)(
+          grantIf(
+            ((has(Author) || has(Owner)) && isAuthor) ||
+              (has(Owner) && resource.ownerId.contains(subject.userId)) || has(TenantAdmin),
+            "discarding a draft requires being its author or the document's owner, or the tenant administrator role"
+          )
         )
 
       case SearchUsers =>

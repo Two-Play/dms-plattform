@@ -535,6 +535,30 @@ object NumberRangeSpec extends ZIOSpecDefault:
           )
       )
     },
+    test("a discarded document keeps its number reserved and is left out of a backfill (DMS-129)") {
+      for
+        f          <- fixture
+        unnumbered <- create(f)
+        _          <- numbered(f, "POL-{YYYY}-{NNNN}")
+        first      <- create(f)
+        s          <- documents
+        _        <- inTenant(f.tenant)(s.discardDraft(unnumbered._1.id, Some("created by accident"), author))
+        _        <- inTenant(f.tenant)(s.discardDraft(first._1.id, None, author))
+        next     <- create(f)
+        service  <- ranges
+        scope    <- inTenant(f.tenant)(service.backfillScope(f.classId.value))
+        kept     <- inTenant(f.tenant)(s.get(first._1.id))
+        byNumber <- inTenant(f.tenant)(s.findByNumber(first._1.number.getOrElse("")))
+      yield assertTrue(
+        first._1.number.exists(_.endsWith("-0001")),
+        // No reuse: the next document gets the next number, the discarded one keeps its own.
+        next._1.number.exists(_.endsWith("-0002")),
+        kept.discarded,
+        kept.document.number == first._1.number,
+        byNumber.contains(first._1.id),
+        !scope.documents.contains(unnumbered._1.id)
+      )
+    },
     test("backfill covers subclasses that inherit the range, needs the unit for {OU} and a range at all") {
       for
         _      <- TestClock.setTime(Instant.parse("2026-05-04T10:00:00Z"))

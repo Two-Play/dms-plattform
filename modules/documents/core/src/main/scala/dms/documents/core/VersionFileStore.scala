@@ -99,6 +99,15 @@ private[core] object VersionFileStore:
                           ${OffsetDateTime.ofInstant(file.setAt, ZoneOffset.UTC)}, ${file.setBy.value},
                           ${file.basedOn})""".update.run()
 
+  /** Removes the original from a draft (DMS-129, discarding it); the guard allows it only while the version
+    * is a draft. Returns the file it pointed to.
+    */
+  def remove(versionId: UUID)(using DbTx): Option[UUID] =
+    sql"""delete from dms.document_version_file where version_id = $versionId returning file_id"""
+      .query[UUID]
+      .run()
+      .headOption
+
   private def toFile(r: Row): VersionFile =
     def read[A: JsonDecoder](json: Jsonb, what: String): A =
       json.value

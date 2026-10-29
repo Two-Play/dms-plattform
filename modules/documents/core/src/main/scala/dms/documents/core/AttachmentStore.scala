@@ -134,6 +134,44 @@ private[core] object AttachmentStore:
   def remove(id: UUID)(using DbTx): Boolean =
     sql"delete from dms.document_version_attachment where id = $id".update.run() == 1
 
+  /** Removes every attachment link of a draft (DMS-129, discarding it); the guard allows it only while the
+    * version is a draft. Returns the files the links pointed to.
+    */
+  def removeAllOf(versionId: UUID)(using DbTx): List[UUID] =
+    sql"""delete from dms.document_version_attachment where version_id = $versionId returning file_id"""
+      .query[UUID]
+      .run()
+      .toList
+
+  /** The file if no version references it any more, neither as attachment nor as original. */
+  def unreferenced(id: UUID)(using DbTx): Option[AttachmentFile] =
+    sql"""select id, document_id, sha256, size_bytes, content_type, object_key, object_version, scan_status,
+                 scanner, scanned_at, created_by
+          from dms.document_attachment_file f
+          where f.id = $id
+            and not exists (select 1 from dms.document_version_attachment a where a.file_id = f.id)
+            and not exists (select 1 from dms.document_version_file v where v.file_id = f.id)"""
+      .query[FileRow]
+      .run()
+      .headOption
+      .map(toFile)
+
+  /** Deletes a file nothing references any more (DMS-129); the guard refuses it under legal hold. */
+  def deleteFile(id: UUID)(using DbTx): Boolean =
+    sql"delete from dms.document_attachment_file where id = $id".update.run() == 1
+
+  /** Whether an active legal hold covers the document (ADR 0031). */
+  def underLegalHold(document: DocumentId)(using DbTx): Boolean =
+    sql"select dms.document_under_legal_hold(${document.value})".query[Boolean].run().head
+
+  /** Whether a file row (still or again) points at this object. */
+  def objectReferenced(objectKey: String, objectVersion: String)(using DbTx): Boolean =
+    sql"""select exists (select 1 from dms.document_attachment_file
+                          where object_key = $objectKey and object_version = $objectVersion)"""
+      .query[Boolean]
+      .run()
+      .head
+
   private def toAttachment(r: LinkRow): VersionAttachment =
     VersionAttachment(
       r.id,

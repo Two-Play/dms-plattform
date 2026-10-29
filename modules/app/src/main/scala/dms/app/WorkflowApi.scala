@@ -122,8 +122,8 @@ final case class WorkflowCaseView(
     definitionVersion: Option[Int],
     fourEyes: Boolean,
     round: Int,
-    /** Running, Returned, Rendering (all steps approved, the archive rendition is being produced) or
-      * Approved.
+    /** Running, Returned, Rendering (all steps approved, the archive rendition is being produced), Approved
+      * or Discarded (the version was discarded as a draft, DMS-129).
       */
     status: String,
     currentStep: Option[String],

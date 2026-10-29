@@ -126,6 +126,11 @@ final case class DocumentDetails(
 ):
   def open: Option[DocumentVersion] = versions.find(v => Versioning.isOpen(v.status))
 
+  /** True if every version was discarded (DMS-129): a first version discarded before it was ever approved.
+    * The document is kept as a record but is not shown or opened any more.
+    */
+  def discarded: Boolean = versions.nonEmpty && versions.forall(_.status == DocumentStatus.Discarded)
+
   /** Whether a number can be assigned manually now (see [[DocumentService.assignNumber]]): no version is in
     * review or approval, and an existing number is not frozen in a submitted version yet.
     */
@@ -147,6 +152,29 @@ final case class DocumentDetails(
   /** The automatic comparison of a minor version with its basis (see [[EditorialCheck]]). */
   def editorialCheck(v: DocumentVersion, threshold: Double): Option[EditorialCheck] =
     EditorialCheck.of(v, versions, threshold)
+
+/** The outcome of discarding a draft (DMS-129, ADR 0050).
+  *
+  * @param version
+  *   the draft, now `Discarded`
+  * @param documentDiscarded
+  *   true if it was the document's only version that was not discarded (a first version never approved): the
+  *   document disappears; false for a new version of an approved document, whose valid version stays
+  * @param validVersion
+  *   the valid version of the document after the discard (Published or ReviewDue), if any
+  * @param releasedFiles
+  *   stored files no version references any more, deleted; their objects are removed by a job
+  * @param keptFiles
+  *   unreferenced files kept because the document is under legal hold
+  */
+final case class DiscardedDraft(
+    version: DocumentVersion,
+    documentDiscarded: Boolean,
+    validVersion: Option[DocumentVersion],
+    removedAttachments: Int,
+    releasedFiles: List[AttachmentFile],
+    keptFiles: List[AttachmentFile]
+)
 
 /** Settings of the documents module (DMS-46).
   *
@@ -969,6 +997,87 @@ final class DocumentService(
             )
           yield next
     yield updated
+
+  /** Discards the open draft of a document (DMS-129, ADR 0050), e.g. one created by accident. Only a draft
+    * that is not submitted can be discarded (409 otherwise: submitted, approved and published versions are
+    * withdrawn or destroyed instead). The version is kept as a record in status `Discarded` and is never read
+    * again; if it was the document's only version, the document disappears from lists (its number stays
+    * reserved).
+    *
+    * Its attachment links and the original of a file document are removed while it is still a draft; the
+    * stored files that no version references any more are deleted and their objects removed by a job after
+    * the commit ([[FileCleanupJobs]]), unless the document is under legal hold, which keeps them. Files of
+    * other versions are never touched. Recorded in the audit trail (`document.discarded`, with the reason)
+    * and published to the outbox in the same transaction. Ending the draft's workflow case is the caller's
+    * job (module `workflow`).
+    */
+  def discardDraft(id: DocumentId, reason: Option[String], actor: UserId): IO[DocumentError, DiscardedDraft] =
+    for
+      document <- sql(DocumentStore.lockDocument(id)).someOrFail(documentNotFound(id))
+      current  <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(
+        DocumentError.Conflict(s"document ${id.value} has no draft to discard")
+      )
+      _ <- ZIO.unless(current.status == DocumentStatus.Draft)(
+        ZIO.fail(
+          DocumentError.Conflict(
+            s"version ${current.label} is ${current.status}: only drafts that are not submitted can be discarded"
+          )
+        )
+      )
+      target <- ZIO
+        .fromEither(Lifecycle.transition(current.status, LifecycleEvent.Discard))
+        .mapError(DocumentError.Lifecycle(_))
+      note = reason.map(_.trim).filter(_.nonEmpty)
+      _ <- ZIO.when(note.exists(_.length > MaxReasonLength))(
+        ZIO.fail(DocumentError.Invalid(List(s"the reason must have at most $MaxReasonLength characters")))
+      )
+      versions <- sql(DocumentStore.versions(id, templates))
+      now      <- Clock.instant
+      files    <- sql {
+        val attached = AttachmentStore.removeAllOf(current.id)
+        val original = VersionFileStore.remove(current.id)
+        val held     = AttachmentStore.underLegalHold(id)
+        val orphans  = (attached ++ original).distinct.flatMap(AttachmentStore.unreferenced)
+        if !held then orphans.foreach(f => AttachmentStore.deleteFile(f.id))
+        (attached.size, held, orphans)
+      }
+      (removedLinks, held, orphans) = files
+      released                      = if held then Nil else orphans
+      _ <- ZIO.foreachDiscard(released)(f => FileCleanupJobs.enqueue(f).mapError(DocumentError.Database(_)))
+      _ <- sql(DocumentStore.changeStatus(current.id, current.status, target, actor, now, None))
+        .filterOrFail(identity)(changedConcurrently(current))
+      discarded = current.copy(status = target, updatedAt = now, attachments = Nil, file = None)
+      others    = versions.filterNot(_.id == current.id)
+      whole     = others.forall(_.status == DocumentStatus.Discarded)
+      valid     = others.filter(v => Versioning.isValid(v.status)).maxByOption(_.number)
+      _ <- record(
+        actor,
+        "document.discarded",
+        discarded,
+        Json.Obj(
+          "from"               -> Json.Str(current.status.toString),
+          "to"                 -> Json.Str(target.toString),
+          "version"            -> Json.Str(current.label),
+          "documentDiscarded"  -> Json.Bool(whole),
+          "documentNumber"     -> document.number.fold[Json](Json.Null)(Json.Str(_)),
+          "reason"             -> note.fold[Json](Json.Null)(Json.Str(_)),
+          "removedAttachments" -> Json.Num(removedLinks),
+          "removedOriginal"    -> Json.Bool(current.file.isDefined),
+          "legalHold"          -> Json.Bool(held),
+          "releasedFiles"      -> Json.Arr(released.map(f => Json.Str(f.sha256))*),
+          "keptFiles"          -> Json.Arr((if held then orphans else Nil).map(f => Json.Str(f.sha256))*)
+        ),
+        note
+      )
+      _ <- publish("document.discarded", document, discarded, Some(current.status))
+    yield DiscardedDraft(
+      discarded,
+      whole,
+      valid,
+      removedLinks,
+      released,
+      if held then orphans else Nil
+    )
 
   /** The trimmed change summary, at most `MaxReasonLength` characters. Required for every version that has a
     * predecessor, major or minor (DMS-126, business concept 5.1: each new version comes with a reason and an
