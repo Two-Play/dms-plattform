@@ -16,6 +16,7 @@ import dms.documents.core.{
 }
 import dms.identity.{Authenticator, TenantDirectory, TenantOrganizations, TokenVerifier, UserDirectories}
 import dms.integration.partners.PartnerDirectories
+import dms.integration.webhooks.{HttpWebhookSender, WebhookSender}
 import dms.rendering.core.{LibreOfficeConverter, VeraPdfValidator, WeasyPrintRenderer}
 import dms.search.core.{OpenSearch, SearchIndex}
 import dms.storage.ObjectStore
@@ -111,10 +112,11 @@ object Main extends ZIOAppDefault:
 
   override def run: ZIO[Any, Throwable, Unit] =
     for
-      cfg     <- ZIO.config(AppConfig.config)
-      scanner <- ZIO.fromEither(cfg.attachments.attachmentScanner).mapError(IllegalArgumentException(_))
-      _       <- ZIO.logInfo(s"DMS platform ${AppBuildInfo.version} starting on port ${cfg.http.port}")
-      _       <- (Server.serve(routes) <&> Background.run(cfg))
+      cfg      <- ZIO.config(AppConfig.config)
+      scanner  <- ZIO.fromEither(cfg.attachments.attachmentScanner).mapError(IllegalArgumentException(_))
+      webhooks <- ZIO.fromEither(cfg.webhooks.settings).mapError(IllegalArgumentException(_))
+      _        <- ZIO.logInfo(s"DMS platform ${AppBuildInfo.version} starting on port ${cfg.http.port}")
+      _        <- (Server.serve(routes) <&> Background.run(cfg))
         .provide(
           // Small bodies are aggregated as before; larger ones (attachment uploads) are streamed, so they are never
           // held in memory as a whole (DMS-114).
@@ -167,7 +169,8 @@ object Main extends ZIOAppDefault:
           RenditionWiring.jobs,
           ZLayer.succeed(cfg.search.openSearch),
           ZLayer.succeed(cfg.search.settings),
-          ZLayer.succeed(cfg.webhooks.settings),
+          ZLayer.succeed(webhooks),
+          ZLayer.succeed[WebhookSender](HttpWebhookSender(webhooks)),
           OpenSearch.layer,
           SearchDocuments.withOriginals,
           SearchIndex.layer,

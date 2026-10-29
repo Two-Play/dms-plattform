@@ -19,12 +19,15 @@ import java.util.UUID
   *   per delivery attempt, including connecting
   * @param maxAttempts
   *   attempts per delivery before it is given up (dead); retries back off exponentially (job runner)
+  * @param secretKeys
+  *   platform keys that encrypt the signing secrets at rest (DMS-107); the development key by default
   */
 final case class WebhookSettings(
     allowedHosts: Set[String] = Set.empty,
     allowPrivateNetworks: Boolean = false,
     timeout: Duration = 10.seconds,
-    maxAttempts: Int = 12
+    maxAttempts: Int = 12,
+    secretKeys: WebhookSecretKeys = WebhookSecretKeys.development
 ):
   def isAllowedHost(host: String): Boolean = allowedHosts.exists(_.equalsIgnoreCase(host))
 
@@ -40,6 +43,9 @@ object WebhookEventType:
   val Withdrawn = "document.withdrawn"
 
   val all: Set[String] = Set(Published, Superseded, Withdrawn)
+
+  /** The signed test event an administrator sends to check a receiver (DMS-107); never sent by the outbox. */
+  val Test = "webhook.test"
 
 /** A subscription of a connected system (e.g. the intranet) to document events.
   *
@@ -73,6 +79,8 @@ final case class WebhookDelivery(
     eventId: Long,
     eventType: String,
     documentId: Option[UUID],
+    /** The document number in the body sent (payload version 2, DMS-107), if the document had one. */
+    documentNumber: Option[String],
     status: String,
     attempts: Int,
     lastStatusCode: Option[Int],

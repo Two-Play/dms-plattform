@@ -165,7 +165,7 @@ object CurrentDocumentApiSpec extends ZIOSpecDefault:
   private val webhookSettings = WebhookSettings(allowedHosts = Set("127.0.0.1"), timeout = 2.seconds)
 
   private type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow & RenditionSource &
-    AuditTrail & RenditionArchive & TemplateService & ProfileSource & WebhookSettings
+    AuditTrail & RenditionArchive & TemplateService & ProfileSource & WebhookSettings & WebhookSender
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -190,7 +190,8 @@ object CurrentDocumentApiSpec extends ZIOSpecDefault:
       ApprovalWorkflow.layer,
       DocumentRenditions.layer,
       ZLayer(RenditionArchive.inMemory),
-      ZLayer.succeed(webhookSettings)
+      ZLayer.succeed(webhookSettings),
+      ZLayer.succeed[WebhookSender](HttpWebhookSender(webhookSettings))
     )
 
   private def token(user: UserId): String =
@@ -417,7 +418,8 @@ object CurrentDocumentApiSpec extends ZIOSpecDefault:
         docs.paths.pathItems.contains("/api/v1/documents/{id}/current.html"),
         docs.paths.pathItems.contains("/api/v1/documents/by-number/{number}/current.pdf"),
         docs.paths.pathItems.contains("/api/v1/documents/by-number/{number}/current.html"),
-        docs.paths.pathItems.contains("/api/v1/admin/webhooks/{id}/deliveries")
+        docs.paths.pathItems.contains("/api/v1/admin/webhooks/{id}/deliveries"),
+        docs.paths.pathItems.contains("/api/v1/admin/webhooks/{id}/test")
       )
     },
     test("the stable address switches to the successor when the publication job publishes it at 00:00") {
@@ -635,6 +637,135 @@ object CurrentDocumentApiSpec extends ZIOSpecDefault:
         notAllowed._1 == Status.NotFound,
         byReader._1 == Status.Ok,
         as[CurrentVersionView](byReader).documentId == contract.id
+      )
+    } @@ TestAspect.withLiveClock,
+    test(
+      "webhook payloads carry the document number when the document has one (payload version 2, DMS-107)"
+    ) {
+      ZIO.scoped(
+        for
+          hook <- receiver
+          (url, received) = hook
+          created <- call(
+            admin,
+            "POST",
+            "/api/v1/admin/webhooks",
+            Some(WebhookRequest(url, List(WebhookEventType.Published), List("policy")).toJson)
+          ).map(as[WebhookWithSecret])
+          doc <- validDocument("Numbered policy")
+          _   <- deliverWebhooks
+          _   <- call(
+            owner,
+            "POST",
+            s"/api/v1/documents/${doc.id}/number",
+            Some("""{"number":"RL-107","reason":"number from the policy register"}""")
+          )
+          _      <- approveNewVersion(doc.id, values(past))
+          _      <- runPublicationJobs
+          _      <- deliverWebhooks
+          events <- received.get
+          log    <- call(admin, "GET", s"/api/v1/admin/webhooks/${created.webhook.id}/deliveries")
+            .map(as[List[WebhookDeliveryView]])
+          // Outbox events of earlier tests reach this subscription too; only this document counts.
+          data = events
+            .flatMap((_, body) =>
+              body.fromJson[Json.Obj].toOption.flatMap(_.get("data")).collect { case o: Json.Obj => o }
+            )
+            .filter(_.get("documentId").contains(Json.Str(doc.id.toString)))
+          first  = data.find(_.get("version").contains(Json.Str("1.0")))
+          second = data.find(_.get("version").contains(Json.Str("2.0")))
+          links  = second.flatMap(_.get("links")).collect { case o: Json.Obj => o }
+        yield assertTrue(
+          data.size == 2,
+          data.forall(_.get("payloadVersion").contains(Json.Num(2))),
+          // Published before it had a number: no number, the links by id only.
+          first.exists(d => d.get("documentNumber").isEmpty),
+          first.flatMap(_.get("links")).exists(!_.toJson.contains("ByNumber")),
+          second.flatMap(_.get("documentNumber")).contains(Json.Str("RL-107")),
+          links.flatMap(_.get("current")).contains(Json.Str(s"/api/v1/documents/${doc.id}/current")),
+          links
+            .flatMap(_.get("currentByNumber"))
+            .contains(Json.Str("/api/v1/documents/by-number/RL-107/current")),
+          links
+            .flatMap(_.get("currentPdfByNumber"))
+            .contains(Json.Str("/api/v1/documents/by-number/RL-107/current.pdf")),
+          log.filter(_.documentId.contains(doc.id)).map(_.documentNumber).sorted == List(None, Some("RL-107"))
+        )
+      )
+    } @@ TestAspect.withLiveClock,
+    test("secrets are encrypted at rest and shown once; the test event is signed with them (DMS-107)") {
+      ZIO.scoped(
+        for
+          hook <- receiver
+          (url, received) = hook
+          createdRaw <- call(
+            admin,
+            "POST",
+            "/api/v1/admin/webhooks",
+            Some(WebhookRequest(url, List(WebhookEventType.Published), active = Some(false)).toJson)
+          )
+          created  = as[WebhookWithSecret](createdRaw)
+          id       = created.webhook.id
+          material = created.secret.stripPrefix("whsec_")
+          listed  <- call(admin, "GET", "/api/v1/admin/webhooks")
+          single  <- call(admin, "GET", s"/api/v1/admin/webhooks/$id")
+          changed <- call(
+            admin,
+            "PUT",
+            s"/api/v1/admin/webhooks/$id",
+            Some(WebhookRequest(url, List(WebhookEventType.Published), active = Some(false)).toJson)
+          )
+          tested   <- call(admin, "POST", s"/api/v1/admin/webhooks/$id/test").map(as[WebhookTestResult])
+          byReader <- call(reader, "POST", s"/api/v1/admin/webhooks/$id/test")
+          unknown  <- call(admin, "POST", s"/api/v1/admin/webhooks/${UUID.randomUUID()}/test")
+          events   <- received.get
+          s        <- setup.await
+          stored   <- s.owner.transactSystem(
+            Db.sql(
+              sql"""select secret, secret_key_id, secret_ciphertext from dms.webhook_subscription where id = $id"""
+                .query[(Option[String], Option[String], Option[String])]
+                .run()
+                .head
+            )
+          )
+          audited <- s.owner.transactSystem(
+            Db.sql(
+              sql"""select details::text from dms.audit_event
+                    where object_type = 'webhook' and action = 'webhook.tested'"""
+                .query[String]
+                .run()
+                .toList
+            )
+          )
+          request = events.head
+        yield assertTrue(
+          createdRaw._1 == Status.Created,
+          List(listed, single, changed).forall((status, body) =>
+            status == Status.Ok && !body.contains(material)
+          ),
+          !single._2.contains("secret"),
+          stored._1.isEmpty,
+          stored._2.contains(WebhookSecretKeys.DevelopmentKeyId),
+          stored._3.exists(c => !c.contains(material)),
+          tested.delivered,
+          tested.statusCode.contains(204),
+          tested.error.isEmpty,
+          // Paused subscriptions can be tested; exactly one request, signed with the secret shown once.
+          events.size == 1,
+          request._1.get("webhook-id").contains(tested.webhookId),
+          request._2.contains(WebhookEventType.Test),
+          WebhookSignature.verify(
+            created.secret,
+            tested.webhookId,
+            request._1.getOrElse("webhook-timestamp", "0").toLong,
+            request._2,
+            request._1.getOrElse("webhook-signature", "")
+          ),
+          byReader._1 == Status.Forbidden,
+          unknown._1 == Status.NotFound,
+          audited.nonEmpty,
+          audited.forall(d => d.contains("\"delivered\"") && !d.contains(material))
+        )
       )
     } @@ TestAspect.withLiveClock,
     test("tenant administrators manage webhooks; unsafe targets and other roles are rejected") {

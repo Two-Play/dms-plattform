@@ -110,9 +110,21 @@ object WebhookJobsSpec extends ZIOSpecDefault:
       types: Set[String] = WebhookEventType.all,
       classes: Set[String] = Set.empty
   ): ZIO[Env, DbError, WebhookSubscription] =
-    ZIO.serviceWithZIO[Env](
-      _.app.transact(tenant)(WebhookStore.create(url, secret, types, classes, None, "admin"))
-    )
+    ZIO.serviceWithZIO[Env] { e =>
+      val id = UUID.randomUUID()
+      e.app.transact(tenant)(
+        WebhookStore
+          .create(
+            id,
+            url,
+            WebhookSecretKeys.development.seal(secret, tenant, id),
+            types,
+            classes,
+            None,
+            "admin"
+          )
+      )
+    }
 
   private def emit(tenant: TenantId, eventType: String, classPath: List[String] = List("policy")) =
     ZIO.serviceWithZIO[Env](
@@ -142,6 +154,19 @@ object WebhookJobsSpec extends ZIOSpecDefault:
 
   private def deliveries(tenant: TenantId, s: WebhookSubscription) =
     ZIO.serviceWithZIO[Env](_.app.transact(tenant)(WebhookStore.deliveries(s.id, None, 50)))
+
+  /** The secret columns as stored: plain text, key id, ciphertext. */
+  private def rawSecrets(tenant: TenantId) =
+    ZIO.serviceWithZIO[Env](
+      _.app.transact(tenant)(
+        Db.sql(
+          sql"""select id, secret, secret_key_id, secret_ciphertext from dms.webhook_subscription"""
+            .query[(UUID, Option[String], Option[String], Option[String])]
+            .run()
+            .toList
+        )
+      )
+    )
 
   private def published(eventId: Long): ZIO[Env, DbError, Boolean] =
     ZIO.serviceWithZIO[Env](
@@ -322,6 +347,159 @@ object WebhookJobsSpec extends ZIOSpecDefault:
           d   <- deliveries(t, s)
           got <- receiver.requests
         yield assertTrue(got.isEmpty, d.map(_.status) == List("skipped"))
+      )
+    },
+    test(
+      "secrets are stored encrypted; plain-text secrets are encrypted at startup and still sign (DMS-107)"
+    ) {
+      ZIO.scoped(
+        for
+          receiver <- FakeReceiver.make
+          t        <- newTenant
+          env      <- ZIO.service[Env]
+          legacyId = UUID.randomUUID()
+          // A subscription as migration V29 finds it: secret in plain text.
+          _ <- env.app.transact(t)(
+            WebhookStore.create(
+              legacyId,
+              receiver.url,
+              StoredSecret.Plain(secret),
+              WebhookEventType.all,
+              Set.empty,
+              None,
+              "admin"
+            )
+          )
+          encrypted <- subscribe(t, receiver.url)
+          before    <- rawSecrets(t)
+          ring = WebhookSecretKeys.parse(WebhookSecretKeys.generate("2026-10")).toOption.get
+          first  <- WebhookSecretMigration.run(env.app, ring)
+          after  <- rawSecrets(t)
+          second <- WebhookSecretMigration.run(env.app, ring)
+          w = WebhookJobs(
+            env.app,
+            TestEvents,
+            HttpWebhookSender(settings(5)),
+            settings(5).copy(secretKeys = ring)
+          )
+          _    <- emit(t, WebhookEventType.Published)
+          _    <- relay(w)
+          _    <- runJobs(w)
+          got  <- receiver.requests
+          logs <- ZTestLogger.logOutput
+        yield assertTrue(
+          before.find(_._1 == legacyId).exists(_._2.contains(secret)),
+          before.find(_._1 == encrypted.id).exists(r => r._2.isEmpty && r._3.contains("dev")),
+          first.resealed >= 2,
+          first.unreadable == 0,
+          after
+            .filter(r => r._1 == legacyId || r._1 == encrypted.id)
+            .forall(r =>
+              r._2.isEmpty && r._3.contains("2026-10") &&
+                r._4.exists(c => !c.contains(secret.stripPrefix("whsec_")))
+            ),
+          second.resealed == 0,
+          got.size == 2,
+          got.forall(r =>
+            WebhookSignature.verify(
+              secret,
+              r.header(WebhookSignature.IdHeader),
+              r.header(WebhookSignature.TimestampHeader).toLong,
+              r.body,
+              r.header(WebhookSignature.SignatureHeader)
+            )
+          ),
+          got.forall(
+            _.body
+              .fromJson[Json.Obj]
+              .toOption
+              .flatMap(_.get("data"))
+              .exists(_.toJson.contains("\"payloadVersion\":2"))
+          ),
+          !logs.exists(_.message().contains(secret.stripPrefix("whsec_")))
+        )
+      )
+    },
+    test("a secret that cannot be decrypted makes the delivery dead without revealing anything (DMS-107)") {
+      ZIO.scoped(
+        for
+          receiver <- FakeReceiver.make
+          t        <- newTenant
+          env      <- ZIO.service[Env]
+          retired = WebhookSecretKeys.parse(WebhookSecretKeys.generate("retired")).toOption.get
+          id      = UUID.randomUUID()
+          s <- env.app.transact(t)(
+            WebhookStore.create(
+              id,
+              receiver.url,
+              retired.seal(secret, t, id),
+              WebhookEventType.all,
+              Set.empty,
+              None,
+              "admin"
+            )
+          )
+          w    <- jobs()
+          _    <- emit(t, WebhookEventType.Published)
+          _    <- relay(w)
+          _    <- runJobs(w)
+          d    <- deliveries(t, s)
+          kept <- WebhookSecretMigration.run(env.app, WebhookSecretKeys.development)
+          got  <- receiver.requests
+          logs <- ZTestLogger.logOutput
+        yield assertTrue(
+          got.isEmpty,
+          d.map(x => (x.status, x.attempts)) == List(("dead", 1)),
+          d.head.lastError.exists(_.contains("'retired'")),
+          kept.unreadable >= 1,
+          !logs.exists(_.message().contains(secret.stripPrefix("whsec_")))
+        )
+      )
+    },
+    test(
+      "a test event is signed and reports the outcome; blocked or failing receivers are reported (DMS-107)"
+    ) {
+      ZIO.scoped(
+        for
+          receiver <- FakeReceiver.make
+          t        <- newTenant
+          s        <- subscribe(t, receiver.url)
+          stored <- ZIO.serviceWithZIO[Env](_.app.transact(t)(WebhookStore.secret(s.id))).someOrFailException
+          ping = WebhookPing(HttpWebhookSender(settings(1)), settings(1))
+          ok      <- ping.send(t, s.id, receiver.url, stored)
+          _       <- receiver.down
+          failing <- ping.send(t, s.id, receiver.url, stored)
+          blocked <- WebhookPing(HttpWebhookSender(WebhookSettings()), WebhookSettings())
+            .send(t, s.id, receiver.url.replace("http://", "https://"), stored)
+          wrongRow <- ping.send(t, UUID.randomUUID(), receiver.url, stored)
+          got      <- receiver.requests
+          logged   <- deliveries(t, s)
+          request = got.head
+          body    = request.body.fromJson[Json.Obj].toOption.get
+        yield assertTrue(
+          ok.delivered,
+          ok.statusCode.contains(204),
+          ok.webhookId.startsWith("test_"),
+          request.header(WebhookSignature.IdHeader) == ok.webhookId,
+          WebhookSignature.verify(
+            secret,
+            ok.webhookId,
+            request.header(WebhookSignature.TimestampHeader).toLong,
+            request.body,
+            request.header(WebhookSignature.SignatureHeader)
+          ),
+          body.get("type").contains(Json.Str(WebhookEventType.Test)),
+          !failing.delivered,
+          failing.statusCode.contains(503),
+          failing.error.exists(_.contains("503")),
+          !blocked.delivered,
+          blocked.error.exists(_.contains("non-public address")),
+          !wrongRow.delivered,
+          wrongRow.error.exists(_.contains("cannot be decrypted")),
+          // Two requests reached the receiver; test events are not part of the delivery log.
+          got.size == 2,
+          logged.isEmpty
+        )
       )
     },
     test("tenants do not see each other's subscriptions and deliveries") {

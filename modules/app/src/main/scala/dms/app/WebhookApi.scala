@@ -56,6 +56,8 @@ final case class WebhookDeliveryView(
     eventId: Long,
     eventType: String,
     documentId: Option[UUID],
+    /** The document number in the body sent (DMS-107), if the document had one. */
+    documentNumber: Option[String],
     /** pending, retrying, delivered, dead (given up or blocked) or skipped (subscription deactivated). */
     status: String,
     attempts: Int,
@@ -67,14 +69,29 @@ final case class WebhookDeliveryView(
 ) derives JsonCodec,
       Schema
 
+/** Outcome of a test event (`webhook.test`, DMS-107). */
+final case class WebhookTestResult(
+    /** The `webhook-id` sent, `test_<uuid>`. */
+    webhookId: String,
+    /** Whether the receiver answered 2xx. */
+    delivered: Boolean,
+    /** The receiver's HTTP status, if it answered. */
+    statusCode: Option[Int],
+    /** Why it was not delivered: blocked target, unreachable receiver, non-2xx answer, unreadable secret. */
+    error: Option[String],
+    durationMillis: Long
+) derives JsonCodec,
+      Schema
+
 /** Webhook subscriptions of connected systems (US-14.1, DMS-58, ADR 0035), managed by tenant administrators
   * (`Configure` on `Webhooks`). Receivers get `document.published`, `document.superseded` and
   * `document.withdrawn` as signed POST requests (Standard Webhooks); the delivery log shows every delivery
-  * with its attempts, and dead deliveries can be sent again. Changes are recorded in the audit trail; the
-  * secret never is.
+  * with its attempts, and dead deliveries can be sent again; a signed test event checks a receiver (DMS-107).
+  * Changes are recorded in the audit trail; the secret never is. Secrets are stored encrypted with the
+  * platform key and shown only in the answer that creates them (creation, rotation).
   */
 object WebhookApi:
-  type Env = Authenticator & Db & Authorizer & AuditTrail & WebhookSettings
+  type Env = Authenticator & Db & Authorizer & AuditTrail & WebhookSettings & WebhookSender
 
   private val base      = "api" / "v1" / "admin" / "webhooks"
   private val webhookId = path[UUID]("id").description("Webhook subscription id")
@@ -99,15 +116,17 @@ object WebhookApi:
       .tag("Webhooks")
       .serverLogic(p =>
         req =>
-          (administrator(p) *> checked(req)).flatMap { valid =>
+          (administrator(p) *> checked(req)).zip(ZIO.service[WebhookSettings]).flatMap { (valid, settings) =>
             inTransaction(p) { ctx =>
+              val id     = UUID.randomUUID()
               val secret = WebhookSignature.newSecret()
               for
                 _       <- ctx.administer
                 created <- WebhookStore
                   .create(
+                    id,
                     valid.url,
-                    secret,
+                    settings.secretKeys.seal(secret, p.tenantId, id),
                     valid.eventTypes,
                     valid.classes,
                     valid.description,
@@ -185,16 +204,60 @@ object WebhookApi:
       .tag("Webhooks")
       .serverLogic(p =>
         id =>
-          inTransaction(p) { ctx =>
-            val secret = WebhookSignature.newSecret()
-            for
-              _       <- ctx.administer
-              _       <- existing(id)
-              _       <- WebhookStore.rotateSecret(id, secret)
-              _       <- ctx.record(p, "webhook.secret-rotated", id, Json.Obj())
-              rotated <- existing(id)
-            yield WebhookWithSecret(view(rotated), secret)
+          ZIO.serviceWithZIO[WebhookSettings] { settings =>
+            inTransaction(p) { ctx =>
+              val secret = WebhookSignature.newSecret()
+              for
+                _       <- ctx.administer
+                _       <- existing(id)
+                _       <- WebhookStore.rotateSecret(id, settings.secretKeys.seal(secret, p.tenantId, id))
+                _       <- ctx.record(p, "webhook.secret-rotated", id, Json.Obj())
+                rotated <- existing(id)
+              yield WebhookWithSecret(view(rotated), secret)
+            }
           }
+      )
+
+  val test: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.post
+      .in(base / webhookId / "test")
+      .out(jsonBody[WebhookTestResult])
+      .description(
+        "Sends a signed test event (`webhook.test`) to the receiver right away and returns the outcome; also for " +
+          "paused subscriptions. Not part of the delivery log and not retried (tenant administrators)."
+      )
+      .tag("Webhooks")
+      .serverLogic(p =>
+        id =>
+          for
+            target <- inTransaction(p)(ctx =>
+              ctx.administer *> existing(id).zip(
+                WebhookStore.secret(id).someOrFail(Failure.NotFound(s"the webhook $id does not exist"))
+              )
+            )
+            (subscription, secret) = target
+            settings <- ZIO.service[WebhookSettings]
+            sender   <- ZIO.service[WebhookSender]
+            // Outside the transaction: the receiver may take up to the timeout.
+            result <- WebhookPing(sender, settings).send(p.tenantId, id, subscription.url, secret)
+            _      <- inTransaction(p)(
+              _.record(
+                p,
+                "webhook.tested",
+                id,
+                Json.Obj(
+                  (List("delivered" -> Json.Bool(result.delivered)) ++
+                    result.statusCode.map(c => "statusCode" -> Json.Num(c)))*
+                )
+              )
+            )
+          yield WebhookTestResult(
+            result.webhookId,
+            result.delivered,
+            result.statusCode,
+            result.error,
+            result.durationMillis
+          )
       )
 
   val deliveries: ZServerEndpoint[Env, Any] =
@@ -257,7 +320,7 @@ object WebhookApi:
       )
 
   def endpoints: List[ZServerEndpoint[Env, Any]] =
-    List(list, create, get, update, delete, rotateSecret, deliveries, redeliver)
+    List(list, create, get, update, delete, rotateSecret, test, deliveries, redeliver)
 
   /** A request after validation. */
   private final case class Valid(
@@ -378,6 +441,7 @@ object WebhookApi:
       d.eventId,
       d.eventType,
       d.documentId,
+      d.documentNumber,
       d.status,
       d.attempts,
       d.lastStatusCode,

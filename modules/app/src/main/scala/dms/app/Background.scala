@@ -11,7 +11,7 @@ import dms.documents.core.{
   ReviewScheduleConfig,
   ReviewService
 }
-import dms.integration.webhooks.{HttpWebhookSender, WebhookJobs}
+import dms.integration.webhooks.{WebhookJobs, WebhookSecretMigration, WebhookSender, WebhookSettings}
 import dms.integration.{JobRunner, OutboxRelay, WorkerConfig}
 import dms.rendering.RenditionRequest
 import dms.rendering.core.RenditionJobs
@@ -38,7 +38,8 @@ object Background:
   def run(
       config: AppConfig
   ): ZIO[
-    Db & S3Client & DocumentService & ReviewService & RenditionJobs & SearchIndex & Deputyships,
+    Db & S3Client & DocumentService & ReviewService & RenditionJobs & SearchIndex & Deputyships &
+      WebhookSettings & WebhookSender,
     Throwable,
     Nothing
   ] =
@@ -50,6 +51,9 @@ object Background:
       rendering <- ZIO.service[RenditionJobs]
       search    <- ZIO.service[SearchIndex]
       deputies  <- ZIO.service[Deputyships]
+      hooks     <- ZIO.service[WebhookSettings]
+      sender    <- ZIO.service[WebhookSender]
+      _         <- secureWebhookSecrets(db, hooks)
       tsa = TsaConfig(config.audit.tsaUrl, trustedCertificates = config.audit.tsaTrustedCertificates)
       trust <- TsaTrust.fromConfig(tsa).mapError(e => RuntimeException(e.message))
       trail       = AuditTrailLive(db, trust)
@@ -74,12 +78,7 @@ object Background:
       reviewJobs = ReviewJobs(db, reviews, ReviewScheduleConfig(config.documents.reviewCheckSeconds.seconds))
       searchJobs = SearchJobs(db, search, config.search.settings)
       legalHolds = LegalHoldSync(db, S3ObjectStore(s3, config.storage.bucket))
-      webhooks   = WebhookJobs(
-        db,
-        DocumentWebhookEvents(documents),
-        HttpWebhookSender(config.webhooks.settings),
-        config.webhooks.settings
-      )
+      webhooks   = WebhookJobs(db, DocumentWebhookEvents(documents), sender, hooks)
       deputyJobs = DeputyshipJobs(
         db,
         deputies,
@@ -105,6 +104,35 @@ object Background:
         .raceFirst(searchJobs.schedule)
         .raceFirst(deputyJobs.schedule)
     yield nothing
+
+  /** Encrypts plain-text webhook secrets and re-encrypts those of older keys with the active key (DMS-107). A
+    * failure is logged and does not stop the instance: deliveries still read every configured key.
+    */
+  private def secureWebhookSecrets(db: Db, settings: WebhookSettings): UIO[Unit] =
+    ZIO
+      .logWarning(
+        "Webhook secrets are encrypted with the publicly known development key: configure " +
+          "DMS_WEBHOOKS_SECRET_KEYS or DMS_WEBHOOKS_SECRET_KEYS_FILE in production (ADR 0035)"
+      )
+      .when(settings.secretKeys.isDevelopment) *>
+      WebhookSecretMigration
+        .run(db, settings.secretKeys)
+        .flatMap(outcome =>
+          ZIO
+            .logInfo(
+              s"Webhook secrets: ${outcome.resealed} encrypted with key ${settings.secretKeys.activeKeyId}"
+            )
+            .when(outcome.resealed > 0) *>
+            ZIO
+              .logError(
+                s"Webhook secrets: ${outcome.unreadable} cannot be decrypted with the configured keys; " +
+                  "configure the missing key or rotate those secrets"
+              )
+              .when(outcome.unreadable > 0)
+        )
+        // Only the kind of error: a database message could quote row data.
+        .catchAll(e => ZIO.logError(s"Webhook secrets could not be re-encrypted: ${e.productPrefix}"))
+        .unit
 
   private def workerName(config: AppConfig): String =
     config.worker.name.getOrElse(ManagementFactory.getRuntimeMXBean.getName) // "pid@host"
