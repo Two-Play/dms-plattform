@@ -17,15 +17,16 @@ import dms.rendering.RenditionRequest
 import dms.rendering.core.RenditionJobs
 import dms.search.core.{SearchIndex, SearchJobs}
 import dms.storage.S3ObjectStore
+import dms.workflow.core.{DeputyshipJobs, DeputyshipScheduleConfig, Deputyships}
 import software.amazon.awssdk.services.s3.S3Client
 import zio.*
 
 import java.lang.management.ManagementFactory
 import java.net.http.HttpClient
 
-/** Background processing of this instance: the job runner (audit, publication, review, rendition, search and
-  * legal hold jobs), the outbox relay and the schedulers of periodic audit jobs, scheduled publications, the
-  * periodic review check and the search synchronization.
+/** Background processing of this instance: the job runner (audit, publication, review, rendition, search,
+  * legal hold and deputyship jobs), the outbox relay and the schedulers of periodic audit jobs, scheduled
+  * publications, the periodic review check, the search synchronization and the deputyship check.
   *
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
   * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029) and the webhooks
@@ -36,7 +37,11 @@ object Background:
 
   def run(
       config: AppConfig
-  ): ZIO[Db & S3Client & DocumentService & ReviewService & RenditionJobs & SearchIndex, Throwable, Nothing] =
+  ): ZIO[
+    Db & S3Client & DocumentService & ReviewService & RenditionJobs & SearchIndex & Deputyships,
+    Throwable,
+    Nothing
+  ] =
     for
       db        <- ZIO.service[Db]
       s3        <- ZIO.service[S3Client]
@@ -44,6 +49,7 @@ object Background:
       reviews   <- ZIO.service[ReviewService]
       rendering <- ZIO.service[RenditionJobs]
       search    <- ZIO.service[SearchIndex]
+      deputies  <- ZIO.service[Deputyships]
       tsa = TsaConfig(config.audit.tsaUrl, trustedCertificates = config.audit.tsaTrustedCertificates)
       trust <- TsaTrust.fromConfig(tsa).mapError(e => RuntimeException(e.message))
       trail       = AuditTrailLive(db, trust)
@@ -74,10 +80,15 @@ object Background:
         HttpWebhookSender(config.webhooks.settings),
         config.webhooks.settings
       )
+      deputyJobs = DeputyshipJobs(
+        db,
+        deputies,
+        DeputyshipScheduleConfig(config.workflow.deputyshipCheckSeconds.seconds)
+      )
       runner = JobRunner(
         db,
         jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers ++
-          legalHolds.handlers ++ webhooks.handlers +
+          legalHolds.handlers ++ webhooks.handlers ++ deputyJobs.handlers +
           (RenditionRequest.JobKind -> rendering.handle),
         WorkerConfig(s"${workerName(config)}-jobs")
       )
@@ -92,6 +103,7 @@ object Background:
         .raceFirst(publications.schedule)
         .raceFirst(reviewJobs.schedule)
         .raceFirst(searchJobs.schedule)
+        .raceFirst(deputyJobs.schedule)
     yield nothing
 
   private def workerName(config: AppConfig): String =

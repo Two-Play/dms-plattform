@@ -40,6 +40,9 @@ trait Groups:
   /** Creates a group; `false` if the key is taken. */
   def create(key: String, name: String, by: UserId): IO[DbError, Boolean]
 
+  /** Changes the display name of a group (the key stays); `false` if there is no such group. */
+  def rename(key: String, name: String): IO[DbError, Boolean]
+
   /** The keys among `keys` that name a group of the tenant. */
   def existing(keys: Set[String]): IO[DbError, Set[String]]
 
@@ -97,6 +100,9 @@ object Groups:
               values (dms.current_tenant(), $key, $name, ${by.value})
               on conflict (tenant_id, key) do nothing""".update.run() > 0
       )
+
+    def rename(key: String, name: String): IO[DbError, Boolean] =
+      Db.sql(sql"update dms.access_group set name = $name where key = $key".update.run() > 0)
 
     def existing(keys: Set[String]): IO[DbError, Set[String]] =
       if keys.isEmpty then ZIO.succeed(Set.empty)

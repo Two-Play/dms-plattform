@@ -15,6 +15,7 @@ import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
 import { Route as AppComplianceRouteImport } from './routes/_app/compliance'
+import { Route as AppDeputiesRouteImport } from './routes/_app/deputies'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppTasksRouteImport } from './routes/_app/tasks'
 import { Route as AppDocumentsIndexRouteImport } from './routes/_app/documents/index'
@@ -51,6 +52,11 @@ const AppAdminRoute = AppAdminRouteImport.update({
 const AppComplianceRoute = AppComplianceRouteImport.update({
   id: '/compliance',
   path: '/compliance',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDeputiesRoute = AppDeputiesRouteImport.update({
+  id: '/deputies',
+  path: '/deputies',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSearchRoute = AppSearchRouteImport.update({
@@ -101,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/sign-in': typeof SignInRoute
   '/admin': typeof AppAdminRoute
   '/compliance': typeof AppComplianceRoute
+  '/deputies': typeof AppDeputiesRoute
   '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
   '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
@@ -115,6 +122,7 @@ export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
   '/admin': typeof AppAdminRoute
   '/compliance': typeof AppComplianceRoute
+  '/deputies': typeof AppDeputiesRoute
   '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
   '/': typeof AppIndexRoute
@@ -132,6 +140,7 @@ export interface FileRoutesById {
   '/sign-in': typeof SignInRoute
   '/_app/admin': typeof AppAdminRoute
   '/_app/compliance': typeof AppComplianceRoute
+  '/_app/deputies': typeof AppDeputiesRoute
   '/_app/search': typeof AppSearchRoute
   '/_app/tasks': typeof AppTasksRoute
   '/_app/': typeof AppIndexRoute
@@ -150,6 +159,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/admin'
     | '/compliance'
+    | '/deputies'
     | '/search'
     | '/tasks'
     | '/documents/$documentId'
@@ -164,6 +174,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/admin'
     | '/compliance'
+    | '/deputies'
     | '/search'
     | '/tasks'
     | '/'
@@ -180,6 +191,7 @@ export interface FileRouteTypes {
     | '/sign-in'
     | '/_app/admin'
     | '/_app/compliance'
+    | '/_app/deputies'
     | '/_app/search'
     | '/_app/tasks'
     | '/_app/'
@@ -239,6 +251,13 @@ declare module '@tanstack/react-router' {
       path: '/compliance'
       fullPath: '/compliance'
       preLoaderRoute: typeof AppComplianceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/deputies': {
+      id: '/_app/deputies'
+      path: '/deputies'
+      fullPath: '/deputies'
+      preLoaderRoute: typeof AppDeputiesRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/search': {
@@ -303,6 +322,7 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
   AppComplianceRoute: typeof AppComplianceRoute
+  AppDeputiesRoute: typeof AppDeputiesRoute
   AppSearchRoute: typeof AppSearchRoute
   AppTasksRoute: typeof AppTasksRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -317,6 +337,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
   AppComplianceRoute: AppComplianceRoute,
+  AppDeputiesRoute: AppDeputiesRoute,
   AppSearchRoute: AppSearchRoute,
   AppTasksRoute: AppTasksRoute,
   AppIndexRoute: AppIndexRoute,

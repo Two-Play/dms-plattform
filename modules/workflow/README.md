@@ -57,6 +57,7 @@ An approver (or reviewer) sets a deputy for an absence: `Deputyships` (`create`,
 - Recording: votes (`acting_for`) and the approval (`acting_for`, from the last approving vote) name the principal; audit entries of the deputy's vote, return, rendition request and approval have `on_behalf_of` = principal; `workflow.returned` / `workflow.approved` carry `actingFor`; the PDF approval note says "by deputy on behalf of principal" ("von … i. V. für …").
 - Authorization (module `app`): for the document of a forwarded task the deputy's subject is extended by the principal's assignments of the task's role (`Authorizer.onBehalfOf`), so the deputy reads and votes within the principal's scope; step-up applies as usual.
 - Not forwarded: owner confirmations of the editorial path (`DocumentOwner` lanes; owner deputies are DMS-88).
+- Notices (DMS-99, ADR 0028 addendum): `DeputyshipJobs` runs `workflow.deputyship-check` per tenant every `dms.workflow.deputyshipCheckSeconds` (300) and publishes `workflow.deputyship-started` (a scheduled period has begun) and `workflow.deputyship-ended-by-period` (a period ran out without an early end) to principal and deputy, once per deputyship (`dms.deputyship_notice`, migration V24). Delivering them is the notifications module's job.
 
 | Method | Path | Purpose | Authorization |
 |---|---|---|---|
@@ -66,4 +67,6 @@ An approver (or reviewer) sets a deputy for an absence: `Deputyships` (`create`,
 
 Task views (`GET /api/v1/workflow/tasks`, cases of a document) carry `deputies` and, in the inbox, `actingFor`; vote and approval views carry `actingFor`.
 
-Tests: `DeputyRulesSpec` (pure), `DeputyshipsSpec` (Testcontainers: RLS, guard, periods, service), `app/WorkflowApiSpec` (create, invalid deputy, deputy votes with step-up on behalf of the approver, return after the end).
+Tests: `DeputyRulesSpec` (pure), `DeputyshipsSpec` (Testcontainers: RLS, guard, periods, service, notices under a clock moved ahead), `app/WorkflowApiSpec` (create, invalid deputy, deputy votes with step-up on behalf of the approver, return after the end; the period is entered with a clock running ahead, no guard is bypassed; deputies on confidential versions only as group members).
+
+Access groups (DMS-101, DMS-105): `RoleDirectory.cleared` limits the participants of a confidential version to author, owner and current members of its groups. When a member joins or leaves a group, the group API calls `ApprovalWorkflow.resolveParticipantsOfGroup` in the same transaction: open and waiting tasks of versions naming the group get their candidates resolved again (unchanged tasks are skipped; changed ones are audited as `workflow.participants-resolved`, empty ones wait and notify the administrators).

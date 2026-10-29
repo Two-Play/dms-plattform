@@ -75,6 +75,8 @@ TanStack Router with **file-based routing**: the Vite plugin generates `src/rout
 | `/compliance?view=&unit=&owner=&document=`          | `routes/_app/compliance.tsx`                     | signed in; compliance cockpit for compliance officers (DMS-59)              |
 | `/templates`                                        | `routes/_app/templates/index.tsx`                | signed in; templates for template designers (DMS-98)                        |
 | `/templates/$templateId?version=…`                  | `routes/_app/templates/$templateId.tsx`          | signed in; one template: versions, content, test mode, status (DMS-98)      |
+| `/admin`                                            | `routes/_app/admin.tsx`                          | tenant administrators; access groups and all deputyships (DMS-105, DMS-99)  |
+| `/deputies`                                         | `routes/_app/deputies.tsx`                       | signed in; own deputies, from the user menu (DMS-99)                        |
 | anything else                                       | `components/not-found-page.tsx`                  | 404 page                                                                    |
 
 The protected layout checks `context.auth.isAuthenticated` in `beforeLoad` and redirects to `/sign-in?redirect=<path>`. After sign-in the original path is carried through the OIDC `state` and restored on `/callback` (only same-origin paths are accepted).
@@ -89,11 +91,13 @@ src/
                  search.ts: full-text search, "valid on" list and CSV export;
                  versions.ts: version history and version comparison;
                  template-admin.ts: template administration, test mode, status changes, impact analysis;
+                 groups.ts: access groups and members; deputyships.ts: deputyships;
                  errors.ts: ApiError with field issues)
   auth/          oidc-client-ts UserManager, scopes, return-path check
   components/    app shell, pages and cards; ui/ holds shadcn/ui components; documents/ the document pages;
                  tasks/ the task inbox and the vote dialog; search/ the search page;
-                 templates/ the template pages
+                 templates/ the template pages;
+                 admin/ the administration; deputies/ the deputyship pages
   lib/           utilities, theme switch
   routes/        file-based routes (files starting with "-" are ignored by the router)
   test/          Vitest setup
@@ -145,12 +149,19 @@ For templates with reference fields (`references` in the fields response), the p
 - The document page of a published version that requires acknowledgement (`components/documents/acknowledgement-panel.tsx`, DMS-47) records the opening when it is displayed (`POST …/opened`), reads the caller's state (`GET …/versions/{versionId}/acknowledgement`) and offers "Acknowledge" once the opening is recorded; afterwards it shows the acknowledgement with version and time.
 - Vote dialog: decisions Approve, Approve with conditions and Request changes (review steps) or Reject (approval steps); a reason is required for everything except a plain approval (checked before sending; the backend answers 422 too). On `401 reauthentication_required` the dialog explains why, remembers the vote and offers "Sign in again" (see API client above). After a vote the task list, the document and its workflow are reloaded.
 - The document page's "Review and approval" card shows the caller's open tasks on the document with the same "Vote…" button.
-- Navigation by role (`GET /api/v1/me`, `useMe` in `api/me.ts`): Home, Documents, Search and Tasks for everyone, Templates for template designers, Compliance for compliance officers, Admin for tenant administrators (Admin still a placeholder). Hiding entries is a convenience; the API enforces the permissions.
+- Navigation by role (`GET /api/v1/me`, `useMe` in `api/me.ts`): Home, Documents, Search and Tasks for everyone, Templates for template designers, Compliance for compliance officers, Admin for tenant administrators. The user menu links to "Deputies". Hiding entries is a convenience; the API enforces the permissions.
 
 ## Compliance cockpit (DMS-59, ADR 0036)
 
 - `/compliance` (`components/compliance/compliance-page.tsx`) shows three key figure cards (overdue reviews, acknowledgement rate, open acknowledgements) and tables of overdue reviews per unit and per owner and of acknowledgement rates per unit (`GET /api/v1/compliance/overview`). Every figure is a link to its list below, kept in the URL (`view=reviews|acknowledgements`, `unit`, `owner`, `document`; parsed in `compliance-params.ts`); an empty `unit` or `owner` selects versions without one ("No unit", "No owner").
 - The acknowledgement list shows figures only. "Who has not acknowledged" opens a dialog that requires a purpose (escalation or reminder) and a reason before it requests the names (`GET …/acknowledgements/{documentId}/{versionId}/open`); the backend records purpose and reason in the audit trail. The names are not cached.
+
+## Administration and deputies (DMS-105, DMS-99)
+
+- `/admin` (`components/admin/admin-page.tsx`) is for tenant administrators (others see a hint; the API enforces it) and has two tabs. **Access groups** (`groups-panel.tsx`): create a group (key checked like the backend: lowercase letters, digits and hyphens), pick a group, rename it (`PUT /api/v1/groups/{key}`; the key stays), add a member by user id and remove current members. The member list keeps former members with who added and removed them when. The backend resolves the participants of open tasks of confidential documents naming the group again when members join or leave, so the inbox is reloaded after a change. **Deputyships**: all deputyships of the tenant (`GET /api/v1/deputyships?all=true`), setting one for anyone (principal field) and ending running or scheduled ones.
+- `/deputies` (`components/deputies/my-deputies-page.tsx`, user menu → "Deputies") is for everyone: set a deputy (`deputyship-form.tsx`: deputy, optional start, end, roles, document class, reason; checked before sending, the backend's reason shown otherwise), "My deputies" and "I stand in for" (`deputyship-table.tsx`) with "End now".
+- The task inbox marks tasks forwarded by an active deputyship with "On behalf of …" (`actingFor`).
+- Users are shown by id until a source of display names exists.
 
 ## Search and "valid on" (DMS-52, DMS-53)
 

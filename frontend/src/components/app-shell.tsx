@@ -10,6 +10,7 @@ import {
   Settings,
   ShieldCheck,
   Sun,
+  UserRoundCheck,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useAuth } from 'react-oidc-context'
@@ -91,6 +92,12 @@ function UserMenu() {
           )}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link to="/deputies">
+            <UserRoundCheck />
+            Deputies
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => void auth.signoutRedirect()}>
           <LogOut />
           Sign out

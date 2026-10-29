@@ -247,6 +247,17 @@ describe('task inbox', () => {
     expect(screen.getByText('2 open, 1 overdue')).toBeInTheDocument()
   })
 
+  it('marks tasks forwarded by a deputyship with the principal (DMS-99)', async () => {
+    state.tasks = state.tasks.map((t) =>
+      t.id === 'approve-policy' ? { ...t, actingFor: 'approver-1' } : t,
+    )
+    renderAt('/tasks')
+
+    const [first, second] = await rows()
+    expect(within(must(first)).getByText('On behalf of approver-1')).toBeInTheDocument()
+    expect(within(must(second)).queryByText(/On behalf of/)).not.toBeInTheDocument()
+  })
+
   it('requires a reason for every decision except a plain approval', async () => {
     const { post, user } = renderAt('/tasks')
     const [, review] = await rows()
