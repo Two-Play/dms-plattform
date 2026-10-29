@@ -11,6 +11,7 @@ import { DeputyshipTable } from '@/components/deputies/deputyship-table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { t } from '@/i18n'
+import { AcknowledgementSettingsPanel } from './acknowledgement-settings-panel'
 import { GroupsPanel } from './groups-panel'
 import { NumberRangesPanel } from './number-ranges-panel'
 import { WebhooksPanel } from './webhooks-panel'
@@ -53,7 +54,7 @@ function DeputyshipsPanel() {
 
 /**
  * Administration for tenant administrators: access groups for confidential documents (DMS-105),
- * number ranges (DMS-113), the deputyships of everyone (DMS-99) and webhooks for connected
+ * number ranges (DMS-113), who must confirm documents per class (DMS-100), the deputyships of everyone (DMS-99) and webhooks for connected
  * systems (DMS-107). The API enforces the permissions.
  */
 export function AdminPage() {
@@ -76,6 +77,7 @@ export function AdminPage() {
         <TabsList>
           <TabsTrigger value="groups">{t('admin.tabGroups')}</TabsTrigger>
           <TabsTrigger value="number-ranges">{t('admin.tabNumberRanges')}</TabsTrigger>
+          <TabsTrigger value="acknowledgements">{t('ackSettings.tab')}</TabsTrigger>
           <TabsTrigger value="deputyships">{t('admin.tabDeputyships')}</TabsTrigger>
           <TabsTrigger value="webhooks">{t('admin.tabWebhooks')}</TabsTrigger>
           <TabsTrigger value="system">{t('admin.tabSystem')}</TabsTrigger>
@@ -85,6 +87,9 @@ export function AdminPage() {
         </TabsContent>
         <TabsContent value="number-ranges" className="pt-4">
           <NumberRangesPanel />
+        </TabsContent>
+        <TabsContent value="acknowledgements" className="pt-4">
+          <AcknowledgementSettingsPanel />
         </TabsContent>
         <TabsContent value="deputyships" className="pt-4">
           <DeputyshipsPanel />
