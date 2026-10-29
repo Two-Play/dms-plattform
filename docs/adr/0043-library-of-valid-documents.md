@@ -71,10 +71,26 @@ Search for content stays on the search page (ADR 0029); the library is for brows
 
 ## Follow-ups
 
-- Must be done: demo data — `scripts/dev_setup.py` seeds only drafts (publishing needs the approval workflow with step-up sign-in), so the local library stays empty until a document is approved; add a published "Zentralanweisung" to the seed once publishing can be scripted (e.g. with `approve-tasks`). A tenant field `summary` should be part of the demo classes.
+- Done (DMS-120, see addendum): demo data — the seed publishes four central instructions ("Zentralanweisung") through the approval workflow; the demo class has the tenant field `summary`.
 - Later: optional "valid on" date for the library (reuse `validAt`); a per-user "last visit" as default for `since`; serving the library from the index (`status` = valid, new aggregations for unit, tags and confidentiality) if tenants grow beyond tens of thousands of valid documents; a core field for a short description if tenants need it everywhere.
 - Ruled out: a separate library table or materialized view (would duplicate validity and need invalidation at scheduled publications).
 
 ## Reversibility
 
 **high**: One additive read endpoint and an extended internal query; no stored state. Moving the endpoint to the search index keeps the API contract (`LibraryView`) and only changes the app module.
+
+## Addendum (DMS-120, 2026-10-29): demo data through the real workflow; the short description stays a class field
+
+**Demo data.** `scripts/dev_setup.py seed` creates the document class `central-instruction` (label "Zentralanweisung") with the tenant fields `summary` (label "Kurzbeschreibung", text up to 500 characters, required from review) and `appliesTo`, a one-step approval workflow (role Approver), the number range `central-instructions` (`ZA-{YYYY}-{NNN}`, yearly reset), the released template "Zentralanweisung" (locked identification with number, issuing unit, valid-from date and short description; editable scope, rules and responsibilities; locked entry into force) and four instructions with German content, tags and different issuing units (IT-Sicherheit, Finanzen, Datenschutz, Personal) whose valid-from dates lie in the past. Publishing uses only the regular API and no dev-only path: `author` creates, fills and submits; `approver` signs in afresh through ZITADEL (session with password check, authorization code flow) and sends the ID token in `X-DMS-Id-Token`, which satisfies the step-up check of approval votes (ADR 0024, addendum DMS-86) exactly as the web UI does; the rendering job seals the rendition and the publication job publishes the versions. The script waits up to three minutes for the publication and continues an interrupted run from each document's status (idempotent by title). Production checks are unchanged, so no configuration switch is needed. It also uploads a Word template (a minimal DOCX with `dms:` content controls, DMS-115) and creates a draft file document from it.
+
+**Short description: class field `summary` (kept) or a core field.**
+
+| Criterion | Kept: tenant field with the conventional key `summary` | New core field `summary` |
+|---|---|---|
+| Classes that need no description (contracts, records) | Do not bind it; no empty field in their forms | Every class gets it (core fields are in every profile) |
+| Existing tenant fields named `summary` | Work as they are; the library reads them | Clash with the core key: tenants could no longer create or keep their own definition (the problem ADR 0040 notes for `documentNumber`); needs a data migration of their values |
+| Label, length, requiredness per class | Chosen by the tenant per class | Fixed by the platform; classes may only tighten requiredness |
+| Library and templates | Read by key, no change | Same |
+| Effort | None | CoreFields, profiles of all tenants, migration of existing values, tests |
+
+Decision: keep the class field. It is not clearly better to make it a core field: the library already works with the conventional key, most document types other than instructions and policies do not need a description, and a core key would collide with the tenant fields that already use it. Reconsider if tenants ask for a description on every document type; then a migration has to move existing `summary` values into the core field.

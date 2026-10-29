@@ -111,11 +111,14 @@ The ZITADEL default admin `zitadel-admin@zitadel.localhost` (password `Password1
 
 Demo content:
 
-- Field definitions and the document classes `contract` (partner number, name and address, monthly fee, term, start and end date, notice period, services, service level) and `policy` (policy area, applies to).
-- Workflows: `contract` with a legal review (Reviewer) and an approval (Approver); `policy` with one approval (Approver).
-- Number ranges (DMS-113): `contracts` (`VTR-{YYYY}-{NNNN}`, yearly reset) assigned to `contract` and `policies` (`RL-{NNN}`) assigned to `policy`; new documents of these classes get the next number. Manage them as `admin` under Admin → Number ranges.
+- Field definitions and the document classes `contract` (partner number, name and address, monthly fee, term, start and end date, notice period, services, service level), `policy` (policy area, applies to) and `central-instruction` "Zentralanweisung" (short description `summary`, shown in the library, and applies to).
+- Workflows: `contract` with a legal review (Reviewer) and an approval (Approver); `policy` and `central-instruction` with one approval (Approver).
+- Number ranges (DMS-113): `contracts` (`VTR-{YYYY}-{NNNN}`, yearly reset) assigned to `contract`, `policies` (`RL-{NNN}`) assigned to `policy` and `central-instructions` (`ZA-{YYYY}-{NNN}`, yearly reset) assigned to `central-instruction`; new documents of these classes get the next number. Manage them as `admin` under Admin → Number ranges.
 - Released templates "Service contract" (partner from the partner master, computed annual fee and total contract value, conditional term clause, repeated service list, locked sections) and "Policy", created by `designer` and released by `designer2`.
 - A draft "Service contract Nordlicht Logistik" of `author` with the partner P-10001 taken over from the partner master.
+- Four published central instructions (DMS-120) for the library (`/library`): "Informationssicherheit am Arbeitsplatz" (IT-Sicherheit), "Reisekostenrichtlinie" (Finanzen), "Umgang mit personenbezogenen Daten" (Datenschutz) and "Mobiles Arbeiten und Homeoffice" (Personal), with tags, short descriptions and numbers `ZA-<year>-001` … from the released template "Zentralanweisung". The seed runs the real workflow: `author` submits, `approver` approves with a fresh sign-in (step-up), the rendering and publication jobs publish them; it waits up to three minutes and continues on the next run if the rendering worker was not ready. Readers see them in the library with an open acknowledgement.
+- A Word template "Zentralanweisung (Word)" (a DOCX with content controls for number, index, issuing unit, valid-from date, short description, approval and the manual field "Ansprechpartner", DMS-115) and the Word draft "Dienstwagenregelung (Word-Entwurf)" of `author`.
+- `scripts/dev_setup.py check [--dump DIR]` checks the demo content offline (fields of the classes, placeholders of the templates, locked sections of the instructions, the Word file's fields) without any running service.
 
 The partner master is the built-in demo directory (`dms.partners.directory = demo`, the default): fictitious partners such as "Nordlicht Logistik GmbH" (P-10001) or "Beispiel Software AG" (P-10002).
 
