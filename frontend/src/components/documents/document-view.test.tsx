@@ -117,6 +117,7 @@ function documentWith(current: DocumentVersionView): DocumentView {
     classVersion: 1,
     classPath: ['policy'],
     canAssignNumber: false,
+    canStartVersion: false,
     kind: 'Structured',
     title: 'IT security policy',
     ownerId: 'owner-1',

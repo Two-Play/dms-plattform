@@ -289,6 +289,12 @@ private[core] object DocumentStore:
           set deviation_report = ${Jsonb(codec.encodeReport(report))}, updated_at = now()
           where id = $id and status = 'Draft'""".update.run() == 1
 
+  /** Changes the change summary (`change_reason`) of a draft in place; it is not part of the working state.
+    */
+  def updateChangeReason(id: UUID, reason: Option[String])(using DbTx): Boolean =
+    sql"""update dms.document_version set change_reason = $reason, updated_at = now()
+          where id = $id and status = 'Draft'""".update.run() == 1
+
   /** All deviation requests of a version, active and withdrawn, oldest first. */
   def deviationRequests(versionId: UUID)(using DbTx): List[RecordedDeviationRequest] =
     sql"""select id, version_id, section_id, reason, requested_by, requested_at, based_on, withdrawn_by,

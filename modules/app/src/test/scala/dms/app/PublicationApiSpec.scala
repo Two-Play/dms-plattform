@@ -283,6 +283,31 @@ object PublicationApiSpec extends ZIOSpecDefault:
   private def newVersion(doc: UUID, body: String, user: UserId = author) =
     call(user, "POST", s"/api/v1/documents/$doc/versions", Some(body))
 
+  private def document(doc: UUID, user: UserId) =
+    call(user, "GET", s"/api/v1/documents/$doc").map(as[DocumentView])
+
+  private def changeSummary(doc: UUID, reason: Option[String], user: UserId = author) =
+    call(
+      user,
+      "PUT",
+      s"/api/v1/documents/$doc/draft/change-summary",
+      Some(UpdateChangeSummary(reason).toJson)
+    )
+
+  /** The audited changes of change summaries of a document: (before, after). */
+  private def summaryChanges(doc: UUID): ZIO[Any, DbError, List[(Option[String], Option[String])]] =
+    setup.await.flatMap(s =>
+      s.owner.transactSystem(
+        Db.sql(
+          sql"""select details ->> 'before', details ->> 'after' from dms.audit_event
+                where action = 'document.change-reason-changed' and object_id = $doc order by occurred_at"""
+            .query[(Option[String], Option[String])]
+            .run()
+            .toList
+        )
+      )
+    )
+
   private def outbox(eventType: String): ZIO[Any, DbError, List[String]] =
     setup.await.flatMap(s =>
       s.owner.transactSystem(
@@ -300,7 +325,10 @@ object PublicationApiSpec extends ZIOSpecDefault:
       val docs = sttp.tapir.docs.openapi
         .OpenAPIDocsInterpreter()
         .toOpenAPI(DocumentApi.endpoints.map(_.endpoint), "DMS Platform", "test")
-      assertTrue(docs.paths.pathItems.contains("/api/v1/documents/{id}/versions"))
+      assertTrue(
+        docs.paths.pathItems.contains("/api/v1/documents/{id}/versions"),
+        docs.paths.pathItems.contains("/api/v1/documents/{id}/draft/change-summary")
+      )
     },
     test("an approved version whose valid-from date has come is published by the publication job") {
       for
@@ -380,6 +408,62 @@ object PublicationApiSpec extends ZIOSpecDefault:
         )
       )
     },
+    test("authors start a new version and edit its change summary until submission (DMS-103)") {
+      for
+        doc      <- validDocument(owner)
+        asAuthor <- document(doc.id, author)
+        asReader <- document(doc.id, reader)
+        major    <- newVersion(doc.id, """{"changeKind":"Major","reason":"Rule 7 rewritten"}""")
+          .map(as[DocumentVersionView])
+        whileOpen <- document(doc.id, author)
+        byReader  <- changeSummary(doc.id, Some("Sneaky"), reader)
+        tooLong   <- changeSummary(doc.id, Some("x" * 4001))
+        edited    <- changeSummary(doc.id, Some("  Rule 7 rewritten: new reporting channel  "))
+          .map(as[DocumentVersionView])
+        same    <- changeSummary(doc.id, Some("Rule 7 rewritten: new reporting channel"))
+        cleared <- changeSummary(doc.id, None).map(as[DocumentVersionView])
+        _       <- changeSummary(doc.id, Some("Rule 7 rewritten: new reporting channel"))
+        history <- versions(doc.id, author)
+        _       <- call(author, "POST", s"/api/v1/documents/${doc.id}/submit")
+        late    <- changeSummary(doc.id, Some("Too late"))
+        audited <- summaryChanges(doc.id)
+      yield assertTrue(
+        asAuthor.canStartVersion,
+        asAuthor.startVersionBlocked.isEmpty,
+        !asReader.canStartVersion,
+        asReader.startVersionBlocked.isEmpty,
+        major.changeReason.contains("Rule 7 rewritten"),
+        !whileOpen.canStartVersion,
+        whileOpen.startVersionBlocked.contains("OpenVersion"),
+        byReader._1 == Status.Forbidden,
+        tooLong._1 == Status.UnprocessableEntity,
+        edited.changeReason.contains("Rule 7 rewritten: new reporting channel"),
+        edited.workingState == major.workingState,
+        same._1 == Status.Ok,
+        cleared.changeReason.isEmpty,
+        history.last.changeReason.contains("Rule 7 rewritten: new reporting channel"),
+        late._1 == Status.Conflict,
+        audited == List(
+          (Some("Rule 7 rewritten"), Some("Rule 7 rewritten: new reporting channel")),
+          (Some("Rule 7 rewritten: new reporting channel"), None),
+          (None, Some("Rule 7 rewritten: new reporting channel"))
+        )
+      )
+    },
+    test("an editorial version keeps a change summary") {
+      for
+        doc   <- validDocument(owner)
+        minor <- newVersion(doc.id, """{"changeKind":"Minor","reason":"Typo"}""").map(as[DocumentVersionView])
+        empty <- changeSummary(doc.id, Some("   "))
+        kept  <- versions(doc.id, author)
+        fixed <- changeSummary(doc.id, Some("Typo in rule 5")).map(as[DocumentVersionView])
+      yield assertTrue(
+        empty._1 == Status.UnprocessableEntity,
+        kept.last.changeReason == minor.changeReason,
+        fixed.changeReason.contains("Typo in rule 5"),
+        fixed.changeKind == "Minor"
+      )
+    },
     test("if the owner wrote the editorial correction, an approver confirms it") {
       for
         doc <- validDocument(author)
@@ -407,6 +491,7 @@ object PublicationApiSpec extends ZIOSpecDefault:
         _         <- approveDefault(doc.id)
         published <- runPublicationJobs
         found     <- versions(doc.id, owner)
+        view      <- document(doc.id, author)
         blocked   <- newVersion(doc.id, """{"changeKind":"Minor","reason":"Typo"}""")
         due = Instant.parse("2098-12-31T23:00:00Z")
       yield assertTrue(
@@ -417,6 +502,8 @@ object PublicationApiSpec extends ZIOSpecDefault:
           Some(("2.0", "Approved", Some(future), Some(due))),
         found(1).publicationDue.contains(due),
         found(1).validFrom.contains(future),
+        !view.canStartVersion,
+        view.startVersionBlocked.contains("ScheduledVersion"),
         blocked._1 == Status.Conflict,
         error(blocked._2).exists(_.message.contains("2099-01-01"))
       )

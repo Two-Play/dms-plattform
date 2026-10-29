@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-10-28, implemented in DMS-54) |
+| Status | Accepted (2026-10-28, implemented in DMS-54; addendum 2026-10-29, DMS-103) |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
@@ -45,13 +45,31 @@ For the change summary, a separate `change_summary` column captured on submit wa
 - Each request computes the diff (O(n·m) per paired block and per section list); very long paragraphs cost memory for the LCS table. Acceptable for policy and contract sizes; a cap or Myers' algorithm would be the remedy.
 - Clause references are compared by key and version only; the changed clause text itself is not expanded.
 - Placeholders are compared as placeholders; the values they render are compared in the field values part, not inside the text.
-- The summary is the reason given when the version was started; authors cannot yet edit it in the draft.
+- The summary is the reason given when the version was started; since DMS-103 authors can change it until they submit the draft (see the addendum).
 
 ## Follow-ups
 
-- Must be done: a frontend form to start a new version with its change summary (only the API exists).
-- Possible: expand clause references to their clause text; let authors edit the summary while the version is a draft (the `change_reason` column is writable for drafts already); side-by-side view.
+- Done (DMS-103, see the addendum): a frontend form to start a new version with its change summary; authors edit the summary while the version is a draft.
+- Possible: expand clause references to their clause text; side-by-side view; require a summary for major versions too (see the addendum).
 - Ruled out: comparing renditions; storing diffs.
+
+## Addendum 2026-10-29: starting versions and editing the change summary in the UI (DMS-103)
+
+Decisions:
+
+1. **Still one text, `change_reason`; no migration.** The author maintains it from starting the version until submission through `PUT /api/v1/documents/{id}/draft/change-summary` (`{"reason": ...}`). The guard trigger (ADR 0021) already lets drafts change the column; the service checks the same rules as on start (required for Minor, trimmed, at most 4000 characters, now also applied on start) and the update condition `status = 'Draft'`. From submission on the summary is frozen with the version (409). It is not part of a working state (content and values are unchanged), so no working state is added; the change is audited as `document.change-reason-changed` with the text before and after (an unchanged text records nothing). Authorization: `EditDraft` on the draft; on a submitted version, where `EditDraft` means reviewers' suggestions, the caller only needs to read it to learn that it can no longer change.
+2. **The backend tells the UI whether a version can be started.** `DocumentView.canStartVersion` (the caller may start the next version now) and `startVersionBlocked` (`OpenVersion` or `ScheduledVersion`, only for callers who could start one) are computed with the same policy question as `POST …/versions` (`EditDraft` on a draft of which the caller is the author) and the same state rules. The UI hides "New version" for callers without permission and disables it with the reason while the document's state blocks it (hidden when the caller looks at the version in progress itself). The endpoint still decides.
+3. **Required as the backend demands.** The dialog requires a summary for editorial (Minor) versions and recommends it for major ones; making it mandatory for major versions (fachkonzept 5.1: "jeweils mit Begründung und Änderungsübersicht") would change the check constraint and the API for all clients and is left as a follow-up decision.
+4. **File and Word documents** keep the behavior of ADR 0042: the new draft takes the original, its field definitions and values over; the dialog and the confirmation tell the author to upload the revised file in the draft, where the file panel offers the upload.
+
+| Criterion | Chosen: separate endpoint for the summary | Summary as part of `PUT …/draft` | Separate `change_summary` column captured on submit |
+|---|---|---|---|
+| Working state | None added (summary is version metadata) | Every summary change adds a working state with unchanged content | None |
+| Clients of `PUT …/draft` (form, Word fields, partner take-over) | Unchanged | Must send the summary or a default meaning "keep" | Unchanged |
+| Migration | No | No | Yes, plus a second text next to the reason |
+| Audit | Own action with before/after | Mixed into `document.draft-changed` | Own action |
+
+Consequences: positive: readers see the corrected summary in the history and the comparison at once; no migration. Negative: the summary of a submitted version cannot be corrected anymore (a return to draft makes it editable again); the UI computes the "becomes version" labels from the valid version's label, while the server counts from the highest approved number (they differ only after withdrawn approved versions). Reversibility: high; the endpoint and the two view fields can be removed without data changes.
 
 ## Reversibility
 

@@ -860,10 +860,7 @@ final class DocumentService(
       base <- ZIO
         .fromOption(versions.filter(v => Versioning.isValid(v.status)).maxByOption(_.number))
         .orElseFail(DocumentError.Conflict("only a document with a valid version can get a new version"))
-      changeReason = reason.map(_.trim).filter(_.nonEmpty)
-      _ <- ZIO.when(kind == ChangeKind.Minor && changeReason.isEmpty)(
-        ZIO.fail(DocumentError.Invalid(List("an editorial (minor) version needs a reason")))
-      )
+      changeReason <- checkChangeReason(kind, reason)
       number = Versioning.next(versions.filter(_.releasedAt.isDefined).map(_.number).maxOption, kind)
       workingState <- sql(DocumentStore.workingStates(id, number)).map(Versioning.nextWorkingState)
       template     <- templates.version(base.templateId, base.templateVersion)
@@ -927,6 +924,58 @@ final class DocumentService(
       )
       _ <- publish("document.version-created", document, version)
     yield version
+
+  /** Changes the change summary of the open draft (DMS-103): what changed and why, shown in the version
+    * history and above version comparisons. It can be changed until the draft is submitted (409 afterwards);
+    * a minor version keeps a non-empty summary (422). Not a working state: content and values are unchanged.
+    * Recorded in the audit trail with the summary before and after; an unchanged summary records nothing.
+    */
+  def updateChangeReason(
+      id: DocumentId,
+      reason: Option[String],
+      actor: UserId
+  ): IO[DocumentError, DocumentVersion] =
+    for
+      current <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
+      _       <- ZIO.unless(Versioning.isEditable(current.status))(
+        ZIO.fail(
+          DocumentError.Conflict(
+            s"version ${current.label} is ${current.status}; the change summary only changes while it is a draft"
+          )
+        )
+      )
+      changeReason <- checkChangeReason(current.changeKind, reason)
+      updated      <-
+        if changeReason == current.changeReason then ZIO.succeed(current)
+        else
+          for
+            now <- Clock.instant
+            _   <- sql(DocumentStore.updateChangeReason(current.id, changeReason))
+              .filterOrFail(identity)(changedConcurrently(current))
+            next = current.copy(changeReason = changeReason, updatedAt = now)
+            _ <- record(
+              actor,
+              "document.change-reason-changed",
+              next,
+              Json.Obj(
+                "changeKind" -> Json.Str(current.changeKind.toString),
+                "before"     -> current.changeReason.fold[Json](Json.Null)(Json.Str(_)),
+                "after"      -> changeReason.fold[Json](Json.Null)(Json.Str(_))
+              )
+            )
+          yield next
+    yield updated
+
+  /** The trimmed change summary; required for minor versions, at most `MaxReasonLength` characters. */
+  private def checkChangeReason(kind: ChangeKind, reason: Option[String]): IO[DocumentError, Option[String]] =
+    val changeReason = reason.map(_.trim).filter(_.nonEmpty)
+    if kind == ChangeKind.Minor && changeReason.isEmpty then
+      ZIO.fail(DocumentError.Invalid(List("an editorial (minor) version needs a reason")))
+    else if changeReason.exists(_.length > MaxReasonLength) then
+      ZIO.fail(
+        DocumentError.Invalid(List(s"the change summary must have at most $MaxReasonLength characters"))
+      )
+    else ZIO.succeed(changeReason)
 
   /** The stored file of the document with this content, if any: an upload of the same bytes reuses it. */
   def attachmentFile(document: DocumentId, sha256: String): IO[DocumentError, Option[AttachmentFile]] =

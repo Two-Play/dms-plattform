@@ -763,6 +763,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/draft/change-summary': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Changes the author's change summary of the open draft (DMS-103), shown in the version history and above version comparisons. Requires EditDraft; only while the version is a draft (409 from submission on). An editorial (Minor) version needs a summary (422); at most 4000 characters (422). Content and values are unchanged, so no working state is added. Recorded in the audit trail. */
+    put: operations['putApiV1DocumentsIdDraftChange-summary']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/{id}/deviation-requests': {
     parameters: {
       query?: never
@@ -2669,6 +2686,8 @@ export interface components {
       documentNumber?: string
       canAssignNumber: boolean
       kind: string
+      canStartVersion: boolean
+      startVersionBlocked?: string
     }
     /** EditorialCheckView */
     EditorialCheckView: {
@@ -4005,6 +4024,10 @@ export interface components {
     UnitRateView: {
       unit?: string
       rate: components['schemas']['RateView']
+    }
+    /** UpdateChangeSummary */
+    UpdateChangeSummary: {
+      reason?: string
     }
     /** UpdateDraft */
     UpdateDraft: {
@@ -6451,6 +6474,49 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'putApiV1DocumentsIdDraftChange-summary': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateChangeSummary']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentVersionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown
