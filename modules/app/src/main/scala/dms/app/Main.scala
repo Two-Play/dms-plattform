@@ -30,7 +30,7 @@ object Main extends ZIOAppDefault:
   private type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
     PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env &
     SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env &
-    EvidenceReportApi.Env & CurrentDocumentApi.Env & WebhookApi.Env & UserApi.Env
+    EvidenceReportApi.Env & CurrentDocumentApi.Env & WebhookApi.Env & UserApi.Env & VersionViewApi.Env
 
   private val apiEndpoints: List[ZServerEndpoint[Env, Any]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -46,6 +46,7 @@ object Main extends ZIOAppDefault:
       CurrentDocumentApi.endpoints.map(_.widen[Env]) ++
       VersionCompareApi.endpoints.map(_.widen[Env]) ++
       RenditionApi.endpoints.map(_.widen[Env]) ++
+      VersionViewApi.endpoints.map(_.widen[Env]) ++
       AcknowledgementApi.endpoints.map(_.widen[Env]) ++
       ReviewApi.endpoints.map(_.widen[Env]) ++
       WorkflowApi.endpoints.map(_.widen[Env]) ++

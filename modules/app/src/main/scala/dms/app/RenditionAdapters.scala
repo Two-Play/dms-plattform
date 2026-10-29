@@ -2,14 +2,14 @@ package dms.app
 
 import dms.audit.AuditTrail
 import dms.db.Db
-import dms.documents.metadata.MetadataValue
+import dms.documents.metadata.{MetadataProfile, MetadataValue, Validation}
 import dms.documents.{DocumentStatus, DocumentVersion, Rendition}
 import dms.documents.core.{DocumentDetails, DocumentService}
 import dms.kernel.UserId
 import dms.rendering.RenditionRequest
 import dms.rendering.core.*
 import dms.templates.core.*
-import dms.templates.{Language, Limits}
+import dms.templates.{Language, Limits, ResolvedContent, TemplateSchema}
 import dms.workflow.core.{ApprovalRendition, ApprovalWorkflow, ReviewSubject, WorkflowError}
 import zio.*
 
@@ -123,25 +123,15 @@ object DocumentRenditions:
       details: DocumentDetails,
       v: DocumentVersion
   ): IO[RenderingError, (String, Language)] =
-    val invalid  = (m: String) => RenderingError.Invalid(s"version ${v.label} cannot be rendered: $m")
-    val values   = v.metadata
-    val language = text(values, "language").getOrElse(Language.default.code)
     for
-      template <- templates.version(v.templateId, v.templateVersion).mapError(e => invalid(e.describe))
-      profile  <- profiles
-        .profile(template.documentClassId, template.documentClassVersion)
-        .mapError(e => invalid(e.describe))
-      schema = ProfileSchema.from(profile)
-      compiled <- ZIO
-        .fromEither(TemplateCompiler.compile(v.content, schema, Limits.default))
-        .mapError(issues => invalid(issues.map(_.show).mkString("; ")))
-      fieldValues = values.collect {
+      prepared <- prepare(templates, profiles, v)
+      (profile, schema, compiled, lang) = prepared
+      fieldValues                       = v.metadata.collect {
         case (key, value) if schema.variable(key).isDefined => key -> ProfileSchema.fieldValue(value)
       }
-      lang = Language.parse(language.takeWhile(_ != '-')).getOrElse(Language.default)
       resolution <- ZIO
         .fromEither(Resolver.resolve(compiled, fieldValues, lang))
-        .mapError(e => invalid(e.message))
+        .mapError(e => invalid(v, e.message))
       labels = profile.fields.map(f => f.key.value -> f.definition.label).toMap
     yield (
       HtmlRenderer.renderDocument(
@@ -150,6 +140,89 @@ object DocumentRenditions:
       ),
       lang
     )
+
+  /** A version resolved for reading on screen or printing on demand (DMS-112), with its rendering options. */
+  final case class VersionRendering(content: ResolvedContent, options: HtmlOptions):
+    /** The HTML fragment (one `article.dms-document`) for the web page. */
+    def fragment: String = HtmlRenderer.render(content, options)
+
+    /** The stand-alone page with the document stylesheet, for the rendering worker. */
+    def page: String = HtmlRenderer.renderDocument(content, options)
+
+    def language: Language = options.language
+
+  /** Whether a version shows the draft marking: it was never approved (draft, in review or approval, or a
+    * draft that was withdrawn). Approved versions show their frozen content without marking.
+    */
+  def drafted(v: DocumentVersion): Boolean = v.releasedAt.isEmpty
+
+  /** The content of any version resolved with its stored field values, in its language (DMS-112, ADR 0039).
+    *
+    * Versions that were never approved are rendered like the live preview (US-03.2): values that do not fit
+    * their field definition and blank values are left out (shown as missing), fields the platform sets are
+    * marked neutrally while they have no value, and the page carries the draft marking "Draft – not valid".
+    * Approved versions are rendered from their frozen version package (content and values) without marking,
+    * as printed into the archive rendition. Runs inside `Db.transact(tenant)`.
+    */
+  def view(
+      templates: TemplateService,
+      profiles: ProfileSource,
+      details: DocumentDetails,
+      v: DocumentVersion
+  ): IO[RenderingError, VersionRendering] =
+    for
+      prepared <- prepare(templates, profiles, v)
+      (profile, schema, compiled, lang) = prepared
+      draft                             = drafted(v)
+      rejected                          =
+        if draft then Validation.checkValues(profile, v.metadata).map(_.field).toSet else Set.empty[String]
+      fieldValues = v.metadata.collect {
+        case (key, value)
+            if schema.variable(key).isDefined && !rejected
+              .contains(key) && !Validation.isEmpty(Some(value)) =>
+          key -> ProfileSchema.fieldValue(value)
+      }
+      resolution <- ZIO
+        .fromEither(Resolver.resolve(compiled, fieldValues, lang))
+        .mapError(e => invalid(v, e.message))
+      labels       = profile.fields.map(f => f.key.value -> f.definition.label).toMap
+      systemFields = profile.fields.filterNot(_.definition.editable).map(_.key.value).toSet
+    yield VersionRendering(
+      resolution.content,
+      HtmlOptions(
+        lang,
+        labels,
+        Option.when(draft)(HtmlOptions.draftLabel(lang)),
+        Some(title(details, v)),
+        systemFields
+      )
+    )
+
+  /** The class profile of the version's template, the schema, the compiled content and the language. */
+  private def prepare(
+      templates: TemplateService,
+      profiles: ProfileSource,
+      v: DocumentVersion
+  ): IO[RenderingError, (MetadataProfile, TemplateSchema, CompiledTemplate, Language)] =
+    val language = text(v.metadata, "language").getOrElse(Language.default.code)
+    for
+      template <- templates.version(v.templateId, v.templateVersion).mapError(e => invalid(v, e.describe))
+      profile  <- profiles
+        .profile(template.documentClassId, template.documentClassVersion)
+        .mapError(e => invalid(v, e.describe))
+      schema = ProfileSchema.from(profile)
+      compiled <- ZIO
+        .fromEither(TemplateCompiler.compile(v.content, schema, Limits.default))
+        .mapError(issues => invalid(v, issues.map(_.show).mkString("; ")))
+    yield (
+      profile,
+      schema,
+      compiled,
+      Language.parse(language.takeWhile(_ != '-')).getOrElse(Language.default)
+    )
+
+  private def invalid(v: DocumentVersion, message: String): RenderingError =
+    RenderingError.Invalid(s"version ${v.label} cannot be rendered: $message")
 
   private def text(values: Map[String, MetadataValue], key: String): Option[String] =
     values.get(key).collect {
