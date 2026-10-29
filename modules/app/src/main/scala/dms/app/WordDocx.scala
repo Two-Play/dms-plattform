@@ -38,6 +38,14 @@ object FieldValue:
   val CheckedSymbol: String   = "☒"
   val UncheckedSymbol: String = "☐"
 
+/** The values an Office file carries for its fields (DMS-127): candidates by key in order of preference, and
+  * whether the platform filled the file (it has the platform's custom XML part or custom properties).
+  */
+final case class RecoveredValues(filledByPlatform: Boolean, candidates: Map[String, List[String]])
+
+object RecoveredValues:
+  val none: RecoveredValues = RecoveredValues(false, Map.empty)
+
 /** A paragraph of a Word document as text (DMS-121); `headingLevel` for paragraphs in a heading style. */
 final case class WordParagraph(text: String, headingLevel: Option[Int] = None)
 
@@ -96,14 +104,47 @@ object WordDocx:
   def fill(docx: Array[Byte], values: Map[String, String]): Either[String, Array[Byte]] =
     fillValues(docx, values.map((k, v) => k -> FieldValue.Text(v)))
 
-  /** The DOCX with `values` (by key, without the `dms:` prefix) filled into its fields. */
+  /** The DOCX with `values` (by key, without the `dms:` prefix) filled into its fields. The values are also
+    * written into the custom XML part and the custom document properties ([[WordFieldStore]], DMS-127); plain
+    * text controls are bound to the custom XML part.
+    */
   def fillValues(docx: Array[Byte], values: Map[String, FieldValue]): Either[String, Array[Byte]] =
     for
       entries <- OfficePackage.unzip(docx, "word/document.xml", Kind)
       parts   <- OfficePackage.parse(entries, FieldParts.matches, Kind)
       _       <- OfficePackage.attempt(parts.foreach((_, doc) => fillDocument(doc, values)))
-      bytes   <- OfficePackage.write(entries, parts)
+      stored  <- WordFieldStore.write(entries, values.map((k, v) => k -> WordFieldStore.raw(v)))
+      bytes   <- OfficePackage.write(entries, parts, stored)
     yield bytes
+
+  /** The values a DOCX carries for its fields (DMS-127), by key: for each key the candidates in order of
+    * preference: the state of a check box or date picker control, the text of a filled content control (not
+    * showing its placeholder; an unchecked box only in a document the platform filled), the element of the
+    * custom XML part, the custom document property. The caller takes the first candidate that is valid for
+    * the field. Fields of repeating sections are not read from the controls (their rows are in the custom XML
+    * part).
+    */
+  def recover(docx: Array[Byte]): Either[String, RecoveredValues] =
+    for
+      entries <- OfficePackage.unzip(docx, "word/document.xml", Kind)
+      parts   <- OfficePackage.parse(entries, FieldParts.matches, Kind)
+      stored  <- WordFieldStore.read(entries)
+    yield
+      val xml        = stored.xml
+      val properties = stored.properties
+      val controls   = parts
+        .sortBy((name, _) => if name == "word/document.xml" then 0 else 1)
+        .flatMap((_, doc) => controlValues(doc.getDocumentElement, stored.filled))
+      val keys = (controls.map(_._1) ++ xml.keys.toList.sorted ++ properties.keys.toList.sorted).distinct
+      RecoveredValues(
+        stored.filled,
+        keys.map { k =>
+          k -> (controls.filter(_._1 == k).map(_._2) ++ xml.get(k) ++ properties.get(k))
+            .map(_.strip)
+            .filter(_.nonEmpty)
+            .distinct
+        }.toMap
+      )
 
   /** The paragraphs of the main document part in document order (paragraphs in tables and text boxes
     * included), for comparing versions (DMS-121): the text of every run (`w:t`; tabs as spaces, breaks as
@@ -283,21 +324,23 @@ object WordDocx:
         .maxOption
         .getOrElse(0) + 1
     )
-    fillIn(doc, doc.getDocumentElement, f => values.get(f.key), ids, automaticOnly = false)
+    fillIn(doc, doc.getDocumentElement, f => values.get(f.key), ids, automaticOnly = false, bound = true)
 
   /** Fills the fields below `root`: repeating sections first (each item filled with its row), then the
     * controls (innermost first; an outer control with a value replaces its whole content anyway), then the
-    * placeholders. With `automaticOnly` only automatic fields are filled (inside repeating sections, whose
-    * manual fields are the columns of their rows).
+    * placeholders, which become plain text controls (DMS-127). With `automaticOnly` only automatic fields are
+    * filled (inside repeating sections, whose manual fields are the columns of their rows). With `bound`
+    * plain text controls are bound to the custom XML part (not inside the rows of repeating sections).
     */
   private def fillIn(
       doc: Document,
       root: Element,
       lookup: Lookup,
       ids: Iterator[Int],
-      automaticOnly: Boolean
+      automaticOnly: Boolean,
+      bound: Boolean
   ): Unit =
-    val controls = ListBuffer.empty[(Element, FieldValue)]
+    val controls = ListBuffer.empty[(Element, (WordField, FieldValue))]
     val sections = ListBuffer.empty[(Element, List[Map[String, FieldValue]])]
     val groups   = ListBuffer.empty[(List[Element], Boolean)]
     def visit(e: Element, automaticOnly: Boolean): Unit =
@@ -312,25 +355,205 @@ object WordDocx:
         // the items are filled with their rows; inside, only automatic fields get the document's values
         children(e).foreach(visit(_, automaticOnly = true))
       else
-        field.filter(allowed).flatMap(lookup).foreach(v => controls += (e -> v))
+        field.filter(allowed).flatMap(f => lookup(f).map(f -> _)).foreach(fv => controls += (e -> fv))
         if isW(e, "p") || isW(e, "sdt") then
           val own = ownTexts(e)
           if own.nonEmpty then groups += (own -> automaticOnly)
         children(e).foreach(visit(_, automaticOnly))
     visit(root, automaticOnly)
     sections.foreach((section, rows) => fillSection(doc, section, rows, lookup, ids))
-    controls.reverse.foreach((sdt, value) => fillControl(doc, sdt, value))
+    controls.reverse.foreach { case (sdt, (field, value)) =>
+      fillControl(doc, sdt, value)
+      if bound then bind(doc, sdt, field.key, value)
+    }
     groups.foreach((texts, automaticOnly) =>
-      Placeholders.fill(
+      fillPlaceholders(
+        doc,
         texts,
         name =>
           WordFields
             .parse(name, None)
             .filter(f => !automaticOnly || f.source == WordFieldSource.Automatic)
-            .flatMap(lookup)
-            .map(_.printed)
+            .flatMap(f => lookup(f).map(f -> _)),
+        ids,
+        bound
       )
     )
+
+  /** Fills the `{{key}}` placeholders of a paragraph's text elements: each placeholder with a value becomes a
+    * plain text content control tagged with the placeholder's name (DMS-127), so the key stays in the
+    * document and it can be filled again; the control's run takes the formatting of the run where the
+    * placeholder starts, text around it stays in runs of that formatting. Placeholders without value stay as
+    * they are.
+    */
+  private def fillPlaceholders(
+      doc: Document,
+      texts: List[Element],
+      value: String => Option[(WordField, FieldValue)],
+      ids: Iterator[Int],
+      bound: Boolean
+  ): Unit =
+    // A placeholder split over several runs is first gathered into the text element where it starts.
+    Placeholders.fill(texts, name => value(name).map(_ => s"{{$name}}"))
+    texts.foreach { t =>
+      val text    = t.getTextContent
+      val matches = Placeholders.Pattern
+        .findAllMatchIn(text)
+        .flatMap(m => value(m.group(1)).map(m -> _))
+        .toList
+      if matches.nonEmpty then
+        Option(t.getParentNode).collect {
+          case r: Element if isW(r, "r") && r.getParentNode != null => r
+        } match
+          case Some(run) => wrapPlaceholders(doc, run, t, text, matches, ids, bound)
+          case None      => Placeholders.fill(List(t), name => value(name).map(_._2.printed))
+    }
+
+  /** Splits `run` around the placeholders of its text element `t`: text before, between and after them stays
+    * in runs with the run's formatting, each placeholder becomes a filled plain text control.
+    */
+  private def wrapPlaceholders(
+      doc: Document,
+      run: Element,
+      t: Element,
+      text: String,
+      matches: List[(scala.util.matching.Regex.Match, (WordField, FieldValue))],
+      ids: Iterator[Int],
+      bound: Boolean
+  ): Unit =
+    val parent            = run.getParentNode
+    val rPr               = child(run, "rPr")
+    def newRun(): Element =
+      val r = doc.createElementNS(W, "w:r")
+      rPr.foreach(p => r.appendChild(p.cloneNode(true)))
+      r
+    def textOf(s: String): Element =
+      val e = doc.createElementNS(W, "w:t")
+      e.setAttributeNS(XMLConstants.XML_NS_URI, "xml:space", "preserve")
+      e.setTextContent(s)
+      e
+    val siblings      = children(run).filterNot(isW(_, "rPr"))
+    var current       = newRun()
+    def flush(): Unit =
+      if children(current).exists(!isW(_, "rPr")) then parent.insertBefore(current, run): Unit
+      current = newRun()
+    siblings.takeWhile(_ ne t).foreach(current.appendChild)
+    var pos = 0
+    matches.foreach { case (m, (field, value)) =>
+      if m.start > pos then current.appendChild(textOf(text.substring(pos, m.start))): Unit
+      flush()
+      val sdt = placeholderControl(doc, m.group(1), rPr, value.printed.contains('\n'), ids)
+      parent.insertBefore(sdt, run)
+      fillControl(doc, sdt, value)
+      if bound then bind(doc, sdt, field.key, value)
+      pos = m.end
+    }
+    if pos < text.length then current.appendChild(textOf(text.substring(pos))): Unit
+    siblings.dropWhile(_ ne t).drop(1).foreach(current.appendChild)
+    flush()
+    parent.removeChild(run): Unit
+
+  /** A plain text content control tagged `tag`, with one run in the formatting `rPr`. */
+  private def placeholderControl(
+      doc: Document,
+      tag: String,
+      rPr: Option[Element],
+      multiLine: Boolean,
+      ids: Iterator[Int]
+  ): Element =
+    def w(name: String, attrs: (String, String)*): Element =
+      val e = doc.createElementNS(W, s"w:$name")
+      attrs.foreach((a, v) => e.setAttributeNS(W, s"w:$a", v))
+      e
+    val sdt = w("sdt")
+    val pr  = w("sdtPr")
+    rPr.foreach(p => pr.appendChild(p.cloneNode(true)))
+    pr.appendChild(w("tag", "val" -> tag))
+    pr.appendChild(w("id", "val" -> ids.next().toString))
+    pr.appendChild(if multiLine then w("text", "multiLine" -> "1") else w("text"))
+    val content = w("sdtContent")
+    val r       = w("r")
+    rPr.foreach(p => r.appendChild(p.cloneNode(true)))
+    content.appendChild(r)
+    sdt.appendChild(pr)
+    sdt.appendChild(content)
+    sdt
+
+  /** Elements of `w:sdtPr` that come before `w:dataBinding` in the schema. */
+  private val BeforeBinding =
+    Set("rPr", "alias", "tag", "id", "lock", "placeholder", "temporary", "showingPlcHdr")
+
+  /** Binds a filled plain text control to the element of `key` in the custom XML part (DMS-127), so that Word
+    * keeps both in sync. Only plain text controls (`w:text`) with a single-line text value are bound: Word
+    * shows the element's text in a bound control, and only there it equals the printed value.
+    */
+  private def bind(doc: Document, sdt: Element, key: String, value: FieldValue): Unit =
+    child(sdt, "sdtPr").foreach { pr =>
+      val plain = child(pr, "text").isDefined && !repeating(sdt)
+      value match
+        case FieldValue.Text(text) if plain && !text.contains('\n') =>
+          val binding = doc.createElementNS(W, "w:dataBinding")
+          binding.setAttributeNS(W, "w:prefixMappings", WordFieldStore.PrefixMappings)
+          binding.setAttributeNS(W, "w:xpath", WordFieldStore.xpath(key))
+          binding.setAttributeNS(W, "w:storeItemID", WordFieldStore.StoreItemId)
+          child(pr, "dataBinding").foreach(pr.removeChild)
+          children(pr).find(c => !(c.getNamespaceURI == W && BeforeBinding(c.getLocalName))) match
+            case Some(next) => pr.insertBefore(binding, next): Unit
+            case None       => pr.appendChild(binding): Unit
+        case _ => ()
+    }
+
+  /** The values shown by the tagged content controls below `root` in document order (DMS-127): check boxes by
+    * their state, date pickers by their ISO date, other controls by their text unless they show their
+    * placeholder. Repeating sections and their items are skipped.
+    */
+  private def controlValues(root: Element, filled: Boolean): List[(String, String)] =
+    val found                   = ListBuffer.empty[(String, String)]
+    def visit(e: Element): Unit =
+      if !(isW(e, "sdt") && repeating(e)) then
+        if isW(e, "sdt") then
+          child(e, "sdtPr").foreach { pr =>
+            child(pr, "tag").flatMap(attr(_, "val")).flatMap(WordFields.parse(_, None)).foreach { f =>
+              val placeholder = child(pr, "showingPlcHdr").isDefined
+              val value       =
+                childNs(pr, W14, "checkbox") match
+                  case Some(box) =>
+                    val checked = childNs(box, W14, "checked")
+                      .map(c => Option(c.getAttributeNS(W14, "val")).getOrElse(""))
+                      .exists(v => v == "1" || v == "true")
+                    // an unchecked box is a value only in a document the platform filled
+                    if checked then Some(WordFields.Checked)
+                    else Option.when(filled)(WordFields.Unchecked)
+                  case None =>
+                    child(pr, "date")
+                      .flatMap(attr(_, "fullDate"))
+                      .map(_.take(10))
+                      .filter(d => Try(LocalDate.parse(d)).isSuccess)
+                      .orElse(Option.unless(placeholder)(controlText(e)))
+              value.foreach(v => found += (f.key -> v))
+            }
+          }
+        children(e).foreach(visit)
+    visit(root)
+    found.toList
+
+  /** The text of a content control: its runs' text, breaks as line breaks, paragraphs on lines. */
+  private def controlText(sdt: Element): String =
+    child(sdt, "sdtContent").fold("") { content =>
+      val out                       = StringBuilder()
+      def collect(e: Element): Unit =
+        children(e).foreach { c =>
+          if isW(c, "t") then out.append(c.getTextContent)
+          else if isW(c, "tab") then out.append('\t')
+          else if isW(c, "br") || isW(c, "cr") then out.append('\n')
+          else if isW(c, "p") then
+            if out.nonEmpty then out.append('\n')
+            collect(c)
+          else if !skipped(c) then collect(c)
+        }
+      collect(content)
+      out.toString
+    }
 
   /** Repeats the first item of a repeating section once per row, filled with the row's values. */
   private def fillSection(
@@ -357,7 +580,7 @@ object WordDocx:
         parent.insertBefore(copy, prototype)
         val rowLookup: Lookup =
           f => if f.source == WordFieldSource.Automatic then lookup(f) else row.get(f.key)
-        fillIn(doc, copy, rowLookup, ids, automaticOnly = false)
+        fillIn(doc, copy, rowLookup, ids, automaticOnly = false, bound = false)
       }
       items.foreach(parent.removeChild)
     }

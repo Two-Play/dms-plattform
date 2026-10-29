@@ -74,14 +74,24 @@ private[app] object OfficePackage:
       }
     }.left.map(m => s"the $kind cannot be read: $m")
 
-  /** The package with the changed parts written back, all other entries unchanged and in their order. */
-  def write(entries: Entries, changed: List[(String, Document)]): Either[String, Array[Byte]] =
+  /** The package with the changed parts written back, all other entries unchanged and in their order; `extra`
+    * entries replace those of the same name or are appended in their order.
+    */
+  def write(
+      entries: Entries,
+      changed: List[(String, Document)],
+      extra: Entries = Nil
+  ): Either[String, Array[Byte]] =
     attempt {
-      val parts = changed.map((name, doc) => name -> serialize(doc)).toMap
-      zip(entries.map((name, data) => name -> parts.getOrElse(name, data)))
+      val parts = changed.map((name, doc) => name -> serialize(doc)).toMap ++ extra.toMap
+      val known = entries.map(_._1).toSet
+      zip(
+        entries.map((name, data) => name -> parts.getOrElse(name, data)) ++
+          extra.filterNot((name, _) => known(name))
+      )
     }
 
-  private def serialize(doc: Document): Array[Byte] =
+  def serialize(doc: Document): Array[Byte] =
     doc.setXmlStandalone(true)
     val transformer = TransformerFactory.newInstance().newTransformer()
     transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8")
