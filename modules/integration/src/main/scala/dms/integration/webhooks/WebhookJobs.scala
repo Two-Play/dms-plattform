@@ -86,6 +86,15 @@ final class WebhookJobs(db: Db, events: WebhookEvents, sender: WebhookSender, se
     yield ()
 
   private def attempt(tenant: TenantId, t: DeliveryTarget, last: Boolean): IO[String, Unit] =
+    settings.secretKeys.open(t.secret, tenant, t.subscriptionId) match
+      case Left(problem) =>
+        // A secret that cannot be decrypted does not become readable by retrying: dead at once. The message
+        // names the key id only.
+        record(tenant)(WebhookStore.recordAttempt(t.deliveryId, WebhookDelivery.Dead, None, Some(problem))) *>
+          ZIO.logError(s"Webhook delivery ${t.deliveryId} not sent: $problem")
+      case Right(secret) => attempt(tenant, t, secret, last)
+
+  private def attempt(tenant: TenantId, t: DeliveryTarget, secret: String, last: Boolean): IO[String, Unit] =
     ZIO
       .fromEither(UrlGuard.parse(t.url, settings))
       .flatMap(uri => UrlGuard.check(uri, settings).as(uri))
@@ -100,14 +109,13 @@ final class WebhookJobs(db: Db, events: WebhookEvents, sender: WebhookSender, se
         case Right(uri) =>
           for
             now <- Clock.instant
-            timestamp = now.getEpochSecond
-            id        = t.deliveryId.toString
-            headers   = List(
-              WebhookSignature.IdHeader        -> id,
-              WebhookSignature.TimestampHeader -> timestamp.toString,
-              WebhookSignature.SignatureHeader -> WebhookSignature.sign(t.secret, id, timestamp, t.payload),
-              "User-Agent"                     -> UserAgent
-            )
+            headers = WebhookSignature.headers(
+              secret,
+              t.deliveryId.toString,
+              now.getEpochSecond,
+              t.payload
+            ) :+
+              ("User-Agent" -> UserAgent)
             answer <- sender.send(uri, headers, t.payload).either
             failed = answer match
               case Right(code) if code >= 200 && code < 300 => None
@@ -130,13 +138,21 @@ final class WebhookJobs(db: Db, events: WebhookEvents, sender: WebhookSender, se
       .Obj(
         "type"      -> Json.Str(n.eventType),
         "timestamp" -> Json.Str(n.occurredAt.toString),
-        "data"      -> n.data.merge(Json.Obj("eventId" -> Json.Num(event.id)))
+        "data"      -> n.data.merge(
+          Json.Obj("eventId" -> Json.Num(event.id), "payloadVersion" -> Json.Num(PayloadVersion))
+        )
       )
       .toJson
 
 object WebhookJobs:
   val DeliverKind = "webhook.deliver"
   val UserAgent   = "DMS-Webhooks/1"
+
+  /** Version of the body's `data` (DMS-107). 1: the fields of DMS-58; 2 adds `payloadVersion`,
+    * `documentNumber` and the stable addresses by number (`links.currentByNumber`, …) when the document has a
+    * number. Changes within a version only add fields; receivers ignore unknown fields.
+    */
+  val PayloadVersion = 2
 
   /** Sends a delivery again with the same id and body (e.g. a dead one, after the receiver was fixed): sets
     * it back to pending and enqueues a new job. Runs inside `Db.transact(tenant)`.

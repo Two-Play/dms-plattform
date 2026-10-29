@@ -93,4 +93,8 @@ object UrlGuard:
       (b(0) == 0x20 && b(1) == 0x01 && b(2) == 0x0d && b(3) == 0xb8) || // documentation 2001:db8::/32
       (b(0) == 0x00 && b(1) == 0x64 && b(2) == 0xff && b(3) == 0x9b) || // NAT64 64:ff9b::/96
       (b(0) == 0x20 && b(1) == 0x02) ||                                 // 6to4 2002::/16 (embeds IPv4)
-      b.take(12).forall(_ == 0)                                         // IPv4-compatible ::a.b.c.d
+      (b(0) == 0x20 && b(1) == 0x01 && b(2) == 0x00 && b(3) == 0x00) || // Teredo 2001::/32 (embeds IPv4)
+      (b(0) == 0x20 && b(1) == 0x01 && b(2) == 0x00 && (b(3) & 0xf0) == 0x10) || // ORCHID 2001:10::/28
+      (b(0) == 0x01 && b(1) == 0x00 && b.slice(2, 8).forall(_ == 0)) ||          // discard-only 100::/64
+      (b.take(10).forall(_ == 0) && b(10) == 0xff && b(11) == 0xff) ||           // IPv4-mapped ::ffff:a.b.c.d
+      b.take(12).forall(_ == 0)                                                  // IPv4-compatible ::a.b.c.d

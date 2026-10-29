@@ -2,12 +2,13 @@
 export const admin = {
   title: 'Admin',
   description:
-    'Access groups for confidential documents, number ranges, deputyships and the system status.',
+    'Access groups for confidential documents, number ranges, deputyships, webhooks and the system status.',
   loading: 'Loading',
   onlyAdmins: 'Only tenant administrators can use the administration.',
   tabGroups: 'Access groups',
   tabNumberRanges: 'Number ranges',
   tabDeputyships: 'Deputyships',
+  tabWebhooks: 'Webhooks',
   tabSystem: 'System status',
   setDeputy: 'Set a deputy',
   setDeputyText: 'For yourself or, as tenant administrator, for someone else.',

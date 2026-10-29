@@ -5,7 +5,7 @@ import dms.documents.{AttachmentScanner, AttachmentSettings}
 import dms.documents.core.DocumentSettings
 import dms.identity.{AuthConfig, UserDirectoryConfig}
 import dms.integration.partners.PartnerDirectoryConfig
-import dms.integration.webhooks.WebhookSettings
+import dms.integration.webhooks.{WebhookSecretKeys, WebhookSettings}
 import dms.rendering.core.{ConverterConfig, RendererConfig}
 import dms.search.core.{OpenSearchConfig, SearchSettings}
 import dms.storage.StorageConfig
@@ -84,7 +84,7 @@ final case class SearchConfig(
   def settings: SearchSettings =
     SearchSettings(syncInterval = zio.Duration.fromSeconds(syncIntervalSeconds.toLong))
 
-/** Webhooks for connected systems (DMS-58, ADR 0035).
+/** Webhooks for connected systems (DMS-58, DMS-107, ADR 0035).
   *
   * @param allowedHosts
   *   development only: comma-separated hosts that may use http and private or loopback addresses (SSRF
@@ -95,20 +95,41 @@ final case class SearchConfig(
   *   per delivery attempt
   * @param maxAttempts
   *   attempts per delivery before it is dead; retries back off exponentially up to one hour
+  * @param secretKeys
+  *   key ring that encrypts the signing secrets at rest: `id:base64key,…`, the first entry active (see
+  *   [[dms.integration.webhooks.WebhookSecretKeys.parse]]); empty: the development key
+  * @param secretKeysFile
+  *   file with the key ring in the same format (e.g. a mounted secret); takes precedence over `secretKeys`
   */
 final case class WebhooksConfig(
     allowedHosts: String,
     allowPrivateNetworks: Boolean,
     timeoutSeconds: Int,
-    maxAttempts: Int
+    maxAttempts: Int,
+    secretKeys: String,
+    secretKeysFile: Option[String]
 ):
-  def settings: WebhookSettings =
-    WebhookSettings(
-      allowedHosts.split(',').map(_.trim).filter(_.nonEmpty).toSet,
-      allowPrivateNetworks,
-      zio.Duration.fromSeconds(timeoutSeconds.toLong),
-      maxAttempts.max(1)
-    )
+  /** The settings, or why the key ring is invalid or its file unreadable (never the key material). */
+  def settings: Either[String, WebhookSettings] =
+    val ring = secretKeysFile.map(_.trim).filter(_.nonEmpty) match
+      case Some(file) =>
+        scala.util
+          .Try(java.nio.file.Files.readString(java.nio.file.Path.of(file)))
+          .toEither
+          .left
+          .map(_ => s"the webhook secret key file $file cannot be read")
+      case None => Right(secretKeys)
+    ring
+      .flatMap(WebhookSecretKeys.parse)
+      .map(keys =>
+        WebhookSettings(
+          allowedHosts.split(',').map(_.trim).filter(_.nonEmpty).toSet,
+          allowPrivateNetworks,
+          zio.Duration.fromSeconds(timeoutSeconds.toLong),
+          maxAttempts.max(1),
+          keys
+        )
+      )
 
 /** Attachments of document versions (DMS-114, ADR 0041).
   *

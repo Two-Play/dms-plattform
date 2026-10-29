@@ -11,16 +11,17 @@ import java.util.UUID
 /** What a delivery attempt needs: the delivery and its subscription. */
 final case class DeliveryTarget(
     deliveryId: UUID,
+    subscriptionId: UUID,
     status: String,
     payload: String,
     url: String,
-    secret: String,
+    secret: StoredSecret,
     subscriptionActive: Boolean
 )
 
-/** Webhook subscriptions and deliveries (migration V22). Every method runs inside `Db.transact(tenant)`; RLS
-  * limits the rows to the tenant. Lists of event types and classes are passed as JSON to stay independent of
-  * the driver's array mapping.
+/** Webhook subscriptions and deliveries (migrations V22, V28). Every method runs inside
+  * `Db.transact(tenant)`; RLS limits the rows to the tenant. Lists of event types and classes are passed as
+  * JSON to stay independent of the driver's array mapping.
   */
 object WebhookStore:
 
@@ -45,18 +46,34 @@ object WebhookStore:
 
   private def json(values: Set[String]): Jsonb = Jsonb(values.toList.sorted.toJson)
 
+  /** Stores a secret: encrypted, or (only for tests of the migration) in plain text. */
+  private def columns(secret: StoredSecret): (Option[String], Option[String], Option[String]) = secret match
+    case StoredSecret.Sealed(keyId, ciphertext) => (None, Some(keyId), Some(ciphertext))
+    case StoredSecret.Plain(plain)              => (Some(plain), None, None)
+
+  private def stored(plain: Option[String], keyId: Option[String], ciphertext: Option[String]): StoredSecret =
+    (keyId, ciphertext) match
+      case (Some(k), Some(c)) => StoredSecret.Sealed(k, c)
+      case _                  => StoredSecret.Plain(plain.getOrElse(""))
+
+  /** Creates a subscription with id `id`; the secret is encrypted by the caller ([[WebhookSecretKeys.seal]]
+    * binds it to the id).
+    */
   def create(
+      id: UUID,
       url: String,
-      secret: String,
+      secret: StoredSecret,
       eventTypes: Set[String],
       documentClasses: Set[String],
       description: Option[String],
       createdBy: String
   ): IO[DbError, WebhookSubscription] =
+    val (plain, keyId, ciphertext) = columns(secret)
     Db.sql(
       sql"""insert into dms.webhook_subscription
-              (tenant_id, url, secret, event_types, document_classes, description, created_by)
-            values (dms.current_tenant(), $url, $secret, array(select jsonb_array_elements_text(${json(
+              (id, tenant_id, url, secret, secret_key_id, secret_ciphertext, event_types, document_classes,
+               description, created_by)
+            values ($id, dms.current_tenant(), $url, $plain, $keyId, $ciphertext, array(select jsonb_array_elements_text(${json(
           eventTypes
         )})),
                     array(select jsonb_array_elements_text(${json(
@@ -103,10 +120,44 @@ object WebhookStore:
             where id = $id and deleted_at is null""".update.run() > 0
     )
 
-  def rotateSecret(id: UUID, secret: String): IO[DbError, Boolean] =
+  def rotateSecret(id: UUID, secret: StoredSecret.Sealed): IO[DbError, Boolean] =
     Db.sql(
-      sql"""update dms.webhook_subscription set secret = $secret, updated_at = now()
+      sql"""update dms.webhook_subscription
+            set secret = null, secret_key_id = ${secret.keyId}, secret_ciphertext = ${secret.ciphertext},
+                updated_at = now()
             where id = $id and deleted_at is null""".update.run() > 0
+    )
+
+  /** The stored secret of a subscription that is not deleted. */
+  def secret(id: UUID): IO[DbError, Option[StoredSecret]] =
+    Db.sql(
+      sql"""select secret, secret_key_id, secret_ciphertext from dms.webhook_subscription
+            where id = $id and deleted_at is null"""
+        .query[(Option[String], Option[String], Option[String])]
+        .run()
+        .headOption
+    ).map(_.map(stored.tupled))
+
+  /** Every stored secret of the tenant, including those of deleted subscriptions. */
+  def secrets: IO[DbError, List[(UUID, StoredSecret)]] =
+    Db.sql(
+      sql"""select id, secret, secret_key_id, secret_ciphertext from dms.webhook_subscription order by id"""
+        .query[(UUID, Option[String], Option[String], Option[String])]
+        .run()
+        .toList
+    ).map(_.map((id, p, k, c) => id -> stored(p, k, c)))
+
+  /** Replaces the stored secret `before` with `after` (re-encryption); `false` if it changed meanwhile, e.g.
+    * because an administrator rotated it.
+    */
+  def reseal(id: UUID, before: StoredSecret, after: StoredSecret.Sealed): IO[DbError, Boolean] =
+    val (plain, keyId, ciphertext) = columns(before)
+    Db.sql(
+      sql"""update dms.webhook_subscription
+            set secret = null, secret_key_id = ${after.keyId}, secret_ciphertext = ${after.ciphertext}
+            where id = $id and secret is not distinct from cast($plain as text)
+              and secret_key_id is not distinct from cast($keyId as text)
+              and secret_ciphertext is not distinct from cast($ciphertext as text)""".update.run() > 0
     )
 
   /** Deletes a subscription: it stops receiving events; it and its delivery log are kept. */
@@ -136,13 +187,16 @@ object WebhookStore:
 
   def target(deliveryId: UUID): IO[DbError, Option[DeliveryTarget]] =
     Db.sql(
-      sql"""select d.id, d.status, d.payload::text, s.url, s.secret, s.active and s.deleted_at is null
+      sql"""select d.id, d.subscription_id, d.status, d.payload::text, s.url, s.secret, s.secret_key_id,
+                   s.secret_ciphertext, s.active and s.deleted_at is null
             from dms.webhook_delivery d join dms.webhook_subscription s on s.id = d.subscription_id
             where d.id = $deliveryId"""
-        .query[(UUID, String, String, String, String, Boolean)]
+        .query[(UUID, UUID, String, String, String, Option[String], Option[String], Option[String], Boolean)]
         .run()
         .headOption
-    ).map(_.map(DeliveryTarget.apply.tupled))
+    ).map(_.map { (id, subscription, status, payload, url, plain, keyId, ciphertext, active) =>
+      DeliveryTarget(id, subscription, status, payload, url, stored(plain, keyId, ciphertext), active)
+    })
 
   /** Records an attempt: its outcome, the HTTP status if there was an answer, the error otherwise. */
   def recordAttempt(
@@ -179,6 +233,7 @@ object WebhookStore:
       Long,
       String,
       Option[UUID],
+      Option[String],
       String,
       Int,
       Option[Int],
@@ -189,13 +244,29 @@ object WebhookStore:
   )
 
   private def delivery(row: DeliveryRow): WebhookDelivery =
-    val (id, sub, event, eventType, doc, status, attempts, code, error, created, attempted, delivered) = row
+    val (
+      id,
+      sub,
+      event,
+      eventType,
+      doc,
+      number,
+      status,
+      attempts,
+      code,
+      error,
+      created,
+      attempted,
+      delivered
+    ) =
+      row
     WebhookDelivery(
       id,
       sub,
       event,
       eventType,
       doc,
+      number,
       status,
       attempts,
       code,
@@ -208,7 +279,8 @@ object WebhookStore:
   /** The deliveries of a subscription, newest first, optionally of one status. */
   def deliveries(subscription: UUID, status: Option[String], limit: Int): IO[DbError, List[WebhookDelivery]] =
     Db.sql(
-      sql"""select id, subscription_id, event_id, event_type, document_id, status, attempts, last_status_code,
+      sql"""select id, subscription_id, event_id, event_type, document_id, payload -> 'data' ->> 'documentNumber',
+                   status, attempts, last_status_code,
                    last_error, created_at, last_attempt_at, delivered_at
             from dms.webhook_delivery
             where subscription_id = $subscription and (cast($status as text) is null or status = $status)
@@ -218,7 +290,8 @@ object WebhookStore:
 
   def delivery(subscription: UUID, id: UUID): IO[DbError, Option[WebhookDelivery]] =
     Db.sql(
-      sql"""select id, subscription_id, event_id, event_type, document_id, status, attempts, last_status_code,
+      sql"""select id, subscription_id, event_id, event_type, document_id, payload -> 'data' ->> 'documentNumber',
+                   status, attempts, last_status_code,
                    last_error, created_at, last_attempt_at, delivered_at
             from dms.webhook_delivery where subscription_id = $subscription and id = $id"""
         .query[DeliveryRow]

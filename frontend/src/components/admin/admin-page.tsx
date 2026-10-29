@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { t } from '@/i18n'
 import { GroupsPanel } from './groups-panel'
 import { NumberRangesPanel } from './number-ranges-panel'
+import { WebhooksPanel } from './webhooks-panel'
 
 /** All deputyships of the tenant for tenant administrators (DMS-99). */
 function DeputyshipsPanel() {
@@ -52,8 +53,8 @@ function DeputyshipsPanel() {
 
 /**
  * Administration for tenant administrators: access groups for confidential documents (DMS-105),
- * number ranges (DMS-113) and the deputyships of everyone (DMS-99). The API enforces the
- * permissions.
+ * number ranges (DMS-113), the deputyships of everyone (DMS-99) and webhooks for connected
+ * systems (DMS-107). The API enforces the permissions.
  */
 export function AdminPage() {
   const me = useMe()
@@ -76,6 +77,7 @@ export function AdminPage() {
           <TabsTrigger value="groups">{t('admin.tabGroups')}</TabsTrigger>
           <TabsTrigger value="number-ranges">{t('admin.tabNumberRanges')}</TabsTrigger>
           <TabsTrigger value="deputyships">{t('admin.tabDeputyships')}</TabsTrigger>
+          <TabsTrigger value="webhooks">{t('admin.tabWebhooks')}</TabsTrigger>
           <TabsTrigger value="system">{t('admin.tabSystem')}</TabsTrigger>
         </TabsList>
         <TabsContent value="groups" className="pt-4">
@@ -86,6 +88,9 @@ export function AdminPage() {
         </TabsContent>
         <TabsContent value="deputyships" className="pt-4">
           <DeputyshipsPanel />
+        </TabsContent>
+        <TabsContent value="webhooks" className="pt-4">
+          <WebhooksPanel />
         </TabsContent>
         <TabsContent value="system" className="max-w-xl pt-4">
           <SystemStatusCard />

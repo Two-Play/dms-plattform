@@ -31,6 +31,14 @@ object WebhookSignature:
   def sign(secret: String, id: String, timestamp: Long, body: String): String =
     "v1," + Base64.getEncoder.encodeToString(hmac(key(secret), s"$id.$timestamp.$body"))
 
+  /** The three Standard Webhooks headers of a request. */
+  def headers(secret: String, id: String, timestamp: Long, body: String): List[(String, String)] =
+    List(
+      IdHeader        -> id,
+      TimestampHeader -> timestamp.toString,
+      SignatureHeader -> sign(secret, id, timestamp, body)
+    )
+
   /** Checks a `webhook-signature` header (space-separated `v1,<sig>` entries) as a receiver would; compares
     * in constant time.
     */

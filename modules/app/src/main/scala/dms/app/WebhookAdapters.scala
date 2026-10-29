@@ -21,8 +21,10 @@ import scala.util.Try
   *   - `document.superseded`: a valid version was replaced by its successor
   *   - `document.withdrawn`: a valid version was withdrawn (withdrawn drafts are none)
   *
-  * The data names the version and the stable addresses of the current version. Confidential and strictly
-  * confidential documents are not announced: a subscription has no access groups (ADR 0032).
+  * The data names the version and the stable addresses of the current version. Since payload version 2
+  * (DMS-107) it also carries the document number, the human-readable stable key, and the stable addresses by
+  * number, if the document has a number; the id stays. Confidential and strictly confidential documents are
+  * not announced: a subscription has no access groups (ADR 0032).
   */
 final class DocumentWebhookEvents(documents: DocumentService) extends WebhookEvents:
 
@@ -61,6 +63,9 @@ final class DocumentWebhookEvents(documents: DocumentService) extends WebhookEve
           val query     = Option(v.scope).filter(_.nonEmpty).fold("")(s => s"?scope=${encode(s)}")
           val stable    = s"/api/v1/documents/$id"
           val successor = v.supersededBy.flatMap(s => details.versions.find(_.id == s))
+          val number    = details.document.number
+          // Numbers consist of letters, digits, '.', '_' and '-' (DocumentNumber), usable in a path as they are.
+          val byNumber = number.map(n => s"/api/v1/documents/by-number/${encode(n)}")
           WebhookNotification(
             t,
             id,
@@ -76,12 +81,21 @@ final class DocumentWebhookEvents(documents: DocumentService) extends WebhookEve
                 "classPath"  -> Json.Arr(details.profile.classPath.map(c => Json.Str(c.value))*),
                 "scope"      -> Json.Str(v.scope),
                 "links"      -> Json.Obj(
-                  "current"          -> Json.Str(s"$stable/current$query"),
-                  "currentPdf"       -> Json.Str(s"$stable/current.pdf$query"),
-                  "currentHtml"      -> Json.Str(s"$stable/current.html$query"),
-                  "versionRendition" -> Json.Str(s"$stable/versions/${v.id}/rendition")
+                  (List(
+                    "current"          -> Json.Str(s"$stable/current$query"),
+                    "currentPdf"       -> Json.Str(s"$stable/current.pdf$query"),
+                    "currentHtml"      -> Json.Str(s"$stable/current.html$query"),
+                    "versionRendition" -> Json.Str(s"$stable/versions/${v.id}/rendition")
+                  ) ++ byNumber.toList.flatMap(b =>
+                    List(
+                      "currentByNumber"     -> Json.Str(s"$b/current$query"),
+                      "currentPdfByNumber"  -> Json.Str(s"$b/current.pdf$query"),
+                      "currentHtmlByNumber" -> Json.Str(s"$b/current.html$query")
+                    )
+                  ))*
                 )
-              ) ++ v.validFrom.map(d => "validFrom" -> Json.Str(d.toString)) ++
+              ) ++ number.map(n => "documentNumber" -> Json.Str(n)) ++ v.validFrom
+                .map(d => "validFrom" -> Json.Str(d.toString)) ++
                 v.rendition.map(r => "renditionSha256" -> Json.Str(r.sha256)) ++
                 successor.map(s =>
                   "supersededBy" -> Json

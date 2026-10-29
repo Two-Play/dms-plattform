@@ -35,17 +35,28 @@ HTTP (module `app`, `PartnerApi`):
 
 The partner master is called outside database transactions. Errors: `503 partner_directory_unavailable` and `502 partner_directory_invalid_response` with a message telling the author that the draft can be saved without the partner; `422 unknown_entry` if the partner master does not know the id; `404` for an unknown reference field.
 
-## Webhooks (DMS-58, ADR 0035)
+## Webhooks (DMS-58, DMS-107, ADR 0035)
 
 Package `dms.integration.webhooks`:
 
 - `WebhookJobs(db, events, sender, settings)`: `deliver(event)` is an outbox subscriber. For an event the port `WebhookEvents` describes as webhook event, it writes in one transaction of the event's tenant one `dms.webhook_delivery` row per matching `dms.webhook_subscription` (event type, class filter on the class path; exact JSON body `{"type","timestamp","data"}`) and a job `webhook.deliver` per row (idempotency key: the delivery id). Rows are unique per subscription and outbox event, so a retried event adds nothing. The job sends the body (`POST`, `Content-Type: application/json`, `User-Agent: DMS-Webhooks/1`) signed after Standard Webhooks (`WebhookSignature`: `webhook-id` = delivery id, `webhook-timestamp`, `webhook-signature: v1,<base64 HMAC-SHA256 of id.timestamp.body>`, secret `whsec_<base64>`). 2xx: `delivered`; otherwise the job fails and is retried with the job runner's backoff until `maxAttempts`, then the delivery is `dead`. Deliveries of deactivated or deleted subscriptions are `skipped`. `redeliver(id)` sets a delivery back to `pending` and enqueues a new job.
-- `UrlGuard`: SSRF protection. `parse` (absolute `https`, no user info, no fragment; `http` only for allowed hosts) and `check` (every resolved address public: no loopback, RFC 1918, link-local/metadata, CGNAT, ULA, multicast, documentation or reserved ranges). Runs when a subscription is saved and before every attempt; a blocked target makes the delivery dead at once.
+- `UrlGuard`: SSRF protection. `parse` (absolute `https`, no user info, no fragment; `http` only for allowed hosts) and `check` (every resolved address public: no loopback, RFC 1918, link-local/metadata, CGNAT, ULA, multicast, documentation, NAT64, 6to4, Teredo, ORCHID, discard, IPv4-mapped or other reserved ranges). Runs when a subscription is saved and before every attempt; a blocked target makes the delivery dead at once.
 - `HttpWebhookSender`: JDK HTTP client, timeout per attempt, redirects not followed.
+- `WebhookPing` (DMS-107): sends a signed `webhook.test` event at once (same SSRF check, signature and headers as a delivery) and returns the outcome; no delivery row, no retry.
+- `WebhookSecretKeys` (DMS-107): encryption of the signing secrets at rest with AES-256-GCM. The stored value is the key id and base64 of nonce, ciphertext and tag; the additional authenticated data binds it to tenant and subscription id. The first configured key encrypts, the others only decrypt. `WebhookSecretMigration` runs at startup of every instance: it encrypts plain-text secrets from before migration V28 and re-encrypts secrets of older keys with the active key (one transaction per tenant; a row an administrator rotated meanwhile is left alone).
 - `WebhookStore`: subscriptions and deliveries (inside `Db.transact(tenant)`, RLS).
-- `WebhookSettings`: `allowedHosts` (development hosts exempt from the SSRF rules), `allowPrivateNetworks` (RFC 1918 / ULA with https), `timeout`, `maxAttempts`.
+- `WebhookSettings`: `allowedHosts` (development hosts exempt from the SSRF rules), `allowPrivateNetworks` (RFC 1918 / ULA with https), `timeout`, `maxAttempts`, `secretKeys`.
 
-Configuration (`dms.webhooks`): `allowedHosts` (`DMS_WEBHOOKS_ALLOWED_HOSTS`, comma-separated, default empty), `allowPrivateNetworks` (`DMS_WEBHOOKS_ALLOW_PRIVATE_NETWORKS`, false), `timeoutSeconds` (10), `maxAttempts` (12, about four hours of retries).
+Configuration (`dms.webhooks`): `allowedHosts` (`DMS_WEBHOOKS_ALLOWED_HOSTS`, comma-separated, default empty), `allowPrivateNetworks` (`DMS_WEBHOOKS_ALLOW_PRIVATE_NETWORKS`, false), `timeoutSeconds` (10), `maxAttempts` (12, about four hours of retries), `secretKeys` (`DMS_WEBHOOKS_SECRET_KEYS`) or `secretKeysFile` (`DMS_WEBHOOKS_SECRET_KEYS_FILE`, takes precedence).
+
+### Key handling for the secret encryption (production)
+
+- Format: `id:base64key,id:base64key,…`; every key is 32 random bytes (AES-256), ids consist of letters, digits, `.`, `_` and `-` (at most 32 characters). The first entry is the active key. Generate a key with `openssl rand -base64 32` and choose an id such as the month (`2026-10:<key>`).
+- Without configuration a publicly known development key (`dev`) is active and the instance logs a warning at startup: it protects nothing. Production must set `DMS_WEBHOOKS_SECRET_KEYS_FILE` (preferred: a file mounted from the secret store, readable only by the service user) or `DMS_WEBHOOKS_SECRET_KEYS` from the secret manager. The key must never be stored in the database, the repository or a backup of the database.
+- All instances of the platform need the same key ring. The key is the only way to read the secrets: back it up separately from the database (losing it means every secret must be rotated and re-entered in the receivers).
+- Rotation: put the new key first and keep the old one (`2027-01:<new>,2026-10:<old>`), restart every instance; the startup pass re-encrypts all secrets with the new key. After every instance has restarted, remove the old key. The receivers notice nothing: the signing secrets stay the same; rotating a *signing* secret is a separate action of the administrators (`POST …/secret`).
+- A secret whose key is missing cannot be decrypted: the instance logs an error at startup naming the count (never the secret), its deliveries become `dead` with a message naming the key id, and the test event reports it. Configure the key again or rotate the secret.
+- Rows encrypted with the development key are re-encrypted automatically once real keys are configured.
 
 HTTP (module `app`, `WebhookApi`; tenant administrators, `Configure` on `Webhooks`; changes are audited, secrets never):
 
@@ -54,8 +65,18 @@ HTTP (module `app`, `WebhookApi`; tenant administrators, `Configure` on `Webhook
 | GET | `/api/v1/admin/webhooks` | List subscriptions |
 | POST | `/api/v1/admin/webhooks` | Create (`{"url","eventTypes","documentClasses","description","active"}`); returns the secret once; 422 for unknown event types or unsafe URLs |
 | GET / PUT / DELETE | `/api/v1/admin/webhooks/{id}` | Read, change (`active: false` pauses), delete (log kept) |
-| POST | `/api/v1/admin/webhooks/{id}/secret` | Rotate the secret |
+| POST | `/api/v1/admin/webhooks/{id}/secret` | Rotate the secret; returns the new one once |
+| POST | `/api/v1/admin/webhooks/{id}/test` | Send a signed test event (`webhook.test`) now, also for paused subscriptions; returns `delivered`, `statusCode`, `error`, `durationMillis` (audited as `webhook.tested`) |
 | GET | `/api/v1/admin/webhooks/{id}/deliveries?status=&limit=` | Delivery log, newest first |
 | POST | `/api/v1/admin/webhooks/{id}/deliveries/{deliveryId}/redeliver` | Send again (409 while pending or retrying) |
 
 Event types (app, `DocumentWebhookEvents`): `document.published` (Approved → Published; not a recertification), `document.superseded`, `document.withdrawn` (only of versions that were valid). `data`: `documentId`, `versionId`, `version`, `title`, `classKey`, `classPath`, `scope`, `validFrom`, `renditionSha256`, `supersededBy`, `eventId` and `links` to the stable addresses (`current`, `currentPdf`, `currentHtml`) and the version's rendition. Confidential and strictly confidential documents are not announced. No order is guaranteed.
+
+Payload versions (`data.payloadVersion`, DMS-107). Versions only add fields; receivers must ignore unknown fields. A body without `payloadVersion` is version 1.
+
+| Version | Since | Changes |
+|---|---|---|
+| 1 | DMS-58 | The fields above |
+| 2 | DMS-107 | `payloadVersion`; `documentNumber` (DMS-113) when the document has a number at the time the event is processed; `links.currentByNumber`, `links.currentPdfByNumber`, `links.currentHtmlByNumber` (stable addresses by number). `documentId` stays the primary key; the number is the human-readable stable key for receivers that store it (e.g. the intranet's link to a policy). |
+
+The test event `webhook.test` has `data` with `subscriptionId`, `message` and `payloadVersion`; it is signed like every delivery, its `webhook-id` is `test_<uuid>`.

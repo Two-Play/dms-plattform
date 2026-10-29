@@ -74,6 +74,11 @@ object UrlGuardSpec extends ZIOSpecDefault:
         !UrlGuard.isPublic(ip("198.18.0.1")),
         !UrlGuard.isPublic(ip("224.0.0.1")),
         !UrlGuard.isPublic(ip("2001:db8::1")),
+        // DMS-107: tunnels embedding IPv4 (Teredo), ORCHID and the discard prefix are not public either.
+        !UrlGuard.isPublic(ip("2001:0:4136:e378:8000:63bf:3fff:fdd2")),
+        !UrlGuard.isPublic(ip("2001:10::1")),
+        !UrlGuard.isPublic(ip("100::1")),
+        UrlGuard.isPublic(ip("2001:4860:4860::8888")),
         UrlGuard.isPrivate(ip("172.16.5.4")),
         !UrlGuard.isPrivate(ip("127.0.0.1"))
       )
