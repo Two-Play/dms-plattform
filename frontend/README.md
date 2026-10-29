@@ -73,6 +73,8 @@ TanStack Router with **file-based routing**: the Vite plugin generates `src/rout
 | `/tasks`                                            | `routes/_app/tasks.tsx`                          | signed in; task inbox with votes and read confirmations (DMS-48)            |
 | `/search`                                           | `routes/_app/search.tsx`                         | signed in; full-text search and "valid on" history (DMS-52, DMS-53)         |
 | `/compliance?view=&unit=&owner=&document=`          | `routes/_app/compliance.tsx`                     | signed in; compliance cockpit for compliance officers (DMS-59)              |
+| `/templates`                                        | `routes/_app/templates/index.tsx`                | signed in; templates for template designers (DMS-98)                        |
+| `/templates/$templateId?version=…`                  | `routes/_app/templates/$templateId.tsx`          | signed in; one template: versions, content, test mode, status (DMS-98)      |
 | anything else                                       | `components/not-found-page.tsx`                  | 404 page                                                                    |
 
 The protected layout checks `context.auth.isAuthenticated` in `beforeLoad` and redirects to `/sign-in?redirect=<path>`. After sign-in the original path is carried through the OIDC `state` and restored on `/callback` (only same-origin paths are accepted).
@@ -86,10 +88,12 @@ src/
                  me.ts: user and business roles; acknowledgements.ts: read confirmations;
                  search.ts: full-text search, "valid on" list and CSV export;
                  versions.ts: version history and version comparison;
+                 template-admin.ts: template administration, test mode, status changes, impact analysis;
                  errors.ts: ApiError with field issues)
   auth/          oidc-client-ts UserManager, scopes, return-path check
   components/    app shell, pages and cards; ui/ holds shadcn/ui components; documents/ the document pages;
-                 tasks/ the task inbox and the vote dialog; search/ the search page
+                 tasks/ the task inbox and the vote dialog; search/ the search page;
+                 templates/ the template pages
   lib/           utilities, theme switch
   routes/        file-based routes (files starting with "-" are ignored by the router)
   test/          Vitest setup
@@ -141,7 +145,7 @@ For templates with reference fields (`references` in the fields response), the p
 - The document page of a published version that requires acknowledgement (`components/documents/acknowledgement-panel.tsx`, DMS-47) records the opening when it is displayed (`POST …/opened`), reads the caller's state (`GET …/versions/{versionId}/acknowledgement`) and offers "Acknowledge" once the opening is recorded; afterwards it shows the acknowledgement with version and time.
 - Vote dialog: decisions Approve, Approve with conditions and Request changes (review steps) or Reject (approval steps); a reason is required for everything except a plain approval (checked before sending; the backend answers 422 too). On `401 reauthentication_required` the dialog explains why, remembers the vote and offers "Sign in again" (see API client above). After a vote the task list, the document and its workflow are reloaded.
 - The document page's "Review and approval" card shows the caller's open tasks on the document with the same "Vote…" button.
-- Navigation by role (`GET /api/v1/me`, `useMe` in `api/me.ts`): Home, Documents, Search and Tasks for everyone, Templates for template designers, Compliance for compliance officers, Admin for tenant administrators (Templates and Admin still placeholders). Hiding entries is a convenience; the API enforces the permissions.
+- Navigation by role (`GET /api/v1/me`, `useMe` in `api/me.ts`): Home, Documents, Search and Tasks for everyone, Templates for template designers, Compliance for compliance officers, Admin for tenant administrators (Admin still a placeholder). Hiding entries is a convenience; the API enforces the permissions.
 
 ## Compliance cockpit (DMS-59, ADR 0036)
 
@@ -158,6 +162,17 @@ For templates with reference fields (`references` in the fields response), the p
 
 - The document page lists the versions the caller may read (`GET /api/v1/documents/{id}/versions`) newest first with status, change kind and the author's change summary. Two picked versions ("Compare selected versions", the older one becomes `from`) or "Changes since …" on a version open `/documents/$documentId/compare?from=…&to=…` (`components/documents/version-compare-page.tsx`).
 - The comparison (`GET /api/v1/documents/{id}/compare`, ADR 0033) shows the change summaries on top, then tabs for text, field values and metadata. Text changes are marked with `<ins>`/`<del>` (with screen reader labels); "Show unchanged text" adds the unchanged sections and blocks. All content is rendered as React text, never as HTML. A 403 (one of the versions is not readable) is explained on the page.
+
+## Template management (DMS-98)
+
+For template designers (`EditTemplates`; the API answers 403 to everyone else):
+
+- `/templates` (`components/templates/template-list-page.tsx`) lists the latest version of every template (`GET /api/v1/admin/templates`) with version number, status and creator.
+- `/templates/$templateId` (`template-page.tsx`) loads all versions (`GET /api/v1/admin/templates/{id}`); `?version=n` picks one, otherwise the latest is shown. Per version: status and history (created, changed by, released by and when, from the version itself; the audit trail of status changes is not exposed by the API yet), the fields of the class profile (`GET …/versions/{version}/fields`, designer endpoint for any status), the content and the test mode.
+- Content: a draft is edited as JSON (`content-editor.tsx`); "Check" calls `POST /api/v1/admin/templates/check`, "Save draft" `PUT …/versions/{version}`. Invalid JSON is reported before anything is sent. A 422 `invalid_content` on save carries the compiler issues only as one text, so the editor runs the check afterwards and lists the issues with their location (section › block path › part, line, column). Other versions show the content read-only; "New version" creates the next draft from the latest version when no version is open. A structured editor follows later.
+- Test mode (`test-mode-panel.tsx`, `POST …/versions/{version}/test` with generated sample data in English or German): branch coverage per condition, the generated cases, and each case rendered as HTML by the backend (`html`, same renderer and document stylesheet as the live preview, draft marking).
+- Status (`template-lifecycle.ts` mirrors `TemplateLifecycle`): Draft → "Start testing"; Testing → "Back to draft" or "Release…"; Released → "Deprecate…" (confirmation); Deprecated → "Archive". "Release…" opens `release-dialog.tsx`, which loads the impact analysis (`GET /api/v1/templates/{id}/versions/{version}/impact`): documents on earlier versions per status, open drafts with title, author, status and last change, and the backend's explanation that a release changes no existing document. Titles of confidential drafts the caller may not read arrive masked (`titleMasked`) and are shown with a lock. If the signed-in user created or changed the version, the page explains that another designer has to release it (four-eyes principle); the backend decides, and its 403 `segregation_of_duties` is shown in the dialog. A 409 (concurrent change, open version) asks to reload.
+- Users (creators, editors, releasers, draft authors) are shown by user id: there is no source of display names yet.
 
 ## Notes
 

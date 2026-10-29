@@ -280,6 +280,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/admin/templates/{id}/versions/{version}/fields': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Fields of a version in any status, for template designers: the editable fields of the class profile with type, rules and requiredness, those the template uses first. 422 (invalid_content) if the content does not compile against the profile. */
+    get: operations['getApiV1AdminTemplatesIdVersionsVersionFields']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/admin/templates/{id}/versions/{version}/status': {
     parameters: {
       query?: never
@@ -2279,6 +2296,7 @@ export interface components {
       /** Format: uuid */
       versionId: string
       title: string
+      titleMasked: boolean
       author: string
       version: string
       status: string
@@ -2973,6 +2991,7 @@ export interface components {
       values: components['schemas']['Map_MetadataValue']
       content?: components['schemas']['ResolvedContent']
       text?: string
+      html?: string
       missingRequired?: string[]
       branches?: components['schemas']['BranchView'][]
       error?: string
@@ -4050,6 +4069,47 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter version, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1AdminTemplatesIdVersionsVersionFields: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Template id */
+        id: string
+        /** @description Template version number */
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TemplateFieldsView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter version */
       400: {
         headers: {
           [name: string]: unknown

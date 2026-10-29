@@ -119,39 +119,7 @@ object TemplatePreviewApi:
           "class profile with type, rules and requiredness. Other versions are not found (404)."
       )
       .tag("Templates")
-      .serverLogic(p =>
-        (id, v) =>
-          released(p, id, v).map { t =>
-            TemplateFieldsView(
-              t.version.templateId.value,
-              t.version.version,
-              t.version.name,
-              t.version.description,
-              t.version.documentClassId,
-              t.version.documentClassVersion,
-              t.fields.map(f =>
-                TemplateFieldView(
-                  f.key,
-                  f.label,
-                  f.description,
-                  f.fieldType,
-                  f.multiple,
-                  f.required,
-                  f.usedInTemplate,
-                  f.reference.map(r => FieldReferenceView(r.reference, r.attribute))
-                )
-              ),
-              t.version.content.references.map(r =>
-                ReferenceFieldView(
-                  r.key,
-                  r.label,
-                  r.source.key,
-                  r.fields.map(m => ReferenceMappingView(m.attribute, m.field))
-                )
-              )
-            )
-          }
-      )
+      .serverLogic(p => (id, v) => released(p, id, v).map(fieldsView))
 
   val preview: ZServerEndpoint[Env, Any] =
     SecuredApi.base.post
@@ -186,6 +154,37 @@ object TemplatePreviewApi:
       )
 
   def endpoints: List[ZServerEndpoint[Env, Any]] = List(fields, preview)
+
+  /** The form fields and reference fields of a compiled version. */
+  private[app] def fieldsView(t: PreviewTemplate): TemplateFieldsView =
+    TemplateFieldsView(
+      t.version.templateId.value,
+      t.version.version,
+      t.version.name,
+      t.version.description,
+      t.version.documentClassId,
+      t.version.documentClassVersion,
+      t.fields.map(f =>
+        TemplateFieldView(
+          f.key,
+          f.label,
+          f.description,
+          f.fieldType,
+          f.multiple,
+          f.required,
+          f.usedInTemplate,
+          f.reference.map(r => FieldReferenceView(r.reference, r.attribute))
+        )
+      ),
+      t.version.content.references.map(r =>
+        ReferenceFieldView(
+          r.key,
+          r.label,
+          r.source.key,
+          r.fields.map(m => ReferenceMappingView(m.attribute, m.field))
+        )
+      )
+    )
 
   private def released(principal: Principal, id: UUID, version: Int) =
     authorized(principal, Action.ReadTemplateCatalog, _ => ZIO.succeed(Resource(principal.tenantId)))(

@@ -49,6 +49,8 @@ object TemplateImpactApiSpec extends ZIOSpecDefault:
   private val approver  = UserId("approver-1")
   private val designer  = UserId("designer-1")
   private val designer2 = UserId("designer-2")
+  // Template designer who also writes documents: author of a confidential draft (DMS-98).
+  private val designer3 = UserId("designer-3")
 
   private val signingKey: RSAKey = RSAKeyGenerator(2048).keyID("key-1").generate()
 
@@ -67,7 +69,11 @@ object TemplateImpactApiSpec extends ZIOSpecDefault:
       template: TemplateId,
       published: DocumentId,
       draft: DocumentId,
-      otherDraft: DocumentId
+      otherDraft: DocumentId,
+      /** Second template (version 1 released, version 2 in Testing) with a confidential draft of designer 3.
+        */
+      secretTemplate: TemplateId,
+      secretDraft: DocumentId
   )
 
   private val setup = Unsafe.unsafe(implicit u => Promise.unsafe.make[Nothing, Setup](FiberId.None))
@@ -141,6 +147,8 @@ object TemplateImpactApiSpec extends ZIOSpecDefault:
             _ <- RoleAssignments.Postgres.grant(reader, RoleAssignment(Role.Reader), admin)
             _ <- RoleAssignments.Postgres.grant(designer, RoleAssignment(Role.TemplateDesigner), admin)
             _ <- RoleAssignments.Postgres.grant(designer2, RoleAssignment(Role.TemplateDesigner), admin)
+            _ <- RoleAssignments.Postgres.grant(designer3, RoleAssignment(Role.TemplateDesigner), admin)
+            _ <- RoleAssignments.Postgres.grant(designer3, RoleAssignment(Role.Author), admin)
             _ <- classes
               .createField("contractPartner", FieldDraft("Contract partner", None, FieldType.Text()), admin)
             cls <- classes.createClass(
@@ -175,11 +183,25 @@ object TemplateImpactApiSpec extends ZIOSpecDefault:
             other <- documents.create(NewDocument(t.templateId, 1, "Draft of author 2", draftValues), author2)
             _     <- templates.newVersion(t.templateId, draft.copy(content = content("New terms")), designer)
             _     <- templates.changeStatus(t.templateId, 2, TemplateStatus.Testing, designer)
-          yield (t.templateId, doc.id, own._1.id, other._1.id)
+            t2    <- templates.create(draft.copy(name = "Merger agreement"), designer)
+            _     <- templates.changeStatus(t2.templateId, 1, TemplateStatus.Testing, designer)
+            _     <- templates.changeStatus(t2.templateId, 1, TemplateStatus.Released, designer2)
+            secret <- documents.create(
+              NewDocument(
+                t2.templateId,
+                1,
+                "Secret merger with Initech",
+                draftValues ++ manual("confidentiality" -> MetadataValue.Selection("Confidential"))
+              ),
+              designer3
+            )
+            _ <- templates.newVersion(t2.templateId, draft.copy(content = content("New terms")), designer)
+            _ <- templates.changeStatus(t2.templateId, 2, TemplateStatus.Testing, designer)
+          yield (t.templateId, doc.id, own._1.id, other._1.id, t2.templateId, secret._1.id)
         )
         .mapError(e => RuntimeException(e.toString))
         .orDie
-      _ <- setup.succeed(Setup(app, owner, ids._1, ids._2, ids._3, ids._4))
+      _ <- setup.succeed(Setup(app, owner, ids._1, ids._2, ids._3, ids._4, ids._5, ids._6))
     yield ZEnvironment(app, appSource)
   )
 
@@ -284,6 +306,7 @@ object TemplateImpactApiSpec extends ZIOSpecDefault:
         view.documents == 3,
         view.byStatus == List(StatusCountView("Draft", 2, 2), StatusCountView("Published", 1, 1)),
         view.byVersion == List(TemplateVersionUseView(1, 3, view.byStatus)),
+        view.openDrafts.forall(!_.titleMasked),
         view.openDrafts
           .map(d => (d.documentId, d.title, d.author, d.version, d.status, d.templateVersion))
           .toSet ==
@@ -297,6 +320,24 @@ object TemplateImpactApiSpec extends ZIOSpecDefault:
         !result._2.contains("ACME"),
         !result._2.contains("\"content\""),
         !result._2.contains("\"values\"")
+      )
+    },
+    test("titles of confidential drafts are masked unless the caller may read the version") {
+      for
+        s        <- setup.await
+        byOther  <- impact(designer2, template = Some(s.secretTemplate.value))
+        byAuthor <- impact(designer3, template = Some(s.secretTemplate.value))
+        masked  = parse(byOther._2).openDrafts
+        visible = parse(byAuthor._2).openDrafts
+      yield assertTrue(
+        byOther._1 == Status.Ok,
+        masked.map(d => (d.documentId, d.title, d.titleMasked, d.author)) ==
+          List((s.secretDraft.value, TemplateImpactApi.MaskedTitle, true, designer3.value)),
+        !byOther._2.contains("Initech"),
+        // Counts are unaffected by masking.
+        parse(byOther._2).documents == 1,
+        byAuthor._1 == Status.Ok,
+        visible.map(d => (d.title, d.titleMasked)) == List(("Secret merger with Initech", false))
       )
     },
     test("the first version has no earlier documents") {
@@ -362,7 +403,7 @@ object TemplateImpactApiSpec extends ZIOSpecDefault:
       yield assertTrue(
         released._1 == Status.Ok,
         released._2.fromJson[TemplateVersionView].toOption.exists(_.status == "Released"),
-        before.size == 6,
+        before.size == 8,
         after == before,
         detailsAfter.map(d => (d.document, d.versions)) == details.map(d => (d.document, d.versions)),
         detailsAfter.forall(_.versions.forall(v => v.templateVersion == 1 && v.content == content("Terms"))),
