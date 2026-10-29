@@ -92,6 +92,7 @@ function draftDocument(values: Record<string, FieldValue>, status = 'Draft'): Do
     createdAt: '2026-10-20T10:00:00Z',
     legalHold: false,
     canAssignNumber: false,
+    kind: 'Structured',
     current: {
       id: 'v1',
       version: status === 'Draft' ? '1.0-draft.2' : '1.0-draft.3',
@@ -132,6 +133,7 @@ const list: DocumentSummary[] = [
     status: 'Draft',
     updatedAt: '2026-10-21T10:00:00Z',
     mine: true,
+    kind: 'Structured',
   },
   {
     id: reviewedId,
@@ -145,6 +147,7 @@ const list: DocumentSummary[] = [
     status: 'InReview',
     updatedAt: '2026-10-19T10:00:00Z',
     mine: false,
+    kind: 'Structured',
   },
 ]
 

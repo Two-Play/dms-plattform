@@ -67,17 +67,21 @@ export function pdfKind(
   return version.rendition ? 'rendition' : 'copy'
 }
 
-/** Downloads the PDF of a version; the request needs the access token, so it is handed over as a blob. */
+/**
+ * Downloads the PDF of a version; the request needs the access token, so it is handed over as a blob.
+ * `attachments` appends the list of attachments (DMS-115); like the change history it needs a printed copy.
+ */
 export async function downloadVersionPdf(
   client: ApiClient,
   documentId: string,
   version: Pick<DocumentVersionView, 'id' | 'version' | 'status' | 'releasedAt' | 'rendition'>,
   changelog: boolean,
+  attachments = false,
 ): Promise<void> {
-  const kind = pdfKind(version, changelog)
+  const kind = pdfKind(version, changelog || attachments)
   if (kind === undefined) throw new Error(`Version ${version.version} has no PDF.`)
   const path = { id: documentId, versionId: version.id }
-  const query = { changelog }
+  const query = { changelog, attachments }
   const { data, error, response } =
     kind === 'rendition'
       ? await client.GET('/api/v1/documents/{id}/versions/{versionId}/rendition', {

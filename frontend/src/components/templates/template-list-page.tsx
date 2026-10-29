@@ -3,6 +3,8 @@ import { Link } from '@tanstack/react-router'
 import { LayoutTemplate } from 'lucide-react'
 import { useApiClient } from '@/api/context'
 import { templateAdminListQuery, type TemplateVersion } from '@/api/template-admin'
+import { wordTemplatesAdminQuery } from '@/api/word'
+import { Badge } from '@/components/ui/badge'
 import { DataTable, type Column } from '@/components/shared/data-table'
 import { ErrorState } from '@/components/shared/error-state'
 import { PageHeader } from '@/components/shared/page-header'
@@ -12,9 +14,10 @@ import { UserName } from '@/components/shared/user-name'
 import { t } from '@/i18n'
 import { formatDateTime } from '@/i18n/format'
 import { TemplateStatusBadge } from './template-status-badge'
+import { NewWordTemplateCard } from './word-template-panel'
 
-/** Built per render, so the headers follow the active language. */
-const columns = (): Column<TemplateVersion>[] => [
+/** Built per render, so the headers follow the active language. `word`: ids of Word templates (DMS-115). */
+const columns = (word: Set<string>): Column<TemplateVersion>[] => [
   {
     key: 'name',
     header: t('templates.list.name'),
@@ -27,6 +30,11 @@ const columns = (): Column<TemplateVersion>[] => [
         >
           {tpl.name}
         </Link>
+        {word.has(tpl.templateId) && (
+          <Badge variant="secondary" className="ml-2">
+            {t('word.templates.badge')}
+          </Badge>
+        )}
         {tpl.description && <p className="text-xs text-muted-foreground">{tpl.description}</p>}
       </>
     ),
@@ -59,6 +67,8 @@ const columns = (): Column<TemplateVersion>[] => [
 export function TemplateListPage() {
   const client = useApiClient()
   const list = useQuery(templateAdminListQuery(client))
+  const words = useQuery(wordTemplatesAdminQuery(client))
+  const wordIds = new Set((words.data ?? []).map((w) => w.templateId))
   const templates = [...(list.data ?? [])].sort((a, b) => a.name.localeCompare(b.name))
 
   return (
@@ -82,7 +92,7 @@ export function TemplateListPage() {
             ) : (
               <DataTable
                 rows={templates}
-                columns={columns()}
+                columns={columns(wordIds)}
                 caption={t('templates.list.caption')}
                 rowKey={(tpl) => tpl.templateId}
               />
@@ -90,6 +100,7 @@ export function TemplateListPage() {
           </CardContent>
         </Card>
       )}
+      {list.data && <NewWordTemplateCard templates={templates} />}
     </div>
   )
 }

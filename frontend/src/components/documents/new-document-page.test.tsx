@@ -105,6 +105,9 @@ interface PreviewBody {
 
 function setup() {
   const get = vi.fn((path: string) => {
+    if (path === '/api/v1/word-templates') {
+      return Promise.resolve({ data: [], response: new Response(null, { status: 200 }) })
+    }
     if (path === '/api/v1/templates') {
       return Promise.resolve({
         data: [

@@ -163,6 +163,7 @@ export const docs = {
     downloadWithHistory: 'Download PDF with change history',
     downloading: 'Preparing the PDF…',
     changelog: 'Attach change history',
+    attachmentList: 'Attach list of attachments',
     draftHint: 'Draft – not valid: generated from the last saved state, not archived.',
     archivedHint: 'The archived PDF/A of the approved version.',
     copyHint:

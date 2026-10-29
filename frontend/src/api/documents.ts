@@ -81,6 +81,8 @@ export async function createDocument(
     templateVersion: number
     title: string
     values: Record<string, MetadataValue>
+    /** `File`: the content is an uploaded file (DMS-115); default structured. */
+    kind?: 'Structured' | 'File'
   },
 ): Promise<DocumentView> {
   const { data, error, response } = await client.POST('/api/v1/documents', { body })

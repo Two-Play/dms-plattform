@@ -22,13 +22,15 @@ export function PdfDownload({
 }) {
   const client = useApiClient()
   const checkboxId = useId()
+  const attachmentsId = useId()
   const hintId = useId()
   const [changelog, setChangelog] = useState(false)
+  const [attachments, setAttachments] = useState(false)
   const download = useMutation({
-    mutationFn: () => downloadVersionPdf(client, documentId, version, changelog),
+    mutationFn: () => downloadVersionPdf(client, documentId, version, changelog, attachments),
   })
 
-  const kind = pdfKind(version, changelog)
+  const kind = pdfKind(version, changelog || attachments)
   if (kind === undefined) return null
   const hint =
     kind === 'draft'
@@ -51,7 +53,7 @@ export function PdfDownload({
         <FileDown className="size-4" aria-hidden />
         {download.isPending
           ? t('docs.pdf.downloading')
-          : kind === 'copy'
+          : kind === 'copy' && changelog
             ? t('docs.pdf.downloadWithHistory')
             : t('docs.pdf.download')}
       </Button>
@@ -66,6 +68,18 @@ export function PdfDownload({
           }}
         />
         <label htmlFor={checkboxId}>{t('docs.pdf.changelog')}</label>
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          id={attachmentsId}
+          className="size-4"
+          checked={attachments}
+          onChange={(event) => {
+            setAttachments(event.target.checked)
+          }}
+        />
+        <label htmlFor={attachmentsId}>{t('docs.pdf.attachmentList')}</label>
       </div>
       <p id={hintId} className="text-xs text-muted-foreground">
         {hint}

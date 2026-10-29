@@ -47,6 +47,8 @@ import { formatDateTime } from '@/i18n/format'
 import { statusLabel } from '@/components/documents/status-label'
 import { TemplateStatusBadge } from './template-status-badge'
 import { TestModePanel } from './test-mode-panel'
+import { newWordTemplateVersion, wordTemplateQuery, type WordTemplate } from '@/api/word'
+import { WordTemplatePanel } from './word-template-panel'
 
 function History({ version }: { version: TemplateVersion }) {
   const edited = (version.editedBy ?? []).filter((u) => u !== version.createdBy)
@@ -98,9 +100,11 @@ interface StatusActionsProps {
   version: TemplateVersion
   versions: TemplateVersion[]
   userId: string | undefined
+  /** A Word template: its next version takes the Word file over (DMS-115). */
+  word?: boolean
 }
 
-function StatusActions({ version, versions, userId }: StatusActionsProps) {
+function StatusActions({ version, versions, userId, word = false }: StatusActionsProps) {
   const client = useApiClient()
   const queryClient = useQueryClient()
   const [dialog, setDialog] = useState<TemplateStatus | undefined>()
@@ -120,10 +124,14 @@ function StatusActions({ version, versions, userId }: StatusActionsProps) {
     },
   })
   const newVersion = useMutation({
-    mutationFn: () => createVersion(client, version.templateId, requestOf(version)),
+    mutationFn: async () =>
+      word
+        ? (await newWordTemplateVersion(client, version.templateId)).version
+        : (await createVersion(client, version.templateId, requestOf(version))).version,
     onSuccess: async (created) => {
-      toast(t('templates.page.versionCreated', { version: created.version }))
+      toast(t('templates.page.versionCreated', { version: created }))
       await queryClient.invalidateQueries({ queryKey: ['template-admin'] })
+      await queryClient.invalidateQueries({ queryKey: ['word-templates'] })
     },
   })
 
@@ -238,10 +246,13 @@ function VersionDetails({
   version,
   versions,
   userId,
+  word,
 }: {
   version: TemplateVersion
   versions: TemplateVersion[]
   userId: string | undefined
+  /** The Word file, if the version is a Word template (DMS-115). */
+  word?: WordTemplate | null
 }) {
   const editable = version.status === 'Draft'
   return (
@@ -255,7 +266,12 @@ function VersionDetails({
         </CardHeader>
         <CardContent className="space-y-4">
           <History version={version} />
-          <StatusActions version={version} versions={versions} userId={userId} />
+          <StatusActions
+            version={version}
+            versions={versions}
+            userId={userId}
+            word={word !== undefined && word !== null}
+          />
         </CardContent>
       </Card>
       <Card>
@@ -267,6 +283,19 @@ function VersionDetails({
           <FieldsPanel key={contentText(version.content)} version={version} />
         </CardContent>
       </Card>
+      {word ? (
+        <WordTemplatePanel key={word.sha256} version={version} word={word} />
+      ) : (
+        <StructuredContent version={version} editable={editable} />
+      )}
+    </div>
+  )
+}
+
+/** Content editor and test mode of a structured template version. */
+function StructuredContent({ version, editable }: { version: TemplateVersion; editable: boolean }) {
+  return (
+    <>
       <Card>
         <CardHeader>
           <CardTitle>{t('templates.page.content')}</CardTitle>
@@ -293,7 +322,7 @@ function VersionDetails({
           <TestModePanel key={contentText(version.content)} version={version} />
         </CardContent>
       </Card>
-    </div>
+    </>
   )
 }
 
@@ -304,6 +333,10 @@ export function TemplatePage({ templateId, version }: { templateId: string; vers
   const me = useMe()
   const all = versions.data ?? []
   const selected = all.find((v) => v.version === version) ?? all.at(-1)
+  const word = useQuery({
+    ...wordTemplateQuery(client, templateId, selected?.version ?? 0),
+    enabled: selected !== undefined,
+  })
 
   return (
     <div className="space-y-6">
@@ -345,6 +378,7 @@ export function TemplatePage({ templateId, version }: { templateId: string; vers
             version={selected}
             versions={all}
             userId={me.data?.userId}
+            word={word.data}
           />
         </>
       )}

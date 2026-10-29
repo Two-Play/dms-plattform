@@ -117,6 +117,7 @@ function documentWith(current: DocumentVersionView): DocumentView {
     classVersion: 1,
     classPath: ['policy'],
     canAssignNumber: false,
+    kind: 'Structured',
     title: 'IT security policy',
     ownerId: 'owner-1',
     authorId: 'author-1',
@@ -312,7 +313,10 @@ describe('Document page: content and metadata of a published version', () => {
       expect(downloads).toEqual(['rendition', 'copy.pdf'])
     })
     expect(get).toHaveBeenCalledWith('/api/v1/documents/{id}/versions/{versionId}/copy.pdf', {
-      params: { path: { id: documentId, versionId: 'v1' }, query: { changelog: true } },
+      params: {
+        path: { id: documentId, versionId: 'v1' },
+        query: { changelog: true, attachments: false },
+      },
       parseAs: 'blob',
     })
   })
@@ -340,11 +344,17 @@ describe('Document page: a version in review', () => {
       expect(downloads).toEqual(['draft.pdf', 'draft.pdf'])
     })
     expect(get).toHaveBeenCalledWith('/api/v1/documents/{id}/versions/{versionId}/draft.pdf', {
-      params: { path: { id: documentId, versionId: 'v2' }, query: { changelog: false } },
+      params: {
+        path: { id: documentId, versionId: 'v2' },
+        query: { changelog: false, attachments: false },
+      },
       parseAs: 'blob',
     })
     expect(get).toHaveBeenCalledWith('/api/v1/documents/{id}/versions/{versionId}/draft.pdf', {
-      params: { path: { id: documentId, versionId: 'v2' }, query: { changelog: true } },
+      params: {
+        path: { id: documentId, versionId: 'v2' },
+        query: { changelog: true, attachments: false },
+      },
       parseAs: 'blob',
     })
   })

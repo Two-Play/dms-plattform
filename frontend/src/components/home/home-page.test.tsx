@@ -40,6 +40,7 @@ const doc = (over: Partial<DocumentSummary>): DocumentSummary => ({
   updatedAt: '2026-10-20T10:00:00Z',
   mine: true,
   ...over,
+  kind: over.kind ?? 'Structured',
 })
 
 let state: {

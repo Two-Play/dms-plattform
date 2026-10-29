@@ -30,6 +30,7 @@ import { VersionHistory } from './version-history'
 import { PdfDownload } from './pdf-download'
 import { VersionContent } from './version-content'
 import { VersionMetadata } from './version-metadata'
+import { FileContentPanel } from './file-content-panel'
 
 /** Whether the page shows the acknowledgement card for a version: valid and requiring it. */
 function asksForAcknowledgement(version: DocumentVersionView): boolean {
@@ -92,6 +93,8 @@ export function DocumentPage({
   const shown = picked ?? current
   const showingOther = shown !== undefined && current !== undefined && shown.id !== current.id
   const editing = shown?.status === 'Draft' && !showingOther
+  // A file document's content is its uploaded original (DMS-115), not structured content.
+  const fileDocument = document.data?.kind === 'File'
 
   return (
     <div className="space-y-6">
@@ -179,12 +182,22 @@ export function DocumentPage({
                 version={shown.templateVersion}
                 language={language ?? documentLanguage(document.data)}
                 draft={{ documentId: document.data.id, version: shown }}
+                kind={fileDocument ? 'file' : 'structured'}
+                aside={
+                  fileDocument ? (
+                    <FileContentPanel documentId={document.data.id} version={shown} editable />
+                  ) : undefined
+                }
               />
               <VersionMetadata document={document.data} version={shown} />
             </>
           ) : (
             <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-              <VersionContent documentId={document.data.id} version={shown} />
+              {fileDocument ? (
+                <FileContentPanel documentId={document.data.id} version={shown} editable={false} />
+              ) : (
+                <VersionContent documentId={document.data.id} version={shown} />
+              )}
               <VersionMetadata document={document.data} version={shown} />
             </div>
           )}
