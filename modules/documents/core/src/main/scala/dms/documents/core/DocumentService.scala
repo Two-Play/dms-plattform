@@ -723,7 +723,9 @@ final class DocumentService(
     for
       document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
       current  <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
-      _        <- ZIO.when(document.kind == DocumentKind.File)(
+      // Drafts started before DMS-126 may lack the summary; they cannot be submitted without one.
+      _ <- checkChangeReason(current.changeKind, current.number, current.changeReason)
+      _ <- ZIO.when(document.kind == DocumentKind.File)(
         current.file match
           case None =>
             ZIO.fail(DocumentError.Invalid(List("upload the file of the document before submitting it")))

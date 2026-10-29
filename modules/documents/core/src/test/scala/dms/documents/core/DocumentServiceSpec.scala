@@ -316,6 +316,16 @@ object DocumentServiceSpec extends ZIOSpecDefault:
   private def create(f: Fixture, values: Map[String, FieldEntry] = initialValues) =
     as(f.tenant)(_.create(NewDocument(f.templateId, 1, "Service contract ACME", values), author))
 
+  /** A draft as it could exist from before DMS-126: a new version without change summary. */
+  private def clearChangeReason(version: UUID): ZIO[Env, DbError, Unit] =
+    ZIO
+      .serviceWithZIO[Env](
+        _.owner.transactSystem(
+          Db.sql(sql"update dms.document_version set change_reason = null where id = $version".update.run())
+        )
+      )
+      .unit
+
   private def outbox(document: DocumentId): ZIO[Env, DbError, List[String]] =
     ZIO.serviceWithZIO[Env](
       _.owner.transactSystem(
@@ -746,6 +756,23 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         } == Some(List("termMonths" -> IssueKind.MissingRequired(Approved))),
         !stored.values.contains("totalValue"),
         stored.status == InApproval
+      )
+    },
+    test("a new version without change summary, started before DMS-126, cannot be submitted") {
+      for
+        f       <- fixture
+        doc     <- published(f)
+        v2      <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Content revised"), author))
+        _       <- clearChangeReason(v2.id)
+        blocked <- as(f.tenant)(_.submit(doc, author)).either
+        _       <- as(f.tenant)(_.updateChangeReason(doc, Some("Content revised"), author))
+        passed  <- as(f.tenant)(_.submit(doc, author))
+      yield assertTrue(
+        blocked.left.exists {
+          case DocumentError.Invalid(errors) => errors.exists(_.contains("needs a change summary"))
+          case _                             => false
+        },
+        passed.status == InReview
       )
     },
     test(
