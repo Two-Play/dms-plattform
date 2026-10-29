@@ -33,6 +33,15 @@ final case class ChangelogEntry(
     publishedAt: Option[Instant]
 )
 
+/** One attachment in the list of attachments appendix ("Anlagenverzeichnis", DMS-115).
+  *
+  * @param size
+  *   in bytes
+  * @param sha256
+  *   lowercase hex SHA-256 of the stored file
+  */
+final case class AttachmentEntry(name: String, size: Long, sha256: String)
+
 /** What an on-demand PDF shows besides the content (DMS-112, ADR 0039).
   *
   * @param version
@@ -81,7 +90,7 @@ object PrintFacts:
 object VersionPrintLayout:
 
   /** Version of the layout below; written as generator into the PDF. Bump it when the output changes. */
-  val Version: String = "print-layout-1"
+  val Version: String = "print-layout-2"
 
   private final case class Labels(
       documentId: String,
@@ -106,6 +115,12 @@ object VersionPrintLayout:
       validFrom: String,
       onBehalfOf: String,
       noSummary: String,
+      attachments: String,
+      attachmentsIntro: String,
+      noAttachments: String,
+      name: String,
+      size: String,
+      bytes: String,
       kinds: Map[String, String],
       statuses: Map[String, String],
       date: DateTimeFormatter,
@@ -135,6 +150,12 @@ object VersionPrintLayout:
     validFrom = "Gültig ab",
     onBehalfOf = "i. V. für",
     noSummary = "ohne Änderungsgrund",
+    attachments = "Anlagenverzeichnis",
+    attachmentsIntro = "Anlagen der Version",
+    noAttachments = "Die Version hat keine Anlagen.",
+    name = "Name",
+    size = "Größe",
+    bytes = "Bytes",
     kinds = Map("Major" -> "Inhaltlich", "Minor" -> "Redaktionell"),
     statuses = Map(
       "Draft"      -> "Entwurf",
@@ -175,6 +196,12 @@ object VersionPrintLayout:
     validFrom = "Valid from",
     onBehalfOf = "on behalf of",
     noSummary = "no change summary",
+    attachments = "List of attachments",
+    attachmentsIntro = "Attachments of version",
+    noAttachments = "The version has no attachments.",
+    name = "Name",
+    size = "Size",
+    bytes = "bytes",
     kinds = Map("Major" -> "Major", "Minor" -> "Minor (editorial)"),
     statuses = Map(
       "Draft"      -> "Draft",
@@ -191,6 +218,13 @@ object VersionPrintLayout:
     date = DateTimeFormatter.ISO_LOCAL_DATE,
     dateTime = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
   )
+
+  /** The name of a status in the document language, e.g. "Freigegeben". */
+  def statusLabel(status: String, language: String): String =
+    labels(language).statuses.getOrElse(status, status)
+
+  /** A date in the document language's format. */
+  def date(value: java.time.LocalDate, language: String): String = labels(language).date.format(value)
 
   private def labels(language: String): Labels =
     if language.toLowerCase(Locale.ROOT).startsWith("de") then german else english
@@ -248,6 +282,9 @@ object VersionPrintLayout:
        |.dms-document .dms-changelog .dms-table { font-size: 8.5pt; }
        |.dms-document .dms-changelog td { vertical-align: top; }
        |.dms-document .dms-changelog .dms-changelog-current td { font-weight: 700; }
+       |.dms-document .dms-attachment-list .dms-table { font-size: 8.5pt; }
+       |.dms-document .dms-attachment-list .dms-checksum { font-family: "Noto Sans Mono", monospace; font-size: 7pt;
+       |  overflow-wrap: anywhere; }
        |""".stripMargin
 
   /** Document metadata as `<meta>` tags. */
@@ -263,8 +300,10 @@ object VersionPrintLayout:
       s"""<meta name="dcterms.modified" content="$created">"""
     ).mkString("\n")
 
-  /** The change history appendix: a section after a page break, one row per version, oldest first. */
-  def changelog(entries: List[ChangelogEntry], facts: PrintFacts): String =
+  /** The change history appendix: a section after a page break (unless it starts the page), one row per
+    * version, oldest first.
+    */
+  def changelog(entries: List[ChangelogEntry], facts: PrintFacts, pageBreak: Boolean = true): String =
     val l                  = labels(facts.language)
     def date(i: Instant)   = l.date.format(i.atZone(facts.zone))
     def status(s: String)  = l.statuses.getOrElse(s, s)
@@ -284,7 +323,7 @@ object VersionPrintLayout:
         s"<td>${line(status(e.status))}${dates.map(line).mkString}</td>" +
         s"<td>${escape(approver)}</td></tr>"
     }
-    s"""<div class="dms-page-break"></div>
+    s"""${if pageBreak then "<div class=\"dms-page-break\"></div>" else ""}
        |<section class="dms-section dms-changelog" data-section="changelog">
        |<h2 class="dms-section-title">${escape(l.changelog)}</h2>
        |<p class="dms-paragraph">${escape(s"${l.changelogIntro} ${facts.version}")}</p>
@@ -297,13 +336,72 @@ object VersionPrintLayout:
        |</section>
        |""".stripMargin
 
-  /** Adds page rules, metadata and (if given) the change history to a stand-alone HTML page of the templates
-    * module (`<head>` and one `article.dms-document`).
+  /** The list of attachments appendix ("Anlagenverzeichnis", DMS-115): a section after a page break (unless
+    * it starts the page), one row per attachment with name, size and SHA-256, in the order they were added.
+    */
+  def attachmentList(entries: List[AttachmentEntry], facts: PrintFacts, pageBreak: Boolean = true): String =
+    val l      = labels(facts.language)
+    val locale =
+      if facts.language.toLowerCase(Locale.ROOT).startsWith("de") then Locale.GERMANY else Locale.UK
+    val rows = entries.map { a =>
+      s"<tr><td>${escape(a.name)}</td><td>${escape(String.format(locale, "%,d", a.size) + " " + l.bytes)}</td>" +
+        s"<td class=\"dms-checksum\">${escape(a.sha256)}</td></tr>"
+    }
+    val body =
+      if entries.isEmpty then s"""<p class="dms-paragraph">${escape(l.noAttachments)}</p>"""
+      else
+        s"""<table class="dms-table"><thead><tr><th scope="col">${escape(
+            l.name
+          )}</th><th scope="col">${escape(
+            l.size
+          )}</th><th scope="col">SHA-256</th></tr></thead>
+           |<tbody>${rows.mkString("\n")}</tbody></table>""".stripMargin
+    s"""${if pageBreak then "<div class=\"dms-page-break\"></div>" else ""}
+       |<section class="dms-section dms-attachment-list" data-section="attachments">
+       |<h2 class="dms-section-title">${escape(l.attachments)}</h2>
+       |<p class="dms-paragraph">${escape(s"${l.attachmentsIntro} ${facts.version}")}</p>
+       |$body
+       |</section>
+       |""".stripMargin
+
+  /** The appendices in print order: the change history, then the list of attachments. With `startsPage` the
+    * first one starts the page (a page of appendices only, e.g. after the original of a file document).
+    */
+  def appendices(
+      facts: PrintFacts,
+      history: Option[List[ChangelogEntry]],
+      attachments: Option[List[AttachmentEntry]],
+      startsPage: Boolean = false
+  ): String =
+    val parts = history.map(h => changelog(h, facts, _)).toList ++
+      attachments.map(a => attachmentList(a, facts, _)).toList
+    parts.zipWithIndex.map((part, i) => part(!(startsPage && i == 0))).mkString
+
+  /** The page for the Word export (DMS-115): the marking and identification as first paragraph, since Word
+    * has no running header from CSS page rules; `.dms-page-break` as page break before.
+    */
+  def wordPage(page: String, facts: PrintFacts): String =
+    val body   = page.indexOf("<body>")
+    val note   = s"${marking(facts)} · ${identification(facts)} · ${generated(facts)}"
+    val color  = if facts.draft then "#b42318" else "#333333"
+    val marker =
+      s"""<p class="dms-word-marking" style="color: $color; font-size: 8pt; font-weight: 700">${escape(
+          note
+        )}</p>
+         |<style>.dms-page-break { page-break-before: always; }</style>
+         |""".stripMargin
+    if body < 0 then marker + page
+    else page.substring(0, body + "<body>".length) + "\n" + marker + page.substring(body + "<body>".length)
+
+  /** Adds page rules, metadata and (if given) the change history and the list of attachments to a stand-alone
+    * HTML page of the templates module (`<head>` and one `article.dms-document`).
     */
   def compose(
       page: String,
       facts: PrintFacts,
-      history: Option[List[ChangelogEntry]]
+      history: Option[List[ChangelogEntry]],
+      attachments: Option[List[AttachmentEntry]] = None,
+      startsPage: Boolean = false
   ): Either[String, String] =
     val head = page.indexOf("</head>")
     val end  = page.lastIndexOf("</article>")
@@ -312,5 +410,5 @@ object VersionPrintLayout:
     else
       val title    = if page.contains("<title>") then "" else s"<title>${escape(facts.title)}</title>\n"
       val extra    = s"$title${meta(facts)}\n<style>\n${pageCss(facts)}</style>\n"
-      val appendix = history.fold("")(changelog(_, facts))
+      val appendix = appendices(facts, history, attachments, startsPage)
       Right(page.substring(0, head) + extra + page.substring(head, end) + appendix + page.substring(end))

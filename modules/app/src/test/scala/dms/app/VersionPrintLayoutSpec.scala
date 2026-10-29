@@ -67,5 +67,33 @@ object VersionPrintLayoutSpec extends ZIOSpecDefault:
         VersionPrintLayout.compose(page, facts, None).toOption.exists(!_.contains("Change history")),
         VersionPrintLayout.compose("<html></html>", facts, None).isLeft
       )
+    },
+    test("the list of attachments follows the change history with name, size and SHA-256") {
+      val attachments = List(AttachmentEntry("Preisliste <2026>.xlsx", 1234567L, "a" * 64))
+      val composed    =
+        VersionPrintLayout.compose(page, facts, Some(List(entry)), Some(attachments)).toOption.get
+      val german = VersionPrintLayout
+        .compose(page, facts.copy(language = "de"), None, Some(attachments), startsPage = true)
+        .toOption
+        .get
+      val empty = VersionPrintLayout.compose(page, facts, None, Some(Nil)).toOption.get
+      assertTrue(
+        composed.indexOf("Change history") < composed.indexOf("List of attachments"),
+        composed.contains("Preisliste &lt;2026&gt;.xlsx"),
+        composed.contains("1,234,567 bytes"),
+        composed.contains("a" * 64),
+        german.contains("Anlagenverzeichnis"),
+        german.contains("1.234.567 Bytes"),
+        // a page of appendices only starts without page break
+        !german.contains("dms-page-break"),
+        empty.contains("The version has no attachments.")
+      )
+    },
+    test("the Word page carries the marking as first paragraph") {
+      val word = VersionPrintLayout.wordPage(page.replace("<body>", "<body>"), facts)
+      assertTrue(
+        word.indexOf("dms-word-marking") < word.indexOf("<p>Text</p>"),
+        word.contains("Draft – not valid · Document number POL-2026-0007")
+      )
     }
   )

@@ -159,6 +159,15 @@ object EvidenceReportLayout:
           "Superseded by"   -> v.supersededBy.fold("–")(_.toString)
         )
       )
+      v.original.foreach { o =>
+        add("<h3>Original file</h3>\n")
+        table(
+          out,
+          List("Name", "Size (bytes)", "SHA-256", "Uploaded", "Virus scan"),
+          List(List(o.name, o.size.toString, o.sha256, s"${at(o.addedAt)} by ${o.addedBy}", o.scanStatus)),
+          mono = Set(2)
+        )
+      }
       v.attachments.filter(_.nonEmpty).foreach { attachments =>
         add("<h3>Attachments</h3>\n")
         table(

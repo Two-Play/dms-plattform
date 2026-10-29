@@ -129,17 +129,48 @@ final class AttachmentUploads(
       file: SpooledFile,
       contentType: String
   ): IO[AttachmentError, ObjectVersion] =
+    storeAt(AttachmentService.objectKey(tenant, document, fileId), file, contentType)
+
+  /** Stores a received file under `key` (e.g. the Word file of a template, DMS-115), SHA-256 verified. */
+  def storeAt(key: String, file: SpooledFile, contentType: String): IO[AttachmentError, ObjectVersion] =
     for
       sha <- ZIO.fromEither(Sha256.fromHex(file.sha256)).mapError(AttachmentError.Storage(_))
       put <- objects
         .put(
-          AttachmentService.objectKey(tenant, document, fileId),
+          key,
           ObjectContent.Stream(ZStream.fromPath(file.path), file.size),
           contentType,
           expectedSha256 = Some(sha)
         )
         .mapError(storageError)
     yield put.version
+
+  /** Stores bytes as a new attachment file object of a document, e.g. the copy of a Word template (DMS-115).
+    */
+  def storeBytes(
+      tenant: TenantId,
+      document: DocumentId,
+      fileId: java.util.UUID,
+      bytes: Chunk[Byte],
+      contentType: String
+  ): IO[AttachmentError, ObjectVersion] =
+    objects
+      .put(
+        AttachmentService.objectKey(tenant, document, fileId),
+        ObjectContent.Bytes(bytes),
+        contentType,
+        expectedSha256 = Some(Sha256.of(bytes))
+      )
+      .mapBoth(storageError, _.version)
+
+  /** The bytes of a stored object, checked against `sha256` (e.g. a template's Word file). */
+  def readBytes(key: String, version: String, sha256: String): IO[AttachmentError, Chunk[Byte]] =
+    readStored(s"object $key", key, version, sha256).flatMap(
+      _.runCollect.mapError {
+        case e: AttachmentException => e.error
+        case e                      => AttachmentError.StorageUnavailable(e.getMessage)
+      }
+    )
 
   /** Removes an object that ended up unreferenced (e.g. a concurrent upload stored the same bytes). Best
     * effort: an object that cannot be removed is left for the clean-up of orphaned objects.
@@ -153,35 +184,53 @@ final class AttachmentUploads(
     * byte is sent); the object store client validates the checksum while the stream is consumed.
     */
   def read(attachment: VersionAttachment): IO[AttachmentError, ZStream[Any, Throwable, Byte]] =
+    readStored(
+      s"attachment ${attachment.id}",
+      attachment.objectKey,
+      attachment.objectVersion,
+      attachment.sha256
+    )
+
+  /** The bytes of the uploaded original of a file document version (DMS-115), checked like an attachment. */
+  def read(file: VersionFile): IO[AttachmentError, ZStream[Any, Throwable, Byte]] =
+    readStored(s"the file of version ${file.versionId}", file.objectKey, file.objectVersion, file.sha256)
+
+  private def readStored(
+      what: String,
+      key: String,
+      version: String,
+      sha256: String
+  ): IO[AttachmentError, ZStream[Any, Throwable, Byte]] =
     objects
-      .head(attachment.objectKey, Some(attachment.objectVersion))
+      .head(key, Some(version))
       .mapError(storageError)
       .flatMap { info =>
-        if !info.sha256.map(_.hex).contains(attachment.sha256) then
+        if !info.sha256.map(_.hex).contains(sha256) then
           ZIO.fail(
             AttachmentError.Integrity(
-              s"attachment ${attachment.id} is stored with SHA-256 ${info.sha256.fold("(none)")(_.hex)}, " +
-                s"expected ${attachment.sha256}"
+              s"$what is stored with SHA-256 ${info.sha256.fold("(none)")(_.hex)}, expected $sha256"
             )
           )
-        else
-          ZIO.succeed(
-            objects
-              .get(attachment.objectKey, attachment.objectVersion)
-              .mapError(e => AttachmentException(storageError(e)))
-          )
+        else ZIO.succeed(objects.get(key, version).mapError(e => AttachmentException(storageError(e))))
       }
 
   /** Reads the whole object and compares its SHA-256 with the recorded one, e.g. for evidence reports. */
   def verify(attachment: VersionAttachment): IO[AttachmentError, Unit] =
+    verifyStored(attachment.objectKey, attachment.objectVersion, attachment.sha256)
+
+  /** Like [[verify]] for the original of a file document version (DMS-115). */
+  def verify(file: VersionFile): IO[AttachmentError, Unit] =
+    verifyStored(file.objectKey, file.objectVersion, file.sha256)
+
+  private def verifyStored(key: String, version: String, sha256: String): IO[AttachmentError, Unit] =
     val digest = MessageDigest.getInstance("SHA-256")
     objects
-      .get(attachment.objectKey, attachment.objectVersion)
+      .get(key, version)
       .mapError(storageError)
       .runForeachChunk(c => ZIO.succeed(digest.update(c.toArray)))
       .flatMap { _ =>
         val actual = java.util.HexFormat.of().formatHex(digest.digest())
-        ZIO.unless(actual == attachment.sha256)(
+        ZIO.unless(actual == sha256)(
           ZIO.fail(AttachmentError.Integrity(s"the stored object has SHA-256 $actual"))
         )
       }

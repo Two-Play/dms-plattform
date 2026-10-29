@@ -3,10 +3,12 @@ package dms.app
 import dms.audit.AuditTrail
 import dms.db.Db
 import dms.documents.metadata.{MetadataProfile, MetadataValue, Validation}
-import dms.documents.{DocumentStatus, DocumentVersion, Rendition}
+import dms.documents.{DocumentKind, DocumentStatus, DocumentVersion, Rendition}
 import dms.documents.core.{DocumentDetails, DocumentService}
-import dms.kernel.UserId
-import dms.rendering.RenditionRequest
+import com.augustnagro.magnum.sql
+import dms.identity.{TenantOrganizations, UserDirectory}
+import dms.kernel.{TenantId, UserId}
+import dms.rendering.{ArchiveStandard, RenditionRequest}
 import dms.rendering.core.*
 import dms.templates.core.*
 import dms.templates.{Language, Limits, ResolvedContent, TemplateSchema}
@@ -55,16 +57,19 @@ final class DocumentRenditions(
     documents: DocumentService,
     templates: TemplateService,
     profiles: ProfileSource,
-    workflow: ApprovalWorkflow
+    workflow: ApprovalWorkflow,
+    names: (TenantId, Set[UserId]) => UIO[Map[UserId, String]] = (_, _) => ZIO.succeed(Map.empty)
 ) extends RenditionSource:
 
-  def load(request: RenditionRequest): IO[RenderingError, Option[RenditionPage]] =
+  def load(request: RenditionRequest): IO[RenderingError, Option[RenditionInput]] =
     for
       details <- documents.get(request.documentId).mapError(e => RenderingError.Invalid(e.describe))
       version <- ZIO
         .fromOption(details.versions.find(_.id == request.versionId))
         .orElseFail(RenderingError.Invalid(s"document version ${request.versionId} does not exist"))
       page <- version.status match
+        case DocumentStatus.InApproval if details.document.kind == DocumentKind.File =>
+          original(details, version, request).asSome
         case DocumentStatus.InApproval => page(details, version, request).asSome
         case _ if version.releasedAt.isDefined && version.rendition.isDefined => ZIO.none
         case other                                                            =>
@@ -88,26 +93,94 @@ final class DocumentRenditions(
       v: DocumentVersion,
       request: RenditionRequest
   ): IO[RenderingError, RenditionPage] =
-    val values = v.metadata
     DocumentRenditions.html(templates, profiles, details, v).map { (html, lang) =>
-      RenditionPage(
-        html,
-        RenditionFacts(
-          documentId = details.document.id.value.toString,
-          title = DocumentRenditions.title(details, v),
-          version = v.number.show,
-          validFrom = values.get("validFrom").collect { case MetadataValue.Date(d) => d },
-          approvedAt = request.approvedAt,
-          approvedBy = request.approver.value,
-          language = lang.code,
-          onBehalfOf = request.onBehalfOf.map(_.value)
-        )
-      )
+      RenditionPage(html, facts(details, v, request, lang.code))
     }
+
+  /** The uploaded original of a file document version (DMS-115), to be converted into PDF/A. */
+  private def original(
+      details: DocumentDetails,
+      v: DocumentVersion,
+      request: RenditionRequest
+  ): IO[RenderingError, RenditionOriginal] =
+    ZIO
+      .fromOption(v.file)
+      .orElseFail(RenderingError.Invalid(s"version ${v.label} of a file document has no file"))
+      .flatMap { file =>
+        import DocumentRenditions.currentTenant
+        val approval = WordFilling.ApprovalFacts(request.approvedAt, request.approver, request.onBehalfOf)
+        // A Word original is filled with the field values and the approval before it is converted (DMS-115).
+        val fill: Option[Map[UserId, String] => Chunk[Byte] => IO[RenderingError, Chunk[Byte]]] =
+          Option.when(file.isWord && file.fields.nonEmpty)(people =>
+            bytes =>
+              ZIO
+                .fromEither(
+                  WordDocx.fill(bytes.toArray, WordFilling.values(details, v, file, people, Some(approval)))
+                )
+                .mapBoth(m => RenderingError.Invalid(s"version ${v.label}: $m"), Chunk.fromArray)
+          )
+        currentTenant.flatMap(tenant => names(tenant, WordFilling.people(details, v, Some(approval)))).map {
+          people =>
+            RenditionOriginal(
+              file.name,
+              Rendition(file.objectKey, Some(file.objectVersion), file.sha256),
+              facts(details, v, request, DocumentRenditions.language(v).code),
+              fill.fold[Chunk[Byte] => IO[RenderingError, Chunk[Byte]]](ZIO.succeed(_))(_(people))
+            )
+        }
+      }
+
+  private def facts(
+      details: DocumentDetails,
+      v: DocumentVersion,
+      request: RenditionRequest,
+      language: String
+  ): RenditionFacts =
+    RenditionFacts(
+      documentId = details.document.id.value.toString,
+      title = DocumentRenditions.title(details, v),
+      version = v.number.show,
+      validFrom = v.metadata.get("validFrom").collect { case MetadataValue.Date(d) => d },
+      approvedAt = request.approvedAt,
+      approvedBy = request.approver.value,
+      language = language,
+      onBehalfOf = request.onBehalfOf.map(_.value)
+    )
 
 object DocumentRenditions:
   val layer: URLayer[DocumentService & TemplateService & ProfileSource & ApprovalWorkflow, RenditionSource] =
     ZLayer.fromFunction(DocumentRenditions(_, _, _, _))
+
+  /** With display names from the user directory for the fields of Word documents (DMS-115). */
+  val withNames: URLayer[
+    DocumentService & TemplateService & ProfileSource & ApprovalWorkflow & TenantOrganizations &
+      UserDirectory,
+    RenditionSource
+  ] = ZLayer.fromZIO(
+    for
+      documents <- ZIO.service[DocumentService]
+      templates <- ZIO.service[TemplateService]
+      profiles  <- ZIO.service[ProfileSource]
+      workflow  <- ZIO.service[ApprovalWorkflow]
+      env       <- ZIO.environment[TenantOrganizations & UserDirectory]
+    yield DocumentRenditions(
+      documents,
+      templates,
+      profiles,
+      workflow,
+      (tenant, ids) => VersionViewApi.displayNames(tenant, ids).provideEnvironment(env)
+    )
+  )
+
+  /** The tenant of the current transaction. */
+  private[app] def currentTenant: IO[RenderingError, TenantId] =
+    Db.sql(sql"select dms.current_tenant()".query[java.util.UUID].run().head)
+      .mapBoth(e => RenderingError.Database(e), TenantId(_))
+
+  /** The language of a version from its `language` field (`de-CH` counts as `de`), else the default. */
+  def language(v: DocumentVersion): Language =
+    val code = text(v.metadata, "language").getOrElse(Language.default.code)
+    Language.parse(code.takeWhile(_ != '-')).getOrElse(Language.default)
 
   /** The title of a version: its `title` field, else the document's title. */
   def title(details: DocumentDetails, v: DocumentVersion): String =
@@ -204,7 +277,6 @@ object DocumentRenditions:
       profiles: ProfileSource,
       v: DocumentVersion
   ): IO[RenderingError, (MetadataProfile, TemplateSchema, CompiledTemplate, Language)] =
-    val language = text(v.metadata, "language").getOrElse(Language.default.code)
     for
       template <- templates.version(v.templateId, v.templateVersion).mapError(e => invalid(v, e.describe))
       profile  <- profiles
@@ -214,12 +286,7 @@ object DocumentRenditions:
       compiled <- ZIO
         .fromEither(TemplateCompiler.compile(v.content, schema, Limits.default))
         .mapError(issues => invalid(v, issues.map(_.show).mkString("; ")))
-    yield (
-      profile,
-      schema,
-      compiled,
-      Language.parse(language.takeWhile(_ != '-')).getOrElse(Language.default)
-    )
+    yield (profile, schema, compiled, language(v))
 
   private def invalid(v: DocumentVersion, message: String): RenderingError =
     RenderingError.Invalid(s"version ${v.label} cannot be rendered: $message")
@@ -236,7 +303,7 @@ object RenditionWiring:
     ZLayer.fromFunction(RenditionArchive.objectStore)
 
   val jobs: URLayer[
-    Db & RenditionSource & PdfRenderer & PdfValidator & RenditionArchive & AuditTrail,
+    Db & RenditionSource & PdfRenderer & PdfValidator & RenditionArchive & AuditTrail & DocumentConverter,
     RenditionJobs
   ] = ZLayer.fromFunction(
     (
@@ -245,6 +312,7 @@ object RenditionWiring:
         renderer: PdfRenderer,
         validator: PdfValidator,
         archive: RenditionArchive,
-        audit: AuditTrail
-    ) => RenditionJobs(db, source, renderer, validator, archive, audit)
+        audit: AuditTrail,
+        converter: DocumentConverter
+    ) => RenditionJobs(db, source, renderer, validator, archive, audit, ArchiveStandard.default, converter)
   )

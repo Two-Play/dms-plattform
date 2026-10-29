@@ -35,7 +35,37 @@ final case class CreateDocument(
     templateVersion: Int,
     title: String,
     /** Entered field values by field key; their origin is stored as manual. */
-    values: Map[String, MetadataValue]
+    values: Map[String, MetadataValue],
+    /** `Structured` (default): the content is the template content, edited in the platform. `File`: the
+      * content is a file uploaded into the draft (`PUT /api/v1/documents/{id}/file`); the template supplies
+      * class and fields.
+      */
+    kind: Option[String] = None
+) derives JsonCodec,
+      Schema
+
+/** The uploaded original of a version of a file document (DMS-115). */
+final case class VersionFileView(
+    versionId: UUID,
+    /** File name of the original. */
+    name: String,
+    /** Media type, from the upload or guessed from the name. */
+    contentType: String,
+    size: Long,
+    /** SHA-256 (lowercase hex) of the original as uploaded; the approval binds it. */
+    sha256: String,
+    /** Clean (checked by the virus scanner) or NotScanned (no scanner configured). */
+    scanStatus: String,
+    uploadedBy: String,
+    uploadedAt: Instant,
+    /** The version whose file this version took over when it was started; empty after an upload into it. */
+    basedOn: Option[UUID],
+    /** Where to download the original unchanged. */
+    downloadUrl: String,
+    /** A PDF for reading in the browser: the archived rendition of an approved version, otherwise the
+      * original converted on request.
+      */
+    previewUrl: String
 ) derives JsonCodec,
       Schema
 
@@ -152,7 +182,10 @@ final case class DocumentVersionView(
     /** For minor versions: the automatic comparison with the version they are based on. */
     editorialCheck: Option[EditorialCheckView] = None,
     /** When the version became valid (DMS-47). */
-    publishedAt: Option[Instant] = None
+    publishedAt: Option[Instant] = None,
+    /** For a file document (DMS-115): the uploaded original of this version, empty before the first upload.
+      */
+    file: Option[VersionFileView] = None
 ) derives JsonCodec,
       Schema
 
@@ -233,7 +266,9 @@ final case class DocumentView(
     /** The document number (DMS-113), from the number range of the class or assigned manually. */
     documentNumber: Option[String] = None,
     /** True if the caller may assign a number manually now (`POST /api/v1/documents/{id}/number`). */
-    canAssignNumber: Boolean = false
+    canAssignNumber: Boolean = false,
+    /** `Structured` (content from the template) or `File` (an uploaded original per version, DMS-115). */
+    kind: String = "Structured"
 ) derives JsonCodec,
       Schema
 
@@ -273,7 +308,9 @@ final case class DocumentSummaryView(
     /** True if the caller created the document or the shown version. */
     mine: Boolean,
     /** The document number (DMS-113), if it has one. */
-    documentNumber: Option[String] = None
+    documentNumber: Option[String] = None,
+    /** `Structured` or `File` (DMS-115). */
+    kind: String = "Structured"
 ) derives JsonCodec,
       Schema
 
@@ -299,7 +336,8 @@ object DocumentApi:
       .out(statusCode(StatusCode.Created).and(jsonBody[DocumentView]))
       .description(
         "Creates a document from a released template version: version 1.0 as a draft with the template content. " +
-          "Values are validated against the class profile (422 with issues); computed fields are evaluated."
+          "Values are validated against the class profile (422 with issues); computed fields are evaluated. " +
+          "With kind File the content is a file uploaded into the draft instead (PUT /api/v1/documents/{id}/file)."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -309,10 +347,15 @@ object DocumentApi:
               context <- ctx.service.templateContext(TemplateId(req.templateId), req.templateVersion)
               (_, profile) = context
               values       = req.values.map((k, v) => k -> FieldEntry(v, ValueOrigin.Manual))
+              kind <- ZIO
+                .fromOption(
+                  req.kind.fold(Some(DocumentKind.Structured))(k => DocumentKind.values.find(_.toString == k))
+                )
+                .orElseFail(DocumentError.Invalid(List("kind must be Structured or File")))
               _       <- ctx.check(Action.CreateFromTemplate, creationResource(p, profile, req.values))
               _       <- ctx.checkGroups(profile, req.values)
               created <- ctx.service.create(
-                NewDocument(TemplateId(req.templateId), req.templateVersion, req.title, values),
+                NewDocument(TemplateId(req.templateId), req.templateVersion, req.title, values, kind),
                 p.userId
               )
               (document, version) = created
@@ -731,7 +774,11 @@ object DocumentApi:
     values.get("owner").collect { case MetadataValue.PersonRef(u) => UserId(u) }
 
   /** The resource of a document to be created by the caller from a template of `profile`'s class. */
-  private def creationResource(p: Principal, profile: MetadataProfile, values: Map[String, MetadataValue]) =
+  private[app] def creationResource(
+      p: Principal,
+      profile: MetadataProfile,
+      values: Map[String, MetadataValue]
+  ) =
     Resource(
       p.tenantId,
       organizationalUnit = DocumentResource.organizationalUnit(values),
@@ -790,7 +837,7 @@ object DocumentApi:
       allowedGroups = DocumentResource.allowedGroups(values)
     )
 
-  private def documentView(
+  private[app] def documentView(
       d: Document,
       profile: MetadataProfile,
       current: DocumentVersionView
@@ -807,7 +854,8 @@ object DocumentApi:
       d.templateVersion,
       d.createdAt,
       current,
-      documentNumber = d.number
+      documentNumber = d.number,
+      kind = d.kind.toString
     )
 
   private def summaryView(details: DocumentDetails, v: DocumentVersion, caller: UserId): DocumentSummaryView =
@@ -825,7 +873,8 @@ object DocumentApi:
       v.status.toString,
       v.updatedAt,
       d.authorId == caller || v.createdBy == caller,
-      d.number
+      d.number,
+      d.kind.toString
     )
 
   private[app] def versionView(v: DocumentVersion): DocumentVersionView =
@@ -858,7 +907,24 @@ object DocumentApi:
       v.requiresExtraReview,
       validFrom = v.validFrom.orElse(Publication.validFrom(v.metadata)),
       requiresAcknowledgement = v.requiresAcknowledgement,
-      publishedAt = v.publishedAt
+      publishedAt = v.publishedAt,
+      file = v.file.map(fileView(v.documentId.value, _))
+    )
+
+  private[app] def fileView(documentId: UUID, f: VersionFile): VersionFileView =
+    val base = s"/api/v1/documents/$documentId/versions/${f.versionId}"
+    VersionFileView(
+      f.versionId,
+      f.name,
+      f.contentType,
+      f.size,
+      f.sha256,
+      f.scanStatus.toString,
+      f.setBy.value,
+      f.setAt,
+      f.basedOn,
+      s"$base/file",
+      s"$base/preview.pdf"
     )
 
   /** The view of a version with what readers need from the other versions of its document: when an approved

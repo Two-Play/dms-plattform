@@ -61,9 +61,11 @@ object WorkflowDocuments:
 
   /** SHA-256 (lowercase hex) over the canonical JSON of the content and the field values with their origin
     * (DMS-41) and, if the version has attachments, their names and SHA-256 sorted by name (DMS-114): a vote
-    * and an approval cover the attachments too. Canonical: object keys sorted, no whitespace, so equal
-    * content gives an equal checksum; versions without attachments keep the checksum they had before
-    * attachments existed.
+    * and an approval cover the attachments too. For a file document (DMS-115) the name and SHA-256 of the
+    * uploaded original and the values entered for its Word fields are included as `file`, so a vote binds the
+    * exact original and what is filled into it (automatic values come from the field values). Canonical:
+    * object keys sorted, no whitespace, so equal content gives an equal checksum; versions without
+    * attachments or file keep the checksum they had before attachments and files existed.
     */
   def contentSha256(v: DocumentVersion): String =
     val content =
@@ -72,8 +74,16 @@ object WorkflowDocuments:
     val attachments = v.attachments
       .sortBy(a => (a.name, a.sha256))
       .map(a => Json.Obj("name" -> Json.Str(a.name), "sha256" -> Json.Str(a.sha256)))
+    val file = v.file.map(f =>
+      "file" -> Json.Obj(
+        (List("name" -> Json.Str(f.name), "sha256" -> Json.Str(f.sha256)) ++
+          Option.when(f.values.nonEmpty)(
+            "values" -> Json.Obj(f.values.toList.sorted.map((k, value) => k -> Json.Str(value))*)
+          ))*
+      )
+    )
     val fields = List("content" -> content, "values" -> values) ++
-      Option.when(attachments.nonEmpty)("attachments" -> Json.Arr(attachments*))
+      Option.when(attachments.nonEmpty)("attachments" -> Json.Arr(attachments*)) ++ file
     val digest = MessageDigest
       .getInstance("SHA-256")
       .digest(canonical(Json.Obj(fields*)).getBytes(StandardCharsets.UTF_8))
