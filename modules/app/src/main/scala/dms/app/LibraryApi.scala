@@ -1,5 +1,6 @@
 package dms.app
 
+import dms.archive.core.LegalHoldStore
 import dms.authz.{AccessDenied, Action, Authorizer, DocumentResource}
 import dms.db.{Db, DbError}
 import dms.documents.Validity
@@ -52,7 +53,9 @@ final case class LibraryItemView(
     changed: Boolean,
     requiresAcknowledgement: Boolean,
     /** The caller is asked to acknowledge this version and has not done so yet. */
-    acknowledgementPending: Boolean
+    acknowledgementPending: Boolean,
+    /** True while an active legal hold covers the document (DMS-106); which holds is not shown here. */
+    legalHold: Boolean = false
 ) derives JsonCodec,
       Schema
 
@@ -247,6 +250,7 @@ object LibraryApi:
             ctx.passes(Recipients.filterOf(audiences.get(v.versionId)))
           )
           .map(_.map(_.versionId).toSet)
+        held   <- LegalHoldStore.heldAmong(readable.map(_.document.id).toSet)
         labels <- classes.listClasses
           .mapError(DocumentService.metadataError)
           .map(_.map(c => c.key.value -> c.label).toMap)
@@ -279,7 +283,8 @@ object LibraryApi:
             Library.isNew(first, boundary),
             Library.isChanged(first, since, boundary),
             v.requiresAcknowledgement,
-            recipientOf.contains(v.versionId) && !acknowledged.contains(v.versionId)
+            recipientOf.contains(v.versionId) && !acknowledged.contains(v.versionId),
+            held.contains(v.document.id)
           )
         },
         labels,
@@ -309,7 +314,8 @@ object LibraryApi:
       i.isNew,
       i.changed,
       i.requiresAcknowledgement,
-      i.acknowledgementPending
+      i.acknowledgementPending,
+      i.legalHold
     )
 
   private def facetsView(f: LibraryFacets) =

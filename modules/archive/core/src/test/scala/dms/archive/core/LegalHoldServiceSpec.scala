@@ -312,6 +312,57 @@ object LegalHoldServiceSpec extends ZIOSpecDefault:
         after == "Destroyed"
       )
     },
+    test("a document removed from a hold is no longer covered by it; the removal is final (DMS-106)") {
+      for
+        t       <- tenant
+        d       <- document(t)
+        created <- holds(t._1)(_.create(hold("Removal"), List(d._1), HoldSource.Document, manager))
+        id = created.id.value
+        noReason <- holds(t._1)(_.removeDocument(created.id, d._1, " ", manager)).either
+        changed  <- holds(t._1)(_.removeDocument(created.id, d._1, "Added by mistake", manager))
+        held     <- lookup(t._1)(_.isUnderLegalHold(d._1))
+        active   <- lookup(t._1)(_.activeHolds(d._1))
+        history  <- holds(t._1)(_.holdsOf(d._1))
+        listed   <- holds(t._1)(_.documents(created.id))
+        twice    <- holds(t._1)(_.removeDocument(created.id, d._1, "Again", manager)).either
+        undo     <- app(t._1)(
+          sql"""update dms.legal_hold_document set removed_at = null, removed_by = null, removal_reason = null
+                where hold_id = $id""".update.run()
+        ).either
+        rewrite <- app(t._1)(
+          sql"update dms.legal_hold_document set reason = 'Other' where hold_id = $id".update.run()
+        ).either
+        readded <- holds(t._1)(
+          _.addDocuments(created.id, List(d._1), "Relevant after all", HoldSource.Document, manager)
+        )
+        heldAgain <- lookup(t._1)(_.isUnderLegalHold(d._1))
+        _         <- holds(t._1)(_.release(created.id, "Closed", manager))
+        late      <- holds(t._1)(_.removeDocument(created.id, d._1, "Too late", manager)).either
+        direct    <- app(t._1)(
+          sql"""update dms.legal_hold_document set removed_at = now(), removed_by = 'x', removal_reason = 'y'
+                where hold_id = $id and removed_at is null""".update.run()
+        ).either
+        events <- outbox(created.id)
+        jobs   <- syncJobs(d._1)
+      yield assertTrue(
+        noReason.left.exists(_.isInstanceOf[LegalHoldError.Invalid]),
+        changed.documentCount == 0,
+        !held,
+        active.isEmpty,
+        history.map(_.id) == List(created.id),
+        listed.flatMap(_.removal).map(r => (r.by, r.reason)) == List((manager, "Added by mistake")),
+        twice.left.exists(_.isInstanceOf[LegalHoldError.NotFound]),
+        undo.isLeft,
+        rewrite.isLeft,
+        readded == List(d._1),
+        heldAgain,
+        late.left.exists(_.isInstanceOf[LegalHoldError.Released]),
+        direct.isLeft,
+        events.contains(LegalHoldEvents.DocumentRemoved),
+        // set, removed, added again, released
+        jobs == 4L
+      )
+    },
     test("holds keep their history and are isolated per tenant") {
       for
         t       <- tenant

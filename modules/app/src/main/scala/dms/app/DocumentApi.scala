@@ -327,7 +327,9 @@ final case class DocumentSummaryView(
     /** The document number (DMS-113), if it has one. */
     documentNumber: Option[String] = None,
     /** `Structured` or `File` (DMS-115). */
-    kind: String = "Structured"
+    kind: String = "Structured",
+    /** True while an active legal hold covers the document (DMS-106); which holds is not shown here. */
+    legalHold: Boolean = false
 ) derives JsonCodec,
       Schema
 
@@ -409,9 +411,12 @@ object DocumentApi:
                 )
               recent   <- ctx.service.recent(size)
               readable <- ZIO.foreach(recent)(details => ctx.visible(details).map(details -> _))
+              held     <- LegalHoldStore
+                .heldAmong(readable.collect { case (d, _ :: _) => d.document.id }.toSet)
+                .mapError(DocumentError.Database(_))
             yield readable.collect { case (details, versions @ (_ :: _)) =>
               val current = versions.find(v => Versioning.isOpen(v.status)).getOrElse(versions.last)
-              summaryView(details, current, p.userId)
+              summaryView(details, current, p.userId).copy(legalHold = held.contains(details.document.id))
             }
           }
       )
