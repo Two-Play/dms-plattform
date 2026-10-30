@@ -658,14 +658,40 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
           .map(m => (m.group(1), m.group(2)))
           .filter((a, b) => names(a) && names(b))
           .toSet
-      // V18 replaces the guard of V10 (which replaced V9's) and allows exactly the lifecycle's transitions;
-      // the earlier ones lacked only the withdrawal of a valid version (DMS-55).
+      // V31 replaces the guard of V18 (which replaced V10's and V9's) and allows exactly the lifecycle's
+      // transitions; V18 lacked only the discarding of a draft (DMS-129), the earlier ones also the withdrawal
+      // of a valid version (DMS-55).
+      val discard       = Set(("Draft", "Discarded"))
       val withdrawValid = Set(("Published", "Withdrawn"), ("ReviewDue", "Withdrawn"))
       assertTrue(
-        pairs("V18__periodic_review.sql") == lifecycle,
+        pairs("V31__discard_drafts.sql") == lifecycle,
+        pairs("V18__periodic_review.sql") == lifecycle -- discard,
         List("V9__document_versions.sql", "V10__deviation_requests.sql").forall(f =>
-          pairs(f) == lifecycle -- withdrawValid
+          pairs(f) == lifecycle -- discard -- withdrawValid
         )
       )
+    },
+    test("a draft is discarded once, frozen afterwards, and gives its version number back") {
+      for
+        f       <- fixture
+        created <- asApp(f.tenant) {
+          val doc   = insertDocument(f)
+          val first = insertVersion(f, doc, 1)
+          (doc, first, setStatus(first, "Discarded"))
+        }
+        (doc, first, discarded) = created
+        // Frozen like every status outside the open ones, and terminal.
+        edit <- asApp(f.tenant)(
+          sql"update dms.document_version set content = $edited where id = $first".update.run()
+        ).either
+        back <- asApp(f.tenant)(setStatus(first, "Draft")).either
+        // The number 1.0 is free again for the next draft of the document.
+        next      <- asApp(f.tenant)(insertVersion(f, doc, 1)).either
+        submitted <- asApp(f.tenant) {
+          val other = insertVersion(f, insertDocument(f), 1)
+          val _     = setStatus(other, "InReview")
+          setStatus(other, "Discarded")
+        }.either
+      yield assertTrue(discarded == 1, edit.isLeft, back.isLeft, next.isRight, submitted.isLeft)
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

@@ -167,7 +167,8 @@ object VersionPrintLayout:
       "Superseded" -> "Abgelöst",
       "Withdrawn"  -> "Außer Kraft",
       "Archived"   -> "Archiviert",
-      "Destroyed"  -> "Vernichtet"
+      "Destroyed"  -> "Vernichtet",
+      "Discarded"  -> "Verworfen"
     ),
     date = DateTimeFormatter.ofPattern("dd.MM.yyyy"),
     dateTime = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
@@ -213,7 +214,8 @@ object VersionPrintLayout:
       "Superseded" -> "Superseded",
       "Withdrawn"  -> "Withdrawn",
       "Archived"   -> "Archived",
-      "Destroyed"  -> "Destroyed"
+      "Destroyed"  -> "Destroyed",
+      "Discarded"  -> "Discarded"
     ),
     date = DateTimeFormatter.ISO_LOCAL_DATE,
     dateTime = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")

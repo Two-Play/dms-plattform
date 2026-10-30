@@ -151,6 +151,7 @@ export const status: Translation<typeof en.status> = {
   Withdrawn: 'Außer Kraft',
   Archived: 'Archiviert',
   Destroyed: 'Vernichtet',
+  Discarded: 'Verworfen',
   Running: 'Läuft',
   Returned: 'Zurückgegeben',
   Rendering: 'PDF wird erzeugt',

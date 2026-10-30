@@ -285,7 +285,45 @@ final case class DocumentView(
       * `OpenVersion`: a version is in progress (draft, review or approval); `ScheduledVersion`: an approved
       * version waits for its valid-from date. Empty if `canStartVersion` or if the caller may not start one.
       */
-    startVersionBlocked: Option[String] = None
+    startVersionBlocked: Option[String] = None,
+    /** True if the caller may discard the open draft now (`POST /api/v1/documents/{id}/draft/discard`,
+      * DMS-129): the open version is a draft that is not submitted, and the caller is its author, the
+      * document's owner or a tenant administrator.
+      */
+    canDiscardDraft: Boolean = false
+) derives JsonCodec,
+      Schema
+
+final case class DiscardDraft(
+    /** Why the draft is discarded, e.g. "created by accident"; optional, at most 4000 characters, recorded in
+      * the audit trail.
+      */
+    reason: Option[String]
+) derives JsonCodec,
+      Schema
+
+/** The outcome of discarding a draft (DMS-129). */
+final case class DiscardedDraftView(
+    documentId: UUID,
+    versionId: UUID,
+    /** The label the draft had, e.g. `2.0-draft.3`. */
+    version: String,
+    /** True if the draft was the document's first version, never approved: the document no longer appears in
+      * lists, search, library or task inbox. False for a new version of an approved document, whose valid
+      * version stays.
+      */
+    documentDiscarded: Boolean,
+    /** The valid version of the document, if any: where readers continue. */
+    validVersionId: Option[UUID],
+    validVersion: Option[String],
+    /** Attachment links of the draft that were removed. */
+    removedAttachments: Int,
+    /** Stored files no version references any more, released for deletion. */
+    releasedFiles: Int,
+    /** Unreferenced files kept because the document is under legal hold. */
+    keptFiles: Int,
+    /** Workflow tasks of the draft that were cancelled. */
+    cancelledTasks: Int
 ) derives JsonCodec,
       Schema
 
@@ -434,10 +472,13 @@ object DocumentApi:
               details  <- ctx.service.get(DocumentId(id))
               readable <- ctx.readable(details)
               current = readable.find(v => Versioning.isOpen(v.status)).getOrElse(readable.last)
-              holds  <- LegalHoldStore.activeHolds(details.document.id).mapError(DocumentError.Database(_))
-              manage <- ctx.allowed(Action.ManageRetention, resource(p, details, current))
-              number <- ctx.allowed(Action.AssignDocumentNumber, resource(p, details, current))
-              start  <- startVersion(ctx, p, details)
+              holds   <- LegalHoldStore.activeHolds(details.document.id).mapError(DocumentError.Database(_))
+              manage  <- ctx.allowed(Action.ManageRetention, resource(p, details, current))
+              number  <- ctx.allowed(Action.AssignDocumentNumber, resource(p, details, current))
+              start   <- startVersion(ctx, p, details)
+              discard <- details.open.filter(_.status == DocumentStatus.Draft) match
+                case Some(open) => ctx.allowed(Action.DiscardDraft, resource(p, details, open))
+                case None       => ZIO.succeed(false)
             yield documentView(
               details.document,
               details.profile,
@@ -447,7 +488,8 @@ object DocumentApi:
               legalHolds = Option.when(manage)(holds.map(LegalHoldApi.refView)),
               canAssignNumber = number && details.numberAssignable,
               canStartVersion = start.contains(None),
-              startVersionBlocked = start.flatten
+              startVersionBlocked = start.flatten,
+              canDiscardDraft = discard
             )
           }
       )
@@ -618,6 +660,53 @@ object DocumentApi:
           }
       )
 
+  val discardDraft: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.post
+      .in(documents / documentId / "draft" / "discard")
+      .in(jsonBody[DiscardDraft])
+      .out(jsonBody[DiscardedDraftView])
+      .description(
+        "Discards the open draft (DMS-129), e.g. one created by accident; requires DiscardDraft (the draft's " +
+          "author, the document's owner or a tenant administrator). Only a draft that is not submitted (409 " +
+          "otherwise: submitted, approved and published versions are withdrawn or destroyed). The version is " +
+          "kept as a record in status Discarded and is no longer readable. A first version takes the document " +
+          "out of lists, search, library and task inbox; for a new version the valid version stays and a new " +
+          "version can be started again. Attachment links and the original of the draft are removed; files no " +
+          "version references any more are deleted unless the document is under legal hold. Pending workflow " +
+          "tasks of the draft are cancelled. The optional reason (at most 4000 characters) is recorded in the " +
+          "audit trail; an assigned document number stays reserved."
+      )
+      .tag("Documents")
+      .serverLogic(p =>
+        (id, req) =>
+          inTransaction(p) { ctx =>
+            for
+              details <- ctx.service.get(DocumentId(id))
+              _       <- ZIO.when(details.discarded)(ZIO.fail(discardedDocument(id)))
+              open    <- openVersion(details)
+              // Decided as if the version were a draft: a reader of a submitted version learns that it can no
+              // longer be discarded (409 from the service), everyone else gets 403.
+              _ <-
+                if open.status == DocumentStatus.Draft then
+                  ctx.check(Action.DiscardDraft, resource(p, details, open))
+                else ctx.checkRead(details, open)
+              result    <- ctx.service.discardDraft(DocumentId(id), req.reason, p.userId)
+              cancelled <- ctx.workflow.discard(result.version.id, p.userId)
+            yield DiscardedDraftView(
+              id,
+              result.version.id,
+              open.label,
+              result.documentDiscarded,
+              result.validVersion.map(_.id),
+              result.validVersion.map(_.label),
+              result.removedAttachments,
+              result.releasedFiles.size,
+              result.keptFiles.size,
+              cancelled.size
+            )
+          }
+      )
+
   private val deviationRequests = documents / documentId / "deviation-requests"
 
   val requestDeviation: ZServerEndpoint[Env, Any] =
@@ -708,6 +797,7 @@ object DocumentApi:
       submit,
       newVersion,
       updateChangeSummary,
+      discardDraft,
       requestDeviation,
       withdrawDeviation,
       deviations,
@@ -762,9 +852,14 @@ object DocumentApi:
     def visible(details: DocumentDetails): IO[WorkflowError, List[DocumentVersion]] =
       visibleWith(details).map(_._1)
 
-    /** The versions the caller may read; denied (and logged) if there is none. */
-    def readable(details: DocumentDetails): IO[AccessDenied | WorkflowError, List[DocumentVersion]] =
+    /** The versions the caller may read; denied (and logged) if there is none. A document whose versions were
+      * all discarded (DMS-129) is not found.
+      */
+    def readable(
+        details: DocumentDetails
+    ): IO[AccessDenied | WorkflowError | DocumentError, List[DocumentVersion]] =
       for
+        _      <- ZIO.when(details.discarded)(ZIO.fail(discardedDocument(details.document.id.value)))
         result <- visibleWith(details)
         (visible, participants, actor) = result
         _ <- ZIO.when(visible.isEmpty)(
@@ -857,6 +952,9 @@ object DocumentApi:
               else None
             )
           )
+
+  private[app] def discardedDocument(id: UUID): DocumentError =
+    DocumentError.NotFound(s"document $id does not exist (it was discarded)")
 
   private def openVersion(details: DocumentDetails): IO[DocumentError, DocumentVersion] =
     ZIO

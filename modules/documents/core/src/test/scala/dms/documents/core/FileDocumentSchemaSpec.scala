@@ -208,6 +208,49 @@ object FileDocumentSchemaSpec extends ZIOSpecDefault:
         stored == List("Vertrag v2.docx")
       )
     },
+    test(
+      "a draft's original is removed only while it is a draft; a stored file is deleted only when unreferenced and not held"
+    ) {
+      for
+        f          <- fixture
+        file       <- asApp(f.tenant)(insertFile(f.document))
+        _          <- asApp(f.tenant)(setFile(f.version, file, "Vertrag.docx"))
+        referenced <- asApp(f.tenant)(
+          sql"delete from dms.document_attachment_file where id = $file".update.run()
+        ).either
+        changed <- asApp(f.tenant)(
+          sql"update dms.document_attachment_file set size_bytes = 11 where id = $file".update.run()
+        ).either
+        removed <- asApp(f.tenant)(
+          sql"delete from dms.document_version_file where version_id = ${f.version}".update.run()
+        )
+        held <- ZIO.serviceWithZIO[Env](
+          _.owner.transactSystem(Db.sql {
+            val hold = UUID.randomUUID()
+            val _    = sql"""insert into dms.legal_hold (id, tenant_id, name, reason, created_by)
+                          values ($hold, ${f.tenant.value}, ${"Matter"}, ${"Pending"}, ${"records"})""".update
+              .run()
+            sql"""insert into dms.legal_hold_document (tenant_id, hold_id, document_id, added_via, reason, added_by)
+                  values (${f.tenant.value}, $hold, ${f.document}, ${"Document"}, ${"Pending"}, ${"records"})""".update
+              .run()
+          })
+        )
+        underHold <- asApp(f.tenant)(
+          sql"delete from dms.document_attachment_file where id = $file".update.run()
+        ).either
+        other   <- asApp(f.tenant)(insertFile(f.structured, "e" * 64))
+        deleted <- asApp(f.tenant)(
+          sql"delete from dms.document_attachment_file where id = $other".update.run()
+        )
+      yield assertTrue(
+        referenced.isLeft,
+        changed.isLeft,
+        removed == 1,
+        held == 1,
+        underHold.isLeft,
+        deleted == 1
+      )
+    },
     test("the Word file of a template version changes only while the version is a draft") {
       for
         f        <- fixture

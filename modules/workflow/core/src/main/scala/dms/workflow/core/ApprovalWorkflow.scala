@@ -335,6 +335,45 @@ final class ApprovalWorkflow(
   def caseOfVersion(versionId: UUID): IO[WorkflowError, Option[CaseDetails]] =
     sql(WorkflowStore.caseOfVersion(versionId)).flatMap(ZIO.foreach(_)(r => details(r.id)))
 
+  /** Ends the case of a version that was discarded as a draft (DMS-129, ADR 0050): open and waiting tasks are
+    * cancelled, a running process instance is deleted and the case becomes `Discarded`, so it neither waits
+    * for a resubmission nor shows tasks in anyone's inbox. Recorded as `workflow.discarded` with the
+    * cancelled tasks. Returns the cancelled task ids; does nothing for a version that was never submitted.
+    */
+  def discard(versionId: UUID, actor: UserId): IO[WorkflowError, List[String]] =
+    sql(WorkflowStore.lockCaseOfVersion(versionId)).flatMap {
+      case None                                                     => ZIO.succeed(Nil)
+      case Some(row) if row.status == CaseStatus.Discarded.toString => ZIO.succeed(Nil)
+      case Some(row)                                                =>
+        for
+          open <- sql(WorkflowStore.tasksOfCase(row.id)).map(
+            _.filter(t => t.status == TaskStatus.Open.toString || t.status == TaskStatus.Waiting.toString)
+          )
+          _ <- sql(open.foreach(t => WorkflowStore.completeTask(t.id, TaskStatus.Cancelled, None)))
+          _ <- ZIO.foreachDiscard(row.processInstanceId)(instance =>
+            flowable.run(_.getRuntimeService.deleteProcessInstance(instance, "discarded"))
+          )
+          _ <- sql(
+            WorkflowStore.updateCase(
+              row.copy(status = CaseStatus.Discarded.toString, processInstanceId = None, currentStep = None)
+            )
+          )
+          cancelled = open.map(_.id)
+          _ <- record(
+            actor,
+            "workflow.discarded",
+            AuditObject("document", Some(row.documentId), None),
+            Json.Obj(
+              "caseId"         -> Json.Str(row.id.toString),
+              "versionId"      -> Json.Str(row.versionId.toString),
+              "previousStatus" -> Json.Str(row.status),
+              "cancelledTasks" -> Json.Arr(cancelled.map(Json.Str(_))*)
+            ),
+            None
+          )
+        yield cancelled
+    }
+
   /** The approvals of the given versions by version id (approver, deputy's principal, time), e.g. for the
     * validity history (DMS-53). Versions approved without a workflow case are missing.
     */

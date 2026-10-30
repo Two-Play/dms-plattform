@@ -45,6 +45,7 @@ function makeDocument(id: string, title: string, versionId: string, version: str
     legalHold: false,
     canAssignNumber: false,
     canStartVersion: false,
+    canDiscardDraft: false,
     kind: 'Structured',
     current: {
       id: versionId,

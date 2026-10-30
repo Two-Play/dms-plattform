@@ -84,6 +84,30 @@ export function documentVersionsQuery(client: ApiClient, id: string) {
   })
 }
 
+export type DiscardedDraft = components['schemas']['DiscardedDraftView']
+
+/** Longest reason for discarding a draft the backend accepts. */
+export const MAX_DISCARD_REASON = 4000
+
+/**
+ * Discards the open draft (POST /api/v1/documents/{id}/draft/discard, DMS-129); an empty `reason` sends
+ * none. The result says whether the whole document disappeared (first version) or which valid version stays.
+ */
+export async function discardDraft(
+  client: ApiClient,
+  id: string,
+  reason: string,
+): Promise<DiscardedDraft> {
+  const { data, error, response } = await client.POST('/api/v1/documents/{id}/draft/discard', {
+    params: { path: { id } },
+    body: reason === '' ? {} : { reason },
+  })
+  if (!response.ok || !data) {
+    throw requestError(response, error, `Discarding the draft failed with HTTP ${response.status}`)
+  }
+  return data
+}
+
 /** Text, field and metadata changes between two versions (GET /api/v1/documents/{id}/compare). */
 export function versionComparisonQuery(client: ApiClient, id: string, from: string, to: string) {
   return queryOptions({

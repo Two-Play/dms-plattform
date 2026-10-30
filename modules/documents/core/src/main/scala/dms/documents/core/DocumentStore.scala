@@ -93,11 +93,14 @@ private[core] object DocumentStore:
       .headOption
       .map(toDocument)
 
-  /** The documents of the tenant, the most recently changed first (by their latest version). */
+  /** The documents of the tenant, the most recently changed first (by their latest version). Documents whose
+    * versions were all discarded (DMS-129) are left out.
+    */
   def recentDocuments(limit: Int)(using DbTx): List[Document] =
     sql"""select d.id, d.class_id, d.class_version, d.title, d.owner_id, d.author_id, d.template_id,
                  d.template_version, d.created_at, d.document_number, d.kind
           from dms.document d
+          where exists (select 1 from dms.document_version v where v.document_id = d.id and v.status <> 'Discarded')
           order by greatest(d.updated_at,
                             (select max(v.updated_at) from dms.document_version v where v.document_id = d.id))
                    desc, d.id

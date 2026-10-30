@@ -42,6 +42,11 @@ enum Role:
   * range of the class (DMS-113, ADR 0040): records managers ("Registratur") and the document's owner, who
   * holds the owner role. The reason is required and recorded in the audit trail.
   *
+  * `DiscardDraft` is discarding a draft that was never submitted, e.g. one created by accident (DMS-129, ADR
+  * 0050): the draft's author (who holds the author or owner role), the document's owner (who holds the owner
+  * role) and tenant administrators, who clean up drafts without reading their content. Only in status
+  * `Draft`; submitted, approved and published versions are withdrawn or destroyed instead.
+  *
   * `SearchUsers` is finding people of the own tenant by name or email, to pick a group member, a deputy or a
   * person in a metadata field (DMS-111, ADR 0037 addendum): every role of the tenant, the tenant
   * administrator included; users without any role assignment may not browse the directory.
@@ -51,7 +56,8 @@ enum Action:
     Withdraw, Recertify,
     EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
     ManageRetention, Destroy, ViewHistory, Configure,
-    MonitorCompliance, ViewAcknowledgementPersons, GenerateEvidenceReport, AssignDocumentNumber, SearchUsers
+    MonitorCompliance, ViewAcknowledgementPersons, GenerateEvidenceReport, AssignDocumentNumber, SearchUsers,
+    DiscardDraft
 
 /** Areas of tenant configuration (matrix row "Configuration"). `Search` is the operation of the tenant's
   * search index, e.g. rebuilding it (DMS-51, ADR 0029). `Groups` is the administration of access groups and

@@ -39,6 +39,10 @@ enum CaseStatus:
   /** All steps approved and the rendition attached; the version is approved. */
   case Approved
 
+  /** The version was discarded as a draft (DMS-129, ADR 0050), e.g. after a return; it is never resubmitted.
+    */
+  case Discarded
+
 /** The review and approval of one document version. Every submission starts a round; all rounds of a case run
   * on the same workflow definition (business concept 6.1: a running case stays on its workflow version).
   *
@@ -75,7 +79,7 @@ enum TaskStatus:
   case Waiting
   case Completed
 
-  /** Another lane of the step returned the version. */
+  /** Another lane of the step returned the version, or the version was discarded (DMS-129). */
   case Cancelled
 
 /** A deputy who may complete a task in place of `principal`, one of its candidates, during an active

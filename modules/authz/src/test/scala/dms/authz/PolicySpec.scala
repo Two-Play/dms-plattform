@@ -46,6 +46,7 @@ object PolicySpec extends ZIOSpecDefault:
     case GenerateEvidenceReport     => document(Superseded)
     case AssignDocumentNumber       => document(Draft)
     case SearchUsers                => Resource(tenant)
+    case DiscardDraft               => document(Draft)
 
   /** The condition that turns a ◐ cell of the matrix into a permission. */
   private def favorable(action: Action, role: Role): Resource =
@@ -57,6 +58,8 @@ object PolicySpec extends ZIOSpecDefault:
       case (Recertify, _)        => r.copy(ownerId = Some(user))
       case (ViewAcknowledgementPersons, _) => r.copy(ownerId = Some(user))
       case (AssignDocumentNumber, _)       => r.copy(ownerId = Some(user))
+      case (DiscardDraft, Owner)           => r.copy(ownerId = Some(user))
+      case (DiscardDraft, _)               => r.copy(authorId = Some(user))
       case (Publish, Approver)             => r.copy(approvedBy = Set(user))
       case (ViewHistory, Author)           => r.copy(authorId = Some(user))
       case (ViewHistory, Reviewer)         => r.copy(assignedParticipants = Set(user))
@@ -100,7 +103,10 @@ object PolicySpec extends ZIOSpecDefault:
     // Manual document numbers (DMS-113, ADR 0040): records management, and owners for their own documents.
     AssignDocumentNumber -> List(Never, Never, Partial, Never, Never, Never, Full, Never, Never, Never),
     // Finding people by name for pickers (DMS-111): every role of the tenant; nobody without a role.
-    SearchUsers -> List(Full, Full, Full, Full, Full, Full, Full, Full, Full, Full)
+    SearchUsers -> List(Full, Full, Full, Full, Full, Full, Full, Full, Full, Full),
+    // Discarding a draft never submitted (DMS-129, ADR 0050): its author, the document's owner and tenant
+    // administrators (clean-up without reading the content).
+    DiscardDraft -> List(Never, Partial, Partial, Never, Never, Never, Never, Never, Full, Never)
   )
 
   private def permitted(roles: Seq[Role], action: Action, resource: Resource): Boolean =
@@ -149,6 +155,30 @@ object PolicySpec extends ZIOSpecDefault:
           )
           .isPermitted
       )
+    },
+    test("a draft is discarded only while it is a draft, by its author or the document's owner") {
+      val own      = document(Draft).copy(authorId = Some(user))
+      val owned    = document(Draft).copy(ownerId = Some(user))
+      val statuses = DocumentStatus.values.toList.filterNot(_ == Draft)
+      assertTrue(
+        permitted(Seq(Author), DiscardDraft, own),
+        permitted(Seq(Owner), DiscardDraft, own),
+        permitted(Seq(Owner), DiscardDraft, owned),
+        // The owner field alone is not enough without the owner role; another author's draft is not one's own.
+        !permitted(Seq(Author), DiscardDraft, owned),
+        !permitted(Seq(Author, Reviewer, Approver), DiscardDraft, document(Draft)),
+        statuses.forall(s =>
+          !permitted(
+            Seq(Author, Owner, TenantAdmin),
+            DiscardDraft,
+            own.copy(status = Some(s), ownerId = Some(user))
+          )
+        )
+      )
+    },
+    test("nobody reads a discarded version") {
+      val discarded = document(Discarded).copy(authorId = Some(user), ownerId = Some(user))
+      assertTrue(!permitted(Role.values.toSeq, ReadDocument, discarded))
     },
     test("deny by default without any role") {
       assertTrue(!permitted(Seq.empty, ReadPublished, base(ReadPublished)))

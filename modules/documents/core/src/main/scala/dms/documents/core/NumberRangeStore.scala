@@ -90,10 +90,13 @@ private[core] object NumberRangeStore:
       .map(DocumentId(_))
 
   /** Documents without number with their class, oldest first (creation time, then id): candidates of a
-    * backfill (DMS-116).
+    * backfill (DMS-116). Documents whose versions were all discarded (DMS-129) get no number.
     */
   def unnumberedDocuments()(using DbTx): List[(DocumentId, UUID)] =
-    sql"""select id, class_id from dms.document where document_number is null order by created_at, id"""
+    sql"""select d.id, d.class_id from dms.document d
+          where d.document_number is null
+            and exists (select 1 from dms.document_version v where v.document_id = d.id and v.status <> 'Discarded')
+          order by d.created_at, d.id"""
       .query[(UUID, UUID)]
       .run()
       .map((id, cls) => DocumentId(id) -> cls)
