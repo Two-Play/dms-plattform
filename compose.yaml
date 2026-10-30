@@ -2,7 +2,8 @@
 # Sprint 0 state: PostgreSQL is verified; ZITADEL is set up and verified with T-00.3 (DMS-19);
 # object storage (SeaweedFS with Object Lock) with DMS-30; rendering worker (WeasyPrint) with DMS-44; conversion
 # worker (LibreOffice) with DMS-115;
-# search index (OpenSearch) with DMS-51.
+# search index (OpenSearch) with DMS-51; virus scanner (ClamAV, compose profile "clamav", not started by default) with
+# DMS-117.
 
 services:
   db:
@@ -136,6 +137,25 @@ services:
       interval: 10s
       retries: 5
 
+  # Virus scanner (DMS-117, ADR 0041 addendum): clamd scans every uploaded file (attachments, originals, Word templates,
+  # upload previews) before it is stored. Not part of the default stack (about 1.5 GB of memory, signature download at the
+  # first start): start it with `docker compose --profile clamav up -d clamav` and run the application with
+  # DMS_ATTACHMENTS_SCANNER=clamav DMS_ATTACHMENTS_CLAMAV_PORT=9310. freshclam keeps the signatures in the volume up to
+  # date. StreamMaxLength (default 100 MB) must be at least the attachment limit (dms.attachments.maxSizeMegabytes).
+  clamav:
+    image: clamav/clamav:1.5.4@sha256:bda39705e291105049c3936e2803ac90b955172af8030f94f05dce1252df6c6d
+    profiles: ["clamav"]
+    ports:
+      - "9310:3310"  # 9310 to avoid clashing with a local clamd on 3310
+    volumes:
+      - dms-clamav:/var/lib/clamav
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "clamdcheck.sh"]
+      interval: 30s
+      retries: 10
+      start_period: 6m
+
   # Search index (ADR 0009, 0029): derived from the database, rebuildable at any time. Single node, security plugin
   # disabled: local development only, never expose this port. The application uses dms.search.url (default
   # http://localhost:9200).
@@ -161,3 +181,4 @@ volumes:
   zitadel-db:
   dms-objectstore:
   dms-search:
+  dms-clamav:

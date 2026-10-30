@@ -145,17 +145,30 @@ final case class WebhooksConfig(
         )
       )
 
-/** Attachments of document versions (DMS-114, ADR 0041).
+/** Connection to ClamAV's `clamd` (DMS-117, ADR 0041 addendum). */
+final case class ClamAvSettings(host: String, port: Int, timeoutSeconds: Int):
+  def config: ClamAvConfig = ClamAvConfig(host.trim, port, timeoutSeconds.max(1))
+
+/** Attachments of document versions (DMS-114, ADR 0041); the scanner also checks originals of file documents,
+  * Word templates and upload previews.
   *
   * @param maxSizeMegabytes
   *   largest accepted file in MiB
   * @param blockedExtensions
   *   comma-separated file name extensions that are refused; empty: the built-in list of executable types
   * @param scanner
-  *   virus scanner before an attachment becomes available: `none` (no-op adapter, files are stored as
-  *   NotScanned); see ADR 0041 for plugging in ClamAV
+  *   virus scanner before an uploaded file is stored or processed: `none` (no-op adapter, files are stored as
+  *   NotScanned) or `clamav` (`clamd` over TCP, DMS-117)
+  * @param allowUnscannedInProduction
+  *   lets the profile `production` start with scanner `none` (explicit opt-out, logged at start)
   */
-final case class AttachmentsConfig(maxSizeMegabytes: Int, blockedExtensions: String, scanner: String):
+final case class AttachmentsConfig(
+    maxSizeMegabytes: Int,
+    blockedExtensions: String,
+    scanner: String,
+    clamav: ClamAvSettings = ClamAvSettings("localhost", 3310, 60),
+    allowUnscannedInProduction: Boolean = false
+):
   def settings: AttachmentSettings =
     val configured =
       blockedExtensions
@@ -167,10 +180,37 @@ final case class AttachmentsConfig(maxSizeMegabytes: Int, blockedExtensions: Str
       if configured.isEmpty then AttachmentSettings.DefaultBlockedExtensions else configured.toSet
     )
 
-  def attachmentScanner: Either[String, AttachmentScanner] =
+  /** The configured scanner. In the profile `production` the no-op scanner is refused (files would be stored
+    * as `NotScanned`) unless [[allowUnscannedInProduction]] is set (DMS-117, ADR 0041 addendum).
+    */
+  def attachmentScanner(profile: Profile): Either[String, AttachmentScanner] =
     scanner.trim.toLowerCase(java.util.Locale.ROOT) match
+      case "none" | "" if profile == Profile.Production && !allowUnscannedInProduction =>
+        Left(
+          "no virus scanner is configured for the production profile: set dms.attachments.scanner = clamav " +
+            "(DMS_ATTACHMENTS_SCANNER) or, deliberately, dms.attachments.allowUnscannedInProduction = true"
+        )
       case "none" | "" => Right(AttachmentScanner.None)
-      case other       => Left(s"unknown attachment scanner '$other'; supported: none")
+      case "clamav"    =>
+        Either.cond(
+          clamav.host.trim.nonEmpty && clamav.port > 0 && clamav.port < 65536,
+          ClamAvScanner(clamav.config),
+          s"invalid ClamAV address ${clamav.host}:${clamav.port} (dms.attachments.clamav)"
+        )
+      case other => Left(s"unknown attachment scanner '$other'; supported: none, clamav")
+
+/** Where the application runs (DMS-117): `production` turns on the checks that refuse development defaults at
+  * start, such as storing uploads without a virus scan.
+  */
+enum Profile:
+  case Development, Production
+
+object Profile:
+  def parse(value: String): Either[String, Profile] =
+    value.trim.toLowerCase(java.util.Locale.ROOT) match
+      case "development" | "" => Right(Development)
+      case "production"       => Right(Production)
+      case other              => Left(s"unknown profile '$other'; supported: development, production")
 
 /** Retention maintenance and clean-up (DMS-82, ADR 0054).
   *
@@ -212,6 +252,8 @@ final case class RetentionConfig(
     OrphanCleanupConfig(grace = zio.Duration.fromSeconds(orphanGraceHours.max(0).toLong * 3600))
 
 final case class AppConfig(
+    /** `development` (default) or `production` (DMS-117), see [[Profile]]. */
+    profile: String,
     http: HttpConfig,
     auth: AuthConfig,
     database: DbConfig,

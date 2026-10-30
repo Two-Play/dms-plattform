@@ -117,10 +117,34 @@ object Main extends ZIOAppDefault:
   /** Request bodies up to this size are aggregated in memory; larger ones are streamed. */
   val AggregatedBodyBytes: Int = 1024 * 1024
 
+  /** Warns at start about uploads without a virus scan and an unreachable `clamd` (DMS-117). Uploads fail
+    * closed while `clamd` does not answer, so the start is not refused.
+    */
+  private def checkScanner(profile: Profile, scanner: dms.documents.AttachmentScanner): UIO[Unit] =
+    scanner match
+      case clamav: ClamAvScanner =>
+        clamav.ping.foldZIO(
+          e => ZIO.logWarning(s"Virus scanner: $e; uploads are refused (503) until clamd answers"),
+          _ => ZIO.logInfo("Virus scanner: clamd answers; uploads are scanned with ClamAV")
+        )
+      case _ if profile == Profile.Production =>
+        ZIO.logWarning(
+          "Virus scanner: none in the production profile (dms.attachments.allowUnscannedInProduction); uploads are " +
+            "stored as NotScanned (ADR 0041)"
+        )
+      case _ =>
+        ZIO.logWarning(
+          "Virus scanner: none; uploads are stored as NotScanned (development profile, ADR 0041)"
+        )
+
   override def run: ZIO[Any, Throwable, Unit] =
     for
-      cfg      <- ZIO.config(AppConfig.config)
-      scanner  <- ZIO.fromEither(cfg.attachments.attachmentScanner).mapError(IllegalArgumentException(_))
+      cfg     <- ZIO.config(AppConfig.config)
+      profile <- ZIO.fromEither(Profile.parse(cfg.profile)).mapError(IllegalArgumentException(_))
+      scanner <- ZIO
+        .fromEither(cfg.attachments.attachmentScanner(profile))
+        .mapError(IllegalArgumentException(_))
+      _        <- checkScanner(profile, scanner)
       webhooks <- ZIO.fromEither(cfg.webhooks.settings).mapError(IllegalArgumentException(_))
       _        <- ZIO.logInfo(s"DMS platform ${AppBuildInfo.version} starting on port ${cfg.http.port}")
       _        <- (Server.serve(routes) <&> Background.run(cfg))
