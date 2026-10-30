@@ -658,12 +658,14 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
           .map(m => (m.group(1), m.group(2)))
           .filter((a, b) => names(a) && names(b))
           .toSet
-      // V31 replaces the guard of V18 (which replaced V10's and V9's) and allows exactly the lifecycle's
-      // transitions; V18 lacked only the discarding of a draft (DMS-129), the earlier ones also the withdrawal
-      // of a valid version (DMS-55).
+      // V33 replaces the guard of V31 with the same transitions (DMS-82 adds the removal of content on
+      // destruction); V31 replaced the guard of V18 (which replaced V10's and V9's) and allows exactly the
+      // lifecycle's transitions; V18 lacked only the discarding of a draft (DMS-129), the earlier ones also the
+      // withdrawal of a valid version (DMS-55).
       val discard       = Set(("Draft", "Discarded"))
       val withdrawValid = Set(("Published", "Withdrawn"), ("ReviewDue", "Withdrawn"))
       assertTrue(
+        pairs("V33__destruction_and_cleanup.sql") == lifecycle,
         pairs("V31__discard_drafts.sql") == lifecycle,
         pairs("V18__periodic_review.sql") == lifecycle -- discard,
         List("V9__document_versions.sql", "V10__deviation_requests.sql").forall(f =>

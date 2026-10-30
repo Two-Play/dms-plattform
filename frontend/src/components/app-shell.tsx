@@ -1,5 +1,6 @@
 import { Link, Outlet, useNavigate, useRouter, useRouterState } from '@tanstack/react-router'
 import {
+  Archive,
   CheckSquare,
   Menu,
   FileText,
@@ -19,6 +20,7 @@ import {
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { useAuth } from 'react-oidc-context'
 import { canManageLegalHolds } from '@/api/legal-holds'
+import { canManageRetention } from '@/api/retention'
 import { hasRole, useMe, type BusinessRole, type Me } from '@/api/me'
 import { displayName } from '@/auth/profile'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -54,6 +56,7 @@ const navItems: readonly {
     | '/templates'
     | '/compliance'
     | '/legal-holds'
+    | '/retention'
     | '/admin'
   label: keyof Messages['shell']['nav']
   icon: typeof LayoutDashboard
@@ -69,6 +72,8 @@ const navItems: readonly {
   { to: '/compliance', label: 'compliance', icon: ShieldCheck, role: 'ComplianceOfficer' },
   // Records managers for the whole tenant: the only ones the legal hold endpoints accept (ADR 0047).
   { to: '/legal-holds', label: 'legalHolds', icon: Scale, allowed: canManageLegalHolds },
+  // Retention and destruction (DMS-82, ADR 0054): the same records managers.
+  { to: '/retention', label: 'retention', icon: Archive, allowed: canManageRetention },
   { to: '/admin', label: 'admin', icon: Settings, role: 'TenantAdmin' },
 ]
 

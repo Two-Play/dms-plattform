@@ -1,6 +1,7 @@
 package dms.app
 
-import dms.archive.core.LegalHoldService
+import dms.archive.core.{DestructionService, LegalHoldService, ObjectCleanup}
+import dms.audit.AuditTrail
 import dms.audit.core.{AuditTrailLive, EvidenceReportStore, TsaTrust}
 import dms.authz.{Authorizer, Groups, RoleAssignments}
 import dms.db.Db
@@ -44,7 +45,7 @@ object Main extends ZIOAppDefault:
     SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env &
     EvidenceReportApi.Env & CurrentDocumentApi.Env & WebhookApi.Env & UserApi.Env & VersionViewApi.Env &
     NumberRangeApi.Env & AttachmentApi.Env & LibraryApi.Env & FileDocumentApi.Env & WordTemplateApi.Env &
-    AcknowledgementOverviewApi.Env & AcknowledgementSettingsApi.Env
+    AcknowledgementOverviewApi.Env & AcknowledgementSettingsApi.Env & RetentionApi.Env
 
   private[app] val apiEndpoints: List[ZServerEndpoint[Env, ZioStreams]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -77,6 +78,7 @@ object Main extends ZIOAppDefault:
       SearchApi.endpoints.map(_.widen[Env]) ++
       GroupApi.endpoints.map(_.widen[Env]) ++
       LegalHoldApi.endpoints.map(_.widen[Env]) ++
+      RetentionApi.endpoints.map(_.widen[Env]) ++
       ComplianceApi.endpoints.map(_.widen[Env]) ++
       EvidenceReportApi.endpoints.map(_.widen[Env]) ++
       WebhookApi.endpoints.map(_.widen[Env])
@@ -154,6 +156,10 @@ object Main extends ZIOAppDefault:
           ZLayer.succeed(cfg.documents.reminders),
           ReviewService.layer,
           LegalHoldService.layer,
+          DestructionService.layer,
+          ZLayer.fromFunction((db: Db, store: ObjectStore, audit: AuditTrail) =>
+            ObjectCleanup(db, store, audit, cfg.retention.orphans)
+          ),
           FlowableEngine.layer,
           WorkflowDocuments.layer,
           RoleDirectory.layer,

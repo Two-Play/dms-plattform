@@ -9,7 +9,7 @@ import com.nimbusds.jose.jwk.{JWKSet, RSAKey}
 import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jose.{JOSEObjectType, JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
-import dms.archive.core.LegalHoldService
+import dms.archive.core.{DestructionService, LegalHoldService, ObjectCleanup, OrphanCleanupConfig}
 import dms.audit.{AuditEvidence, AuditTrail, EvidenceReportRegistry}
 import dms.audit.core.{
   AuditCheckpoints,
@@ -67,6 +67,7 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
   private val reader   = UserId("reader-1")
   private val auditor  = UserId("auditor-1")
   private val records  = UserId("records-1")
+  private val records2 = UserId("records-2")
   private val designer = UserId("designer-1")
   private val designr2 = UserId("designer-2")
 
@@ -139,6 +140,7 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
             _ <- RoleAssignments.Postgres.grant(reader, RoleAssignment(Role.Reader), admin)
             _ <- RoleAssignments.Postgres.grant(auditor, RoleAssignment(Role.Auditor), admin)
             _ <- RoleAssignments.Postgres.grant(records, RoleAssignment(Role.RecordsManager), admin)
+            _ <- RoleAssignments.Postgres.grant(records2, RoleAssignment(Role.RecordsManager), admin)
             _ <- classes
               .createField("contractPartner", FieldDraft("Contract partner", None, FieldType.Text()), admin)
             cls <- classes.createClass(
@@ -216,7 +218,7 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
   private type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow &
     AcknowledgementService & ReviewService & LegalHoldService & RoleAssignments & AuditTrail & AuditEvidence &
     EvidenceReportRegistry & RenditionArchive & PdfRenderer & PdfValidator & Deputyships & RenditionSource &
-    ObjectStore & AuditCheckpoints & AttachmentUploads
+    ObjectStore & AuditCheckpoints & AttachmentUploads & DestructionService & ObjectCleanup
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -242,6 +244,10 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
       AcknowledgementService.layer,
       ReviewService.layer,
       LegalHoldService.layer,
+      DestructionService.layer,
+      ZLayer.fromFunction((db: Db, store: ObjectStore, audit: AuditTrail) =>
+        ObjectCleanup(db, store, audit, OrphanCleanupConfig())
+      ),
       FlowableEngine.layer,
       WorkflowDocuments.layer,
       RoleDirectory.layer,
@@ -279,7 +285,7 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
     ZioHttpInterpreter().toHttp(
       DocumentApi.endpoints.map(_.widen[Env]) ++ WorkflowApi.endpoints.map(_.widen[Env]) ++
         AcknowledgementApi.endpoints.map(_.widen[Env]) ++ DeputyshipApi.endpoints.map(_.widen[Env]) ++
-        EvidenceReportApi.endpoints.map(_.widen[Env])
+        EvidenceReportApi.endpoints.map(_.widen[Env]) ++ RetentionApi.endpoints.map(_.widen[Env])
     )
 
   final case class Response(status: Status, headers: Headers, body: Chunk[Byte]):
@@ -302,6 +308,7 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
     )
     val request = method match
       case "POST" => Request.post(url, Body.fromString(body.getOrElse("{}"))).addHeaders(headers)
+      case "PUT"  => Request.put(url, Body.fromString(body.getOrElse("{}"))).addHeaders(headers)
       case _      => Request.get(url).addHeaders(headers)
     ZIO
       .scoped(routes.runZIO(request))
@@ -528,10 +535,10 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         version.workflow
           .flatMap(_.approval)
           .exists(a => a.approvedBy == deputy.value && a.actingFor.contains(approver.value)),
-        // readers of contracts: author, reviewer, approver, reader, auditor, records manager (not the deputy's
+        // readers of contracts: author, reviewer, approver, reader, auditor, two records managers (not the deputy's
         // policy-only role, not the administrator)
         version.acknowledgements.exists(a =>
-          a.audience == 6 && a.acknowledged == 1 && a.ratePercent.contains("16.7") &&
+          a.audience == 7 && a.acknowledged == 1 && a.ratePercent.contains("14.3") &&
             a.entries.map(_.userId) == List(reader.value)
         ),
         parsed.integrity.checks.map(c => (c.check, c.status)).toSet == Set(
@@ -558,7 +565,7 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         texts.forall(_.contains(s"Evidence report ${view.id}")),
         texts.exists(_.contains("Annex 2 must be attached")),
         texts.exists(_.contains(s"${deputy.value} on behalf of ${approver.value}")),
-        texts.exists(_.contains("1 of 6 readers (16.7 %)"))
+        texts.exists(_.contains("1 of 7 readers (14.3 %)"))
       )
     },
     test("only auditors and records managers create and read reports") {
@@ -695,6 +702,120 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         !parsed.integrity.auditChain.documentEntriesVerified,
         violated.findings.exists(_.contains(s"position $seq")),
         restored.integrityStatus == "Intact"
+      )
+    },
+    test(
+      "destruction after retention (DMS-82): four eyes, a tombstone, the document is gone, the report intact"
+    ) {
+      for
+        doc <- publishedDocument("Vernichtung AG", attachment = Some(("Annex.pdf", "annex".getBytes(UTF_8))))
+        rendition = doc.current.rendition.get
+        // Out of force since 2010 (withdrawn); the lifecycle up to there is not under test.
+        _ <- ownerQuery {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          sql"""update dms.document_version
+                set status = 'Withdrawn', withdrawn_at = '2010-03-01T10:00:00Z',
+                    status_changed_at = '2010-03-01T10:00:00Z'
+                where id = ${doc.current.id}""".update.run()
+        }
+        rule <- call(
+          records,
+          "PUT",
+          "/api/v1/retention/rules/contract-10y",
+          Some(
+            """{"name":"Contracts, 10 years","periodMonths":120,"trigger":"EndOfValidity","fromYearEnd":true}"""
+          )
+        )
+        badRule <- call(
+          records,
+          "PUT",
+          "/api/v1/retention/rules/Bad%20Key",
+          Some("""{"name":"x","periodMonths":12}""")
+        )
+        notAllowed <- call(reader, "GET", "/api/v1/retention/destruction-list")
+        list       <- call(records, "GET", "/api/v1/retention/destruction-list").map(as[DestructionListView])
+        candidate = list.candidates.find(_.versionId == doc.current.id)
+        noReason <- call(
+          records,
+          "POST",
+          "/api/v1/retention/destruction-proposals",
+          Some(s"""{"versionIds":["${doc.current.id}"]}""")
+        )
+        proposed <- call(
+          records,
+          "POST",
+          "/api/v1/retention/destruction-proposals",
+          Some(s"""{"versionIds":["${doc.current.id}"],"reason":"Retention of 2020 ended"}""")
+        )
+        proposal = as[DestructionProposalView](proposed)
+        self <- call(
+          records,
+          "POST",
+          s"/api/v1/retention/destruction-proposals/${proposal.id}/approve",
+          Some("""{"reason":"Myself"}""")
+        )
+        open <- call(records2, "GET", "/api/v1/retention/destruction-proposals").map(
+          as[List[DestructionProposalView]]
+        )
+        approved <- call(
+          records2,
+          "POST",
+          s"/api/v1/retention/destruction-proposals/${proposal.id}/approve",
+          Some("""{"reason":"Checked against the register"}""")
+        )
+        decided = as[DestructionProposalView](approved)
+        // The objects go after the commit.
+        s             <- setup.await
+        cleanup       <- ZIO.service[ObjectCleanup]
+        _             <- JobRunner(s.app, cleanup.handlers, WorkerConfig("test-cleanup")).runOnce
+        store         <- ZIO.service[ObjectStore]
+        renditionGone <- store.head(rendition.objectKey, rendition.objectVersion).either
+        opened        <- call(records, "GET", s"/api/v1/documents/${doc.id}")
+        listed        <- call(author, "GET", "/api/v1/documents")
+        _             <- ZIO.serviceWithZIO[AuditCheckpoints](_.write(tenantId))
+        created       <- createReport(auditor, doc.id)
+        view = as[EvidenceReportView](created)
+        json <- payloadOf(auditor, view)
+        parsed  = EvidenceReport.parse(json.text).fold(e => throw AssertionError(e), identity)
+        version = parsed.versions.head
+        checks  = parsed.integrity.checks
+          .filter(_.versionId == doc.current.id)
+          .map(c => c.check -> c.status)
+          .toMap
+        pdf <- call(auditor, "GET", view.pdfUrl)
+        texts = RenderingWorker.pageTexts(pdf.body).map(RenderingWorker.normalized).mkString(" ")
+      yield assertTrue(
+        rule.status == Status.Ok,
+        badRule.status == Status.UnprocessableEntity,
+        notAllowed.status == Status.Forbidden,
+        candidate.exists(c => c.title.contains("Vertrag Vernichtung AG") && c.manageable),
+        candidate.exists(_.retentionEndsOn == java.time.LocalDate.of(2020, 12, 31)),
+        noReason.status == Status.UnprocessableEntity,
+        proposed.status == Status.Created,
+        !proposal.canDecide,
+        self.status == Status.Forbidden,
+        self.text.contains("four_eyes"),
+        open.find(_.id == proposal.id).exists(_.canDecide),
+        approved.status == Status.Ok,
+        decided.status == "Approved",
+        decided.items.map(_.outcome) == List("Destroyed"),
+        decided.items.head.renditionSha256.contains(rendition.sha256),
+        decided.items.head.files.map(f => (f.name, f.released)) == List(("Annex.pdf", true)),
+        renditionGone.left.exists(_.isInstanceOf[StorageError.NotFound]),
+        opened.status == Status.NotFound,
+        listed.status == Status.Ok,
+        !listed.text.contains(doc.id.toString),
+        version.status == "Destroyed",
+        version.destruction.exists(d => d.approvedBy == records2.value && d.proposedBy == records.value),
+        version.destruction.exists(_.renditionSha256.contains(rendition.sha256)),
+        version.rendition.exists(_.sha256 == rendition.sha256),
+        checks.get("destruction record").contains("Match"),
+        checks.get("destroyed rendition").contains("Match"),
+        !checks.contains("rendition checksum"),
+        !checks.values.exists(_ == "Mismatch"),
+        view.integrityStatus == "Intact",
+        parsed.auditTrail.exists(_.action == "document.destroyed"),
+        texts.contains("Destruction")
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

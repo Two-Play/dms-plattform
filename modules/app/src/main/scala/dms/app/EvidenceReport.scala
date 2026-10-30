@@ -1,6 +1,6 @@
 package dms.app
 
-import dms.archive.{HoldRemoval, LegalHold}
+import dms.archive.{DestructionRecord, HoldRemoval, LegalHold}
 import dms.audit.{ChainIntegrity, RecordedEntry}
 import dms.documents.core.DocumentDetails
 import dms.documents.{Acknowledgement, DocumentVersion, RecordedDeviationRequest, ReviewTask, Validity}
@@ -122,6 +122,31 @@ final case class EvidenceReview(
     comment: Option[String]
 ) derives JsonCodec
 
+/** A file of a destroyed version (DMS-82): name, role (Attachment or Original), SHA-256 and whether its bytes
+  * were released (no other version referenced them).
+  */
+final case class EvidenceDestroyedFile(name: String, role: String, sha256: String, released: Boolean)
+    derives JsonCodec
+
+/** The destruction of a version after its retention (DMS-82, ADR 0054): the proposal, the approval by a
+  * second records manager and the checksums of what was destroyed (the tombstone).
+  */
+final case class EvidenceDestruction(
+    proposalId: UUID,
+    proposedBy: String,
+    proposedAt: Instant,
+    proposalReason: String,
+    approvedBy: String,
+    approvedAt: Instant,
+    approvalReason: String,
+    retentionRule: String,
+    retentionEndedOn: LocalDate,
+    destroyedAt: Instant,
+    renditionSha256: Option[String],
+    contentSha256: Option[String],
+    files: List[EvidenceDestroyedFile]
+) derives JsonCodec
+
 final case class EvidenceVersion(
     id: UUID,
     version: String,
@@ -148,7 +173,9 @@ final case class EvidenceVersion(
       */
     attachments: Option[List[EvidenceAttachment]] = None,
     /** The uploaded original of a file document version (DMS-115); absent for structured documents. */
-    original: Option[EvidenceAttachment] = None
+    original: Option[EvidenceAttachment] = None,
+    /** Present only for destroyed versions (DMS-82); their content, files and rendition no longer exist. */
+    destruction: Option[EvidenceDestruction] = None
 ) derives JsonCodec
 
 final case class EvidenceLegalHold(
@@ -253,7 +280,9 @@ final case class EvidenceFacts(
     entries: List[RecordedEntry],
     contentSha256: Map[UUID, String],
     /** Holds the document was removed from (and not added to again), by hold id (DMS-106). */
-    holdRemovals: Map[UUID, HoldRemoval] = Map.empty
+    holdRemovals: Map[UUID, HoldRemoval] = Map.empty,
+    /** Destruction records of destroyed versions, by version id (DMS-82). */
+    destructions: Map[UUID, DestructionRecord] = Map.empty
 )
 
 /** Result of re-reading a stored rendition. */
@@ -316,7 +345,7 @@ object EvidenceReport:
     val versions  = facts.details.versions
     val chainView = chainOf(chain, facts.entries)
     val checks    = versions.flatMap(v =>
-      versionChecks(v, facts) ++ renditionCheck(v, renditions) ++ attachmentChecks(v, attachments)
+      versionChecks(v, facts) ++ renditionCheck(v, renditions, facts) ++ attachmentChecks(v, attachments)
     )
     val findings =
       chainFindings(chainView) ++ checks
@@ -399,7 +428,10 @@ object EvidenceReport:
       publishedAt = v.publishedAt,
       validity = validity(v, facts),
       supersededBy = v.supersededBy,
-      contentSha256 = facts.contentSha256.getOrElse(v.id, ""),
+      // A destroyed version's content is gone; the checksum recorded on its destruction is the approved one.
+      contentSha256 =
+        if destroyed(v) then facts.destructions.get(v.id).flatMap(_.item.contentSha256).getOrElse("")
+        else facts.contentSha256.getOrElse(v.id, ""),
       rendition = v.rendition.map(r => EvidenceRendition(r.objectKey, r.objectVersion, r.sha256)),
       deviationRequests = facts.deviationRequests
         .getOrElse(v.id, Nil)
@@ -464,8 +496,28 @@ object EvidenceReport:
           f.setBy.value,
           f.setAt
         )
-      )
+      ),
+      destruction = facts.destructions.get(v.id).map { d =>
+        val decision = d.proposal.decision
+        EvidenceDestruction(
+          d.proposal.id,
+          d.proposal.proposedBy.value,
+          d.proposal.proposedAt,
+          d.proposal.reason,
+          decision.fold("")(_.by.value),
+          decision.fold(d.proposal.proposedAt)(_.at),
+          decision.fold("")(_.reason),
+          d.item.retentionRule,
+          d.item.retentionEndedOn,
+          d.item.outcomeAt.getOrElse(d.proposal.proposedAt),
+          d.item.renditionSha256,
+          d.item.contentSha256,
+          d.item.files.map(f => EvidenceDestroyedFile(f.name, f.role, f.sha256, f.released))
+        )
+      }
     )
+
+  private def destroyed(v: DocumentVersion): Boolean = v.status == dms.documents.DocumentStatus.Destroyed
 
   /** In force from its effective start until its successor's effective start or its withdrawal (DMS-53). */
   private def validity(v: DocumentVersion, facts: EvidenceFacts): Option[EvidenceValidity] =
@@ -575,17 +627,44 @@ object EvidenceReport:
     */
   private def versionChecks(v: DocumentVersion, facts: EvidenceFacts): List[EvidenceCheck] =
     val approval = facts.cases.filter(_.workflowCase.versionId == v.id).flatMap(_.approval).lastOption
-    val content  = approval.map { a =>
-      val actual = facts.contentSha256.getOrElse(v.id, "")
-      EvidenceCheck(
-        v.id,
-        v.label,
-        "approved content",
-        if actual == a.contentSha256 then Match else Mismatch,
-        Some(a.contentSha256),
-        Option.unless(actual == a.contentSha256)(s"the version's content has SHA-256 $actual")
-      )
-    }
+    // A destroyed version (DMS-82) is checked against its destruction record: the content checksum recorded on
+    // destruction must be the approved one; without a record the destruction is not documented.
+    val content = if destroyed(v) then
+      Some(facts.destructions.get(v.id) match
+        case Some(d) =>
+          val recorded = d.item.contentSha256
+          val expected = approval.map(_.contentSha256).orElse(recorded)
+          EvidenceCheck(
+            v.id,
+            v.label,
+            "destruction record",
+            if expected == recorded then Match else Mismatch,
+            expected,
+            Option.unless(expected == recorded)(
+              s"the destruction recorded content SHA-256 ${recorded.getOrElse("–")}"
+            )
+          )
+        case None =>
+          EvidenceCheck(
+            v.id,
+            v.label,
+            "destruction record",
+            Unverified,
+            None,
+            Some("no destruction record found")
+          ))
+    else
+      approval.map { a =>
+        val actual = facts.contentSha256.getOrElse(v.id, "")
+        EvidenceCheck(
+          v.id,
+          v.label,
+          "approved content",
+          if actual == a.contentSha256 then Match else Mismatch,
+          Some(a.contentSha256),
+          Option.unless(actual == a.contentSha256)(s"the version's content has SHA-256 $actual")
+        )
+      }
     val snapshot = for
       r     <- v.rendition
       snap  <- v.metadataSnapshot
@@ -602,15 +681,35 @@ object EvidenceReport:
     )
     content.toList ++ snapshot.toList
 
-  private def renditionCheck(v: DocumentVersion, results: Map[UUID, RenditionCheck]): Option[EvidenceCheck] =
-    v.rendition.map { r =>
-      val (status, detail) = results.get(v.id) match
-        case Some(RenditionCheck.Matches)       => (Match, None)
-        case Some(RenditionCheck.Mismatch(d))   => (Mismatch, Some(d))
-        case Some(RenditionCheck.Unverified(d)) => (Unverified, Some(d))
-        case None                               => (Unverified, Some("not checked"))
-      EvidenceCheck(v.id, v.label, "rendition checksum", status, Some(r.sha256), detail)
-    }
+  private def renditionCheck(
+      v: DocumentVersion,
+      results: Map[UUID, RenditionCheck],
+      facts: EvidenceFacts
+  ): Option[EvidenceCheck] =
+    if destroyed(v) then
+      // The rendition was destroyed with the version (DMS-82): its checksum must be the one recorded then.
+      for
+        r <- v.rendition
+        d <- facts.destructions.get(v.id)
+      yield
+        val ok = d.item.renditionSha256.contains(r.sha256)
+        EvidenceCheck(
+          v.id,
+          v.label,
+          "destroyed rendition",
+          if ok then Match else Mismatch,
+          Some(r.sha256),
+          Option.unless(ok)(s"the destruction recorded ${d.item.renditionSha256.getOrElse("no rendition")}")
+        )
+    else
+      v.rendition.map { r =>
+        val (status, detail) = results.get(v.id) match
+          case Some(RenditionCheck.Matches)       => (Match, None)
+          case Some(RenditionCheck.Mismatch(d))   => (Mismatch, Some(d))
+          case Some(RenditionCheck.Unverified(d)) => (Unverified, Some(d))
+          case None                               => (Unverified, Some("not checked"))
+        EvidenceCheck(v.id, v.label, "rendition checksum", status, Some(r.sha256), detail)
+      }
 
   /** Every attachment file read back from object storage against its SHA-256 (DMS-114), keyed by file id. */
   private def attachmentChecks(v: DocumentVersion, results: Map[UUID, RenditionCheck]): List[EvidenceCheck] =

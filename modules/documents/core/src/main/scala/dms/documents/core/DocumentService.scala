@@ -131,6 +131,17 @@ final case class DocumentDetails(
     */
   def discarded: Boolean = versions.nonEmpty && versions.forall(_.status == DocumentStatus.Discarded)
 
+  /** True if the document's content is gone (DMS-82, ADR 0054): at least one version was destroyed and all
+    * others were destroyed or discarded. The document is kept as a tombstone (audit trail, evidence report,
+    * number) but disappears from lists and is not opened any more.
+    */
+  def destroyed: Boolean =
+    versions.exists(_.status == DocumentStatus.Destroyed) &&
+      versions.forall(v => v.status == DocumentStatus.Destroyed || v.status == DocumentStatus.Discarded)
+
+  /** Discarded or destroyed: nothing of the document is shown or opened any more. */
+  def gone: Boolean = discarded || destroyed
+
   /** Whether a number can be assigned manually now (see [[DocumentService.assignNumber]]): no version is in
     * review or approval, and an existing number is not frozen in a submitted version yet.
     */

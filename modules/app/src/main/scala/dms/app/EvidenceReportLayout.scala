@@ -159,6 +159,29 @@ object EvidenceReportLayout:
           "Superseded by"   -> v.supersededBy.fold("–")(_.toString)
         )
       )
+      v.destruction.foreach { d =>
+        add("<h3>Destruction</h3>\n")
+        facts(
+          out,
+          List(
+            "Destroyed"         -> at(d.destroyedAt),
+            "Proposed"          -> s"${at(d.proposedAt)} by ${d.proposedBy}: ${d.proposalReason}",
+            "Approved"          -> s"${at(d.approvedAt)} by ${d.approvedBy}: ${d.approvalReason}",
+            "Retention"         -> s"${d.retentionRule}, ended ${d.retentionEndedOn}",
+            "Rendition SHA-256" -> d.renditionSha256.getOrElse("–"),
+            "Approved content"  -> d.contentSha256.getOrElse("–")
+          )
+        )
+        if d.files.nonEmpty then
+          table(
+            out,
+            List("File", "Role", "SHA-256", "Bytes removed"),
+            d.files.map(f =>
+              List(f.name, f.role, f.sha256, if f.released then "yes" else "no (still referenced)")
+            ),
+            mono = Set(2)
+          )
+      }
       v.original.foreach { o =>
         add("<h3>Original file</h3>\n")
         table(

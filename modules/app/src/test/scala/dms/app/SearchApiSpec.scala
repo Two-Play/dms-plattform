@@ -9,6 +9,8 @@ import com.nimbusds.jose.jwk.{JWKSet, RSAKey}
 import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jose.{JOSEObjectType, JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
+import dms.archive.{RetentionRuleInput, RetentionTrigger}
+import dms.archive.core.DestructionService
 import dms.audit.AuditTrail
 import dms.audit.core.{AuditTrailLive, TsaTrust}
 import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
@@ -64,7 +66,7 @@ object SearchApiSpec extends ZIOSpecDefault:
       |  create role dms_app_user login nobypassrls password 'dms-app-test' in role dms_app;
       |end $$""".stripMargin
 
-  final case class Setup(app: Db, released: TemplateId)
+  final case class Setup(app: Db, released: TemplateId, owner: Db)
 
   private val setup = Unsafe.unsafe(implicit u => Promise.unsafe.make[Nothing, Setup](FiberId.None))
 
@@ -133,7 +135,7 @@ object SearchApiSpec extends ZIOSpecDefault:
         )
         .mapError(e => RuntimeException(e.toString))
         .orDie
-      _ <- setup.succeed(Setup(app, released))
+      _ <- setup.succeed(Setup(app, released, schemaOwner))
     yield ZEnvironment(app, appSource)
   )
 
@@ -433,6 +435,38 @@ object SearchApiSpec extends ZIOSpecDefault:
         after.hits.map(_.versionId).toSet == before.hits.map(_.versionId).toSet,
         badStatus._1 == Status.BadRequest,
         badSize._1 == Status.BadRequest
+      )
+    },
+    test("a destroyed version leaves the index; the valid version stays (DMS-82)") {
+      for
+        s     <- setup.await
+        audit <- ZIO.service[AuditTrail]
+        service = DestructionService(audit)
+        before <- results(reader, "q=Reisekostenrichtlinie&status=Superseded")
+        old = before.hits.head.versionId
+        // Approved in 2010, so that a retention of ten years from approval has ended.
+        _ <- s.owner.transactSystem(Db.sql {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          sql"update dms.document_version set released_at = '2010-01-01T00:00:00Z' where id = $old".update
+            .run()
+        })
+        _ <- s.app.transact(tenantId)(
+          service.saveRule(
+            "policy-10y",
+            RetentionRuleInput("Policies", 120, RetentionTrigger.Approval, fromYearEnd = true),
+            admin
+          ) *>
+            service
+              .propose(List(old), "Retention ended", UserId("records-1"))
+              .flatMap(p => service.approve(p.id, "Confirmed", UserId("records-2")))
+        )
+        _          <- runIndexing
+        superseded <- results(reader, "q=Reisekostenrichtlinie&status=Superseded")
+        current    <- results(reader, "q=Reisekostenrichtlinie")
+      yield assertTrue(
+        before.hits.map(_.versionLabel) == List("1.0"),
+        superseded.hits.isEmpty,
+        current.hits.map(h => (h.versionLabel, h.status)) == List(("2.0", "Published"))
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock @@ TestAspect.timeout(10.minutes)
