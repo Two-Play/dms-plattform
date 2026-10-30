@@ -10,6 +10,7 @@ object WorkflowJson:
     JsonCodec.string.transformOrFail(enumValue(StepCondition.valueOf), _.toString)
   given JsonCodec[Lane]               = DeriveJsonCodec.gen
   given JsonCodec[Step]               = DeriveJsonCodec.gen
+  given JsonCodec[DeadlinePolicy]     = DeriveJsonCodec.gen
   given JsonCodec[WorkflowDefinition] = DeriveJsonCodec.gen
 
   private def enumValue[A](valueOf: String => A)(s: String): Either[String, A] =

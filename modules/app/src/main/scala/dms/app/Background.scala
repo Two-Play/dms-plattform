@@ -21,7 +21,14 @@ import dms.rendering.RenditionRequest
 import dms.rendering.core.RenditionJobs
 import dms.search.core.{SearchIndex, SearchJobs}
 import dms.storage.S3ObjectStore
-import dms.workflow.core.{DeputyshipJobs, DeputyshipScheduleConfig, Deputyships}
+import dms.workflow.core.{
+  ApprovalWorkflow,
+  DeadlineJobs,
+  DeadlineScheduleConfig,
+  DeputyshipJobs,
+  DeputyshipScheduleConfig,
+  Deputyships
+}
 import software.amazon.awssdk.services.s3.S3Client
 import zio.*
 
@@ -29,9 +36,10 @@ import java.lang.management.ManagementFactory
 import java.net.http.HttpClient
 
 /** Background processing of this instance: the job runner (audit, publication, review, rendition, search,
-  * legal hold, file clean-up, deputyship and acknowledgement reminder jobs), the outbox relay and the
-  * schedulers of periodic audit jobs, scheduled publications, the periodic review check, the search
-  * synchronization, the deputyship check and the acknowledgement reminder check.
+  * legal hold, file clean-up, deputyship, acknowledgement reminder, notification and task deadline jobs), the
+  * outbox relay and the schedulers of periodic audit jobs, scheduled publications, the periodic review check,
+  * the search synchronization, the deputyship check, the acknowledgement reminder check, the notification
+  * clean-up and the deadline check of review and approval tasks (DMS-87).
   *
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
   * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029) and the webhooks
@@ -46,7 +54,8 @@ object Background:
       config: AppConfig
   ): ZIO[
     Db & S3Client & DocumentService & ReviewService & RenditionJobs & SearchIndex & Deputyships &
-      WebhookSettings & WebhookSender & AcknowledgementService & RoleAssignments & Groups & NotificationJobs,
+      WebhookSettings & WebhookSender & AcknowledgementService & RoleAssignments & Groups & NotificationJobs &
+      ApprovalWorkflow,
     Throwable,
     Nothing
   ] =
@@ -64,6 +73,7 @@ object Background:
       roles     <- ZIO.service[RoleAssignments]
       groups    <- ZIO.service[Groups]
       notices   <- ZIO.service[NotificationJobs]
+      workflow  <- ZIO.service[ApprovalWorkflow]
       _         <- secureWebhookSecrets(db, hooks)
       tsa = TsaConfig(config.audit.tsaUrl, trustedCertificates = config.audit.tsaTrustedCertificates)
       trust <- TsaTrust.fromConfig(tsa).mapError(e => RuntimeException(e.message))
@@ -105,12 +115,18 @@ object Background:
         deputies,
         DeputyshipScheduleConfig(config.workflow.deputyshipCheckSeconds.seconds)
       )
+      deadlineJobs = DeadlineJobs(
+        db,
+        workflow,
+        DeadlineScheduleConfig(config.workflow.deadlineCheckSeconds.max(1).seconds)
+      )
       reminders = AcknowledgementReminderJobs(db, documents, acks, roles, groups, config.documents.reminders)
       runner    = JobRunner(
         db,
         jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers ++
           legalHolds.handlers ++ fileCleanup.handlers ++ webhooks.handlers ++ deputyJobs.handlers ++
-          reminders.handlers ++ objectCleanup.handlers ++ maintenance.handlers ++ notices.handlers +
+          reminders.handlers ++ objectCleanup.handlers ++ maintenance.handlers ++ notices.handlers ++
+          deadlineJobs.handlers +
           (RenditionRequest.JobKind -> rendering.handle),
         WorkerConfig(s"${workerName(config)}-jobs")
       )
@@ -132,6 +148,7 @@ object Background:
         .raceFirst(reminders.schedule)
         .raceFirst(maintenance.schedule)
         .raceFirst(notices.schedule)
+        .raceFirst(deadlineJobs.schedule)
     yield nothing
 
   /** Encrypts plain-text webhook secrets and re-encrypts those of older keys with the active key (DMS-107). A

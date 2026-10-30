@@ -93,6 +93,8 @@ final case class TaskDeputy(deputy: UserId, principal: UserId)
   *   deputies of candidates who may complete the open task now (DMS-49); empty for tasks that are not open
   * @param actingFor
   *   in the task inbox of a deputy: the candidate the caller acts for; empty if the caller is a candidate
+  * @param dueAt
+  *   the deadline (end of the due day in the tenant's time zone, DMS-87); empty without deadline
   */
 final case class WorkflowTask(
     id: String,
@@ -111,7 +113,8 @@ final case class WorkflowTask(
     completedAt: Option[Instant],
     completedBy: Option[UserId],
     deputies: List[TaskDeputy] = Nil,
-    actingFor: Option[UserId] = None
+    actingFor: Option[UserId] = None,
+    dueAt: Option[Instant] = None
 )
 
 /** A cast vote, bound to the version and the SHA-256 of its content. It becomes invalid when the content

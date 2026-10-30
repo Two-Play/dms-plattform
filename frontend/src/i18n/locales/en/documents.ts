@@ -23,6 +23,7 @@ export const docPanels = {
     assignedTo: 'Assigned to',
     by: 'by',
     nobody: 'Nobody has this role yet',
+    dueOn: 'due {date}',
     voteDetail: '{decision} (round {round}, {step})',
     invalidated: '(invalidated by a later change)',
     yourTask: 'Your task:',

@@ -1687,6 +1687,25 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/admin/workflow-deadlines': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The tenant's default deadlines of review and approval tasks (working days to the deadline, reminder before, escalation after, escalation targets) or the installation's when the tenant set none. A workflow or a step of it may set its own (DMS-87). Tenant administrators. */
+    get: operations['getApiV1AdminWorkflow-deadlines']
+    /** @description Sets the tenant's default deadlines for tasks created from now on (422 if invalid); audited as workflow.deadlines-changed. Tenant administrators. */
+    put: operations['putApiV1AdminWorkflow-deadlines']
+    post?: never
+    /** @description Removes the tenant's default deadlines: the installation's apply again. Tenant administrators. */
+    delete: operations['deleteApiV1AdminWorkflow-deadlines']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/deputyships': {
     parameters: {
       query?: never
@@ -3104,6 +3123,25 @@ export interface components {
        * @enum {string}
        */
       type: 'Date'
+    }
+    /** DeadlinePolicyView */
+    DeadlinePolicyView: {
+      /** Format: int32 */
+      dueWorkingDays: number
+      /** Format: int32 */
+      reminderWorkingDays: number
+      /** Format: int32 */
+      escalationWorkingDays: number
+      escalateTo?: string[]
+    }
+    /** DeadlineSettingsView */
+    DeadlineSettingsView: {
+      source: string
+      deadlines: components['schemas']['DeadlinePolicyView']
+      installation: components['schemas']['DeadlinePolicyView']
+      /** Format: date-time */
+      updatedAt?: string
+      updatedBy?: string
     }
     /** DecideDestruction */
     DecideDestruction: {
@@ -4644,6 +4682,8 @@ export interface components {
       kind: string
       lanes?: components['schemas']['LaneView'][]
       when?: string
+      /** Format: int32 */
+      dueWorkingDays?: number
     }
     /** StorageCleanupRequest */
     StorageCleanupRequest: {
@@ -4730,6 +4770,8 @@ export interface components {
       completedBy?: string
       deputies?: components['schemas']['TaskDeputyView'][]
       actingFor?: string
+      /** Format: date-time */
+      dueAt?: string
     }
     /** TemplateClassView */
     TemplateClassView: {
@@ -5362,6 +5404,7 @@ export interface components {
     WorkflowDefinitionView: {
       steps?: components['schemas']['StepView'][]
       resetTo?: string
+      deadlines?: components['schemas']['DeadlinePolicyView']
     }
     /** YesNo */
     YesNo: {
@@ -10029,6 +10072,100 @@ export interface operations {
         }
         content: {
           'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1AdminWorkflow-deadlines': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeadlineSettingsView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'putApiV1AdminWorkflow-deadlines': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DeadlinePolicyView']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeadlineSettingsView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'deleteApiV1AdminWorkflow-deadlines': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeadlineSettingsView']
         }
       }
       default: {

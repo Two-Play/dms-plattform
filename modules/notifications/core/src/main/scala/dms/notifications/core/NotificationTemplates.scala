@@ -46,6 +46,9 @@ object NotificationTemplates:
     "workflow.rejected",
     "workflow.approved",
     "workflow.participant-missing",
+    "workflow.task-due-soon",
+    "workflow.task-overdue",
+    "workflow.task-escalated",
     "acknowledgement.requested",
     "acknowledgement.reminder",
     "deputyship.created",
@@ -108,6 +111,25 @@ object NotificationTemplates:
           bodyEn =
             s"Nobody holds the role ${p("role")} for step “${p("step")}” of $doc. Please assign the role and resolve the participants again."
         )(tasks)
+      case "workflow.task-due-soon" =>
+        r(de = s"Frist läuft ab: $docShort", en = s"Due soon: $docShort")(
+          bodyDe =
+            s"Der Schritt „${p("step")}“ von $docDat ist bis ${date("dueOn")} zu erledigen.$actingForDe",
+          bodyEn = s"Step “${p("step")}” of $doc is due by ${date("dueOn")}.$actingForEn"
+        )(tasks)
+      case "workflow.task-overdue" =>
+        r(de = s"Überfällig: $docShort", en = s"Overdue: $docShort")(
+          bodyDe =
+            s"Der Schritt „${p("step")}“ von $docDat war bis ${date("dueOn")} zu erledigen und ist noch offen.$actingForDe",
+          bodyEn = s"Step “${p("step")}” of $doc was due by ${date("dueOn")} and is still open.$actingForEn"
+        )(tasks)
+      case "workflow.task-escalated" =>
+        r(de = s"Eskalation: $docShort", en = s"Escalated: $docShort")(
+          bodyDe =
+            s"Der Schritt „${p("step")}“ von $docDat ist seit ${date("dueOn")} überfällig. Bitte kümmern Sie sich darum oder sprechen Sie die Zuständigen an.",
+          bodyEn =
+            s"Step “${p("step")}” of $doc has been overdue since ${date("dueOn")}. Please take care of it or contact the participants."
+        )(docLink)
       case "acknowledgement.requested" =>
         r(de = s"Kenntnisnahme erforderlich: $docShort", en = s"Acknowledgement required: $docShort")(
           bodyDe = s"Bitte lesen Sie $doc und bestätigen Sie die Kenntnisnahme.",

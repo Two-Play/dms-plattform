@@ -3,6 +3,7 @@ package dms.workflow.core
 import dms.db.Db
 import org.flowable.common.engine.api.{FlowableObjectNotFoundException, FlowableOptimisticLockingException}
 import org.flowable.common.engine.impl.AbstractEngineConfiguration
+import org.flowable.common.engine.impl.cfg.TransactionState
 import org.flowable.common.engine.impl.history.HistoryLevel
 import org.flowable.common.engine.impl.interceptor.CommandInterceptor
 import org.flowable.common.engine.impl.persistence.StrongUuidGenerator
@@ -26,15 +27,28 @@ import javax.sql.DataSource
   */
 final class FlowableEngine(val engine: ProcessEngine):
 
-  /** Runs engine calls inside the current `Db.transact`. Must not be used outside a transaction. */
+  /** Runs engine calls inside the current `Db.transact`. Must not be used outside a transaction. The engine's
+    * `COMMITTED` listeners run after the transaction committed, its `ROLLED_BACK` listeners after a rollback
+    * (commit hook, DMS-87, ADR 0053).
+    */
   def run[A](f: ProcessEngine => A): IO[WorkflowError, A] =
     Db.connection
       .mapError(WorkflowError.Database(_))
       .flatMap(connection =>
         ZIO
-          .attemptBlocking(SharedTransaction.joined(connection)(f(engine)))
+          .attemptBlocking(SharedTransaction.call(connection)(f(engine)))
           .mapError(FlowableEngine.toError)
       )
+      .flatMap { (result, tx) =>
+        val hooks =
+          ZIO.when(tx.listensTo(TransactionState.COMMITTED))(
+            Db.afterCommit(FlowableEngine.fire(tx, TransactionState.COMMITTED))
+          ) *>
+            ZIO.when(tx.listensTo(TransactionState.ROLLED_BACK))(
+              Db.afterRollback(FlowableEngine.fire(tx, TransactionState.ROLLED_BACK))
+            )
+        hooks.mapBoth(WorkflowError.Database(_), _ => result)
+      }
 
 object FlowableEngine:
   val Schema = "flowable"
@@ -96,6 +110,12 @@ object FlowableEngine:
       configuration.setDatabaseSchemaUpdate(AbstractEngineConfiguration.DB_SCHEMA_UPDATE_TRUE)
       configuration.buildProcessEngine().close()
     }
+
+  /** Fires the listeners of `state` after the outer transaction ended; failures are logged. */
+  private def fire(tx: SharedTransaction.Joined, state: TransactionState): UIO[Unit] =
+    ZIO
+      .attemptBlocking(tx.fire(state))
+      .catchAll(e => ZIO.logWarning(s"A workflow engine listener ($state) failed: ${e.getMessage}"))
 
   private def toError(t: Throwable): WorkflowError = t match
     case e: WorkflowError.Failure              => e.error

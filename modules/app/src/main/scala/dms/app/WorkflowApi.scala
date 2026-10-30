@@ -25,12 +25,42 @@ final case class StepView(
     name: String,
     kind: String,
     lanes: List[LaneView],
-    when: Option[String]
+    when: Option[String],
+    /** Working days a task of this step has (DMS-87); overrides the workflow's or tenant's; 0: none. */
+    dueWorkingDays: Option[Int] = None
 ) derives JsonCodec,
       Schema
 
-final case class WorkflowDefinitionView(steps: List[StepView], resetTo: Option[String])
-    derives JsonCodec,
+/** Deadlines in working days (Monday to Friday, tenant time zone; DMS-87, ADR 0053). */
+final case class DeadlinePolicyView(
+    /** Due at the end of this many working days after the task was created; 0: no deadlines. */
+    dueWorkingDays: Int,
+    /** Reminder this many working days before the deadline; 0: none. */
+    reminderWorkingDays: Int,
+    /** Escalation this many working days after the deadline; 0: none. */
+    escalationWorkingDays: Int,
+    /** Owner, ComplianceOfficer, TenantAdmin. */
+    escalateTo: List[String]
+) derives JsonCodec,
+      Schema
+
+final case class WorkflowDefinitionView(
+    steps: List[StepView],
+    resetTo: Option[String],
+    /** Deadlines of the workflow's tasks; empty: the tenant's, else the installation's (DMS-87). */
+    deadlines: Option[DeadlinePolicyView] = None
+) derives JsonCodec,
+      Schema
+
+/** The tenant's default deadlines (DMS-87) and where the effective ones come from. */
+final case class DeadlineSettingsView(
+    /** tenant (set by an administrator) or installation (the configured default). */
+    source: String,
+    deadlines: DeadlinePolicyView,
+    installation: DeadlinePolicyView,
+    updatedAt: Option[Instant],
+    updatedBy: Option[String]
+) derives JsonCodec,
       Schema
 
 final case class DefineWorkflow(
@@ -78,7 +108,9 @@ final case class TaskView(
     /** In the caller's task inbox: the candidate the caller stands in for as deputy (UI: "X i. V. für Y");
       * empty if the caller is a candidate.
       */
-    actingFor: Option[String] = None
+    actingFor: Option[String] = None,
+    /** The deadline: end of the due day in the tenant's time zone (DMS-87); empty without deadline. */
+    dueAt: Option[Instant] = None
 ) derives JsonCodec,
       Schema
 
@@ -305,8 +337,85 @@ object WorkflowApi:
           }
       )
 
+  private val deadlines = "api" / "v1" / "admin" / "workflow-deadlines"
+
+  val deadlineSettings: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(deadlines)
+      .out(jsonBody[DeadlineSettingsView])
+      .description(
+        "The tenant's default deadlines of review and approval tasks (working days to the deadline, reminder " +
+          "before, escalation after, escalation targets) or the installation's when the tenant set none. A " +
+          "workflow or a step of it may set its own (DMS-87). Tenant administrators."
+      )
+      .tag("Workflow")
+      .serverLogic(p => _ => inTransaction(p)(ctx => ctx.configure(p) *> settingsView(ctx.workflow)))
+
+  val changeDeadlineSettings: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.put
+      .in(deadlines)
+      .in(jsonBody[DeadlinePolicyView])
+      .out(jsonBody[DeadlineSettingsView])
+      .description(
+        "Sets the tenant's default deadlines for tasks created from now on (422 if invalid); audited as " +
+          "workflow.deadlines-changed. Tenant administrators."
+      )
+      .tag("Workflow")
+      .serverLogic(p =>
+        req =>
+          inTransaction(p)(ctx =>
+            ctx.configure(p) *> ctx.workflow.changeDeadlineSettings(policy(req), p.userId) *>
+              settingsView(ctx.workflow)
+          )
+      )
+
+  val resetDeadlineSettings: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.delete
+      .in(deadlines)
+      .out(jsonBody[DeadlineSettingsView])
+      .description(
+        "Removes the tenant's default deadlines: the installation's apply again. Tenant administrators."
+      )
+      .tag("Workflow")
+      .serverLogic(p =>
+        _ =>
+          inTransaction(p)(ctx =>
+            ctx.configure(p) *> ctx.workflow.resetDeadlineSettings(p.userId) *> settingsView(ctx.workflow)
+          )
+      )
+
+  private def settingsView(workflow: ApprovalWorkflow): IO[WorkflowError, DeadlineSettingsView] =
+    workflow.deadlineSettings.map {
+      case Some((p, at, by)) =>
+        DeadlineSettingsView(
+          "tenant",
+          policyView(p),
+          policyView(workflow.installationDeadlines),
+          Some(at),
+          Some(by.value)
+        )
+      case None =>
+        DeadlineSettingsView(
+          "installation",
+          policyView(workflow.installationDeadlines),
+          policyView(workflow.installationDeadlines),
+          None,
+          None
+        )
+    }
+
   def endpoints: List[ZServerEndpoint[Env, Any]] =
-    List(myTasks, vote, resolveParticipants, documentCases, listDefinitions, define)
+    List(
+      myTasks,
+      vote,
+      resolveParticipants,
+      documentCases,
+      listDefinitions,
+      define,
+      deadlineSettings,
+      changeDeadlineSettings,
+      resetDeadlineSettings
+    )
 
   private final class Context(
       val workflow: ApprovalWorkflow,
@@ -410,11 +519,17 @@ object WorkflowApi:
             }
           }
         }
-      yield Step(s.key, s.name, kind, lanes, when)
+      yield Step(s.key, s.name, kind, lanes, when, s.dueWorkingDays)
     }
     val problems = parsed.collect { case Left(p) => p }
     if problems.nonEmpty then Left(problems)
-    else Right(WorkflowDefinition(parsed.collect { case Right(s) => s }, v.resetTo))
+    else Right(WorkflowDefinition(parsed.collect { case Right(s) => s }, v.resetTo, v.deadlines.map(policy)))
+
+  def policy(v: DeadlinePolicyView): DeadlinePolicy =
+    DeadlinePolicy(v.dueWorkingDays, v.reminderWorkingDays, v.escalationWorkingDays, v.escalateTo)
+
+  def policyView(p: DeadlinePolicy): DeadlinePolicyView =
+    DeadlinePolicyView(p.dueWorkingDays, p.reminderWorkingDays, p.escalationWorkingDays, p.escalateTo)
 
   private def parse[A](f: String => A, value: String, problem: String): Either[String, A] =
     try Right(f(value))
@@ -428,10 +543,12 @@ object WorkflowApi:
           s.name,
           s.kind.toString,
           s.lanes.map(l => LaneView(l.key, l.role)),
-          Option.when(s.when != StepCondition.Always)(s.when.toString)
+          Option.when(s.when != StepCondition.Always)(s.when.toString),
+          s.dueWorkingDays
         )
       ),
-      d.resetTo
+      d.resetTo,
+      d.deadlines.map(policyView)
     )
 
   private def storedView(s: StoredDefinition): StoredWorkflowView =
@@ -463,7 +580,8 @@ object WorkflowApi:
       t.completedAt,
       t.completedBy.map(_.value),
       t.deputies.map(d => TaskDeputyView(d.deputy.value, d.principal.value)),
-      t.actingFor.map(_.value)
+      t.actingFor.map(_.value),
+      t.dueAt
     )
 
   def caseView(d: CaseDetails): WorkflowCaseView =

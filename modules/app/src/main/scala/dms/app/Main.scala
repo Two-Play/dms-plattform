@@ -145,10 +145,11 @@ object Main extends ZIOAppDefault:
       scanner <- ZIO
         .fromEither(cfg.attachments.attachmentScanner(profile))
         .mapError(IllegalArgumentException(_))
-      _        <- checkScanner(profile, scanner)
-      webhooks <- ZIO.fromEither(cfg.webhooks.settings).mapError(IllegalArgumentException(_))
-      _        <- ZIO.logInfo(s"DMS platform ${AppBuildInfo.version} starting on port ${cfg.http.port}")
-      _        <- (Server.serve(routes) <&> Background.run(cfg))
+      _         <- checkScanner(profile, scanner)
+      webhooks  <- ZIO.fromEither(cfg.webhooks.settings).mapError(IllegalArgumentException(_))
+      deadlines <- ZIO.fromEither(cfg.workflow.deadlines).mapError(IllegalArgumentException(_))
+      _         <- ZIO.logInfo(s"DMS platform ${AppBuildInfo.version} starting on port ${cfg.http.port}")
+      _         <- (Server.serve(routes) <&> Background.run(cfg))
         .provide(
           // Small bodies are aggregated as before; larger ones (attachment uploads) are streamed, so they are never
           // held in memory as a whole (DMS-114).
@@ -190,7 +191,10 @@ object Main extends ZIOAppDefault:
           RoleDirectory.layer,
           WorkflowExtraReview.layer,
           ZLayer.succeed(
-            WorkflowConfig(java.time.Duration.ofSeconds(cfg.workflow.reauthenticationSeconds.toLong))
+            WorkflowConfig(
+              java.time.Duration.ofSeconds(cfg.workflow.reauthenticationSeconds.toLong),
+              deadlines
+            )
           ),
           WorkflowRendition.layer,
           ApprovalWorkflow.layer,

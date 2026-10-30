@@ -395,6 +395,154 @@ final class ApprovalWorkflow(
   def approvals(versionIds: List[UUID]): IO[WorkflowError, Map[UUID, Approval]] =
     sql(WorkflowStore.approvalsOfVersions(versionIds)).map(_.map(a => a.versionId -> a).toMap)
 
+  // ---- deadlines (DMS-87, ADR 0053) ----------------------------------------------------------------------
+
+  /** The tenant's default deadline policy (with when and by whom it was set), if it has one. */
+  def deadlineSettings: IO[WorkflowError, Option[(DeadlinePolicy, Instant, UserId)]] =
+    sql(WorkflowStore.deadlineSettings)
+
+  /** The installation's deadline policy, used where neither the workflow nor the tenant sets one. */
+  def installationDeadlines: DeadlinePolicy = config.deadlines
+
+  /** Sets the tenant's default deadline policy for tasks created from now on; audited as
+    * `workflow.deadlines-changed`.
+    */
+  def changeDeadlineSettings(policy: DeadlinePolicy, actor: UserId): IO[WorkflowError, DeadlinePolicy] =
+    val normalized = policy.copy(escalateTo = policy.escalateTo.map(_.trim).filter(_.nonEmpty).distinct)
+    val problems   = DeadlinePolicy.problems(normalized)
+    for
+      _ <- ZIO.unless(problems.isEmpty)(ZIO.fail(WorkflowError.Invalid(problems)))
+      _ <- sql(WorkflowStore.saveDeadlineSettings(normalized, actor))
+      _ <- record(
+        actor,
+        "workflow.deadlines-changed",
+        AuditObject("workflow-deadlines", None, None),
+        Json.Obj(
+          "dueWorkingDays"        -> Json.Num(normalized.dueWorkingDays),
+          "reminderWorkingDays"   -> Json.Num(normalized.reminderWorkingDays),
+          "escalationWorkingDays" -> Json.Num(normalized.escalationWorkingDays),
+          "escalateTo"            -> Json.Arr(normalized.escalateTo.map(Json.Str(_))*)
+        ),
+        None
+      )
+    yield normalized
+
+  /** Removes the tenant's default: the installation's applies again. `false` if there was none. */
+  def resetDeadlineSettings(actor: UserId): IO[WorkflowError, Boolean] =
+    sql(WorkflowStore.deleteDeadlineSettings).tap(removed =>
+      ZIO.when(removed)(
+        record(
+          actor,
+          "workflow.deadlines-reset",
+          AuditObject("workflow-deadlines", None, None),
+          Json.Obj(),
+          None
+        )
+      )
+    )
+
+  /** Open tasks whose next deadline notice is due at `now` and was not published yet. */
+  def dueDeadlineNotices(now: Instant): IO[WorkflowError, List[(String, DeadlineStage)]] =
+    for
+      tasks <- sql(WorkflowStore.tasksWithDeadlineReached(now))
+      due   <- ZIO.foreach(tasks) { t =>
+        deadlineOfRow(t).flatMap(Deadlines.stage(_, now)) match
+          case None        => ZIO.none
+          case Some(stage) =>
+            sql(WorkflowStore.deadlineNotices(t.id)).map(sent =>
+              Option.unless(sent(stage.key))(t.id -> stage)
+            )
+      }
+    yield due.flatten
+
+  /** Publishes the deadline notice `stage` of a task once (DMS-87): records it in
+    * `dms.workflow_task_deadline_notice`, writes the outbox event (`workflow.task-due-soon`,
+    * `workflow.task-overdue`, `workflow.task-escalated`) for the notifications module and an audit entry.
+    * Recipients: the task's candidates; when overdue also their active deputies; when escalated also the
+    * escalation targets of the policy (owner, compliance officers in scope, tenant administrators). `false`
+    * if the task is no longer open, the stage is not reached at `now` or the notice was published before.
+    */
+  def noticeDeadline(taskId: String, stage: DeadlineStage, now: Instant): IO[WorkflowError, Boolean] =
+    for
+      found <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
+      row   <- sql(WorkflowStore.lockCase(found.caseId)).someOrFail(taskNotFound(taskId))
+      task  <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
+      due = task.status == TaskStatus.Open.toString &&
+        deadlineOfRow(task).flatMap(Deadlines.stage(_, now)).contains(stage)
+      published <-
+        if !due then ZIO.succeed(false)
+        else
+          sql(WorkflowStore.insertDeadlineNotice(task.id, stage.key))
+            .tap(inserted => ZIO.when(inserted)(publishDeadline(row, task, stage)))
+    yield published
+
+  private def publishDeadline(row: CaseRow, task: TaskRow, stage: DeadlineStage): IO[WorkflowError, Unit] =
+    val definition = WorkflowStore.parse(row.definition)
+    for
+      subject  <- documents.subject(DocumentId(row.documentId), row.versionId)
+      zone     <- sql(WorkflowStore.tenantZone)
+      deputies <-
+        if stage == DeadlineStage.Reminder then ZIO.succeed(Nil)
+        else views(row, List(task)).map(_.flatMap(_.deputies))
+      targets <-
+        if stage != DeadlineStage.Escalated then ZIO.succeed(Nil)
+        else
+          for
+            tenantPolicy <- sql(WorkflowStore.deadlineSettings).map(_.map(_._1))
+            step = definition
+              .step(task.stepKey)
+              .getOrElse(Step(task.stepKey, task.stepKey, StepKind.Review, Nil))
+            policy = Deadlines.policyFor(step, definition, tenantPolicy, config.deadlines)
+            people <- ZIO.foreach(policy.escalateTo) {
+              case DeadlinePolicy.Owner             => ZIO.succeed(subject.owner.toList)
+              case DeadlinePolicy.ComplianceOfficer =>
+                directory.holders(DeadlinePolicy.ComplianceOfficer, subject)
+              case DeadlinePolicy.TenantAdmin => directory.tenantAdmins
+              case _                          => ZIO.succeed(Nil)
+            }
+          yield people.flatten.distinct
+      dueAt   = task.dueAt.map(_.toInstant)
+      payload = Json.Obj(
+        "caseId"     -> Json.Str(row.id.toString),
+        "taskId"     -> Json.Str(task.id),
+        "documentId" -> Json.Str(subject.documentId.value.toString),
+        "versionId"  -> Json.Str(subject.versionId.toString),
+        "version"    -> Json.Str(subject.versionLabel),
+        "step"       -> Json.Str(task.stepKey),
+        "stepName"   -> Json.Str(definition.step(task.stepKey).fold(task.stepKey)(_.name)),
+        "stepKind"   -> Json.Str(task.stepKind),
+        "stage"      -> Json.Str(stage.key),
+        "dueAt"      -> dueAt.fold(Json.Null)(d => Json.Str(d.toString)),
+        "dueOn"      -> dueAt.fold(Json.Null)(d => Json.Str(Deadlines.dueOn(d, zone).toString)),
+        "recipients" -> Json.Arr(task.candidateList.map(u => Json.Str(u.value))*),
+        "deputies"   -> Json.Arr(
+          deputies.map(d =>
+            Json.Obj("deputy" -> Json.Str(d.deputy.value), "principal" -> Json.Str(d.principal.value))
+          )*
+        ),
+        "escalatedTo" -> Json.Arr(targets.filterNot(task.candidateList.contains).map(u => Json.Str(u.value))*)
+      )
+      _ <- Outbox
+        .publish("workflow", row.id, stage.eventType, Jsonb(payload.toJson))
+        .mapError(WorkflowError.Database(_))
+      _ <- record(DeadlineActor, stage.auditAction, target(subject), payload, None, technical = true)
+    yield ()
+
+  /** The deadline of a task as stored when it was created. */
+  private def deadlineOfRow(t: TaskRow): Option[TaskDeadline] =
+    t.dueAt.map(d => TaskDeadline(d.toInstant, t.remindAt.map(_.toInstant), t.escalateAt.map(_.toInstant)))
+
+  /** The deadline of a new task of `step` created now, in the tenant's time zone. */
+  private def deadlineOf(
+      step: Step,
+      definition: WorkflowDefinition
+  ): IO[WorkflowError, Option[TaskDeadline]] =
+    for
+      tenantPolicy <- sql(WorkflowStore.deadlineSettings).map(_.map(_._1))
+      zone         <- sql(WorkflowStore.tenantZone)
+      now          <- Clock.instant
+    yield Deadlines.deadline(Deadlines.policyFor(step, definition, tenantPolicy, config.deadlines), now, zone)
+
   // ---- internals ------------------------------------------------------------------------------------------
 
   private def open(subject: ReviewSubject, actor: UserId): IO[WorkflowError, UUID] =
@@ -585,7 +733,8 @@ final class ApprovalWorkflow(
       lane <- ZIO
         .fromOption(Rules.parseTaskKey(key).flatMap((_, l) => step.lanes.find(_.key == l)))
         .orElseFail(WorkflowError.Engine(s"unknown task $key"))
-      holders <- holdersOf(lane.role, subject)
+      holders  <- holdersOf(lane.role, subject)
+      deadline <- deadlineOf(step, definition)
       eligible = Rules.eligible(holders, subject.author, row.fourEyes)
       task     = TaskRow(
         taskId,
@@ -599,7 +748,10 @@ final class ApprovalWorkflow(
         (if eligible.isEmpty then TaskStatus.Waiting else TaskStatus.Open).toString,
         java.time.OffsetDateTime.now(),
         None,
-        None
+        None,
+        deadline.map(d => WorkflowStore.offset(d.dueAt)),
+        deadline.flatMap(_.remindAt).map(WorkflowStore.offset),
+        deadline.flatMap(_.escalateAt).map(WorkflowStore.offset)
       )
       _ <- sql(WorkflowStore.insertTask(task))
       _ <-
@@ -963,6 +1115,9 @@ object ApprovalWorkflow:
 
   private def optional(user: Option[UserId]): Json = user.fold(Json.Null)(u => Json.Str(u.value))
 
+  /** The platform as actor of deadline notices (DMS-87); recorded as technical actor. */
+  val DeadlineActor: UserId = UserId("system:workflow-deadlines")
+
   private def target(s: ReviewSubject): AuditObject =
     AuditObject("document", Some(s.documentId.value), Some(s.versionLabel))
 
@@ -988,5 +1143,6 @@ object ApprovalWorkflow:
       TaskStatus.valueOf(t.status),
       t.createdAt.toInstant,
       t.completedAt.map(_.toInstant),
-      t.completedBy.map(UserId(_))
+      t.completedBy.map(UserId(_)),
+      dueAt = t.dueAt.map(_.toInstant)
     )

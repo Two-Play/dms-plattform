@@ -17,6 +17,7 @@ export type OwnedAcknowledgement = components['schemas']['OwnedAcknowledgementVi
 /** Categories in the order the settings page lists them. */
 export const notificationCategories = [
   'workflow',
+  'deadline',
   'acknowledgement',
   'deputyship',
   'publication',

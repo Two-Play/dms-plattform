@@ -8,10 +8,62 @@ export type CastVote = components['schemas']['CastVote']
 export type WorkflowCaseView = components['schemas']['WorkflowCaseView']
 
 /**
- * A review or approval task. `dueAt` is not sent yet (deadlines follow with DMS-87); the inbox shows
- * it and marks overdue tasks once the API delivers it.
+ * A review or approval task. `dueAt` is its deadline (end of the due day in the tenant's time zone,
+ * DMS-87); the inbox sorts by it and marks overdue tasks.
  */
-export type WorkflowTask = components['schemas']['TaskView'] & { dueAt?: string }
+export type WorkflowTask = components['schemas']['TaskView']
+
+/** Deadlines in working days (DMS-87, ADR 0053). */
+export type DeadlinePolicy = components['schemas']['DeadlinePolicyView']
+export type DeadlineSettings = components['schemas']['DeadlineSettingsView']
+
+/** Who an overdue task can be escalated to. */
+export const escalationTargets = ['Owner', 'ComplianceOfficer', 'TenantAdmin'] as const
+
+/** The tenant's default deadlines, or the installation's (GET /api/v1/admin/workflow-deadlines). */
+export function deadlineSettingsQuery(client: ApiClient) {
+  return queryOptions({
+    queryKey: ['workflow', 'deadlines'],
+    queryFn: async (): Promise<DeadlineSettings> => {
+      const { data, error, response } = await client.GET('/api/v1/admin/workflow-deadlines')
+      if (!response.ok || !data) {
+        throw requestError(
+          response,
+          error,
+          `Loading the deadlines failed with HTTP ${response.status}`,
+        )
+      }
+      return data
+    },
+  })
+}
+
+/** Sets the tenant's default deadlines (PUT); 422 if invalid. */
+export async function saveDeadlineSettings(
+  client: ApiClient,
+  policy: DeadlinePolicy,
+): Promise<DeadlineSettings> {
+  const { data, error, response } = await client.PUT('/api/v1/admin/workflow-deadlines', {
+    body: policy,
+  })
+  if (!response.ok || !data) {
+    throw requestError(response, error, `Saving the deadlines failed with HTTP ${response.status}`)
+  }
+  return data
+}
+
+/** Removes the tenant's default deadlines; the installation's apply again (DELETE). */
+export async function resetDeadlineSettings(client: ApiClient): Promise<DeadlineSettings> {
+  const { data, error, response } = await client.DELETE('/api/v1/admin/workflow-deadlines')
+  if (!response.ok || !data) {
+    throw requestError(
+      response,
+      error,
+      `Resetting the deadlines failed with HTTP ${response.status}`,
+    )
+  }
+  return data
+}
 
 /** Vote decisions (`dms.workflow.VoteDecision`). */
 export type VoteDecision = 'Approve' | 'ApproveWithConditions' | 'RequestChanges' | 'Reject'

@@ -22,6 +22,7 @@ export const notifications = {
   received: 'Erhalten {date}',
   categories: {
     workflow: 'Prüfungen und Freigaben',
+    deadline: 'Fristen und Eskalationen',
     acknowledgement: 'Kenntnisnahmen',
     deputyship: 'Vertretungen',
     publication: 'Veröffentlichung meiner Dokumente',
@@ -72,6 +73,7 @@ export const notifications = {
     hints: {
       workflow:
         'Ihnen zugewiesene Aufgaben, zurückgegebene oder freigegebene Versionen, fehlende Teilnehmende.',
+      deadline: 'Erinnerungen vor Fristablauf, überfällige Aufgaben und Eskalationen.',
       acknowledgement:
         'Dokumente, die Sie zur Kenntnis nehmen sollen, und Erinnerungen an offene Kenntnisnahmen.',
       deputyship: 'Für Sie oder von Ihnen eingerichtete Vertretungen, ihr Beginn und Ende.',

@@ -21,7 +21,15 @@ import dms.templates.core.ContentJson.given
 import dms.templates.core.{TemplateDraft, TemplateService}
 import dms.audit.AuditTrail
 import dms.rendering.core.RenditionSource
-import dms.workflow.core.{ApprovalWorkflow, Deputyships, FlowableEngine, WorkflowConfig}
+import dms.workflow.core.{
+  ApprovalWorkflow,
+  DeadlineJobs,
+  DeadlineScheduleConfig,
+  Deadlines,
+  Deputyships,
+  FlowableEngine,
+  WorkflowConfig
+}
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import sttp.tapir.ztapir.RichZServerEndpoint
@@ -418,7 +426,8 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       assertTrue(
         docs.paths.pathItems.contains("/api/v1/workflow/tasks"),
         docs.paths.pathItems.contains("/api/v1/workflow/tasks/{taskId}/votes"),
-        docs.paths.pathItems.contains("/api/v1/admin/workflows/{classKey}")
+        docs.paths.pathItems.contains("/api/v1/admin/workflows/{classKey}"),
+        docs.paths.pathItems.contains("/api/v1/admin/workflow-deadlines")
       )
     },
     test("tenant administrators define the workflow of a class; invalid definitions are rejected") {
@@ -1072,6 +1081,115 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         waiting.candidates.isEmpty,
         missingAfter == missingBefore + 1,
         !approverInbox.exists(_.id == approval.id)
+      )
+    },
+    test("deadlines: tasks are due after working days, reminded, overdue and escalated once each (DMS-87)") {
+      val policy = DeadlinePolicyView(3, 1, 2, List("Owner", "TenantAdmin"))
+      for
+        denied  <- call(reader, "PUT", "/api/v1/admin/workflow-deadlines", Some(policy.toJson))
+        invalid <- call(
+          admin,
+          "PUT",
+          "/api/v1/admin/workflow-deadlines",
+          Some(policy.copy(reminderWorkingDays = 3).toJson)
+        )
+        unknown <- call(
+          admin,
+          "PUT",
+          "/api/v1/admin/workflow-deadlines",
+          Some(policy.copy(escalateTo = List("Boss")).toJson)
+        )
+        saved   <- call(admin, "PUT", "/api/v1/admin/workflow-deadlines", Some(policy.toJson))
+        doc     <- draftDocument("Deadline GmbH")
+        _       <- submit(doc.id)
+        started <- cases(doc.id).map(_.head)
+        inbox   <- call(reviewer1, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
+        task     = openTask(started, "department")
+        open     = started.tasks.count(_.status == "Open")
+        expected = Deadlines.deadline(
+          WorkflowApi.policy(policy),
+          task.createdAt,
+          java.time.ZoneId.of("Europe/Berlin")
+        )
+        s        <- setup.await
+        workflow <- ZIO.service[ApprovalWorkflow]
+        jobs = DeadlineJobs(s.app, workflow, DeadlineScheduleConfig())
+        now <- Clock.instant
+        at = (i: Instant) => ahead(Duration.fromInterval(now, i.plusSeconds(60)))
+        dl = expected.get
+        before      <- jobs.check(tenantId)
+        reminded    <- at(dl.remindAt.get)(jobs.check(tenantId))
+        again       <- at(dl.remindAt.get)(jobs.check(tenantId))
+        overdue     <- at(dl.dueAt)(jobs.check(tenantId))
+        escalated   <- at(dl.escalateAt.get)(jobs.check(tenantId))
+        later       <- at(dl.escalateAt.get.plusSeconds(86400))(jobs.check(tenantId))
+        soon        <- outbox("workflow.task-due-soon").map(_.filter(_.contains(doc.id.toString)))
+        late        <- outbox("workflow.task-overdue").map(_.filter(_.contains(doc.id.toString)))
+        escalations <- outbox("workflow.task-escalated").map(_.filter(_.contains(doc.id.toString)))
+        audited     <- lastAudit("workflow.task-escalated")
+        notices     <- s.owner
+          .transactSystem(
+            Db.sql(
+              sql"select kind from dms.workflow_task_deadline_notice where task_id = ${task.id} order by noticed_at"
+                .query[String]
+                .run()
+                .toList
+            )
+          )
+        documents <- ZIO.service[DocumentService]
+        audit     <- ZIO.service[AuditTrail]
+        event = dms.db.queue.OutboxEvent(
+          1L,
+          tenantId,
+          "workflow",
+          started.id,
+          "workflow.task-escalated",
+          dms.db.Jsonb(escalations.head),
+          None,
+          1
+        )
+        meaning <- s.app.transact(tenantId)(
+          PlatformNotificationEvents(
+            documents,
+            RoleAssignments.Postgres,
+            dms.archive.core.LegalHoldService(audit)
+          )
+            .describe(event)
+        )
+        reset <- call(admin, "DELETE", "/api/v1/admin/workflow-deadlines").map(as[DeadlineSettingsView])
+      yield assertTrue(
+        denied._1 == Status.Forbidden,
+        invalid._1 == Status.UnprocessableEntity,
+        unknown._1 == Status.UnprocessableEntity,
+        saved._1 == Status.Ok,
+        as[DeadlineSettingsView](saved).source == "tenant",
+        as[DeadlineSettingsView](saved).installation.dueWorkingDays == 5,
+        task.dueAt == expected.map(_.dueAt),
+        inbox.find(_.id == task.id).flatMap(_.dueAt) == task.dueAt,
+        // due at the end of the day in Berlin, on a working day
+        task.dueAt.exists(d =>
+          Deadlines.isWorkingDay(d.atZone(java.time.ZoneId.of("Europe/Berlin")).toLocalDate) &&
+            d.atZone(java.time.ZoneId.of("Europe/Berlin")).toLocalTime == java.time.LocalTime.of(23, 59, 59)
+        ),
+        before >= 0,
+        reminded >= open,
+        again == 0,
+        overdue >= open,
+        escalated >= open,
+        later == 0,
+        open >= 1,
+        soon.size == open,
+        late.size == open,
+        escalations.size == open,
+        escalations.forall(e => e.contains(s""""escalatedTo":[""") || e.contains(s""""escalatedTo": [""")),
+        escalations.exists(e => e.contains(admin.value) && e.contains(author.value)),
+        audited.exists(_._1 == "system:workflow-deadlines"),
+        notices == List("reminder", "overdue", "escalated"),
+        meaning.map(_.kind).distinct == List("workflow.task-escalated"),
+        meaning.flatMap(_.recipients).toSet.contains(admin),
+        meaning.flatMap(_.recipients).toSet.contains(author),
+        meaning.forall(_.category == dms.notifications.NotificationCategory.Deadline),
+        reset.source == "installation"
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

@@ -3,6 +3,7 @@ package dms.workflow.core
 import dms.db.DbError
 import dms.documents.{ChangeKind, DocumentStatus, LifecycleEvent}
 import dms.kernel.{DocumentId, UserId}
+import dms.workflow.DeadlinePolicy
 import zio.*
 
 import java.time.{Duration, Instant}
@@ -146,7 +147,13 @@ object ExtraReviewCheck:
 /** @param reauthenticationWindow
   *   how recent the sign-in (`auth_time`) must be for an approval vote
   */
-final case class WorkflowConfig(reauthenticationWindow: Duration)
+/** @param deadlines
+  *   the installation's deadline policy where neither the workflow nor the tenant sets one (DMS-87)
+  */
+final case class WorkflowConfig(
+    reauthenticationWindow: Duration,
+    deadlines: DeadlinePolicy = DeadlinePolicy.default
+)
 
 object WorkflowConfig:
   val default: WorkflowConfig = WorkflowConfig(Duration.ofMinutes(5))
