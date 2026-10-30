@@ -130,6 +130,22 @@ export interface DocumentWorkspaceProps {
    * continues (DMS-127: the upload wizard stores the file and its values). Must not throw.
    */
   afterCreate?: (documentId: string) => Promise<void>
+  /**
+   * Values a new document starts with, e.g. the title the upload wizard proposed (DMS-131). Ignored when a
+   * draft is continued and for keys the template has no field for.
+   */
+  initialValues?: Partial<FormInputs>
+}
+
+/** The empty inputs of the fields, with the given initial values for the fields that exist. */
+function withInitial(
+  fields: TemplateField[],
+  initial: Partial<FormInputs> | undefined,
+): FormInputs {
+  const inputs = initialInputs(fields)
+  for (const [key, value] of Object.entries(initial ?? {}))
+    if (value !== undefined && key in inputs) inputs[key] = value
+  return inputs
 }
 
 function conflictMessage(e: ApiRequestError, action: 'saved' | 'submitted'): string {
@@ -155,11 +171,12 @@ export function DocumentWorkspace({
   aside,
   onCreated,
   afterCreate,
+  initialValues,
 }: DocumentWorkspaceProps) {
   const client = useApiClient()
   const queryClient = useQueryClient()
   const [inputs, setInputs] = useState<FormInputs>(() =>
-    draft ? inputsFromDraft(fields, draft.version.values) : initialInputs(fields),
+    draft ? inputsFromDraft(fields, draft.version.values) : withInitial(fields, initialValues),
   )
   const [picked, setPicked] = useState<Record<string, Partner | undefined>>(() =>
     draft

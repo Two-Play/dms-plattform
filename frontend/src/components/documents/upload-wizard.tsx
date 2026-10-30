@@ -715,6 +715,10 @@ function AsDocument({
     onSuccess: setTemplate,
   })
   const hasManual = (analysis.fields ?? []).some((f) => f.source === 'Manual')
+  // The title shown in the fields step (from the file's title field, else its name) pre-fills the form (DMS-131).
+  const title =
+    (analysis.fields ?? []).find((f) => f.key === 'title' && f.source === 'Automatic')?.value ||
+    baseName(file.name)
 
   /** Stores the file and the entered values in the new draft; never throws (the document exists). */
   const store = async (documentId: string) => {
@@ -737,6 +741,7 @@ function AsDocument({
           version={template.version}
           language={language}
           kind="file"
+          initialValues={{ title }}
           afterCreate={store}
           onCreated={onCreated}
           onSubmitted={onCreated}

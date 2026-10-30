@@ -85,7 +85,7 @@ type Reply = Promise<{ data: unknown; error: unknown; response: Response }>
 const ok = (data: unknown, status = 200): Reply =>
   Promise.resolve({ data, error: undefined, response: new Response(null, { status }) })
 
-function setup(roles: string[]) {
+function setup(roles: string[], uploaded: UploadAnalysis = analysis) {
   const get = vi.fn((path: string) => {
     switch (path) {
       case '/api/v1/me':
@@ -101,7 +101,7 @@ function setup(roles: string[]) {
   const post = vi.fn((path: string) => {
     switch (path) {
       case '/api/v1/uploads/fields':
-        return ok(analysis)
+        return ok(uploaded)
       case '/api/v1/uploads/preview.pdf':
         return ok(new Blob(['%PDF-1.7'], { type: 'application/pdf' }))
       case '/api/v1/uploads/classes/{classId}/template':
@@ -198,7 +198,11 @@ describe('Upload document wizard (DMS-127)', () => {
 
     await user.selectOptions(await screen.findByLabelText('Document class'), classId)
     await user.click(screen.getByRole('button', { name: 'Continue with the metadata' }))
-    await user.type(await screen.findByLabelText(/Title/), 'Vertrag ACME')
+    // the title of the fields step is proposed and can be changed (DMS-131)
+    const title = await screen.findByLabelText(/Title/)
+    expect(title).toHaveValue('Vertrag')
+    await user.clear(title)
+    await user.type(title, 'Vertrag ACME')
     await user.click(screen.getByRole('button', { name: 'Save draft' }))
 
     await waitFor(() => {
@@ -220,6 +224,20 @@ describe('Upload document wizard (DMS-127)', () => {
       params: { path: { id: documentId } },
       body: { values: { customer: 'ACME GmbH' } },
     })
+  })
+
+  it('proposes the file name as title when the file has no title value (DMS-131)', async () => {
+    const withoutTitle: UploadAnalysis = {
+      ...analysis,
+      fields: (analysis.fields ?? []).map((f) =>
+        f.key === 'title' ? { ...f, value: undefined } : f,
+      ),
+    }
+    const { user } = setup(['Author'], withoutTitle)
+    await throughPreview(user)
+    await user.selectOptions(await screen.findByLabelText('Document class'), classId)
+    await user.click(screen.getByRole('button', { name: 'Continue with the metadata' }))
+    expect(await screen.findByLabelText(/Title/)).toHaveValue('Vertrag')
   })
 
   it('designers make a Word template of the file; the document choice is disabled', async () => {
