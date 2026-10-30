@@ -125,6 +125,11 @@ export interface DocumentWorkspaceProps {
   aside?: ReactNode
   /** Called once the first save created the document (file and Word documents continue on its page). */
   onCreated?: (documentId: string) => void
+  /**
+   * Awaited after the first save created the document, before `onCreated` and before a submission
+   * continues (DMS-127: the upload wizard stores the file and its values). Must not throw.
+   */
+  afterCreate?: (documentId: string) => Promise<void>
 }
 
 function conflictMessage(e: ApiRequestError, action: 'saved' | 'submitted'): string {
@@ -149,6 +154,7 @@ export function DocumentWorkspace({
   kind = 'structured',
   aside,
   onCreated,
+  afterCreate,
 }: DocumentWorkspaceProps) {
   const client = useApiClient()
   const queryClient = useQueryClient()
@@ -244,6 +250,8 @@ export function DocumentWorkspace({
             ? await createWordDocument(client, body)
             : await createDocument(client, kind === 'file' ? { ...body, kind: 'File' } : body)
         current = { documentId: created.id, label: created.current.version, applied: {} }
+        setSaved(current)
+        if (afterCreate) await afterCreate(created.id)
         if (kind !== 'structured') onCreated?.(created.id)
       }
       setSaved(current)

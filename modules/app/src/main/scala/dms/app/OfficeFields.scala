@@ -57,6 +57,31 @@ object OfficeFields:
       case Some(Format.Xlsx) => fillPlaceholders(bytes, values, Workbook)
       case Some(Format.Pptx) => fillPlaceholders(bytes, values, Presentation)
 
+  /** The values a file carries for its fields (DMS-127): for Word documents from their content controls, the
+    * custom XML part and the custom document properties the platform writes when filling
+    * ([[WordDocx.recover]]); none for other files (their placeholders are replaced when filled).
+    */
+  def recover(name: String, bytes: Array[Byte]): Either[String, RecoveredValues] =
+    format(name) match
+      case Some(Format.Docx) => WordDocx.recover(bytes)
+      case _                 => Right(RecoveredValues.none)
+
+  /** For each manual field, the first recovered candidate that is a valid value of the field (DMS-127). */
+  def pick(
+      fields: List[WordField],
+      recovered: RecoveredValues,
+      readRows: String => Either[String, WordFields.Rows]
+  ): Map[String, String] =
+    fields
+      .filter(_.source == dms.templates.WordFieldSource.Manual)
+      .flatMap(f =>
+        recovered.candidates
+          .getOrElse(f.key, Nil)
+          .find(v => WordFields.check(fields, Map(f.key -> v), complete = false, readRows).isEmpty)
+          .map(f.key -> _)
+      )
+      .toMap
+
   /** Where the placeholders of a format are. */
   private final case class Layout(
       kind: String,

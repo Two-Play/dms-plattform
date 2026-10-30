@@ -361,6 +361,69 @@ object AttachmentApi:
     * whole body is limited to the size limit plus some overhead, so oversized requests fail while they
     * stream.
     */
+  /** Largest accepted text part before the file of a form (DMS-127). */
+  private[app] val MaxFormFieldBytes: Int = 256 * 1024
+
+  /** Like [[receive]], also collecting the text parts sent before the part `file` (e.g. `values` as JSON, at
+    * most [[MaxFormFieldBytes]] together), by name (DMS-127).
+    */
+  private[app] def receiveForm(
+      uploads: AttachmentUploads,
+      boundary: String,
+      body: ZStream[Any, Throwable, Byte]
+  ): ZIO[Scope, AttachmentError, (Map[String, String], String, Option[String], SpooledFile)] =
+    final case class Form(
+        fields: Map[String, Chunk[Byte]],
+        current: Option[String],
+        file: Option[MultipartStream.Event.Part]
+    )
+    val untilFile = ZSink.fold[MultipartStream.Event, Form](Form(Map.empty, None, None))(_.file.isEmpty) {
+      case (s, p: MultipartStream.Event.Part) if p.name == "file" => s.copy(current = None, file = Some(p))
+      case (s, p: MultipartStream.Event.Part)                     => s.copy(current = Some(p.name))
+      case (s, MultipartStream.Event.Data(bytes))                 =>
+        s.current.fold(s)(name =>
+          val total = s.fields.values.map(_.size).sum + bytes.size
+          // beyond the limit the field is cut, which makes it unreadable (checked below)
+          if total > MaxFormFieldBytes then
+            s.copy(fields = s.fields.updated(name, Chunk.empty), current = None)
+          else s.copy(fields = s.fields.updated(name, s.fields.getOrElse(name, Chunk.empty) ++ bytes))
+        )
+      case (s, MultipartStream.Event.PartEnd) => s.copy(current = None)
+    }
+    val limit   = uploads.settings.maxSizeBytes + MultipartOverhead
+    val limited = body.chunks
+      .mapAccumZIO(0L) { (total, chunk) =>
+        val next = total + chunk.size
+        if next > limit then
+          ZIO.fail(
+            AttachmentUploads.AttachmentException(AttachmentError.TooLarge(uploads.settings.maxSizeBytes))
+          )
+        else ZIO.succeed((next, chunk))
+      }
+      .flattenChunks
+    MultipartStream
+      .parse(limited, boundary)
+      .peel(untilFile)
+      .mapError(readError)
+      .flatMap {
+        case (Form(fields, _, Some(part)), rest) =>
+          val bytes = rest
+            .takeWhile(_ != MultipartStream.Event.PartEnd)
+            .collect { case MultipartStream.Event.Data(b) => b }
+            .flattenChunks
+          uploads
+            .spool(bytes)
+            .map(spooled =>
+              (
+                fields.map((k, v) => k -> String(v.toArray, StandardCharsets.UTF_8)),
+                part.filename.getOrElse(""),
+                part.contentType,
+                spooled
+              )
+            )
+        case _ => ZIO.fail(AttachmentError.Invalid("the request has no part named `file`"))
+      }
+
   private[app] def receive(
       uploads: AttachmentUploads,
       boundary: String,

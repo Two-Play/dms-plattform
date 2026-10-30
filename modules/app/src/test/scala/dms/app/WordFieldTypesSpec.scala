@@ -41,7 +41,7 @@ object WordFieldTypesSpec extends ZIOSpecDefault:
       s"""</w:$element></w:sdtPr><w:sdtContent><w:r><w:rPr><w:rStyle w:val="PlaceholderText"/><w:u w:val="single"/></w:rPr>""" +
       """<w:t>Element auswählen.</w:t></w:r></w:sdtContent></w:sdt>"""
 
-  private def cell(content: String) = s"<w:tc>${paragraph(content)}</w:tc>"
+  private[app] def cell(content: String) = s"<w:tc>${paragraph(content)}</w:tc>"
 
   /** A repeating section around table rows, with the given content of its item. */
   private[app] def section(tag: Option[String], item: String) =
@@ -218,7 +218,7 @@ object WordFieldTypesSpec extends ZIOSpecDefault:
         xml.contains(">Pump<"),
         xml.contains(">Valve<"),
         xml.contains("Seal &amp; ring"),
-        xml.contains("Due 02.01.2027"),
+        WordDocx.text(filled).exists(_.contains("Due 02.01.2027")),
         // a row without a value keeps the item's placeholder text
         "Due \\{\\{dueDate\\}\\}".r.findAllIn(xml).size == 2,
         // automatic fields inside are filled in every row
@@ -268,7 +268,10 @@ object WordFieldTypesSpec extends ZIOSpecDefault:
       val xml    = part(filled, "word/document.xml")
       assertTrue(
         WordDocx.scan(document).map(_.map(_.key)) == Right(List("customer", "other")),
-        xml.contains("""<w:b/></w:rPr><w:t xml:space="preserve">Dear ACME</w:t>"""),
+        xml.contains("""<w:b/></w:rPr><w:t xml:space="preserve">Dear </w:t>"""),
+        // the placeholder became a control in the formatting of the run where it started (DMS-127)
+        xml.contains("""<w:tag w:val="customer"/>"""),
+        xml.contains("""<w:sdtContent><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">ACME</w:t>"""),
         xml.contains("""<w:u w:val="single"/></w:rPr><w:t xml:space="preserve">, see {{other}}</w:t>"""),
         !xml.contains(">tom<"),
         WordDocx.paragraphs(filled) == Right(List(WordParagraph("Dear ACME, see {{other}}"))),

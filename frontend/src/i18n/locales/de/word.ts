@@ -75,6 +75,8 @@ export const word: Translation<typeof en.word> = {
       'Alternativ {manual} oder {automatic} in den Text schreiben; auch ein durch Formatierung geteilter Platzhalter wird gefunden und übernimmt die Formatierung seines ersten Teils.',
     office:
       'Excel- (.xlsx) und PowerPoint-Dateien (.pptx): Platzhalter in Zellen und auf Folien werden als Text befüllt.',
+    values:
+      'Beim Befüllen bleiben die Schlüssel erhalten: Inhaltssteuerelemente behalten Tag und Titel, ein befüllter Platzhalter wird zu einem Nur-Text-Steuerelement mit seinem Schlüssel als Tag, und jeder Wert wird zusätzlich im Dokument gespeichert (benutzerdefinierte Dokumenteigenschaften dms.<Schlüssel> und ein benutzerdefinierter XML-Teil, an den die Nur-Text-Steuerelemente gebunden sind). Ein befülltes Dokument, das erneut hochgeladen wird, bringt seine Werte wieder mit.',
   },
   templates: {
     badge: 'Word',

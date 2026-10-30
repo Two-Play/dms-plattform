@@ -290,7 +290,7 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
       FileDocumentApi.endpoints.map(_.widen[Env]) ++ DocumentApi.endpoints.map(_.widen[Env]) ++
         WorkflowApi.endpoints.map(_.widen[Env]) ++ WordTemplateApi.endpoints.map(_.widen[Env]) ++
         VersionViewApi.endpoints.map(_.widen[Env]) ++ AttachmentApi.endpoints.map(_.widen[Env]) ++
-        VersionCompareApi.endpoints.map(_.widen[Env])
+        VersionCompareApi.endpoints.map(_.widen[Env]) ++ UploadFlowApi.endpoints.map(_.widen[Env])
     )
 
   final case class Response(status: Status, headers: Headers, body: Chunk[Byte]):
@@ -326,6 +326,27 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
       user,
       Request
         .put(URL.decode(path).toOption.get, multipart(name, bytes))
+        .addHeader(Header.ContentType(MediaType.multipart.`form-data`, Some(zio.http.Boundary(boundary))))
+    )
+
+  /** A multipart form with an optional part `values` before the part `file` (DMS-127). */
+  private def form(
+      user: UserId,
+      path: String,
+      name: String,
+      bytes: Array[Byte],
+      values: Option[String] = None
+  ) =
+    val fields =
+      values.fold("")(v => s"--$boundary\r\nContent-Disposition: form-data; name=\"values\"\r\n\r\n$v\r\n")
+    val head =
+      fields + s"--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"$name\"\r\n" +
+        "Content-Type: application/octet-stream\r\n\r\n"
+    val all = head.getBytes(UTF_8) ++ bytes ++ s"\r\n--$boundary--\r\n".getBytes(UTF_8)
+    send(
+      user,
+      Request
+        .post(URL.decode(path).toOption.get, Body.fromChunk(Chunk.fromArray(all)))
         .addHeader(Header.ContentType(MediaType.multipart.`form-data`, Some(zio.http.Boundary(boundary))))
     )
 
@@ -611,7 +632,8 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
         filled.status == Status.Ok,
         filled.header("Content-Disposition").exists(_.contains("Wartungsvertrag.docx")),
         body.contains("ACME GmbH"),
-        body.contains("Lieferung bis 31.01.2027"),
+        // the placeholder became a content control (DMS-127); the paragraph reads as before
+        WordDocx.text(filled.body.toArray).exists(_.contains("Lieferung bis 31.01.2027")),
         head.contains("Wartungsvertrag ACME"),
         head.contains("1.0-draft"),
         head.contains("Finance"),
@@ -1045,7 +1067,7 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
           ">Pump<".r.findAllIn(body).size == 1,
           ">Valve<".r.findAllIn(body).size == 1,
           "<w:tr>".r.findAllIn(body).size == 2,
-          body.contains("Contact: Ada"),
+          WordDocx.text(filled.body.toArray).exists(_.contains("Contact: Ada")),
           // the approval checksum covers the rows
           WorkflowDocuments.contentSha256(version) != WorkflowDocuments.contentSha256(
             version.copy(file = version.file.map(f => f.copy(values = f.values + ("positions" -> "[]"))))
@@ -1059,6 +1081,158 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
           brokenXlsx.error.contains("invalid_office_file"),
           audit.contains(FileDocumentApi.FilledFileAction)
         )
+    },
+    test("an uploaded Word file becomes a document of a class through its upload template (DMS-127)") {
+      for
+        s             <- setup.await
+        classes       <- call(author, "GET", "/api/v1/uploads/classes").map(as[List[TemplateClassView]])
+        readerClasses <- call(reader, "GET", "/api/v1/uploads/classes").map(as[List[TemplateClassView]])
+        byReader      <- form(reader, "/api/v1/uploads/fields", "Vertrag.docx", template)
+        analysed      <- form(author, "/api/v1/uploads/fields?language=de", "Vertrag.docx", template)
+          .map(as[UploadAnalysisView])
+        byDesigner <- form(designer, "/api/v1/uploads/fields", "Vertrag.docx", template)
+        preview    <- form(
+          author,
+          "/api/v1/uploads/preview.pdf?language=de",
+          "Vertrag.docx",
+          template,
+          Some("""{"customer":"ACME","deliveryDate":"2027-01-31"}""")
+        )
+        previewed <- lastConversion
+        invalid   <- form(
+          author,
+          "/api/v1/uploads/preview.pdf",
+          "Vertrag.docx",
+          template,
+          Some("""{"deliveryDate":"bald"}""")
+        )
+        notJson   <- form(author, "/api/v1/uploads/preview.pdf", "Vertrag.docx", template, Some("[1]"))
+        first     <- call(author, "POST", s"/api/v1/uploads/classes/${s.classId}/template")
+        second    <- call(author, "POST", s"/api/v1/uploads/classes/${s.classId}/template")
+        notAuthor <- call(designer, "POST", s"/api/v1/uploads/classes/${s.classId}/template")
+        unknown   <- call(author, "POST", s"/api/v1/uploads/classes/${UUID.randomUUID()}/template")
+        upload = as[UploadTemplateView](first)
+        catalog <- ZIO.serviceWithZIO[TemplateService](svc => s.app.transact(tenantId)(svc.catalog))
+        listed  <- ZIO.serviceWithZIO[TemplateService](svc => s.app.transact(tenantId)(svc.list))
+        doc     <- call(
+          author,
+          "POST",
+          "/api/v1/documents",
+          Some(
+            s"""{"templateId":"${upload.templateId}","templateVersion":${upload.version},"title":"Vertrag ACME",""" +
+              s""""values":${values("de")},"kind":"File"}"""
+          )
+        ).map(as[DocumentView])
+        fieldsUrl = s"/api/v1/documents/${doc.id}/versions/${doc.current.id}/word-fields"
+        _ <- put(author, s"/api/v1/documents/${doc.id}/file", "Vertrag.docx", template)
+        _ <- call(
+          author,
+          "PUT",
+          s"/api/v1/documents/${doc.id}/word-fields",
+          Some("""{"values":{"customer":"ACME","deliveryDate":"2027-01-31"}}""")
+        )
+        filled <- call(author, "GET", s"/api/v1/documents/${doc.id}/versions/${doc.current.id}/filled.docx")
+        // the values are cleared; the re-uploaded filled document brings them back
+        _       <- call(author, "PUT", s"/api/v1/documents/${doc.id}/word-fields", Some("""{"values":{}}"""))
+        cleared <- call(author, "GET", fieldsUrl).map(as[WordFieldsView])
+        reuploaded <- put(
+          author,
+          s"/api/v1/documents/${doc.id}/file",
+          "Vertrag-ACME.docx",
+          filled.body.toArray
+        )
+          .map(as[DocumentVersionView])
+        recovered  <- call(author, "GET", fieldsUrl).map(as[WordFieldsView])
+        reanalysed <- form(author, "/api/v1/uploads/fields", "Vertrag-ACME.docx", filled.body.toArray)
+          .map(as[UploadAnalysisView])
+        audit <- actions(upload.templateId)
+      yield
+        val manual =
+          (v: WordFieldsView) => v.fields.filter(_.source == "Manual").map(f => f.key -> f.value).toMap
+        val item  = parts(filled.body.toArray).get("customXml/item1.xml").map(String(_, UTF_8)).getOrElse("")
+        val shown = String(parts(previewed._2.toArray)("word/document.xml"), UTF_8)
+        assertTrue(
+          classes.exists(_.id == s.classId),
+          readerClasses.isEmpty,
+          byReader.status == Status.Forbidden,
+          byDesigner.status == Status.Ok,
+          analysed.word,
+          analysed.fillable,
+          !analysed.filledBefore,
+          analysed.sha256 == sha256(template),
+          analysed.fields.find(_.key == "customer").exists(f => f.source == "Manual" && f.value.isEmpty),
+          analysed.fields.find(_.key == "deliveryDate").exists(_.`type` == "Date"),
+          analysed.fields.find(_.key == "title").flatMap(_.value).contains("Vertrag"),
+          analysed.fields.find(_.key == "version").flatMap(_.value).contains("1.0-draft.1"),
+          // the number is assigned when the document is created
+          analysed.fields.find(_.key == "documentNumber").exists(_.value.isEmpty),
+          preview.status == Status.Ok,
+          preview.header("Content-Type").exists(_.startsWith("application/pdf")),
+          shown.contains("ACME"),
+          shown.contains("31.01.2027"),
+          invalid.status == Status.UnprocessableEntity,
+          notJson.status == Status.UnprocessableEntity,
+          first.status == Status.Ok,
+          as[UploadTemplateView](second) == upload,
+          upload.documentClassId == s.classId,
+          notAuthor.status == Status.Forbidden,
+          unknown.status == Status.NotFound,
+          // the upload template is neither in the catalog nor in the designers' list
+          !catalog.exists(_.templateId.value == upload.templateId),
+          !listed.exists(_.templateId.value == upload.templateId),
+          audit.contains("template.file-upload-version-released"),
+          doc.kind == "File",
+          filled.status == Status.Ok,
+          item.contains("<customer>ACME</customer>"),
+          item.contains("<deliveryDate>2027-01-31</deliveryDate>"),
+          manual(cleared).values.forall(_.isEmpty),
+          // the re-uploaded original is stored unchanged
+          reuploaded.file.exists(_.sha256 == sha256(filled.body.toArray)),
+          manual(recovered) == Map("customer" -> Some("ACME"), "deliveryDate" -> Some("2027-01-31")),
+          reanalysed.filledBefore,
+          reanalysed.fields.find(_.key == "customer").flatMap(_.value).contains("ACME"),
+          reanalysed.fields.map(_.key).contains("deliveryDate")
+        )
+    },
+    test("a designer uses a published Word document as template, without its values (DMS-127)") {
+      for
+        created <- wordTemplate
+        (id, uploaded) = created
+        _   <- release(id, 1)
+        doc <- call(
+          author,
+          "POST",
+          "/api/v1/documents/word",
+          Some(
+            s"""{"templateId":"$id","templateVersion":1,"title":"Vertrag Muster","values":${values("de")}}"""
+          )
+        ).map(as[DocumentView])
+        _ <- call(
+          author,
+          "PUT",
+          s"/api/v1/documents/${doc.id}/word-fields",
+          Some("""{"values":{"customer":"ACME"}}""")
+        )
+        _ <- approveAndPublish(doc.id)
+        url = s"/api/v1/documents/${doc.id}/versions/${doc.current.id}/word-template"
+        byAuthor <- call(author, "POST", url, Some("""{"name":"Aus Dokument"}"""))
+        noName   <- call(designer, "POST", url, Some("""{"name":" "}"""))
+        made <- call(designer, "POST", url, Some("""{"name":"Vertrag aus Dokument","description":"Kopie"}"""))
+        copy = as[WordTemplateView](made)
+        file <- call(designer, "GET", s"/api/v1/admin/templates/${copy.templateId}/versions/1/word/file")
+      yield assertTrue(
+        byAuthor.status == Status.Forbidden,
+        noName.status == Status.UnprocessableEntity,
+        made.status == Status.Created,
+        copy.status == "Draft",
+        copy.version == 1,
+        copy.templateName == "Vertrag aus Dokument",
+        copy.sha256 == sha256(template),
+        copy.fields.map(_.key) == uploaded.fields.map(_.key),
+        file.body.toArray.sameElements(template),
+        // the template's file carries no values
+        !file.text.contains("ACME")
+      )
     },
     test("only Word template uploads and file uploads may stream large bodies") {
       val streamed = Body.fromStreamChunked(ZStream.fromIterable(Array.fill(10)('x'.toByte)))
@@ -1080,9 +1254,13 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
               streamed
             )
           )
+          analysed <- handler(Request.post(URL.decode("/api/v1/uploads/fields").toOption.get, streamed))
+          preview  <- handler(Request.post(URL.decode("/api/v1/uploads/preview.pdf").toOption.get, streamed))
         yield assertTrue(
           file.status == Status.Ok,
           word.status == Status.Ok,
+          analysed.status == Status.Ok,
+          preview.status == Status.Ok,
           fields.status == Status.RequestEntityTooLarge
         )
       )

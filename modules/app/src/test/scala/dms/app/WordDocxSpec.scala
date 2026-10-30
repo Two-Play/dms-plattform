@@ -47,23 +47,38 @@ object WordDocxSpec extends ZIOSpecDefault:
         document.contains("<w:b/>"),
         "showingPlcHdr".r.findAllIn(document).size == 1,
         "PlaceholderText".r.findAllIn(document).size == 1,
-        document.contains("Customer: ACME &amp; Co, signed {{ signingDate }}"),
+        // a filled placeholder becomes a plain text control tagged with its key (DMS-127)
+        WordDocx
+          .paragraphs(filled.toOption.get)
+          .exists(
+            _.exists(_.text == "Customer: ACME & Co, signed {{ signingDate }}")
+          ),
+        document.contains("""<w:tag w:val="customer"/>"""),
         // no value: the control keeps its placeholder text
         document.contains("Name of the customer"),
         header.contains("01.01.2027"),
         // the controls stay, so the document can be filled again
         WordDocx.scan(filled.toOption.get).map(_.map(_.key)) ==
-          Right(List("documentNumber", "signingDate", "Customer", "validFrom"))
+          Right(List("documentNumber", "signingDate", "customer", "Customer", "validFrom"))
       )
     },
     test("only the field parts change; filling is deterministic") {
       val values = Map("documentNumber" -> "1")
       val first  = WordDocx.fill(sample, values).toOption.get
       val second = WordDocx.fill(sample, values).toOption.get
+      val empty  = WordDocx.fill(sample, Map.empty).toOption.get
       assertTrue(
         first.sameElements(second),
-        parts(first)("[Content_Types].xml").sameElements(parts(sample)("[Content_Types].xml")),
-        parts(first).keySet == parts(sample).keySet
+        // the values are added as custom XML part and custom properties (DMS-127), nothing else is added
+        parts(first).keySet == parts(sample).keySet ++ Set(
+          "customXml/item1.xml",
+          "customXml/itemProps1.xml",
+          "customXml/_rels/item1.xml.rels",
+          "docProps/custom.xml"
+        ),
+        // without values nothing is added
+        parts(empty).keySet == parts(sample).keySet,
+        parts(empty)("[Content_Types].xml").sameElements(parts(sample)("[Content_Types].xml"))
       )
     },
     test("multi-line values become line breaks; block-level controls keep one paragraph") {

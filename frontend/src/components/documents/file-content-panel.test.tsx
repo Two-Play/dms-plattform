@@ -122,14 +122,22 @@ function renderPanel(
   editable: boolean,
   upload?: UploadFile<DocumentVersionView>,
   wordFields: WordFields = fields(editable),
+  roles: string[] = ['Author'],
 ) {
   const get = vi.fn((path: string) => {
+    if (path === '/api/v1/me') return ok({ userId: 'u-1', tenantId: 't-1', roles })
     if (path === '/api/v1/users') return ok([{ id: 'author-1', name: 'Ada Author' }])
     if (path.endsWith('/word-fields')) return ok(wordFields)
     return ok(new Blob(['%PDF-1.7']))
   })
   const put = vi.fn(() => ok(v))
-  const client = { GET: get, PUT: put } as unknown as ApiClient
+  const post = vi.fn(() =>
+    ok(
+      { templateId: 'tpl-9', version: 1, templateName: 'Wartungsvertrag Muster', status: 'Draft' },
+      201,
+    ),
+  )
+  const client = { GET: get, PUT: put, POST: post } as unknown as ApiClient
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={queryClient}>
@@ -138,7 +146,7 @@ function renderPanel(
       </ApiClientProvider>
     </QueryClientProvider>,
   )
-  return { get, put, user: userEvent.setup({ applyAccept: false }) }
+  return { get, put, post, user: userEvent.setup({ applyAccept: false }) }
 }
 
 describe('Content of a file document (DMS-115)', () => {
@@ -286,5 +294,55 @@ describe('Content of a file document (DMS-115)', () => {
     expect(screen.getByRole('textbox', { name: 'Item, Zeile 1' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Zeile 1 entfernen' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'Bitte wählen …' })).toBeInTheDocument()
+  })
+
+  it('designers use a Word document as template, without its values (DMS-127)', async () => {
+    const { post, user } = renderPanel(version('Published'), false, undefined, fields(false), [
+      'TemplateDesigner',
+    ])
+    await user.click(await screen.findByRole('button', { name: 'Use as template…' }))
+    const name = screen.getByLabelText('Name of the template')
+    expect(name).toHaveValue('Wartungsvertrag')
+    await user.clear(name)
+    await user.type(name, 'Wartungsvertrag Muster')
+    await user.click(screen.getByRole('button', { name: 'Create template' }))
+
+    await waitFor(() => {
+      expect(post).toHaveBeenCalledWith(
+        '/api/v1/documents/{id}/versions/{versionId}/word-template',
+        {
+          params: { path: { id: documentId, versionId } },
+          body: { name: 'Wartungsvertrag Muster', description: undefined },
+        },
+      )
+    })
+    expect(await screen.findByRole('link', { name: 'Open the template' })).toHaveAttribute(
+      'href',
+      '/templates/tpl-9',
+    )
+  })
+
+  it('only designers see "Use as template", and only for Word documents', async () => {
+    renderPanel(version('Published'), false, undefined, fields(false), ['Author'])
+    expect(await screen.findByText('VT-2026-0007')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Use as template…' })).not.toBeInTheDocument()
+  })
+
+  it('no "Use as template" for other files', async () => {
+    renderPanel(version('Published', 'Budget.xlsx'), false, undefined, fields(false), [
+      'TemplateDesigner',
+    ])
+    expect(await screen.findByText('VT-2026-0007')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Use as template…' })).not.toBeInTheDocument()
+  })
+
+  it('"Use as template" speaks German', async () => {
+    setLocale('de')
+    const { user } = renderPanel(version('Published'), false, undefined, fields(false), [
+      'TemplateDesigner',
+    ])
+    await user.click(await screen.findByRole('button', { name: 'Als Vorlage verwenden …' }))
+    expect(screen.getByLabelText('Name der Vorlage')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Vorlage anlegen' })).toBeInTheDocument()
   })
 })

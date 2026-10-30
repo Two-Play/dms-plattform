@@ -1,0 +1,101 @@
+/** Uploading a finished file as document or template (DMS-127). */
+export const upload = {
+  entry: 'Upload document',
+  title: 'Upload document',
+  description:
+    'Upload a Word document: the platform fills the automatic fields, you fill the others, check the preview and decide at the end whether it becomes a document or a template.',
+  steps: {
+    label: 'Steps',
+    file: 'File',
+    fields: 'Fields',
+    preview: 'Preview',
+    purpose: 'Use',
+    current: 'Step {step} of {total}: {label}',
+    done: 'done',
+  },
+  back: 'Back',
+  next: 'Next',
+  file: {
+    title: 'Choose the file',
+    text: 'A Word document (DOCX) with content controls or {placeholder} placeholders; Excel, PowerPoint and PDF files can become documents as well. Nothing is stored before the last step.',
+    choose: 'File',
+    analysing: 'Reading the fields…',
+    failed: 'The file cannot be used: {message}',
+    notConvertible: 'Files of type .{extension} cannot be archived as PDF/A.',
+    chosen: '{name} · {size}',
+    checksum: 'SHA-256 {sha}',
+    filledBefore:
+      'The platform filled this document before: the values it carries were taken over and can be changed.',
+  },
+  fields: {
+    title: 'Fill the fields',
+    automatic: 'Filled by the platform',
+    automaticText: 'Date, author, number, index, issuing unit and the other automatic fields.',
+    manual: 'Your entries',
+    manualText:
+      'Fields of the file that you fill in. Required ones must be filled before submission.',
+    assignedLater: 'Assigned when the document is created',
+    none: 'The file has no fields.',
+    noManual: 'The file has no fields to fill in.',
+  },
+  preview: {
+    title: 'Check the preview',
+    text: 'The file with the fields filled, marked as preview; the number and the class values follow when the document is created.',
+    loading: 'Converting the document…',
+    failed: 'The preview is not available: {message}',
+    retry: 'Try again',
+    region: 'Preview of {name}',
+  },
+  purpose: {
+    title: 'Decide what the file becomes',
+    legend: 'The file becomes',
+    document: 'A document',
+    documentText:
+      'E.g. a policy or a central instruction: choose the document class, enter its metadata; then review, approval and publication as usual.',
+    template: 'A template',
+    templateText:
+      'E.g. for contracts: a Word template with the fields of this file; after the four-eyes release it can be chosen under "New document".',
+    noDocumentRole: 'Creating documents requires the author or owner role.',
+    noTemplateRole: 'Only template designers can create templates.',
+    notWord: 'Only Word documents (DOCX) can become templates.',
+  },
+  document: {
+    class: 'Document class',
+    chooseClass: 'Choose a class…',
+    loadingClasses: 'Loading classes…',
+    noClasses: 'There is no document class you may create documents in.',
+    prepare: 'Continue with the metadata',
+    preparing: 'Preparing…',
+    prepareFailed: 'The class cannot be used: {message}',
+    metadata:
+      'Enter the title and the metadata of the class. Saving creates the document with your file and the values of its fields.',
+    aside:
+      'The file and the values entered in the previous steps are saved with the draft; the document number is assigned when it is created.',
+    created: 'Document created with your file.',
+    fileFailed:
+      'The document was created, but the file was not taken over: {message}. Upload it on the document page.',
+  },
+  template: {
+    name: 'Name of the template',
+    description: 'Description',
+    class: 'Document class',
+    chooseClass: 'Choose a class…',
+    create: 'Create template',
+    creating: 'Creating…',
+    created: 'Template created as draft. Test it and have it released by a second designer.',
+    failed: 'The template could not be created: {message}',
+  },
+  fromVersion: {
+    action: 'Use as template…',
+    title: 'Use as template',
+    text: 'A new Word template draft with this file and its field definitions, without the values entered here.',
+    name: 'Name of the template',
+    description: 'Description',
+    create: 'Create template',
+    creating: 'Creating…',
+    cancel: 'Cancel',
+    created: 'Template "{name}" created as draft.',
+    open: 'Open the template',
+    failed: 'The template could not be created: {message}',
+  },
+} as const

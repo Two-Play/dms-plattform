@@ -2,7 +2,8 @@ import { t } from '@/i18n'
 
 /**
  * How fields are marked in Word documents (DMS-115, DMS-122, ADR 0042): content controls (typed check boxes,
- * date pickers, drop-down lists, repeating sections) and placeholders, also in Excel and PowerPoint files.
+ * date pickers, drop-down lists, repeating sections) and placeholders, also in Excel and PowerPoint files;
+ * how filled documents keep their keys and values (DMS-127, ADR 0049).
  */
 export function WordFieldHelp() {
   return (
@@ -16,6 +17,7 @@ export function WordFieldHelp() {
         <li>{t('word.help.repeating')}</li>
         <li>{t('word.help.placeholders', { manual: '{{key}}', automatic: '{{dms:key}}' })}</li>
         <li>{t('word.help.office')}</li>
+        <li>{t('word.help.values')}</li>
       </ul>
     </details>
   )

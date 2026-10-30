@@ -3,6 +3,7 @@ import { Download, FileDown, Upload } from 'lucide-react'
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useApiClient } from '@/api/context'
 import { extensionOf } from '@/api/attachments'
+import { hasRole, useMe } from '@/api/me'
 import type { DocumentVersionView } from '@/api/partners'
 import { isOpenVersion } from '@/api/version-view'
 import {
@@ -28,6 +29,7 @@ import { Label } from '@/components/ui/label'
 import { t } from '@/i18n'
 import { formatDateTime, formatFileSize } from '@/i18n/format'
 import { toast } from '@/lib/toast'
+import { UseAsTemplate } from './use-as-template'
 import { WordFieldHelp } from './word-field-help'
 import { WordFieldInput, WordFieldValue } from './word-field-input'
 
@@ -63,6 +65,7 @@ export function FileContentPanel({
   const [uploadError, setUploadError] = useState<string | undefined>(undefined)
   const file = version.file
   const send = upload ?? uploadOriginal(documentId)
+  const me = useMe()
 
   const download = useMutation({
     mutationFn: (kind: 'original' | 'filled') =>
@@ -179,6 +182,9 @@ export function FileContentPanel({
               </>
             )}
           </div>
+          {file && isWordFile(file.name) && hasRole(me.data, 'TemplateDesigner') && (
+            <UseAsTemplate documentId={documentId} versionId={version.id} fileName={file.name} />
+          )}
           {editable && <p className="text-xs text-muted-foreground">{t('word.file.accepted')}</p>}
           {uploadError && (
             <p role="alert" className="text-destructive">

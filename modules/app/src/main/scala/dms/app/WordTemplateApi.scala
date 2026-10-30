@@ -298,10 +298,10 @@ object WordTemplateApi:
   def isUpload(method: zio.http.Method, path: zio.http.Path): Boolean =
     method == zio.http.Method.PUT && UploadPath.matches(path.encode)
 
-  private type Work[A] =
+  private[app] type Work[A] =
     ZIO[TemplateService & WordTemplateService, DocumentError | TemplateError | AccessDenied, A]
 
-  private def inTransaction[A](p: Principal, action: Action)(
+  private[app] def inTransaction[A](p: Principal, action: Action)(
       body: Work[A]
   ): ZIO[Env, (StatusCode, ApiError), A] =
     (for
@@ -333,7 +333,7 @@ object WordTemplateApi:
       .serviceWithZIO[WordTemplateService](_.get(TemplateId(id), version))
       .someOrFail(DocumentError.NotFound(s"template $id version $version is not a Word template"))
 
-  private def viewOf(id: UUID, version: Int): Work[WordTemplateView] =
+  private[app] def viewOf(id: UUID, version: Int): Work[WordTemplateView] =
     viewIf(id, version, _ => true).someOrFail(
       DocumentError.NotFound(s"template $id version $version is not a Word template")
     )

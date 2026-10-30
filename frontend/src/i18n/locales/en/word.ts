@@ -71,6 +71,8 @@ export const word = {
       'Alternatively write {manual} or {automatic} in the text; a placeholder split by formatting is still found and takes the formatting of its first part.',
     office:
       'Excel (.xlsx) and PowerPoint (.pptx) files: placeholders in cells and on slides are filled as text.',
+    values:
+      'Filling keeps the keys: content controls keep tag and title, a filled placeholder becomes a plain text control tagged with its key, and every value is also stored in the document (custom document properties dms.<key> and a custom XML part bound to the plain text controls). A filled document uploaded again brings its values back.',
   },
   templates: {
     badge: 'Word',

@@ -166,6 +166,105 @@ final class TemplateService(audit: AuditTrail, profiles: ProfileSource, limits: 
   def version(id: TemplateId, number: Int): IO[TemplateError, TemplateVersion] =
     sql(TemplateStore.version(id, number)).someOrFail(versionNotFound(id, number))
 
+  /** The released version of the upload template of a document class (DMS-127, ADR 0049) for the class
+    * version `classVersion`, created on demand: a template with empty structured content from which file
+    * documents of the class are created when a finished file is uploaded without choosing a template. Its
+    * versions are released by the platform ([[TemplateService.FileUploadReleaser]]) when they are created;
+    * when the class has a newer version, a new released version binding it is added and the previous one is
+    * deprecated. Upload templates are listed neither in the catalog nor in the designers' list. Safe against
+    * concurrent callers.
+    */
+  def fileUploadTemplate(
+      classId: UUID,
+      classVersion: Int,
+      name: String,
+      actor: UserId
+  ): IO[TemplateError, TemplateVersion] =
+    for
+      id       <- uploadTemplateOf(classId, actor)
+      versions <- sql(TemplateStore.versions(id))
+      current = versions.filter(_.status == TemplateStatus.Released).maxByOption(_.version)
+      version <- current match
+        case Some(v) if v.documentClassVersion == classVersion => ZIO.succeed(v)
+        case _                                                 =>
+          releaseUploadVersion(id, versions, current, classId, classVersion, name, actor)
+    yield version
+
+  private def uploadTemplateOf(classId: UUID, actor: UserId): IO[TemplateError, TemplateId] =
+    sql(TemplateStore.fileUploadTemplate(classId)).flatMap {
+      case Some(id) => ZIO.succeed(id)
+      case None     =>
+        val id = TemplateId.random()
+        sql(TemplateStore.insertFileUploadTemplate(id, classId, actor)).flatMap { added =>
+          if added then ZIO.succeed(id)
+          else
+            sql(TemplateStore.fileUploadTemplate(classId))
+              .someOrFail(TemplateError.Conflict(s"the upload template of class $classId vanished"))
+        }
+    }
+
+  private def releaseUploadVersion(
+      id: TemplateId,
+      versions: List[TemplateVersion],
+      current: Option[TemplateVersion],
+      classId: UUID,
+      classVersion: Int,
+      name: String,
+      actor: UserId
+  ): IO[TemplateError, TemplateVersion] =
+    for
+      now <- Clock.instant
+      next = TemplateVersion(
+        id,
+        versions.map(_.version).maxOption.getOrElse(0) + 1,
+        name,
+        Some("Created by the platform for files uploaded as documents of this class"),
+        classId,
+        classVersion,
+        TemplateStatus.Released,
+        TemplateContent(Nil),
+        actor,
+        now
+      )
+      added   <- sql(TemplateStore.insertReleasedVersion(next, FileUploadReleaser, now))
+      created <-
+        if added then
+          for
+            _ <- ZIO.foreachDiscard(current)(old =>
+              sql(
+                TemplateStore.changeStatus(
+                  id,
+                  old.version,
+                  TemplateStatus.Released,
+                  TemplateStatus.Deprecated,
+                  FileUploadReleaser,
+                  now
+                )
+              )
+            )
+            v <- version(id, next.version)
+            _ <- record(
+              actor,
+              "template.file-upload-version-released",
+              v,
+              Json.Obj(
+                "releasedBy" -> Json.Str(FileUploadReleaser.value),
+                "deprecated" -> current.fold[Json](Json.Null)(o => Json.Num(o.version))
+              )
+            )
+          yield v
+        else
+          // another transaction added it at the same time: use the version released now
+          sql(TemplateStore.versions(id)).flatMap(vs =>
+            ZIO
+              .fromOption(
+                vs.filter(v => v.status == TemplateStatus.Released && v.documentClassVersion == classVersion)
+                  .maxByOption(_.version)
+              )
+              .orElseFail(TemplateError.Conflict(s"template ${id.value} was changed concurrently"))
+          )
+    yield created
+
   /** The latest version of every template, for template designers. */
   def list: IO[TemplateError, List[TemplateVersion]] = sql(TemplateStore.latestVersions())
 
@@ -332,6 +431,10 @@ private[core] final class LruCache[K, V](maxEntries: Int):
   def size: Int                   = entries.synchronized(entries.size)
 
 object TemplateService:
+
+  /** Who releases the versions of upload templates of classes (DMS-127): the platform, not a person. */
+  val FileUploadReleaser: UserId = UserId("system:file-upload")
+
   val layer: URLayer[AuditTrail & ProfileSource, TemplateService] =
     ZLayer.fromFunction((audit: AuditTrail, profiles: ProfileSource) => TemplateService(audit, profiles))
 

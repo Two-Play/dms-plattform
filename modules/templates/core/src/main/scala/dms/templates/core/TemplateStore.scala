@@ -53,25 +53,60 @@ private[core] object TemplateStore:
               from dms.template_version where template_id = ${id.value} and version = $version"""
     query.query[Row].run().headOption.map(toVersion)
 
-  /** The latest version of every template. */
+  /** The latest version of every template, without the upload templates of classes (V32). */
   def latestVersions()(using DbTx): List[TemplateVersion] =
     sql"""select distinct on (template_id) template_id, version, name, description, document_class_id, document_class_version, status, content,
                  created_by, created_at, to_jsonb(edited_by), released_by, released_at
-          from dms.template_version order by template_id, version desc"""
+          from dms.template_version v
+          where not exists (select 1 from dms.template t
+                            where t.id = v.template_id and t.file_upload_class_id is not null)
+          order by template_id, version desc"""
       .query[Row]
       .run()
       .map(toVersion)
       .toList
 
-  /** All released versions, by name and version. */
+  /** All released versions, by name and version, without the upload templates of classes (V32). */
   def released()(using DbTx): List[TemplateVersion] =
     sql"""select template_id, version, name, description, document_class_id, document_class_version, status, content,
                  created_by, created_at, to_jsonb(edited_by), released_by, released_at
-          from dms.template_version where status = 'Released' order by name, template_id, version"""
+          from dms.template_version v
+          where status = 'Released'
+            and not exists (select 1 from dms.template t
+                            where t.id = v.template_id and t.file_upload_class_id is not null)
+          order by name, template_id, version"""
       .query[Row]
       .run()
       .map(toVersion)
       .toList
+
+  /** The upload template of a class (V32, DMS-127), if it exists. */
+  def fileUploadTemplate(classId: UUID)(using DbTx): Option[TemplateId] =
+    sql"""select id from dms.template where file_upload_class_id = $classId"""
+      .query[UUID]
+      .run()
+      .headOption
+      .map(TemplateId(_))
+
+  /** Inserts the upload template of a class unless another transaction did; whether it was inserted. */
+  def insertFileUploadTemplate(id: TemplateId, classId: UUID, createdBy: UserId)(using DbTx): Boolean =
+    sql"""insert into dms.template (id, tenant_id, created_by, file_upload_class_id)
+          values (${id.value}, dms.current_tenant(), ${createdBy.value}, $classId)
+          on conflict (tenant_id, file_upload_class_id) where file_upload_class_id is not null
+          do nothing""".update.run() == 1
+
+  /** Inserts a version that is released at once (upload templates, V32); whether it was inserted. */
+  def insertReleasedVersion(v: TemplateVersion, releasedBy: UserId, at: Instant)(using DbTx): Boolean =
+    val time = OffsetDateTime.ofInstant(at, ZoneOffset.UTC)
+    sql"""insert into dms.template_version
+            (tenant_id, template_id, version, name, description, document_class_id, document_class_version,
+             status, content, content_format, created_by, status_changed_by, status_changed_at, released_by,
+             released_at)
+          values (dms.current_tenant(), ${v.templateId.value}, ${v.version}, ${v.name}, ${v.description},
+                  ${v.documentClassId}, ${v.documentClassVersion}, 'Released',
+                  ${Jsonb(ContentJson.encodeStored(v.content))}, ${ContentJson.FormatVersion},
+                  ${v.createdBy.value}, ${releasedBy.value}, $time, ${releasedBy.value}, $time)
+          on conflict (template_id, version) do nothing""".update.run() == 1
 
   def insertTemplate(id: TemplateId, createdBy: UserId)(using DbTx): Unit =
     val _ = sql"""insert into dms.template (id, tenant_id, created_by)
