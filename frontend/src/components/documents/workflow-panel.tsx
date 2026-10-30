@@ -9,13 +9,31 @@ import { decisionLabel, myTasksQuery, type WorkflowTask } from '@/api/workflow'
 import { roleLabel } from '@/components/shared/role-label'
 import { UserName, UserNames } from '@/components/shared/user-name'
 import { t } from '@/i18n'
-import { formatDateTime } from '@/i18n/format'
+import { formatDate, formatDateTime } from '@/i18n/format'
 import { PendingVoteNotice } from '@/components/tasks/pending-vote-notice'
 import { VoteDialog, type VoteDraft } from '@/components/tasks/vote-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatusBadge } from './status-badge'
 import { statusLabel } from './status-label'
+
+/** The deadline of an open task (DMS-87), marked when it has passed. */
+function DueDate({ dueAt }: { dueAt: string }) {
+  const [now] = useState(() => Date.now())
+  const overdue = Date.parse(dueAt) < now
+  return (
+    <span className="text-muted-foreground">
+      {' · '}
+      {t('docPanels.workflow.dueOn', { date: formatDate(dueAt) })}
+      {overdue && (
+        <Badge variant="destructive" className="ml-1">
+          {t('common.overdue')}
+        </Badge>
+      )}
+    </span>
+  )
+}
 
 function CaseDetails({ workflowCase, version }: { workflowCase: WorkflowCase; version: string }) {
   const tasks = (workflowCase.tasks ?? []).filter((task) => task.round === workflowCase.round)
@@ -85,6 +103,7 @@ function CaseDetails({ workflowCase, version }: { workflowCase: WorkflowCase; ve
                         {t('docPanels.workflow.by')} <UserName id={task.completedBy} />
                       </span>
                     )}
+                    {task.status === 'Open' && task.dueAt && <DueDate dueAt={task.dueAt} />}
                   </td>
                   <td className="py-1.5 text-muted-foreground">
                     {task.status === 'Waiting' ? (

@@ -19,6 +19,9 @@ enum NotificationCategory(val key: String, val emailByDefault: Boolean):
   /** Review and approval tasks assigned, returned, approved; participants missing. */
   case Workflow extends NotificationCategory("workflow", true)
 
+  /** Deadlines of review and approval tasks: reminders, overdue tasks, escalations (DMS-87). */
+  case Deadline extends NotificationCategory("deadline", true)
+
   /** Acknowledgements required and reminders of open ones. */
   case Acknowledgement extends NotificationCategory("acknowledgement", true)
 

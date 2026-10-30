@@ -15,7 +15,8 @@ Layout: `api` holds public types, `core` the implementation. Other modules may o
 - `ApprovalWorkflow`: `define`, `definitions`, `start` (after submission, or the next round of a returned case), `vote`, `completeApproval` (called by the rendering job), `myTasks`, `task`, `cases`, `caseOfVersion`, `resolveParticipants`. Every method runs inside `Db.transact(tenant)`; engine calls, status changes (through the `DocumentGateway` port), votes, audit entries and outbox events commit together. Votes lock the case row.
 - `Rules`: pure rules: participants with the four-eyes rule, resume vs. reset after a return (content checksum), vote checks (reason, step-up window), return events.
 - `Bpmn`: generates the BPMN model of a definition (resume gateway, conditional steps, parallel lanes).
-- `FlowableEngine`: the embedded Flowable 8 engine (schema `flowable`, table prefix, async executor off) and `migrateSchema` for `dms.app.Migrate`. `SharedTransaction`: the only code using Flowable `impl` packages; joins the `Db.transact` connection. `SharedTransactionSpec` must pass on every Flowable upgrade.
+- `FlowableEngine`: the embedded Flowable 8 engine (schema `flowable`, table prefix, async executor off) and `migrateSchema` for `dms.app.Migrate`. `SharedTransaction`: the only code using Flowable `impl` packages; joins the `Db.transact` connection. Commit hook (DMS-87, ADR 0053): `COMMITTING` listeners fire at the end of an engine call, `COMMITTED` listeners after the outer commit and `ROLLED_BACK` listeners after a rollback (`Db.afterCommit` / `Db.afterRollback`). `SharedTransactionSpec` must pass on every Flowable upgrade.
+- Deadlines (DMS-87, ADR 0053): `Deadlines` (pure: working days Monday to Friday in the tenant's time zone, policy precedence step → workflow → tenant → installation, the stage at a time), `DeadlineJobs` (`workflow.deadline-check` per tenant every `dms.workflow.deadlineCheckSeconds`), `ApprovalWorkflow.dueDeadlineNotices` / `noticeDeadline` / `deadlineSettings` / `changeDeadlineSettings` / `resetDeadlineSettings`.
 - Ports implemented by `app`: `DocumentGateway` (version under review with content SHA-256, lifecycle events), `ParticipantDirectory` (role holders in scope, tenant administrators, a person's role assignments for deputies), `ExtraReviewCheck` (`DocumentVersion.requiresExtraReview`). `WorkflowConfig.reauthenticationWindow` is the step-up window.
 
 ## Behaviour
@@ -27,6 +28,18 @@ Layout: `api` holds public types, `core` the implementation. Other modules may o
 - Discarding the draft (DMS-129, ADR 0050): `ApprovalWorkflow.discard(versionId, actor)` cancels open and waiting tasks of the version's case, deletes a running process instance and sets the case to `Discarded` (migration V31), audited as `workflow.discarded`.
 - Approval votes need a sign-in (`auth_time`) within `dms.workflow.reauthenticationSeconds` (default 300 s); otherwise 401 `reauthentication_required`, and the client re-authenticates with OIDC `max_age=0` or `prompt=login` and votes again. The `auth_time` comes from the OIDC ID token in header `X-DMS-Id-Token` (ZITADEL access tokens have none, DMS-86) or from the access token.
 - Disabling the four-eyes rule needs a reason and is audited (`workflow.four-eyes-disabled`). The final approver must still differ from the author (ADR 0021).
+
+## Deadlines, reminder and escalation (DMS-87, ADR 0053)
+
+- Policy: `DeadlinePolicy(dueWorkingDays, reminderWorkingDays, escalationWorkingDays, escalateTo)` with `escalateTo` ⊆ `Owner`, `ComplianceOfficer`, `TenantAdmin`. A step may set `dueWorkingDays` (0: none for this step), the workflow definition `deadlines`; else the tenant's default (`dms.workflow_deadline_settings`), else the installation's (`dms.workflow.dueWorkingDays` 5, `reminderWorkingDays` 1, `escalationWorkingDays` 2, `escalateTo` Owner).
+- A new task stores `due_at` (23:59:59 local time of the N-th working day after its creation day), `remind_at` and `escalate_at` (migration V35). Tasks from before V35 have no deadline; policy changes apply to new tasks.
+- The deadline check publishes per open task the notice of the latest stage reached, once (`dms.workflow_task_deadline_notice`): `workflow.task-due-soon` (candidates), `workflow.task-overdue` (candidates and active deputies), `workflow.task-escalated` (also the escalation targets), each with an audit entry (`workflow.task-reminded`, `workflow.task-overdue`, `workflow.task-escalated`, actor `system:workflow-deadlines`). Payload: case, task, document, version, step and step name, `dueAt`, `dueOn` (local date), `recipients`, `deputies`, `escalatedTo`. The notifications module delivers them (category `deadline`).
+
+| Method | Path | Purpose | Authorization |
+|---|---|---|---|
+| GET / PUT / DELETE | `/api/v1/admin/workflow-deadlines` | The tenant's default deadlines; `source` tenant or installation; 422 if invalid; audited | `Configure` Workflows |
+
+Task views carry `dueAt`; workflow definitions `deadlines` and per step `dueWorkingDays`.
 
 ## Tables (migration V11)
 

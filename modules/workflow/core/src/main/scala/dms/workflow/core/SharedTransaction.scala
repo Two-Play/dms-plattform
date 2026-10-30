@@ -30,10 +30,12 @@ import scala.collection.mutable.ListBuffer
   * neither commits nor closes that connection; `Db.transact` does. Covered by `SharedTransactionSpec`, which
   * must pass on every Flowable upgrade.
   *
-  * Flowable's transaction listeners are collected per engine call and fired when the call returns:
-  * `COMMITTING` and `COMMITTED` after success, `ROLLED_BACK` after a failure. They therefore fire before the
-  * outer commit. That is safe as long as the async executor is off (ADR 0024); with timers it has to move to
-  * a commit hook of `Db`.
+  * Flowable's transaction listeners are collected per engine call. `COMMITTING` fires when the call returns
+  * successfully, still on the bound connection (like Spring's "before commit"). `COMMITTED` and a later
+  * `ROLLED_BACK` are handed back with [[SharedTransaction.call]] and fired by [[FlowableEngine.run]] through
+  * the commit hooks of `Db` (`Db.afterCommit` / `Db.afterRollback`, DMS-87, ADR 0053): engine side effects
+  * that must only happen once the business transaction is durable run after the outer commit, and not at all
+  * if it rolls back. A failing engine call fires `ROLLED_BACK` at once (a failed command flushes nothing).
   */
 object SharedTransaction:
 
@@ -49,6 +51,9 @@ object SharedTransaction:
       val matching = listeners.synchronized(listeners.filter(_._1 == state).toList)
       matching.foreach((_, listener, context) => listener.execute(context))
 
+    /** Whether listeners for `state` were registered. */
+    def listensTo(state: TransactionState): Boolean = listeners.synchronized(listeners.exists(_._1 == state))
+
   private val current = new ThreadLocal[Joined]
 
   def bound: Option[Joined] = Option(current.get)
@@ -57,10 +62,13 @@ object SharedTransaction:
   final class RollbackOnly
       extends RuntimeException("the workflow engine marked the transaction rollback-only")
 
-  /** Runs `f` (engine calls) on `connection`, which belongs to the caller's open transaction. Fails if
-    * Flowable marked the transaction rollback-only, so that the caller rolls back.
+  /** Runs `f` (engine calls) on `connection`, which belongs to the caller's open transaction, and fires the
+    * `COMMITTING` listeners. Returns the result and the transaction state, whose `COMMITTED` and
+    * `ROLLED_BACK` listeners the caller fires once the outer transaction committed or rolled back. Fails if
+    * Flowable marked the transaction rollback-only, so that the caller rolls back; a failure fires
+    * `ROLLED_BACK` at once.
     */
-  def joined[A](connection: Connection)(f: => A): A =
+  def call[A](connection: Connection)(f: => A): (A, Joined) =
     val tx       = Joined(connection)
     val previous = current.get
     current.set(tx)
@@ -73,8 +81,7 @@ object SharedTransaction:
             throw t
       if tx.rollbackOnly then throw RollbackOnly()
       tx.fire(TransactionState.COMMITTING)
-      tx.fire(TransactionState.COMMITTED)
-      result
+      (result, tx)
     catch
       case t: Throwable =>
         try tx.fire(TransactionState.ROLLED_BACK)
@@ -93,13 +100,14 @@ object SharedTransaction:
     val connection = dataSource.getConnection
     try
       connection.setAutoCommit(false)
-      val result =
-        try joined(connection)(f)
+      val (result, tx) =
+        try call(connection)(f)
         catch
           case t: Throwable =>
             connection.rollback()
             throw t
       connection.commit()
+      tx.fire(TransactionState.COMMITTED)
       result
     finally
       connection.setAutoCommit(true)

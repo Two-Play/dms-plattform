@@ -6,6 +6,9 @@ import dms.db.queue.Outbox
 import dms.db.{Db, DbConfig, Jsonb, Migrations}
 import dms.kernel.TenantId
 import dms.workflow.*
+import org.flowable.common.engine.impl.cfg.TransactionState
+import org.flowable.common.engine.impl.context.Context
+import org.flowable.common.engine.impl.interceptor.{Command, CommandContext}
 import org.flowable.engine.ProcessEngine
 import org.testcontainers.utility.DockerImageName
 import zio.*
@@ -261,6 +264,83 @@ object SharedTransactionSpec extends ZIOSpecDefault:
         result._1 != result._3,
         result._4 == result._1,
         result._5 == List("task.review.reviewer")
+      )
+    },
+    test(
+      "commit hook: the engine's COMMITTED listeners run after the outer commit, never on rollback (DMS-87)"
+    ) {
+      for
+        e      <- ZIO.service[Env]
+        events <- Ref.make(List.empty[String])
+        record = (what: String) =>
+          Unsafe.unsafe(implicit u => Runtime.default.unsafe.run(events.update(_ :+ what)).getOrThrow())
+        listen = (engine: ProcessEngine) =>
+          engine.getManagementService.executeCommand(new Command[Unit]:
+            def execute(context: CommandContext): Unit =
+              val tx = Context.getTransactionContext
+              tx.addTransactionListener(TransactionState.COMMITTING, _ => record("committing"))
+              tx.addTransactionListener(TransactionState.COMMITTED, _ => record("committed"))
+              tx.addTransactionListener(TransactionState.ROLLED_BACK, _ => record("rolled-back")))
+        _ <- e.app
+          .transact(e.tenant)(
+            e.flowable.run(listen) *> events.get.flatMap(seen =>
+              events.update(_ :+ s"before commit: ${seen.mkString(",")}")
+            )
+          )
+          .mapError(err => RuntimeException(err.toString))
+        afterCommit <- events.getAndSet(Nil)
+        failed      <- e.app
+          .transact(e.tenant)(
+            e.flowable.run(listen) *> ZIO.fail(WorkflowError.Conflict("business rule failed"))
+          )
+          .either
+        afterRollback <- events.getAndSet(Nil)
+        engineFailed  <- e.app
+          .transact(e.tenant)(
+            e.flowable.run { engine =>
+              listen(engine)
+              throw IllegalStateException("engine call failed")
+            }
+          )
+          .either
+        afterEngineFailure <- events.get
+      yield assertTrue(
+        afterCommit == List("committing", "before commit: committing", "committed"),
+        failed.isLeft,
+        afterRollback == List("committing", "rolled-back"),
+        engineFailed.isLeft,
+        // a failed engine call rolls its listeners back at once; the transaction then rolls back as well
+        afterEngineFailure.headOption.contains("rolled-back"),
+        !afterEngineFailure.contains("committed")
+      )
+    },
+    test("commit hooks of Db: after commit or after rollback, failures logged, not outside a transaction") {
+      for
+        e    <- ZIO.service[Env]
+        seen <- Ref.make(List.empty[String])
+        ok   <- e.app
+          .transact(e.tenant)(
+            Db.afterCommit(seen.update(_ :+ "commit-1")) *>
+              Db.afterCommit(ZIO.die(RuntimeException("hook failed"))) *>
+              Db.afterCommit(seen.update(_ :+ "commit-2")) *>
+              Db.afterRollback(seen.update(_ :+ "rollback")) *> seen.get
+          )
+          .mapError(err => RuntimeException(err.toString))
+        committed <- seen.getAndSet(Nil)
+        failed    <- e.app
+          .transact(e.tenant)(
+            Db.afterCommit(seen.update(_ :+ "commit")) *> Db.afterRollback(seen.update(_ :+ "rollback")) *>
+              ZIO.fail("boom")
+          )
+          .either
+        rolledBack <- seen.get
+        outside    <- Db.afterCommit(ZIO.unit).either
+      yield assertTrue(
+        ok.isEmpty,
+        committed == List("commit-1", "commit-2"),
+        failed.isLeft,
+        rolledBack == List("rollback"),
+        outside.isLeft
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

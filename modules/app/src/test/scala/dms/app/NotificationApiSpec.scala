@@ -291,7 +291,7 @@ object NotificationApiSpec extends ZIOSpecDefault:
         initial.tenantLanguage == "de",
         initial.emailAvailable,
         initial.categories.map(_.category) ==
-          List("workflow", "acknowledgement", "deputyship", "publication", "legal-hold"),
+          List("workflow", "deadline", "acknowledgement", "deputyship", "publication", "legal-hold"),
         initial.categories.forall(c => c.email == c.emailByDefault),
         changed.language.contains("en"),
         changed.categories.find(_.category == "workflow").exists(!_.email),

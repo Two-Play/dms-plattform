@@ -181,6 +181,7 @@ const runningCase: WorkflowCase = {
       candidates: ['reviewer-1'],
       status: 'Open',
       createdAt: '2026-10-22T10:00:00Z',
+      dueAt: '2026-10-27T22:59:59Z',
     },
   ],
   votes: [],
@@ -441,6 +442,9 @@ describe('Document page with a draft', () => {
     expect(within(workflow).getByText('Running')).toBeInTheDocument()
     expect(within(workflow).getByText(/current step: Legal review/)).toBeInTheDocument()
     expect(within(workflow).getByText('reviewer-1')).toBeInTheDocument()
+    // the deadline of the open task (DMS-87), past: marked overdue
+    expect(within(workflow).getByText(/due 27 Oct 2026/)).toBeInTheDocument()
+    expect(within(workflow).getByText('Overdue')).toBeInTheDocument()
     expect(screen.getAllByText('In review').length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: 'Save draft' })).not.toBeInTheDocument()
     expect(post).toHaveBeenCalledWith('/api/v1/documents/{id}/submit', {

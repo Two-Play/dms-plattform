@@ -159,11 +159,13 @@ export function NotificationsPage() {
   )
 }
 
-type CategoryKey = 'workflow' | 'acknowledgement' | 'deputyship' | 'publication' | 'legal-hold'
+type CategoryKey =
+  'workflow' | 'deadline' | 'acknowledgement' | 'deputyship' | 'publication' | 'legal-hold'
 
 function categoryKey(category: string): CategoryKey {
   switch (category) {
     case 'workflow':
+    case 'deadline':
     case 'acknowledgement':
     case 'deputyship':
     case 'publication':

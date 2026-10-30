@@ -23,6 +23,7 @@ export const docPanels: Translation<typeof en.docPanels> = {
     assignedTo: 'Zugewiesen an',
     by: 'von',
     nobody: 'Noch niemand hat diese Rolle',
+    dueOn: 'fällig am {date}',
     voteDetail: '{decision} (Runde {round}, {step})',
     invalidated: '(durch eine spätere Änderung ungültig)',
     yourTask: 'Ihre Aufgabe:',

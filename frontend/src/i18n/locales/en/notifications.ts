@@ -22,6 +22,7 @@ export const notifications = {
   received: 'Received {date}',
   categories: {
     workflow: 'Reviews and approvals',
+    deadline: 'Deadlines and escalations',
     acknowledgement: 'Read confirmations',
     deputyship: 'Deputies',
     publication: 'Publications of my documents',
@@ -69,6 +70,7 @@ export const notifications = {
     failed: 'The settings were not saved: {message}',
     hints: {
       workflow: 'Tasks assigned to you, returned or approved versions, missing participants.',
+      deadline: 'Reminders before a task is due, overdue tasks and escalations.',
       acknowledgement: 'Documents you have to read and reminders of open read confirmations.',
       deputyship: 'Deputies set for you or by you, their start and end.',
       publication: 'A document you own became valid.',

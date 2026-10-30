@@ -6,7 +6,7 @@ Layout: `api` holds public types and the ports, `core` the implementation. Other
 
 ## `api` (package `dms.notifications`)
 
-- `NotificationCategory`: `workflow`, `acknowledgement`, `deputyship`, `publication`, `legal-hold`, each with an email default (all on except legal holds). `Channel`: `in-app`, `email`. `Language`: `de`, `en`.
+- `NotificationCategory`: `workflow`, `deadline` (DMS-87), `acknowledgement`, `deputyship`, `publication`, `legal-hold`, each with an email default (all on except legal holds). `Channel`: `in-app`, `email`. `Language`: `de`, `en`.
 - `Notice(kind, category, recipients, document, params)`: what an outbox event means for whom. `params` never hold document titles.
 - Ports implemented by `app`:
   - `NotificationEvents` (`concerns`, `describe`): outbox event → notices (`PlatformNotificationEvents`).
@@ -22,7 +22,7 @@ Layout: `api` holds public types and the ports, `core` the implementation. Other
   - Job `notifications.deliver`: preference check again (email off → `skipped`), read check (`NotificationDocuments`), rendering in the recipient's language (their choice, else the tenant's), then in-app: insert into `dms.notification` (id = delivery id, exactly once); email: address from the directory (none → `skipped`), send; failure → `retrying` and the job runner's backoff, after `maxAttempts` → `dead`.
   - `redeliver(id)`: a dead delivery back to `pending` with a new job.
   - Job `notifications.purge` (daily per tenant, `tick`/`schedule`): deletes read notifications and delivered/skipped deliveries older than the retention.
-- `NotificationTemplates`: German and English subject, text and link per kind; `email` adds greeting, absolute link and footer. Kinds: `workflow.task-assigned`, `workflow.changes-requested`, `workflow.rejected`, `workflow.approved`, `workflow.participant-missing`, `acknowledgement.requested`, `acknowledgement.reminder`, `deputyship.created|started|ended|ended-by-period`, `publication.published`, `legal-hold.created|released`. Without read permission the text names "a document" and no title.
+- `NotificationTemplates`: German and English subject, text and link per kind; `email` adds greeting, absolute link and footer. Kinds: `workflow.task-assigned`, `workflow.changes-requested`, `workflow.rejected`, `workflow.approved`, `workflow.participant-missing`, `workflow.task-due-soon`, `workflow.task-overdue`, `workflow.task-escalated`, `acknowledgement.requested`, `acknowledgement.reminder`, `deputyship.created|started|ended|ended-by-period`, `publication.published`, `legal-hold.created|released`. Without read permission the text names "a document" and no title.
 - `NotificationInbox`: the caller's page, unread count, mark read, mark all read, preferences.
 - `NotificationStore`: SQL for deliveries, notifications, preferences, the tenant's language and time zone.
 - `SmtpMailSender(SmtpConfig)`: Jakarta Mail (Eclipse Angus), plain-text UTF-8, `Message-ID` from the delivery id, `Content-Language`, `Auto-Submitted: auto-generated`; security `starttls` (default), `tls` or `none`.
@@ -35,6 +35,9 @@ Layout: `api` holds public types and the ports, `core` the implementation. Other
 | `workflow.returned` | `workflow.changes-requested` / `workflow.rejected` | author and owner | workflow |
 | `workflow.approved` | `workflow.approved` | author and owner, not the approver | workflow |
 | `workflow.participant-missing` | `workflow.participant-missing` | tenant administrators | workflow |
+| `workflow.task-due-soon` (DMS-87) | `workflow.task-due-soon` | candidates | deadline |
+| `workflow.task-overdue` (DMS-87) | `workflow.task-overdue` | candidates and their active deputies | deadline |
+| `workflow.task-escalated` (DMS-87) | `workflow.task-escalated` | candidates, deputies and the escalation targets (owner, compliance officers, administrators) | deadline |
 | `document.acknowledgement-requested` (new) | `acknowledgement.requested` | the asked recipients | acknowledgement |
 | `document.acknowledgement-reminder` | `acknowledgement.reminder` | the reminded readers | acknowledgement |
 | `workflow.deputyship-created`, `-started`, `-ended`, `-ended-by-period` | `deputyship.*` | principal and deputy (different texts) | deputyship |

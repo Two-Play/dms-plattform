@@ -94,6 +94,10 @@ The follow-up "rendering fills the rendition before the last approval vote" is i
 
 **Reversibility: high.** The ID token check is confined to `TokenVerifier.verifyIdToken`, `Authenticator.authenticate` and `SecuredApi.stepUp`; switching to another source of `auth_time` only changes how `Principal.authenticatedAt` is filled.
 
+## Addendum (DMS-87, 2026-10-30): deadlines and commit hook
+
+The follow-up "deadlines, reminders and escalation (enable the async executor; move listener firing to a commit hook in `Db`)" is implemented, see [ADR 0053](0053-workflow-deadlines-escalation-and-commit-hook.md): deadlines are columns of `dms.workflow_task` with a periodic check job instead of Flowable timers, so the async executor stays off. The commit hook exists anyway: `Db.afterCommit` / `Db.afterRollback`, and `FlowableEngine.run` fires the engine's `COMMITTED` listeners after the outer commit and its `ROLLED_BACK` listeners after a rollback (`COMMITTING` still at the end of the engine call). The negative consequence "Flowable listeners fire at the end of each engine call, before the outer commit" no longer applies. The follow-up "notifications module consumes `workflow.participant-missing`, `workflow.returned`, `workflow.approved`" is done by DMS-130 (ADR 0052).
+
 ## Addendum (DMS-49, 2026-10-28): deputies
 
 The follow-up "delegation" is implemented for workflow participants as time-limited deputyships, see [ADR 0028](0028-deputies-for-workflow-participants.md). Candidates stay a snapshot (decision 4); deputies of candidates are resolved whenever a task is read or voted on, the principal keeps the task. Votes and approvals record `acting_for` (migration V14), audit entries `on_behalf_of`. Owner confirmations (DMS-46) are not forwarded (DMS-88).

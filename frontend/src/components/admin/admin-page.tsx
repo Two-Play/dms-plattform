@@ -10,6 +10,7 @@ import { DeputyshipForm } from '@/components/deputies/deputyship-form'
 import { DeputyshipTable } from '@/components/deputies/deputyship-table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { DeadlinesPanel } from './deadlines-panel'
 import { t } from '@/i18n'
 import { AcknowledgementSettingsPanel } from './acknowledgement-settings-panel'
 import { GroupsPanel } from './groups-panel'
@@ -79,6 +80,7 @@ export function AdminPage() {
           <TabsTrigger value="number-ranges">{t('admin.tabNumberRanges')}</TabsTrigger>
           <TabsTrigger value="acknowledgements">{t('ackSettings.tab')}</TabsTrigger>
           <TabsTrigger value="deputyships">{t('admin.tabDeputyships')}</TabsTrigger>
+          <TabsTrigger value="deadlines">{t('deadlines.tab')}</TabsTrigger>
           <TabsTrigger value="webhooks">{t('admin.tabWebhooks')}</TabsTrigger>
           <TabsTrigger value="system">{t('admin.tabSystem')}</TabsTrigger>
         </TabsList>
@@ -93,6 +95,9 @@ export function AdminPage() {
         </TabsContent>
         <TabsContent value="deputyships" className="pt-4">
           <DeputyshipsPanel />
+        </TabsContent>
+        <TabsContent value="deadlines" className="max-w-3xl pt-4">
+          <DeadlinesPanel />
         </TabsContent>
         <TabsContent value="webhooks" className="pt-4">
           <WebhooksPanel />

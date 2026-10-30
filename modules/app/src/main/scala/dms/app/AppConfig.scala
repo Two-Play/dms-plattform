@@ -41,8 +41,36 @@ final case class WorkerSettings(name: Option[String])
   *   step-up window for approval votes: the token's `auth_time` must not be older (DMS-41)
   * @param deputyshipCheckSeconds
   *   how often begun and expired deputyship periods are looked up to notify principal and deputy (DMS-99)
+  * @param deadlineCheckSeconds
+  *   how often task deadlines are checked for reminders and escalations (DMS-87)
+  * @param dueWorkingDays
+  *   the installation's deadline of review and approval tasks in working days; 0: none (DMS-87)
+  * @param reminderWorkingDays
+  *   reminder this many working days before the deadline; 0: none
+  * @param escalationWorkingDays
+  *   escalation this many working days after the deadline; 0: none
+  * @param escalateTo
+  *   comma-separated escalation targets: Owner, ComplianceOfficer, TenantAdmin
   */
-final case class WorkflowSettings(reauthenticationSeconds: Int, deputyshipCheckSeconds: Int)
+final case class WorkflowSettings(
+    reauthenticationSeconds: Int,
+    deputyshipCheckSeconds: Int,
+    deadlineCheckSeconds: Int = 900,
+    dueWorkingDays: Int = 5,
+    reminderWorkingDays: Int = 1,
+    escalationWorkingDays: Int = 2,
+    escalateTo: String = "Owner"
+):
+  /** The installation's deadline policy, or why it is invalid. */
+  def deadlines: Either[String, dms.workflow.DeadlinePolicy] =
+    val policy = dms.workflow.DeadlinePolicy(
+      dueWorkingDays,
+      reminderWorkingDays,
+      escalationWorkingDays,
+      escalateTo.split(',').map(_.trim).filter(_.nonEmpty).toList.distinct
+    )
+    val problems = dms.workflow.DeadlinePolicy.problems(policy)
+    Either.cond(problems.isEmpty, policy, s"dms.workflow deadlines: ${problems.mkString("; ")}")
 
 /** Documents: editorial versions (DMS-46), scheduled publication (DMS-45, ADR 0026) and periodic review
   * (DMS-55, ADR 0030).

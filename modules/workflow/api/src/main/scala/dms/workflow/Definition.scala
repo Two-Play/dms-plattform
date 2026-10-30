@@ -22,14 +22,73 @@ final case class Lane(key: String, role: String)
 
 /** A step of the workflow. Steps run one after the other; the lanes of a step run in parallel and all must
   * approve.
+  *
+  * @param dueWorkingDays
+  *   working days a task of this step has (DMS-87); overrides the workflow's or the tenant's deadline, 0: no
+  *   deadline for this step
   */
 final case class Step(
     key: String,
     name: String,
     kind: StepKind,
     lanes: List[Lane],
-    when: StepCondition = StepCondition.Always
+    when: StepCondition = StepCondition.Always,
+    dueWorkingDays: Option[Int] = None
 )
+
+/** Deadlines of review and approval tasks (DMS-87, ADR 0053), counted in working days (Monday to Friday in
+  * the tenant's time zone; public holidays are not known).
+  *
+  * @param dueWorkingDays
+  *   a task is due at the end of this many working days after the day it was created; 0: no deadlines
+  * @param reminderWorkingDays
+  *   the participants are reminded this many working days before the deadline; 0: no reminder
+  * @param escalationWorkingDays
+  *   the task is escalated to [[escalateTo]] this many working days after the deadline; 0: no escalation (at
+  *   the deadline itself the participants and their deputies are told that it is overdue)
+  * @param escalateTo
+  *   who is told on escalation besides the participants: `Owner` (the document's owner), `ComplianceOfficer`
+  *   (compliance officers whose scope covers the document), `TenantAdmin`
+  */
+final case class DeadlinePolicy(
+    dueWorkingDays: Int,
+    reminderWorkingDays: Int = 1,
+    escalationWorkingDays: Int = 2,
+    escalateTo: List[String] = List(DeadlinePolicy.Owner)
+):
+  def hasDeadlines: Boolean = dueWorkingDays > 0
+
+object DeadlinePolicy:
+  val Owner             = "Owner"
+  val ComplianceOfficer = "ComplianceOfficer"
+  val TenantAdmin       = "TenantAdmin"
+
+  /** Who can be escalated to. */
+  val EscalationTargets: List[String] = List(Owner, ComplianceOfficer, TenantAdmin)
+
+  /** Upper bounds of the day counts. */
+  val MaxDays = 60
+
+  /** The installation's default when neither the workflow nor the tenant sets one. */
+  val default: DeadlinePolicy = DeadlinePolicy(5)
+
+  def problems(p: DeadlinePolicy): List[String] =
+    List(
+      Option.unless(p.dueWorkingDays >= 0 && p.dueWorkingDays <= MaxDays)(
+        s"dueWorkingDays must be between 0 and $MaxDays"
+      ),
+      Option.unless(p.reminderWorkingDays >= 0 && p.reminderWorkingDays <= MaxDays)(
+        s"reminderWorkingDays must be between 0 and $MaxDays"
+      ),
+      Option.when(p.dueWorkingDays > 0 && p.reminderWorkingDays >= p.dueWorkingDays)(
+        "the reminder must come before the deadline (reminderWorkingDays < dueWorkingDays)"
+      ),
+      Option.unless(p.escalationWorkingDays >= 0 && p.escalationWorkingDays <= MaxDays)(
+        s"escalationWorkingDays must be between 0 and $MaxDays"
+      )
+    ).flatten ++ p.escalateTo
+      .filterNot(EscalationTargets.contains)
+      .map(t => s"unknown escalation target $t; allowed: ${EscalationTargets.mkString(", ")}")
 
 /** The review and approval workflow of a document class (business concept 6.1): configured, not programmed.
   *
@@ -38,8 +97,14 @@ final case class Step(
   * @param resetTo
   *   the step a resubmitted version restarts at when its content changed after a vote (DMS-41); default: the
   *   first step. Steps before it are not repeated.
+  * @param deadlines
+  *   deadlines, reminder and escalation of its tasks (DMS-87); default: the tenant's, else the installation's
   */
-final case class WorkflowDefinition(steps: List[Step], resetTo: Option[String] = None):
+final case class WorkflowDefinition(
+    steps: List[Step],
+    resetTo: Option[String] = None,
+    deadlines: Option[DeadlinePolicy] = None
+):
   def step(key: String): Option[Step] = steps.find(_.key == key)
 
   def firstStep: String = steps.head.key
@@ -97,7 +162,7 @@ object WorkflowDefinition:
       )("review steps must come before the approval steps"),
       Option.when(keys.distinct.size != keys.size)("step keys must be unique"),
       d.resetTo.filterNot(keys.contains).map(k => s"resetTo names an unknown step: $k")
-    ).flatten ++
+    ).flatten ++ d.deadlines.toList.flatMap(DeadlinePolicy.problems) ++
       d.steps.flatMap { s =>
         val lanes = s.lanes.map(_.key)
         List(
@@ -107,7 +172,10 @@ object WorkflowDefinition:
           Option.when(lanes.distinct.size != lanes.size)(s"lane keys of step ${s.key} must be unique"),
           Option.when(s.kind == StepKind.Approval && s.when != StepCondition.Always)(
             s"approval step ${s.key} cannot be conditional"
-          )
+          ),
+          s.dueWorkingDays
+            .filterNot(d => d >= 0 && d <= DeadlinePolicy.MaxDays)
+            .map(_ => s"dueWorkingDays of step ${s.key} must be between 0 and ${DeadlinePolicy.MaxDays}")
         ).flatten ++ s.lanes.flatMap(l =>
           List(
             Option.unless(Key.matches(l.key))(s"invalid lane key '${l.key}' in step ${s.key}"),

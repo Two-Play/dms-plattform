@@ -169,13 +169,16 @@ private[core] object WorkflowStore:
       status: String,
       createdAt: OffsetDateTime,
       completedAt: Option[OffsetDateTime],
-      completedBy: Option[String]
+      completedBy: Option[String],
+      dueAt: Option[OffsetDateTime] = None,
+      remindAt: Option[OffsetDateTime] = None,
+      escalateAt: Option[OffsetDateTime] = None
   ) derives DbCodec:
     def candidateList: List[UserId] = candidates.value.fromJson[List[String]].getOrElse(Nil).map(UserId(_))
 
   def tasksOfCase(caseId: UUID)(using DbTx): List[TaskRow] =
     sql"""select id, case_id, round, step_key, step_kind, lane_key, role, candidates, status, created_at,
-                 completed_at, completed_by
+                 completed_at, completed_by, due_at, remind_at, escalate_at
           from dms.workflow_task where case_id = $caseId order by created_at, id"""
       .query[TaskRow]
       .run()
@@ -183,7 +186,7 @@ private[core] object WorkflowStore:
 
   def task(id: String)(using DbTx): Option[TaskRow] =
     sql"""select id, case_id, round, step_key, step_kind, lane_key, role, candidates, status, created_at,
-                 completed_at, completed_by
+                 completed_at, completed_by, due_at, remind_at, escalate_at
           from dms.workflow_task where id = $id"""
       .query[TaskRow]
       .run()
@@ -192,7 +195,7 @@ private[core] object WorkflowStore:
   /** Open tasks the user may complete. */
   def openTasksOf(user: UserId)(using DbTx): List[TaskRow] =
     sql"""select id, case_id, round, step_key, step_kind, lane_key, role, candidates, status, created_at,
-                 completed_at, completed_by
+                 completed_at, completed_by, due_at, remind_at, escalate_at
           from dms.workflow_task
           where status = 'Open' and candidates @> jsonb_build_array(${user.value}::text)
           order by created_at, id"""
@@ -203,7 +206,7 @@ private[core] object WorkflowStore:
   /** Open tasks any of `users` may complete (the principals of a deputy, DMS-49). */
   def openTasksOfAny(users: List[UserId])(using DbTx): List[TaskRow] =
     sql"""select id, case_id, round, step_key, step_kind, lane_key, role, candidates, status, created_at,
-                 completed_at, completed_by
+                 completed_at, completed_by, due_at, remind_at, escalate_at
           from dms.workflow_task t
           where status = 'Open'
             and exists (select 1 from jsonb_array_elements_text(${candidatesJson(users.distinct)}) p (id)
@@ -216,7 +219,7 @@ private[core] object WorkflowStore:
   /** Open and waiting tasks of the tenant, oldest first. */
   def unfinishedTasks(using DbTx): List[TaskRow] =
     sql"""select id, case_id, round, step_key, step_kind, lane_key, role, candidates, status, created_at,
-                 completed_at, completed_by
+                 completed_at, completed_by, due_at, remind_at, escalate_at
           from dms.workflow_task where status in ('Open', 'Waiting')
           order by created_at, id"""
       .query[TaskRow]
@@ -225,9 +228,82 @@ private[core] object WorkflowStore:
 
   def insertTask(t: TaskRow)(using DbTx): Unit =
     val _ = sql"""insert into dms.workflow_task
-                    (id, tenant_id, case_id, round, step_key, step_kind, lane_key, role, candidates, status)
+                    (id, tenant_id, case_id, round, step_key, step_kind, lane_key, role, candidates, status, due_at,
+                     remind_at, escalate_at)
                   values (${t.id}, dms.current_tenant(), ${t.caseId}, ${t.round}, ${t.stepKey}, ${t.stepKind},
-                          ${t.laneKey}, ${t.role}, ${t.candidates}, ${t.status})""".update.run()
+                          ${t.laneKey}, ${t.role}, ${t.candidates}, ${t.status}, ${t.dueAt}, ${t.remindAt},
+                          ${t.escalateAt})""".update.run()
+
+  /** Open tasks whose reminder, deadline or escalation time has come at `now` (DMS-87), oldest deadline
+    * first.
+    */
+  def tasksWithDeadlineReached(now: Instant)(using DbTx): List[TaskRow] =
+    sql"""select id, case_id, round, step_key, step_kind, lane_key, role, candidates, status, created_at,
+                 completed_at, completed_by, due_at, remind_at, escalate_at
+          from dms.workflow_task
+          where status = 'Open' and due_at is not null
+            and (due_at <= ${offset(now)} or remind_at <= ${offset(now)})
+          order by due_at, id"""
+      .query[TaskRow]
+      .run()
+      .toList
+
+  /** Records that the deadline notice `kind` of a task was published; `false` if it was before. */
+  def insertDeadlineNotice(taskId: String, kind: String)(using DbTx): Boolean =
+    sql"""insert into dms.workflow_task_deadline_notice (tenant_id, task_id, kind)
+          values (dms.current_tenant(), $taskId, $kind)
+          on conflict (task_id, kind) do nothing""".update.run() > 0
+
+  /** The deadline notices published for a task. */
+  def deadlineNotices(taskId: String)(using DbTx): Set[String] =
+    sql"select kind from dms.workflow_task_deadline_notice where task_id = $taskId".query[String].run().toSet
+
+  /** The tenant's time zone (working days and due dates). */
+  def tenantZone(using DbTx): java.time.ZoneId =
+    sql"select time_zone from dms.tenant where id = dms.current_tenant()"
+      .query[String]
+      .run()
+      .headOption
+      .flatMap(z => scala.util.Try(java.time.ZoneId.of(z)).toOption)
+      .getOrElse(java.time.ZoneId.of("Europe/Berlin"))
+
+  private type DeadlineRow = (Int, Int, Int, String, OffsetDateTime, String)
+
+  /** The tenant's default deadline policy with when and by whom it was set, if any. */
+  def deadlineSettings(using DbTx): Option[(DeadlinePolicy, Instant, UserId)] =
+    sql"""select due_working_days, reminder_working_days, escalation_working_days, array_to_json(escalate_to)::text,
+                 updated_at, updated_by
+          from dms.workflow_deadline_settings"""
+      .query[DeadlineRow]
+      .run()
+      .headOption
+      .map((due, remind, escalate, to, at, by) =>
+        (
+          DeadlinePolicy(due, remind, escalate, to.fromJson[List[String]].getOrElse(Nil)),
+          at.toInstant,
+          UserId(by)
+        )
+      )
+
+  def saveDeadlineSettings(p: DeadlinePolicy, by: UserId)(using DbTx): Unit =
+    val _ = sql"""insert into dms.workflow_deadline_settings
+                    (tenant_id, due_working_days, reminder_working_days, escalation_working_days, escalate_to,
+                     updated_at, updated_by)
+                  values (dms.current_tenant(), ${p.dueWorkingDays}, ${p.reminderWorkingDays},
+                          ${p.escalationWorkingDays},
+                          array(select jsonb_array_elements_text(${Jsonb(
+        p.escalateTo.distinct.toJson
+      )})), now(),
+                          ${by.value})
+                  on conflict (tenant_id) do update
+                  set due_working_days = excluded.due_working_days,
+                      reminder_working_days = excluded.reminder_working_days,
+                      escalation_working_days = excluded.escalation_working_days,
+                      escalate_to = excluded.escalate_to, updated_at = now(), updated_by = excluded.updated_by""".update
+      .run()
+
+  def deleteDeadlineSettings(using DbTx): Boolean =
+    sql"delete from dms.workflow_deadline_settings".update.run() > 0
 
   def updateCandidates(id: String, candidates: List[UserId], status: TaskStatus)(using DbTx): Unit =
     val _ = sql"""update dms.workflow_task set candidates = ${candidatesJson(

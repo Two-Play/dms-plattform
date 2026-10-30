@@ -24,6 +24,8 @@ import scala.util.Try
   *
   *   - `workflow.task-assigned`: the candidates of a new task, and active deputies of a candidate on their
   *     behalf
+  *   - `workflow.task-due-soon`, `workflow.task-overdue`, `workflow.task-escalated` (DMS-87): the candidates,
+  *     their deputies when overdue, the escalation targets when escalated
   *   - `workflow.returned`: author and owner (changes requested or rejected)
   *   - `workflow.approved`: author and owner, without the approver
   *   - `workflow.participant-missing`: the tenant administrators
@@ -57,17 +59,7 @@ final class PlatformNotificationEvents(
       def params(keys: String*): Map[String, String] = keys.flatMap(k => text(k).map(k -> _)).toMap
       event.eventType match
         case "workflow.task-assigned" =>
-          val base     = params("version", "stepKind", "taskId") ++ text("stepName").map("step" -> _)
-          val deputies = payload.get("deputies").collect { case Json.Arr(items) =>
-            items.toList.flatMap {
-              case o: Json.Obj =>
-                for
-                  deputy    <- o.get("deputy").collect { case Json.Str(s) => s }
-                  principal <- o.get("principal").collect { case Json.Str(s) => s }
-                yield (UserId(deputy), principal)
-              case _ => None
-            }
-          }
+          val base = params("version", "stepKind", "taskId") ++ text("stepName").map("step" -> _)
           ZIO.succeed(
             Notice(
               "workflow.task-assigned",
@@ -76,17 +68,30 @@ final class PlatformNotificationEvents(
               document,
               base
             ) ::
-              deputies
-                .getOrElse(Nil)
-                .map((deputy, principal) =>
-                  Notice(
-                    "workflow.task-assigned",
-                    NotificationCategory.Workflow,
-                    List(deputy),
-                    document,
-                    base + ("actingFor" -> principal)
-                  )
+              deputiesOf(payload).map((deputy, principal) =>
+                Notice(
+                  "workflow.task-assigned",
+                  NotificationCategory.Workflow,
+                  List(deputy),
+                  document,
+                  base + ("actingFor" -> principal)
                 )
+              )
+          )
+        case "workflow.task-due-soon" | "workflow.task-overdue" | "workflow.task-escalated" =>
+          val base = params("version", "stepKind", "taskId", "dueOn") ++ text("stepName").map("step" -> _)
+          ZIO.succeed(
+            Notice(event.eventType, NotificationCategory.Deadline, users("recipients"), document, base) ::
+              Notice(event.eventType, NotificationCategory.Deadline, users("escalatedTo"), document, base) ::
+              deputiesOf(payload).map((deputy, principal) =>
+                Notice(
+                  event.eventType,
+                  NotificationCategory.Deadline,
+                  List(deputy),
+                  document,
+                  base + ("actingFor" -> principal)
+                )
+              )
           )
         case "workflow.returned" =>
           val kind =
@@ -197,6 +202,22 @@ final class PlatformNotificationEvents(
         case _ => ZIO.succeed(Nil)
     }
 
+  /** The `deputies` of a workflow event: deputy and the principal they stand in for. */
+  private def deputiesOf(payload: Json.Obj): List[(UserId, String)] =
+    payload
+      .get("deputies")
+      .collect { case Json.Arr(items) =>
+        items.toList.flatMap {
+          case o: Json.Obj =>
+            for
+              deputy    <- o.get("deputy").collect { case Json.Str(s) => s }
+              principal <- o.get("principal").collect { case Json.Str(s) => s }
+            yield (UserId(deputy), principal)
+          case _ => None
+        }
+      }
+      .getOrElse(Nil)
+
   private def details(ref: DocumentRef) =
     documents
       .get(ref.documentId)
@@ -231,6 +252,9 @@ final class PlatformNotificationEvents(
 object PlatformNotificationEvents:
   val Types: Set[String] = Set(
     "workflow.task-assigned",
+    "workflow.task-due-soon",
+    "workflow.task-overdue",
+    "workflow.task-escalated",
     "workflow.returned",
     "workflow.approved",
     "workflow.participant-missing",
