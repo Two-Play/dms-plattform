@@ -1167,7 +1167,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description A PDF preview of a file before it becomes a document (DMS-127): the fields filled with the entered manual values and the automatic values known before creation, converted by the conversion worker and marked as preview on every page. Not stored, not audited. 422 for invalid values or files (as for the upload of an original), 503 if the conversion worker is unavailable. Requires the author, owner or template designer role. */
+    /** @description A PDF preview of a file before it becomes a document (DMS-127): the fields filled with the entered manual values and the automatic values known before creation, converted by the conversion worker and marked as preview on every page; the file is virus-scanned before it is converted. Not stored, not audited. 422 for invalid values or files (as for the upload of an original, `attachment_infected` included), 503 if the conversion worker is unavailable. Requires the author, owner or template designer role. */
     post: operations['postApiV1UploadsPreview.pdf']
     delete?: never
     options?: never

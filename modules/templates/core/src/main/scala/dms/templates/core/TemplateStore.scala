@@ -53,7 +53,7 @@ private[core] object TemplateStore:
               from dms.template_version where template_id = ${id.value} and version = $version"""
     query.query[Row].run().headOption.map(toVersion)
 
-  /** The latest version of every template, without the upload templates of classes (V31). */
+  /** The latest version of every template, without the upload templates of classes (V32). */
   def latestVersions()(using DbTx): List[TemplateVersion] =
     sql"""select distinct on (template_id) template_id, version, name, description, document_class_id, document_class_version, status, content,
                  created_by, created_at, to_jsonb(edited_by), released_by, released_at
@@ -66,7 +66,7 @@ private[core] object TemplateStore:
       .map(toVersion)
       .toList
 
-  /** All released versions, by name and version, without the upload templates of classes (V31). */
+  /** All released versions, by name and version, without the upload templates of classes (V32). */
   def released()(using DbTx): List[TemplateVersion] =
     sql"""select template_id, version, name, description, document_class_id, document_class_version, status, content,
                  created_by, created_at, to_jsonb(edited_by), released_by, released_at
@@ -80,7 +80,7 @@ private[core] object TemplateStore:
       .map(toVersion)
       .toList
 
-  /** The upload template of a class (V31, DMS-127), if it exists. */
+  /** The upload template of a class (V32, DMS-127), if it exists. */
   def fileUploadTemplate(classId: UUID)(using DbTx): Option[TemplateId] =
     sql"""select id from dms.template where file_upload_class_id = $classId"""
       .query[UUID]
@@ -95,7 +95,7 @@ private[core] object TemplateStore:
           on conflict (tenant_id, file_upload_class_id) where file_upload_class_id is not null
           do nothing""".update.run() == 1
 
-  /** Inserts a version that is released at once (upload templates, V31); whether it was inserted. */
+  /** Inserts a version that is released at once (upload templates, V32); whether it was inserted. */
   def insertReleasedVersion(v: TemplateVersion, releasedBy: UserId, at: Instant)(using DbTx): Boolean =
     val time = OffsetDateTime.ofInstant(at, ZoneOffset.UTC)
     sql"""insert into dms.template_version
