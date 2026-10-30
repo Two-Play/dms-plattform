@@ -9,7 +9,10 @@ Layout: `api` holds public types and interfaces, `core` the implementation. Othe
   (outbox event `document.rendition-failed`).
 - `core`:
   - `RenditionJobs`: the job handler (load page → render → validate → store → attach and complete the approval) and
-    `enqueue`; failure notification through audit and outbox.
+    `enqueue`; failure notification through audit and outbox. A failed job's error starts with the failure's code
+    (`[unavailable] …`, `RenderingError.code`, read back with `RenditionJobs.parseJobError`) so the rendition status can
+    explain it; the completion records renderer, worker image and build fingerprint and validator in
+    `dms.rendition_provenance` (DMS-93, ADR 0055). Status, retry and the list of failures: `dms.app.RenditionStatusApi`.
   - `RenditionLayout`: running header and footer (document ID, version, valid-from, approval note, page x of y), metadata,
     file identifier; pure. A deputy's approval note names the approver they stood in for ("on behalf of" / "i. V. für",
     `RenditionRequest.onBehalfOf`, DMS-49).
@@ -24,5 +27,5 @@ Layout: `api` holds public types and interfaces, `core` the implementation. Othe
 
 Tests: `RenditionLayoutSpec` (pure), `PdfRenditionSpec` (worker image built by Testcontainers, veraPDF, PDFBox text checks),
 `ConversionWorkerSpec` (conversion worker image built by Testcontainers: DOCX → valid PDF/A-2b, HTML → DOCX),
-`ContentSignatureSpec` (pure);
+`ContentSignatureSpec` (pure), `RenditionJobErrorSpec` (pure: failure codes in job errors);
 end to end with workflow, database, SeaweedFS and download in `modules/app` (`RenditionApiSpec`).

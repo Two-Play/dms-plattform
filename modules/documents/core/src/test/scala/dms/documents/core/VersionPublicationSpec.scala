@@ -271,8 +271,9 @@ object VersionPublicationSpec extends ZIOSpecDefault:
     ZIO.serviceWithZIO[Env](
       _.owner.transactSystem(
         Db.sql(
+          // Publication jobs only: an approval also queues the Object Lock retention of the version (DMS-93).
           sql"""select idempotency_key, run_at from dms.job where payload ->> 'versionId' = ${version.toString}
-                order by run_at"""
+                and kind = ${PublicationJobs.PublishKind} order by run_at"""
             .query[(String, java.time.OffsetDateTime)]
             .run()
             .toList

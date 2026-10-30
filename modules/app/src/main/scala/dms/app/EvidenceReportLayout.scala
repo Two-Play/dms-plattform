@@ -159,6 +159,20 @@ object EvidenceReportLayout:
           "Superseded by"   -> v.supersededBy.fold("–")(_.toString)
         )
       )
+      v.rendition.filter(r => r.producedBy.isDefined || r.retention.isDefined).foreach { r =>
+        add("<h3>Rendition</h3>\n")
+        facts(
+          out,
+          r.producedBy.toList.flatMap(p =>
+            List(
+              "Produced by"  -> p.renderer,
+              "Worker image" -> p.workerImage.getOrElse("–"),
+              "Worker build" -> p.workerBuild.getOrElse("–"),
+              "Validated"    -> s"${p.standard} (${p.validator})"
+            )
+          ) ++ r.retention.toList.map(l => "Object Lock" -> s"${l.mode} until ${at(l.retainUntil)}")
+        )
+      }
       v.destruction.foreach { d =>
         add("<h3>Destruction</h3>\n")
         facts(

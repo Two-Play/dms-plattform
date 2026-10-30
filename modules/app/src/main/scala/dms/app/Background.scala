@@ -1,6 +1,6 @@
 package dms.app
 
-import dms.archive.core.{LegalHoldSync, ObjectCleanup, RetentionMaintenance}
+import dms.archive.core.{LegalHoldSync, ObjectCleanup, ObjectRetentionSync, RetentionMaintenance}
 import dms.audit.core.*
 import dms.db.Db
 import dms.authz.{Groups, RoleAssignments}
@@ -36,10 +36,10 @@ import java.lang.management.ManagementFactory
 import java.net.http.HttpClient
 
 /** Background processing of this instance: the job runner (audit, publication, review, rendition, search,
-  * legal hold, file clean-up, deputyship, acknowledgement reminder, notification and task deadline jobs), the
-  * outbox relay and the schedulers of periodic audit jobs, scheduled publications, the periodic review check,
-  * the search synchronization, the deputyship check, the acknowledgement reminder check, the notification
-  * clean-up and the deadline check of review and approval tasks (DMS-87).
+  * legal hold, object retention, file clean-up, deputyship, acknowledgement reminder, notification and task
+  * deadline jobs), the outbox relay and the schedulers of periodic audit jobs, scheduled publications, the
+  * periodic review check, the search synchronization, the deputyship check, the acknowledgement reminder
+  * check, the notification clean-up and the deadline check of review and approval tasks (DMS-87).
   *
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
   * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029) and the webhooks
@@ -99,6 +99,9 @@ object Background:
       reviewJobs = ReviewJobs(db, reviews, ReviewScheduleConfig(config.documents.reviewCheckSeconds.seconds))
       searchJobs = SearchJobs(db, search, config.search.settings)
       legalHolds = LegalHoldSync(db, S3ObjectStore(s3, config.storage.bucket))
+      policy <- ZIO.fromEither(config.retention.objectLock.policy).mapError(IllegalArgumentException(_))
+      // Object Lock retention of the objects of approved versions (DMS-93, ADR 0055).
+      retention = ObjectRetentionSync(db, S3ObjectStore(s3, config.storage.bucket), policy, trail)
       // Objects of files released by discarded drafts (DMS-129, ADR 0050).
       fileCleanup = FileCleanupJobs(db, S3ObjectStore(s3, config.storage.bucket))
       // Objects released by destructions and orphaned objects; compaction and discarded drafts (DMS-82, ADR 0054).
@@ -124,9 +127,9 @@ object Background:
       runner    = JobRunner(
         db,
         jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers ++
-          legalHolds.handlers ++ fileCleanup.handlers ++ webhooks.handlers ++ deputyJobs.handlers ++
-          reminders.handlers ++ objectCleanup.handlers ++ maintenance.handlers ++ notices.handlers ++
-          deadlineJobs.handlers +
+          legalHolds.handlers ++ retention.handlers ++ fileCleanup.handlers ++ webhooks.handlers ++
+          deputyJobs.handlers ++ reminders.handlers ++ objectCleanup.handlers ++ maintenance.handlers ++
+          notices.handlers ++ deadlineJobs.handlers +
           (RenditionRequest.JobKind -> rendering.handle),
         WorkerConfig(s"${workerName(config)}-jobs")
       )

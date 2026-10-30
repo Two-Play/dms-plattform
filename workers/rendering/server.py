@@ -12,19 +12,25 @@ external resource fails the render.
 Endpoints:
   GET  /health   200 {"status": "ok", "renderer": "..."}
   POST /render   JSON request (see RenderRequest below) -> 200 application/pdf
-                 headers X-Renderer (renderer versions) and X-Pages (page count)
+                 headers X-Renderer (renderer versions), X-Pages (page count), X-Worker-Image (image
+                 reference from DMS_WORKER_IMAGE) and X-Worker-Build (build fingerprint)
                  400 malformed request, 422 the page cannot be rendered as requested, 500 unexpected failure
 """
 
 import argparse
+import hashlib
 import html
+import importlib.metadata
 import json
 import logging
+import os
 import re
+import subprocess
 import sys
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from xml.etree import ElementTree
 
 import pydyf
@@ -34,6 +40,32 @@ from weasyprint.urls import FatalURLFetchingError, URLFetcher
 # Bump when this file changes in a way that affects the PDF bytes.
 WORKER_VERSION = "1"
 RENDERER = f"WeasyPrint {weasyprint.__version__}; pydyf {pydyf.__version__}; worker {WORKER_VERSION}"
+
+
+def build_fingerprint() -> str:
+    """SHA-256 over what determines this worker's output (DMS-93, ADR 0055): the Debian packages and Python
+    distributions installed in the image, the Python version and this file. Equal images give equal
+    fingerprints, so a rendition can be traced to the build that produced it even without a registry digest."""
+    digest = hashlib.sha256()
+    try:
+        packages = subprocess.run(
+            ["dpkg-query", "-W", "-f", "${Package}=${Version}\n"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.splitlines()
+    except (OSError, subprocess.SubprocessError) as e:
+        logging.warning("cannot list the Debian packages: %s", e)
+        return "unknown"
+    distributions = [f"{d.metadata['Name']}=={d.version}" for d in importlib.metadata.distributions()]
+    for line in sorted(packages) + sorted(distributions) + [sys.version]:
+        digest.update(line.encode() + b"\n")
+    digest.update(Path(__file__).read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+
+# Image reference of this worker with its digest (e.g. registry/dms-rendering-worker:1@sha256:...), set by the
+# deployment; the application records it with every rendition. A container cannot read its own image digest.
+WORKER_IMAGE = os.environ.get("DMS_WORKER_IMAGE", "").strip() or "unknown"
+WORKER_BUILD = "unknown"  # computed in main()
 
 VARIANTS = {"pdf/a-2b", "pdf/a-3b"}
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
@@ -169,7 +201,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self.reply_json(HTTPStatus.OK, {"status": "ok", "renderer": RENDERER})
+            self.reply_json(
+                HTTPStatus.OK,
+                {"status": "ok", "renderer": RENDERER, "image": WORKER_IMAGE, "build": WORKER_BUILD},
+            )
         else:
             self.reply_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
@@ -196,6 +231,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(pdf)))
             self.send_header("X-Renderer", RENDERER)
             self.send_header("X-Pages", str(pages))
+            self.send_header("X-Worker-Image", WORKER_IMAGE)
+            self.send_header("X-Worker-Build", WORKER_BUILD)
             self.end_headers()
             self.wfile.write(pdf)
 
@@ -219,8 +256,13 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     # WeasyPrint's progress messages are noise; its warnings (layout, CSS) explain unexpected output and stay.
     logging.getLogger("weasyprint.progress").setLevel(logging.WARNING)
+    global WORKER_BUILD
+    WORKER_BUILD = build_fingerprint()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    logging.info("rendering worker listening on %s:%d (%s)", args.host, args.port, RENDERER)
+    logging.info(
+        "rendering worker listening on %s:%d (%s; image %s; build %s)",
+        args.host, args.port, RENDERER, WORKER_IMAGE, WORKER_BUILD,
+    )
     server.serve_forever()
     return 0
 

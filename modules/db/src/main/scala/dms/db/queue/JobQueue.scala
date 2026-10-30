@@ -57,7 +57,8 @@ object JobQueue:
 
   private type JobRow = (Long, Option[UUID], String, Jsonb, Int, Int)
 
-  /** Claims up to `max` due jobs of `kinds` for `worker` with a lease of `lease`. */
+  /** Claims up to `max` due jobs of `kinds` for `worker` with a lease of `lease`, oldest (lowest id) first.
+    */
   def claim(
       db: Db,
       worker: String,
@@ -74,7 +75,8 @@ object JobQueue:
           .toList
       )
     ).map(
-      _.map((id, tenant, kind, payload, attempts, maxAttempts) =>
+      // `update … returning` gives the rows in no particular order: hand them out oldest first.
+      _.sortBy(_._1).map((id, tenant, kind, payload, attempts, maxAttempts) =>
         ClaimedJob(id, tenant.map(TenantId(_)), kind, payload, attempts, maxAttempts)
       )
     )

@@ -9,6 +9,8 @@ import com.nimbusds.jose.jwk.{JWKSet, RSAKey}
 import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jose.{JOSEObjectType, JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
+import dms.archive.{ObjectRetentionPolicy, ObjectRetentions}
+import dms.archive.core.ObjectRetentionSync
 import dms.audit.AuditTrail
 import dms.audit.core.{AuditTrailLive, TsaTrust}
 import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
@@ -20,7 +22,7 @@ import dms.integration.{JobRunner, WorkerConfig}
 import dms.kernel.{TemplateId, TenantId, UserId}
 import dms.rendering.{ArchiveStandard, RenditionRequest}
 import dms.rendering.core.*
-import dms.storage.{ObjectStore, S3ObjectStore, StorageConfig}
+import dms.storage.{ObjectStore, RetentionMode, S3ObjectStore, StorageConfig}
 import dms.templates.*
 import dms.templates.core.{ProfileSource, TemplateDraft, TemplateService}
 import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
@@ -56,6 +58,7 @@ object RenditionApiSpec extends ZIOSpecDefault:
   private val reviewer = UserId("reviewer-1")
   private val approver = UserId("approver-1")
   private val reader   = UserId("reader-1")
+  private val records  = UserId("records-1")
   private val designer = UserId("designer-1")
   private val designr2 = UserId("designer-2")
 
@@ -129,6 +132,7 @@ object RenditionApiSpec extends ZIOSpecDefault:
             _ <- RoleAssignments.Postgres.grant(reviewer, RoleAssignment(Role.Reviewer), admin)
             _ <- RoleAssignments.Postgres.grant(approver, RoleAssignment(Role.Approver), admin)
             _ <- RoleAssignments.Postgres.grant(reader, RoleAssignment(Role.Reader), admin)
+            _ <- RoleAssignments.Postgres.grant(records, RoleAssignment(Role.RecordsManager), admin)
             _ <- classes
               .createField("contractPartner", FieldDraft("Contract partner", None, FieldType.Text()), admin)
             cls <- classes.createClass(
@@ -200,7 +204,7 @@ object RenditionApiSpec extends ZIOSpecDefault:
   }
 
   private type Env = DocumentApi.Env & WorkflowApi.Env & RenditionApi.Env & RenditionSource & PdfRenderer &
-    AuditTrail
+    AuditTrail & ObjectStore
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -251,7 +255,7 @@ object RenditionApiSpec extends ZIOSpecDefault:
   private val routes =
     ZioHttpInterpreter().toHttp(
       DocumentApi.endpoints.map(_.widen[Env]) ++ WorkflowApi.endpoints.map(_.widen[Env]) ++
-        RenditionApi.endpoints.map(_.widen[Env])
+        RenditionApi.endpoints.map(_.widen[Env]) ++ RenditionStatusApi.endpoints.map(_.widen[Env])
     )
 
   final case class Response(status: Status, headers: Headers, body: Chunk[Byte]):
@@ -330,6 +334,31 @@ object RenditionApiSpec extends ZIOSpecDefault:
   private def rendition(user: UserId, doc: UUID, version: UUID) =
     call(user, "GET", s"/api/v1/documents/$doc/versions/$version/rendition")
 
+  private def status(user: UserId, doc: UUID, version: UUID) =
+    call(user, "GET", s"/api/v1/documents/$doc/versions/$version/rendition/status")
+
+  private def retry(user: UserId, doc: UUID, version: UUID) =
+    call(user, "POST", s"/api/v1/documents/$doc/versions/$version/rendition/retry")
+
+  private def failures(user: UserId) = call(user, "GET", "/api/v1/renditions/failures")
+
+  /** The retention job of the archive module (DMS-93) for a version, as the job runner would run it. */
+  private def retain(doc: UUID, version: UUID) =
+    for
+      s       <- setup.await
+      objects <- ZIO.service[ObjectStore]
+      audit   <- ZIO.service[AuditTrail]
+      result  <- ObjectRetentionSync(s.app, objects, ObjectRetentionPolicy.default, audit)
+        .lock(tenantId, dms.kernel.DocumentId(doc), version)
+        .orDieWith(RuntimeException(_))
+    yield result
+
+  private def retentionJobs(version: UUID) =
+    ownerQuery(
+      sql"""select count(*) from dms.job where kind = ${ObjectRetentions.JobKind}
+            and idempotency_key = ${"object-retention:" + version}""".query[Long].run().head
+    )
+
   /** The rendering job of the application (worker, veraPDF, SeaweedFS), or with a replaced step. */
   private def jobs(
       renderer: Option[PdfRenderer] = None,
@@ -403,10 +432,16 @@ object RenditionApiSpec extends ZIOSpecDefault:
         download   <- rendition(author, doc.id, version)
         report     <- VeraPdfValidator.validate(download.body, ArchiveStandard.PdfA2b)
         texts = RenderingWorker.pageTexts(download.body).map(RenderingWorker.normalized)
-        finished <- renditionJob(version)
-        again    <- jobs().flatMap(runJobs)
-        actions  <- auditActions(doc.id)
-        events   <- ownerQuery(
+        finished        <- renditionJob(version)
+        again           <- jobs().flatMap(runJobs)
+        actions         <- auditActions(doc.id)
+        done2           <- status(author, doc.id, version).map(as[RenditionStatusView])
+        queuedRetention <- retentionJobs(version)
+        retention       <- retain(doc.id, version)
+        objects         <- ZIO.service[ObjectStore]
+        attachedNow     <- document(doc.id).map(_.current.rendition.get)
+        head            <- objects.head(attachedNow.objectKey, attachedNow.objectVersion)
+        events          <- ownerQuery(
           sql"select count(*) from dms.outbox_event where event_type = 'workflow.approved' and payload->>'documentId' = ${doc.id.toString}"
             .query[Long]
             .run()
@@ -468,7 +503,19 @@ object RenditionApiSpec extends ZIOSpecDefault:
           again == 0,
           actions == List("document.rendition-attached", "document.rendition-created"),
           events == 1L,
-          repeated == Right(None)
+          repeated == Right(None),
+          // DMS-93: provenance of the rendition, and its Object Lock retention after the approval
+          done2.state == "Done",
+          done2.lastError.isEmpty,
+          !done2.canRetry,
+          done2.renderer.exists(_.contains("WeasyPrint")),
+          done2.workerImage.contains(RenderingWorker.ImageReference),
+          done2.workerBuild.exists(_.matches("sha256:[0-9a-f]{64}")),
+          queuedRetention == 1L,
+          retention.exists(r => r.locked.size == 1 && r.skipped.isEmpty),
+          head.retention.exists(r =>
+            r.mode == RetentionMode.Governance && r.until.isAfter(Instant.now().plusSeconds(9L * 365 * 86400))
+          )
         )
     },
     test("only callers who may read the version download its rendition") {
@@ -490,13 +537,18 @@ object RenditionApiSpec extends ZIOSpecDefault:
         pair <- approvedByVotes("Initech")
         (doc, waiting) = pair
         version        = waiting.versionId
+        pending    <- status(author, doc.id, version).map(as[RenditionStatusView])
         first      <- jobs(renderer = Some(unavailable)).flatMap(runJobs)
         afterFirst <- renditionJob(version)
+        retrying   <- status(author, doc.id, version).map(as[RenditionStatusView])
+        byAdmin    <- status(admin, doc.id, version)
+        listed     <- failures(records).map(as[List[RenditionFailureView]])
         stillOpen  <- document(doc.id)
         caseOpen   <- cases(doc.id).map(_.head)
         _          <- makeDue(version, maxAttempts = 2)
         _          <- jobs(validator = notArchivable).flatMap(runJobs)
         afterLast  <- renditionJob(version)
+        failed     <- status(author, doc.id, version).map(as[RenditionStatusView])
         events     <- outbox("document.rendition-failed", doc.id)
         actions    <- auditActions(doc.id)
         download   <- rendition(author, doc.id, version)
@@ -520,7 +572,78 @@ object RenditionApiSpec extends ZIOSpecDefault:
         parsed.map(o => fields(o, "final")) == List(Some("false"), Some("true")),
         parsed.last.get("reason").exists(_.toString.contains("font not embedded")),
         actions == List("document.rendition-failed", "document.rendition-failed"),
-        download.status == Status.NotFound
+        download.status == Status.NotFound,
+        pending.state == "Pending",
+        pending.attempts == 0,
+        retrying.state == "Retrying",
+        retrying.attempts == 1,
+        retrying.nextAttemptAt.isDefined,
+        retrying.lastError.exists(e =>
+          e.code.contains("unavailable") && e.message.contains("connection refused")
+        ),
+        // the author is named owner but holds no owner role: may see, not retry
+        !retrying.canRetry,
+        // the tenant administrator cannot read a version in approval (no business role)
+        byAdmin.status == Status.Forbidden,
+        listed.exists(f =>
+          f.versionId == version && f.state == "Retrying" && f.canRetry &&
+            f.title.contains("Vertrag Initech")
+        ),
+        failed.state == "Failed",
+        failed.attempts == 2,
+        failed.failedAt.isDefined,
+        failed.nextAttemptAt.isEmpty,
+        failed.lastError.exists(e =>
+          e.code.contains("not_archivable") && e.message.contains("font not embedded")
+        )
+      )
+    },
+    test("a failed rendition is retried by a records manager, audited, and then completes the approval") {
+      for
+        pair <- approvedByVotes("Umbrella")
+        (doc, waiting) = pair
+        version        = waiting.versionId
+        _          <- makeDue(version, maxAttempts = 1)
+        _          <- jobs(renderer = Some(unavailable)).flatMap(runJobs)
+        dead       <- renditionJob(version)
+        listed     <- failures(admin).map(as[List[RenditionFailureView]])
+        notAllowed <- failures(author)
+        byAuthor   <- retry(author, doc.id, version)
+        byReviewer <- retry(reviewer, doc.id, version)
+        byRecords  <- retry(records, doc.id, version)
+        view = as[RenditionStatusView](byRecords)
+        requeued <- renditionJob(version)
+        actions  <- auditActions(doc.id)
+        details  <- ownerQuery(
+          sql"""select actor_id, details ->> 'previousState' from dms.audit_event
+                where object_id = ${doc.id} and action = ${RenditionStatusApi.RetryRequested}"""
+            .query[(String, String)]
+            .run()
+            .toList
+        )
+        processed  <- jobs().flatMap(runJobs)
+        approved   <- document(doc.id)
+        again      <- retry(records, doc.id, version)
+        unknown    <- retry(records, doc.id, UUID.randomUUID())
+        afterwards <- failures(records).map(as[List[RenditionFailureView]])
+      yield assertTrue(
+        dead.exists((status, attempts, _) => status == "dead" && attempts == 1),
+        listed.exists(f => f.versionId == version && f.state == "Failed" && f.canRetry),
+        notAllowed.status == Status.Forbidden,
+        byAuthor.status == Status.Forbidden,
+        byReviewer.status == Status.Forbidden,
+        byRecords.status == Status.Ok,
+        view.state == "Pending",
+        view.attempts == 0,
+        requeued.exists((status, attempts, _) => status == "queued" && attempts == 0),
+        actions.contains(RenditionStatusApi.RetryRequested),
+        details == List((records.value, "Failed")),
+        processed == 1,
+        approved.current.status == "Approved",
+        again.status == Status.Conflict,
+        again.text.contains("rendition_not_failed"),
+        unknown.status == Status.NotFound,
+        !afterwards.exists(_.versionId == version)
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

@@ -29,6 +29,9 @@ object RenderingWorker:
     require(Files.isRegularFile(path.resolve("Dockerfile")), s"no Dockerfile in $path")
     path
 
+  /** The image reference the test worker reports (`DMS_WORKER_IMAGE`, DMS-93). */
+  val ImageReference: String = "dms-rendering-worker-test:local@sha256:" + "0" * 64
+
   /** A started worker; its configuration points at the mapped port. */
   val config: ZLayer[Any, Throwable, RendererConfig] = ZLayer.scoped(
     ZIO
@@ -36,6 +39,7 @@ object RenderingWorker:
         val image = ImageFromDockerfile("dms-rendering-worker-test", false).withFileFromPath(".", directory)
         val c     = Container(image)
           .withExposedPorts(8080)
+          .withEnv("DMS_WORKER_IMAGE", ImageReference)
           .waitingFor(Wait.forHttp("/health").forPort(8080).forStatusCode(200))
         c.start()
         c

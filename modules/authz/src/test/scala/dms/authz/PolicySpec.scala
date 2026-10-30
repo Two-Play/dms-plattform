@@ -47,6 +47,7 @@ object PolicySpec extends ZIOSpecDefault:
     case AssignDocumentNumber       => document(Draft)
     case SearchUsers                => Resource(tenant)
     case DiscardDraft               => document(Draft)
+    case RetryRendition             => document(InApproval).copy(ownerId = Some(other))
 
   /** The condition that turns a ◐ cell of the matrix into a permission. */
   private def favorable(action: Action, role: Role): Resource =
@@ -60,6 +61,8 @@ object PolicySpec extends ZIOSpecDefault:
       case (AssignDocumentNumber, _)       => r.copy(ownerId = Some(user))
       case (DiscardDraft, Owner)           => r.copy(ownerId = Some(user))
       case (DiscardDraft, _)               => r.copy(authorId = Some(user))
+      case (RetryRendition, Owner)         => r.copy(ownerId = Some(user))
+      case (RetryRendition, _)             => r.copy(ownerId = None, authorId = Some(user))
       case (Publish, Approver)             => r.copy(approvedBy = Set(user))
       case (ViewHistory, Author)           => r.copy(authorId = Some(user))
       case (ViewHistory, Reviewer)         => r.copy(assignedParticipants = Set(user))
@@ -106,7 +109,10 @@ object PolicySpec extends ZIOSpecDefault:
     SearchUsers -> List(Full, Full, Full, Full, Full, Full, Full, Full, Full, Full),
     // Discarding a draft never submitted (DMS-129, ADR 0050): its author, the document's owner and tenant
     // administrators (clean-up without reading the content).
-    DiscardDraft -> List(Never, Partial, Partial, Never, Never, Never, Never, Never, Full, Never)
+    DiscardDraft -> List(Never, Partial, Partial, Never, Never, Never, Never, Never, Full, Never),
+    // Retrying a failed rendition (DMS-93, ADR 0055): the document's owner (without owner: its author), records
+    // managers and tenant administrators.
+    RetryRendition -> List(Never, Partial, Partial, Never, Never, Never, Full, Never, Full, Never)
   )
 
   private def permitted(roles: Seq[Role], action: Action, resource: Resource): Boolean =
@@ -314,6 +320,26 @@ object PolicySpec extends ZIOSpecDefault:
         !Policy.decide(expired, SearchUsers, Resource(tenant), now).isPermitted,
         !permitted(Seq(TenantAdmin), SearchUsers, Resource(TenantId.random())),
         !permitted(Seq(Reader), SearchUsers, document(Published))
+      )
+    },
+    test(
+      "a rendition is retried only while the version is in approval; the tenant list needs records or admin (DMS-93)"
+    ) {
+      val owned = document(InApproval).copy(ownerId = Some(user))
+      assertTrue(
+        permitted(Seq(Owner), RetryRendition, owned),
+        !permitted(Seq(Owner), RetryRendition, owned.copy(status = Some(Approved))),
+        !permitted(Seq(TenantAdmin), RetryRendition, document(Draft)),
+        permitted(Seq(RecordsManager), RetryRendition, Resource(tenant)),
+        permitted(Seq(TenantAdmin), RetryRendition, Resource(tenant)),
+        !permitted(Seq(Owner), RetryRendition, Resource(tenant)),
+        !permitted(Seq(TenantAdmin), RetryRendition, Resource(TenantId.random())),
+        // Confidentiality applies as everywhere: an administrator outside the allowed groups is denied.
+        !permitted(
+          Seq(TenantAdmin),
+          RetryRendition,
+          document(InApproval).copy(confidentiality = Confidentiality.Confidential)
+        )
       )
     },
     test("every denial carries a reason") {

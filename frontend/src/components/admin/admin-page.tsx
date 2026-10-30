@@ -9,6 +9,7 @@ import { hasRole, useMe } from '@/api/me'
 import { DeputyshipForm } from '@/components/deputies/deputyship-form'
 import { DeputyshipTable } from '@/components/deputies/deputyship-table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { RenditionFailuresPanel } from '@/components/documents/rendition-failures-panel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DeadlinesPanel } from './deadlines-panel'
 import { t } from '@/i18n'
@@ -55,8 +56,8 @@ function DeputyshipsPanel() {
 
 /**
  * Administration for tenant administrators: access groups for confidential documents (DMS-105),
- * number ranges (DMS-113), who must confirm documents per class (DMS-100), the deputyships of everyone (DMS-99) and webhooks for connected
- * systems (DMS-107). The API enforces the permissions.
+ * number ranges (DMS-113), who must confirm documents per class (DMS-100), the deputyships of everyone (DMS-99), webhooks for connected
+ * systems (DMS-107) and failed archive PDFs (DMS-93). The API enforces the permissions.
  */
 export function AdminPage() {
   const me = useMe()
@@ -82,6 +83,7 @@ export function AdminPage() {
           <TabsTrigger value="deputyships">{t('admin.tabDeputyships')}</TabsTrigger>
           <TabsTrigger value="deadlines">{t('deadlines.tab')}</TabsTrigger>
           <TabsTrigger value="webhooks">{t('admin.tabWebhooks')}</TabsTrigger>
+          <TabsTrigger value="renditions">{t('admin.tabRenditions')}</TabsTrigger>
           <TabsTrigger value="system">{t('admin.tabSystem')}</TabsTrigger>
         </TabsList>
         <TabsContent value="groups" className="pt-4">
@@ -101,6 +103,9 @@ export function AdminPage() {
         </TabsContent>
         <TabsContent value="webhooks" className="pt-4">
           <WebhooksPanel />
+        </TabsContent>
+        <TabsContent value="renditions" className="pt-4">
+          <RenditionFailuresPanel />
         </TabsContent>
         <TabsContent value="system" className="max-w-xl pt-4">
           <SystemStatusCard />

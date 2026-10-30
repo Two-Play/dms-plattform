@@ -256,6 +256,8 @@ object Profile:
   *   orphaned objects and files are removed only once they are older than this
   * @param sweepOrphans
   *   whether the maintenance removes orphaned objects (otherwise only on request)
+  * @param objectLock
+  *   Object Lock retention of the objects of approved versions (DMS-93, ADR 0055)
   */
 final case class RetentionConfig(
     maintenanceIntervalSeconds: Int = 86400,
@@ -264,7 +266,8 @@ final case class RetentionConfig(
     keepRecentWorkingStatesDays: Int = 7,
     discardedContentGraceDays: Int = 30,
     orphanGraceHours: Int = 168,
-    sweepOrphans: Boolean = true
+    sweepOrphans: Boolean = true,
+    objectLock: ObjectLockConfig = ObjectLockConfig()
 ):
   def maintenance: MaintenanceConfig =
     MaintenanceConfig(
@@ -278,6 +281,30 @@ final case class RetentionConfig(
 
   def orphans: OrphanCleanupConfig =
     OrphanCleanupConfig(grace = zio.Duration.fromSeconds(orphanGraceHours.max(0).toLong * 3600))
+
+// Derived here rather than inside AppConfig's derivation, which would exceed the compiler's inline limit.
+object RetentionConfig:
+  given DeriveConfig[RetentionConfig] = DeriveConfig.derived
+
+/** Object Lock retention of the objects of approved versions (DMS-93, ADR 0055), `dms.retention.objectLock`.
+  * The period comes from the version's retention rule (`dms.retention_rule`, DMS-82); these settings only add
+  * the capability flag, the mode and the period for versions whose rule has no row.
+  *
+  * @param enabled
+  *   capability flag: whether the object store supports S3 Object Lock; `false` sets no retention
+  * @param mode
+  *   `governance` (default: the bypass permission can still delete before the end, e.g. for a corrected rule)
+  *   or `compliance` (nobody can delete before the end)
+  * @param defaultYears
+  *   lock period after the approval for versions whose retention rule is not (yet) defined
+  */
+final case class ObjectLockConfig(
+    enabled: Boolean = true,
+    mode: String = "governance",
+    defaultYears: Int = 10
+):
+  def policy: Either[String, dms.archive.ObjectRetentionPolicy] =
+    dms.archive.ObjectRetentionPolicy.parse(enabled, mode, defaultYears)
 
 /** Delivery of notifications (DMS-130, ADR 0052).
   *

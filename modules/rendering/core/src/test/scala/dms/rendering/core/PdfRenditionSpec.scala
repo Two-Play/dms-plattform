@@ -97,7 +97,7 @@ object PdfRenditionSpec extends ZIOSpecDefault:
         texts(1).contains("1.250,00 €")
       )
     },
-    test("is reproducible and carries the identification in the metadata") {
+    test("is reproducible, carries the identification in the metadata and names the worker build") {
       for
         first  <- ZIO.serviceWithZIO[PdfRenderer](_.render(job(page)))
         second <- ZIO.serviceWithZIO[PdfRenderer](_.render(job(page)))
@@ -114,6 +114,10 @@ object PdfRenditionSpec extends ZIOSpecDefault:
           finally document.close()
       yield assertTrue(
         sha256(first.bytes) == sha256(second.bytes),
+        // Image reference as configured, build fingerprint computed by the worker from its packages (DMS-93).
+        first.worker.image.contains(RenderingWorker.ImageReference),
+        first.worker.build.exists(_.matches("sha256:[0-9a-f]{64}")),
+        first.worker == second.worker,
         xmp.contains(s"<dms:documentId>${facts.documentId}</dms:documentId>"),
         xmp.contains("<dms:version>1.0</dms:version>"),
         xmp.contains("<dms:validFrom>2027-01-01</dms:validFrom>"),

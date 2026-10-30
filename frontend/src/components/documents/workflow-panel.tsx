@@ -15,6 +15,7 @@ import { VoteDialog, type VoteDraft } from '@/components/tasks/vote-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { RenditionStatusNotice } from './rendition-status'
 import { StatusBadge } from './status-badge'
 import { statusLabel } from './status-label'
 
@@ -68,6 +69,12 @@ function CaseDetails({ workflowCase, version }: { workflowCase: WorkflowCase; ve
           </span>
         )}
       </div>
+      {workflowCase.status === 'Rendering' && (
+        <RenditionStatusNotice
+          documentId={workflowCase.documentId}
+          versionId={workflowCase.versionId}
+        />
+      )}
       {tasks.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

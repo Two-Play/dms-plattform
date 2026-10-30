@@ -1,6 +1,7 @@
 package dms.app
 
-import dms.archive.{DestructionError, LegalHoldError}
+import com.augustnagro.magnum.sql
+import dms.archive.{DestructionError, LegalHoldError, ObjectRetentions}
 import dms.archive.core.{DestructionService, LegalHoldService}
 import dms.audit.*
 import dms.audit.core.{
@@ -213,8 +214,10 @@ object EvidenceReportApi:
                 _.filter(_.documentId == id).lastOption.flatMap(_.removal).map(h.id.value -> _)
               )
           )
-          entries <- evidence.entriesOf(id.value).mapError(DocumentError.Database(_))
-          records <- destruction.recordsOf(id).mapError(destructionError)
+          entries    <- evidence.entriesOf(id.value).mapError(DocumentError.Database(_))
+          records    <- destruction.recordsOf(id).mapError(destructionError)
+          production <- renditionProduction(details.versions.map(_.id)).mapError(DocumentError.Database(_))
+          locks      <- ObjectRetentions.ofDocument(id).mapError(DocumentError.Database(_))
         yield EvidenceFacts(
           details,
           cases,
@@ -226,7 +229,13 @@ object EvidenceReportApi:
           entries,
           details.versions.map(v => v.id -> WorkflowDocuments.contentSha256(v)).toMap,
           removals.flatten.toMap,
-          records.map(r => r.item.versionId -> r).toMap
+          records.map(r => r.item.versionId -> r).toMap,
+          production,
+          locks
+            .map(l =>
+              (l.objectKey, l.objectVersion) -> EvidenceObjectRetention(l.mode.toString, l.retainUntil)
+            )
+            .toMap
         )
       }
       // Outside the transaction: the chain verification opens its own, the renditions come from object storage.
@@ -291,6 +300,21 @@ object EvidenceReportApi:
       }.toMap
 
   /** Reads every rendition back from object storage and compares it with its stored SHA-256. */
+  /** What produced the renditions of the versions (`dms.rendition_provenance`, DMS-93). */
+  private def renditionProduction(
+      versions: List[UUID]
+  ): IO[DbError, Map[UUID, EvidenceRenditionProduction]] =
+    Db.sql(
+      sql"""select version_id, renderer, worker_image, worker_build, standard, validator
+            from dms.rendition_provenance where version_id = any(${versions.toArray})"""
+        .query[(UUID, String, Option[String], Option[String], String, String)]
+        .run()
+        .map((id, renderer, image, build, standard, validator) =>
+          id -> EvidenceRenditionProduction(renderer, image, build, standard, validator)
+        )
+        .toMap
+    )
+
   private def checkRenditions(
       versions: List[DocumentVersion]
   ): URIO[RenditionArchive, Map[UUID, RenditionCheck]] =

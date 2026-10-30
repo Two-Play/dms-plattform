@@ -8,8 +8,9 @@ Endpoints:
   GET  /health                          200 {"status": "ok", "converter": "..."}
   POST /convert?target=...&name=...     body: the file; target "pdf/a-2b" or "docx"; name: the original file name
                                         (its extension selects the import filter)
-                                        -> 200 with the converted bytes, header X-Converter (LibreOffice and worker
-                                        version); 400 malformed request, 413 too large, 415 unsupported type,
+                                        -> 200 with the converted bytes, headers X-Converter (LibreOffice and
+                                        worker version), X-Worker-Image and X-Worker-Build (see the rendering
+                                        worker); 400 malformed request, 413 too large, 415 unsupported type,
                                         422 the file cannot be converted, 500 unexpected failure
 
 Isolation: every conversion runs in its own temporary directory with its own LibreOffice profile, which is deleted
@@ -19,6 +20,8 @@ run without outbound network (see compose.yaml).
 """
 
 import argparse
+import hashlib
+import importlib.metadata
 import json
 import logging
 import os
@@ -35,6 +38,32 @@ from urllib.parse import parse_qs, urlparse
 
 # Bump when this file changes in a way that affects the output.
 WORKER_VERSION = "1"
+
+
+def build_fingerprint() -> str:
+    """SHA-256 over what determines this worker's output (DMS-93, ADR 0055): the Debian packages and Python
+    distributions installed in the image, the Python version and this file. Equal images give equal
+    fingerprints, so a rendition can be traced to the build that produced it even without a registry digest."""
+    digest = hashlib.sha256()
+    try:
+        packages = subprocess.run(
+            ["dpkg-query", "-W", "-f", "${Package}=${Version}\n"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.splitlines()
+    except (OSError, subprocess.SubprocessError) as e:
+        logging.warning("cannot list the Debian packages: %s", e)
+        return "unknown"
+    distributions = [f"{d.metadata['Name']}=={d.version}" for d in importlib.metadata.distributions()]
+    for line in sorted(packages) + sorted(distributions) + [sys.version]:
+        digest.update(line.encode() + b"\n")
+    digest.update(Path(__file__).read_bytes())
+    return "sha256:" + digest.hexdigest()
+
+
+# Image reference of this worker with its digest (e.g. registry/dms-conversion-worker:1@sha256:...), set by the
+# deployment; the application records it with every rendition. A container cannot read its own image digest.
+WORKER_IMAGE = os.environ.get("DMS_WORKER_IMAGE", "").strip() or "unknown"
+WORKER_BUILD = "unknown"  # computed in main()
 
 MAX_REQUEST_BYTES = int(os.environ.get("DMS_CONVERSION_MAX_BYTES", str(64 * 1024 * 1024)))
 TIMEOUT_SECONDS = int(os.environ.get("DMS_CONVERSION_TIMEOUT_SECONDS", "110"))
@@ -156,7 +185,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if urlparse(self.path).path == "/health":
-            self.reply_json(HTTPStatus.OK, {"status": "ok", "converter": CONVERTER})
+            self.reply_json(
+                HTTPStatus.OK,
+                {"status": "ok", "converter": CONVERTER, "image": WORKER_IMAGE, "build": WORKER_BUILD},
+            )
         else:
             self.reply_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
@@ -196,6 +228,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", media)
             self.send_header("Content-Length", str(len(converted)))
             self.send_header("X-Converter", CONVERTER)
+            self.send_header("X-Worker-Image", WORKER_IMAGE)
+            self.send_header("X-Worker-Build", WORKER_BUILD)
             self.end_headers()
             self.wfile.write(converted)
 
@@ -212,15 +246,19 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    global CONVERTER
+    global CONVERTER, WORKER_BUILD
     parser = argparse.ArgumentParser(description="DMS conversion worker")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     CONVERTER = f"{soffice_version()}; worker {WORKER_VERSION}"
+    WORKER_BUILD = build_fingerprint()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    logging.info("conversion worker listening on %s:%d (%s)", args.host, args.port, CONVERTER)
+    logging.info(
+        "conversion worker listening on %s:%d (%s; image %s; build %s)",
+        args.host, args.port, CONVERTER, WORKER_IMAGE, WORKER_BUILD,
+    )
     server.serve_forever()
     return 0
 

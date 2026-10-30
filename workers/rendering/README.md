@@ -26,10 +26,22 @@ this directory with Testcontainers (no compose needed).
 | `identifier` | PDF file identifier, 32 lowercase hex characters (stable per version, for reproducible bytes) |
 | `xmp` | Custom XMP properties `documentId`, `version`, `validFrom` (strings), declared in a PDF/A extension schema |
 
-Responses: `200 application/pdf` with headers `X-Renderer` (WeasyPrint, pydyf and worker version) and `X-Pages`; `400` malformed
+Responses: `200 application/pdf` with headers `X-Renderer` (WeasyPrint, pydyf and worker version), `X-Pages`, `X-Worker-Image`
+(the image reference from `DMS_WORKER_IMAGE`, `unknown` if unset) and `X-Worker-Build` (build fingerprint, see below); `400` malformed
 request; `422` the page cannot be rendered (e.g. an external reference); `500` unexpected failure. `GET /health` answers `200`.
 
 One render runs at a time per container (WeasyPrint is not documented as thread-safe); scale with replicas.
+
+## Image identity (DMS-93, ADR 0055)
+
+The application records with every rendition which worker produced it (`dms.rendition_provenance`, evidence report):
+
+- `X-Worker-Build`: `sha256:` over the installed Debian packages and Python distributions (name and version), the Python
+  version and `server.py`, computed once at start. Equal images give equal fingerprints, so a rendition can be traced to
+  the build even where no registry digest exists (local builds).
+- `X-Worker-Image`: the image reference with digest (`registry/dms-rendering-worker:<version>@sha256:<digest>`), passed in
+  by the deployment as `DMS_WORKER_IMAGE`; a container cannot read its own image digest. In `compose.yaml` the variable
+  `DMS_RENDERING_IMAGE` sets both the image compose runs and this reference; it defaults to the local build tag.
 
 ## Pinning
 

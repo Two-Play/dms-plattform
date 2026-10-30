@@ -105,9 +105,16 @@ services:
   # Rendering worker (ADR 0008, 0025): HTML -> PDF/A with WeasyPrint over HTTP (POST /render, GET /health).
   # Built from workers/rendering; stateless, no credentials, read-only file system. The application calls it at
   # dms.rendering.url (default http://localhost:9180).
+  #
+  # Image identity (DMS-93, ADR 0055): locally the image is built and tagged dms-rendering-worker:local. Where the image
+  # is published to a registry, set DMS_RENDERING_IMAGE to its reference pinned by digest
+  # (registry/dms-rendering-worker:<version>@sha256:<digest>); compose then uses exactly that image, and the worker
+  # reports the reference (DMS_WORKER_IMAGE) with every rendition, next to the build fingerprint it computes itself.
   rendering:
     build: ./workers/rendering
-    image: dms-rendering-worker:local
+    image: ${DMS_RENDERING_IMAGE:-dms-rendering-worker:local}
+    environment:
+      DMS_WORKER_IMAGE: ${DMS_RENDERING_IMAGE:-dms-rendering-worker:local}
     ports:
       - "9180:8080"  # 9180 to avoid clashing with other local services on 8080
     read_only: true
@@ -123,9 +130,12 @@ services:
   # PowerPoint, …) into PDF/A and structured documents into Word. Built from workers/conversion; stateless, no
   # credentials, read-only file system, no outbound network. The application calls it at dms.conversion.url
   # (default http://localhost:9181).
+  # Image identity as for the rendering worker (DMS_CONVERSION_IMAGE).
   conversion:
     build: ./workers/conversion
-    image: dms-conversion-worker:local
+    image: ${DMS_CONVERSION_IMAGE:-dms-conversion-worker:local}
+    environment:
+      DMS_WORKER_IMAGE: ${DMS_CONVERSION_IMAGE:-dms-conversion-worker:local}
     ports:
       - "9181:8080"  # next to the rendering worker
     read_only: true

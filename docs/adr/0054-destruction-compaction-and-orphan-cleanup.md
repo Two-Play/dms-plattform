@@ -90,6 +90,7 @@ Given: the status `Destroyed` and the transition `Archived → Destroyed` exist 
 - Should be done: remove personal data from audit details of draft edits (store only field keys, or crypto-shredding of audit payloads) so destruction also covers them.
 - Should be done: destruction or content removal of withdrawn drafts after a grace period, like discarded drafts.
 - Could be done: paged listing / S3 inventory for the orphan clean-up of large tenants; an export of the destruction protocol as PDF/A.
+- Related (DMS-93, ADR 0055): the S3 Object Lock retention of renditions, originals and attachment files of approved versions is computed from the same `dms.retention_rule` (`RetentionPeriod.endsOn`, from the trigger or, until the end of validity is known, from the approval) and only ever extended; changing a rule or a version going out of force re-runs it. The object clean-up keeps such objects until the lock ends.
 - Ruled out: deleting version or document rows; destroying without a second person; deleting objects inside the destruction transaction.
 
 ## Reversibility
