@@ -9,6 +9,7 @@ export const admin = {
   tabNumberRanges: 'Number ranges',
   tabDeputyships: 'Deputyships',
   tabWebhooks: 'Webhooks',
+  tabRenditions: 'Archive PDFs',
   tabSystem: 'System status',
   setDeputy: 'Set a deputy',
   setDeputyText: 'For yourself or, as tenant administrator, for someone else.',

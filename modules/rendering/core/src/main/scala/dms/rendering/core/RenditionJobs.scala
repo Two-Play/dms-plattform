@@ -1,5 +1,6 @@
 package dms.rendering.core
 
+import com.augustnagro.magnum.*
 import dms.audit.*
 import dms.db.queue.{ClaimedJob, JobQueue, Outbox}
 import dms.db.{Db, DbError, Jsonb}
@@ -50,12 +51,18 @@ trait RenditionSource:
   /** Attaches the stored rendition to the version and completes the approval of the request's case. */
   def complete(request: RenditionRequest, rendition: Rendition): IO[RenderingError, Unit]
 
-/** Result of a successful job. */
+/** Result of a successful job.
+  *
+  * @param worker
+  *   image and build fingerprint of the worker that produced the PDF (unknown for an original archived
+  *   unchanged)
+  */
 final case class RenditionResult(
     rendition: Rendition,
     pages: Option[Int],
     renderer: String,
-    report: ValidationReport
+    report: ValidationReport,
+    worker: WorkerIdentity = WorkerIdentity.unknown
 )
 
 /** Renders the archive rendition of an approved version (DMS-44, ADR 0025): the job of kind
@@ -68,9 +75,13 @@ final case class RenditionResult(
   * the version before the last step, so a failure leaves it in approval.
   *
   * Failures are retried by the job queue with backoff (ADR 0010). The owner is notified with the outbox event
-  * [[RenditionEvents.Failed]] on the first failed attempt and again when no retry follows. Every step is
-  * idempotent: rendering is deterministic, storing reuses an equal stored version, and an approved version is
-  * left alone.
+  * [[RenditionEvents.Failed]] on the first failed attempt and again when no retry follows. The job's error
+  * starts with the failure's code in brackets (`[unavailable] …`, see [[RenderingError.code]]), so the status
+  * of a rendition can explain it (DMS-93). Every step is idempotent: rendering is deterministic, storing
+  * reuses an equal stored version, and an approved version is left alone.
+  *
+  * The last step also records what produced the PDF in `dms.rendition_provenance` (renderer versions, worker
+  * image and build fingerprint, validator; DMS-93, ADR 0055) for the evidence report.
   */
 final class RenditionJobs(
     db: Db,
@@ -93,7 +104,7 @@ final class RenditionJobs(
         error =>
           notifyFailure(tenant, request, error, job)
             .catchAll(e => ZIO.logWarning(s"Rendition failure of ${request.versionId} not recorded: $e")) *>
-            ZIO.fail(error.describe),
+            ZIO.fail(jobError(error)),
         _ => ZIO.unit
       )
     yield ()
@@ -110,8 +121,11 @@ final class RenditionJobs(
             RenditionArchive.key(tenant, request.documentId, request.versionId),
             pdf.bytes
           )
-          result = RenditionResult(stored, pdf.pages, pdf.renderer, report)
-          _ <- transact(tenant)(source.complete(request, stored) *> recordCreated(request, result, input))
+          result = RenditionResult(stored, pdf.pages, pdf.renderer, report, pdf.worker)
+          _ <- transact(tenant)(
+            source.complete(request, stored) *> recordProvenance(request, result) *>
+              recordCreated(request, result, input)
+          )
         yield Some(result)
     }
 
@@ -150,7 +164,7 @@ final class RenditionJobs(
               for
                 converted <- converter.convert(original, file.name, ConversionTarget.pdf(standard))
                 report    <- validated(converted.bytes)
-              yield (RenderedPdf(converted.bytes, None, converted.converter), report)
+              yield (RenderedPdf(converted.bytes, None, converted.converter, converted.worker), report)
         yield result
 
   private def validated(pdf: Chunk[Byte]): IO[RenderingError, ValidationReport] =
@@ -178,10 +192,24 @@ final class RenditionJobs(
           "pages"         -> result.pages.fold(Json.Null)(Json.Num(_)),
           "standard"      -> Json.Str(result.report.standard.label),
           "validator"     -> Json.Str(result.report.validator),
-          "renderer"      -> Json.Str(result.renderer)
+          "renderer"      -> Json.Str(result.renderer),
+          "workerImage"   -> result.worker.image.fold(Json.Null)(Json.Str(_)),
+          "workerBuild"   -> result.worker.build.fold(Json.Null)(Json.Str(_))
         )
       )
     )
+
+  /** What produced the rendition, for reproducibility (`dms.rendition_provenance`, DMS-93). */
+  private def recordProvenance(request: RenditionRequest, result: RenditionResult): IO[RenderingError, Unit] =
+    Db.sql(
+      sql"""insert into dms.rendition_provenance
+              (version_id, tenant_id, renderer, worker_image, worker_build, standard, validator, pages)
+            values (${request.versionId}, dms.current_tenant(), ${result.renderer}, ${result.worker.image},
+                    ${result.worker.build}, ${result.report.standard.label}, ${result.report.validator},
+                    ${result.pages})
+            on conflict (version_id) do nothing""".update.run()
+    ).mapError(RenderingError.Database(_))
+      .unit
 
   /** Records the failure in the audit trail and, on the first attempt and when no retry follows, notifies the
     * recipients through the outbox. Runs in its own transaction.
@@ -236,6 +264,17 @@ object RenditionJobs:
 
   /** The technical actor of rendering in the audit trail. */
   val RenderingActor: String = "dms-rendering"
+
+  /** The error text of a failed job: the failure's code in brackets, then its description. */
+  def jobError(error: RenderingError): String = s"[${error.code}] ${error.describe}"
+
+  /** The code and message of a job error written by [[jobError]]; `None` as code for other texts. */
+  def parseJobError(text: String): (Option[String], String) =
+    text match
+      case JobErrorPattern(code, message) => (Some(code), message)
+      case other                          => (None, other)
+
+  private val JobErrorPattern = "(?s)^\\[([a-z_]+)\\] (.*)$".r
 
   /** Recorded as renderer when a PDF original that conforms to the archive standard is archived unchanged. */
   val OriginalRenderer: String = "original PDF/A, unchanged"

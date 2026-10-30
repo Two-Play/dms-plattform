@@ -30,8 +30,27 @@ final case class EvidenceDocument(
 
 final case class EvidenceValidity(from: Instant, until: Option[Instant]) derives JsonCodec
 
-final case class EvidenceRendition(objectKey: String, objectVersion: Option[String], sha256: String)
-    derives JsonCodec
+/** What produced a rendition (DMS-93): renderer and worker versions, the worker image and its build
+  * fingerprint, the validator. Absent for renditions from before the provenance was recorded.
+  */
+final case class EvidenceRenditionProduction(
+    renderer: String,
+    workerImage: Option[String],
+    workerBuild: Option[String],
+    standard: String,
+    validator: String
+) derives JsonCodec
+
+/** The Object Lock retention of a stored object (DMS-93, ADR 0055), as recorded when it was set. */
+final case class EvidenceObjectRetention(mode: String, retainUntil: Instant) derives JsonCodec
+
+final case class EvidenceRendition(
+    objectKey: String,
+    objectVersion: Option[String],
+    sha256: String,
+    producedBy: Option[EvidenceRenditionProduction] = None,
+    retention: Option[EvidenceObjectRetention] = None
+) derives JsonCodec
 
 /** An attachment of a version (DMS-114) with the SHA-256 of its stored bytes. */
 final case class EvidenceAttachment(
@@ -43,7 +62,9 @@ final case class EvidenceAttachment(
     objectVersion: String,
     scanStatus: String,
     addedBy: String,
-    addedAt: Instant
+    addedAt: Instant,
+    /** The Object Lock retention of the stored file, once a version referencing it was approved (DMS-93). */
+    retention: Option[EvidenceObjectRetention] = None
 ) derives JsonCodec
 
 final case class EvidenceDeviationRequest(
@@ -282,7 +303,11 @@ final case class EvidenceFacts(
     /** Holds the document was removed from (and not added to again), by hold id (DMS-106). */
     holdRemovals: Map[UUID, HoldRemoval] = Map.empty,
     /** Destruction records of destroyed versions, by version id (DMS-82). */
-    destructions: Map[UUID, DestructionRecord] = Map.empty
+    destructions: Map[UUID, DestructionRecord] = Map.empty,
+    /** What produced the rendition of each version, by version id (DMS-93). */
+    renditionProduction: Map[UUID, EvidenceRenditionProduction] = Map.empty,
+    /** Object Lock retention of the document's objects, by object key and version (DMS-93). */
+    objectRetention: Map[(String, String), EvidenceObjectRetention] = Map.empty
 )
 
 /** Result of re-reading a stored rendition. */
@@ -432,7 +457,15 @@ object EvidenceReport:
       contentSha256 =
         if destroyed(v) then facts.destructions.get(v.id).flatMap(_.item.contentSha256).getOrElse("")
         else facts.contentSha256.getOrElse(v.id, ""),
-      rendition = v.rendition.map(r => EvidenceRendition(r.objectKey, r.objectVersion, r.sha256)),
+      rendition = v.rendition.map(r =>
+        EvidenceRendition(
+          r.objectKey,
+          r.objectVersion,
+          r.sha256,
+          facts.renditionProduction.get(v.id),
+          r.objectVersion.flatMap(ov => facts.objectRetention.get((r.objectKey, ov)))
+        )
+      ),
       deviationRequests = facts.deviationRequests
         .getOrElse(v.id, Nil)
         .map(r =>
@@ -480,7 +513,8 @@ object EvidenceReport:
             a.objectVersion,
             a.scanStatus.toString,
             a.addedBy.value,
-            a.addedAt
+            a.addedAt,
+            facts.objectRetention.get((a.objectKey, a.objectVersion))
           )
         )
       ),
@@ -494,7 +528,8 @@ object EvidenceReport:
           f.objectVersion,
           f.scanStatus.toString,
           f.setBy.value,
-          f.setAt
+          f.setAt,
+          facts.objectRetention.get((f.objectKey, f.objectVersion))
         )
       ),
       destruction = facts.destructions.get(v.id).map { d =>

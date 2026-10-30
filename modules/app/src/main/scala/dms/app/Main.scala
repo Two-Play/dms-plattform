@@ -45,7 +45,8 @@ object Main extends ZIOAppDefault:
     SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env &
     EvidenceReportApi.Env & CurrentDocumentApi.Env & WebhookApi.Env & UserApi.Env & VersionViewApi.Env &
     NumberRangeApi.Env & AttachmentApi.Env & LibraryApi.Env & FileDocumentApi.Env & WordTemplateApi.Env &
-    AcknowledgementOverviewApi.Env & AcknowledgementSettingsApi.Env & RetentionApi.Env & NotificationApi.Env
+    AcknowledgementOverviewApi.Env & AcknowledgementSettingsApi.Env & RetentionApi.Env & NotificationApi.Env &
+    RenditionStatusApi.Env
 
   private[app] val apiEndpoints: List[ZServerEndpoint[Env, ZioStreams]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -68,6 +69,7 @@ object Main extends ZIOAppDefault:
       LibraryApi.endpoints.map(_.widen[Env]) ++
       VersionCompareApi.endpoints.map(_.widen[Env]) ++
       RenditionApi.endpoints.map(_.widen[Env]) ++
+      RenditionStatusApi.endpoints.map(_.widen[Env]) ++
       VersionViewApi.endpoints.map(_.widen[Env]) ++
       AcknowledgementApi.endpoints.map(_.widen[Env]) ++
       AcknowledgementOverviewApi.endpoints.map(_.widen[Env]) ++
@@ -148,6 +150,7 @@ object Main extends ZIOAppDefault:
       _         <- checkScanner(profile, scanner)
       webhooks  <- ZIO.fromEither(cfg.webhooks.settings).mapError(IllegalArgumentException(_))
       deadlines <- ZIO.fromEither(cfg.workflow.deadlines).mapError(IllegalArgumentException(_))
+      _         <- ZIO.fromEither(cfg.retention.objectLock.policy).mapError(IllegalArgumentException(_))
       _         <- ZIO.logInfo(s"DMS platform ${AppBuildInfo.version} starting on port ${cfg.http.port}")
       _         <- (Server.serve(routes) <&> Background.run(cfg))
         .provide(

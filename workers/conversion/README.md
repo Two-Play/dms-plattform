@@ -34,7 +34,9 @@ The application finds it at `dms.conversion.url` (`DMS_CONVERSION_URL`, default 
 | `docx` | html, htm, odt, rtf, doc | Word document (`MS Word 2007 XML`); HTML is opened in Writer |
 
 The extension of `name` selects the import filter and the PDF export filter (Writer, Calc, Impress, Draw).
-Responses: `200` with the bytes and header `X-Converter` (LibreOffice and worker version); `400` malformed request; `413` too
+Responses: `200` with the bytes and headers `X-Converter` (LibreOffice and worker version), `X-Worker-Image` and
+`X-Worker-Build` (image reference and build fingerprint as for the rendering worker, DMS-93; `DMS_CONVERSION_IMAGE` in
+`compose.yaml`); `400` malformed request; `413` too
 large; `415` unsupported type; `422` LibreOffice could not convert the file (or took longer than
 `DMS_CONVERSION_TIMEOUT_SECONDS`, default 110); `500` unexpected failure. `GET /health` answers `200`.
 

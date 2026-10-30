@@ -50,6 +50,12 @@ enum Role:
   * `SearchUsers` is finding people of the own tenant by name or email, to pick a group member, a deputy or a
   * person in a metadata field (DMS-111, ADR 0037 addendum): every role of the tenant, the tenant
   * administrator included; users without any role assignment may not browse the directory.
+  *
+  * `RetryRendition` is requeueing the rendering job of a version whose archive rendition failed (DMS-93, ADR
+  * 0055): on a version in approval, the document's owner (without owner: the author, who gets the failure
+  * notice instead), records managers and tenant administrators; on the tenant (the list of failed renditions)
+  * records managers and tenant administrators. A retry changes nothing but the job's schedule, so it needs no
+  * reading permission; confidentiality still applies.
   */
 enum Action:
   case ReadPublished, ReadDocument, CreateFromTemplate, EditDraft, CommentInReview, Review, Approve, Publish,
@@ -57,7 +63,7 @@ enum Action:
     EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
     ManageRetention, Destroy, ViewHistory, Configure,
     MonitorCompliance, ViewAcknowledgementPersons, GenerateEvidenceReport, AssignDocumentNumber, SearchUsers,
-    DiscardDraft
+    DiscardDraft, RetryRendition
 
 /** Areas of tenant configuration (matrix row "Configuration"). `Search` is the operation of the tenant's
   * search index, e.g. rebuilding it (DMS-51, ADR 0029). `Groups` is the administration of access groups and

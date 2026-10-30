@@ -30,6 +30,17 @@ enum RenderingError:
 
   case Database(error: DbError)
 
+  /** A stable code of the kind of failure, for clients that explain it (DMS-93): `unavailable`, `rejected`,
+    * `not_archivable`, `invalid`, `integrity` or `database`.
+    */
+  def code: String = this match
+    case Unavailable(_)   => "unavailable"
+    case Rejected(_)      => "rejected"
+    case NotArchivable(_) => "not_archivable"
+    case Invalid(_)       => "invalid"
+    case Integrity(_)     => "integrity"
+    case Database(_)      => "database"
+
   def describe: String = this match
     case Unavailable(m)        => s"rendering unavailable: $m"
     case Rejected(m)           => s"the rendering worker rejected the page: $m"
@@ -51,10 +62,34 @@ enum RenderingError:
   */
 final case class PdfJob(html: String, standard: ArchiveStandard, identifier: String, xmp: Map[String, String])
 
+/** Which worker produced a file, for reproducibility (DMS-93, ADR 0055).
+  *
+  * @param image
+  *   the worker's image reference with digest, as configured for the worker (`DMS_WORKER_IMAGE`)
+  * @param build
+  *   the worker's build fingerprint: SHA-256 over its installed packages and code, computed at start
+  */
+final case class WorkerIdentity(image: Option[String], build: Option[String])
+
+object WorkerIdentity:
+  val unknown: WorkerIdentity = WorkerIdentity(None, None)
+
+  /** From the response headers `X-Worker-Image` and `X-Worker-Build`. */
+  def from(response: HttpResponse[?]): WorkerIdentity =
+    def header(name: String): Option[String] =
+      val value = response.headers().firstValue(name)
+      if value.isPresent then Some(value.get).map(_.trim).filter(v => v.nonEmpty && v != "unknown") else None
+    WorkerIdentity(header("X-Worker-Image"), header("X-Worker-Build"))
+
 /** @param renderer
   *   versions of the renderer that produced the bytes (worker, WeasyPrint, pydyf)
   */
-final case class RenderedPdf(bytes: Chunk[Byte], pages: Option[Int], renderer: String)
+final case class RenderedPdf(
+    bytes: Chunk[Byte],
+    pages: Option[Int],
+    renderer: String,
+    worker: WorkerIdentity = WorkerIdentity.unknown
+)
 
 /** Prints HTML as PDF/A (ADR 0008, 0025). */
 trait PdfRenderer:
@@ -93,7 +128,8 @@ final class WeasyPrintRenderer(client: HttpClient, config: RendererConfig) exten
               RenderedPdf(
                 bytes,
                 header(response, "X-Pages").flatMap(_.toIntOption),
-                header(response, "X-Renderer").getOrElse("unknown")
+                header(response, "X-Renderer").getOrElse("unknown"),
+                WorkerIdentity.from(response)
               )
             )
           case 400 | 422 => ZIO.fail(RenderingError.Rejected(message))

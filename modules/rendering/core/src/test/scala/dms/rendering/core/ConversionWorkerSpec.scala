@@ -63,7 +63,10 @@ object ConversionWorkerSpec extends ZIOSpecDefault:
         report.compliant,
         text.contains("Rahmenvertrag über Wartungsleistungen"),
         text.contains("VT-2026-0001"),
-        pdf.converter.contains("LibreOffice")
+        pdf.converter.contains("LibreOffice"),
+        // No image reference configured; the build fingerprint is computed by the worker (DMS-93).
+        pdf.worker.image.isEmpty,
+        pdf.worker.build.exists(_.matches("sha256:[0-9a-f]{64}"))
       )
     },
     test("an HTML page becomes a Word document") {

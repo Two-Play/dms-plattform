@@ -11,6 +11,7 @@ export const admin: Translation<typeof en.admin> = {
   tabNumberRanges: 'Nummernkreise',
   tabDeputyships: 'Stellvertretungen',
   tabWebhooks: 'Webhooks',
+  tabRenditions: 'Archiv-PDFs',
   tabSystem: 'Systemstatus',
   setDeputy: 'Stellvertretung festlegen',
   setDeputyText: 'Für sich selbst oder, als Mandanten-Administration, für andere.',

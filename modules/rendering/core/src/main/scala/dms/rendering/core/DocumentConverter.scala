@@ -28,7 +28,11 @@ object ConversionTarget:
   * @param converter
   *   versions of the converter that produced the bytes (worker, LibreOffice)
   */
-final case class ConvertedFile(bytes: Chunk[Byte], converter: String)
+final case class ConvertedFile(
+    bytes: Chunk[Byte],
+    converter: String,
+    worker: WorkerIdentity = WorkerIdentity.unknown
+)
 
 /** Converts office files into PDF/A and HTML pages into Word documents (DMS-115, ADR 0042): the conversion
   * worker (`workers/conversion`, LibreOffice) over HTTP.
@@ -182,7 +186,8 @@ final class LibreOfficeConverter(client: HttpClient, config: ConverterConfig) ex
             ZIO.succeed(
               ConvertedFile(
                 Chunk.fromArray(response.body()),
-                if converter.isPresent then converter.get else "unknown"
+                if converter.isPresent then converter.get else "unknown",
+                WorkerIdentity.from(response)
               )
             )
           case 400 | 413 | 415 | 422 => ZIO.fail(RenderingError.Rejected(message))
