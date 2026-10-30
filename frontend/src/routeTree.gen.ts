@@ -18,6 +18,7 @@ import { Route as AppComplianceRouteImport } from './routes/_app/compliance'
 import { Route as AppDeputiesRouteImport } from './routes/_app/deputies'
 import { Route as AppLegalHoldsRouteImport } from './routes/_app/legal-holds'
 import { Route as AppLibraryRouteImport } from './routes/_app/library'
+import { Route as AppNotificationsRouteImport } from './routes/_app/notifications'
 import { Route as AppRetentionRouteImport } from './routes/_app/retention'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppTasksRouteImport } from './routes/_app/tasks'
@@ -25,6 +26,7 @@ import { Route as AppDocumentsIndexRouteImport } from './routes/_app/documents/i
 import { Route as AppDocumentsDocumentIdRouteImport } from './routes/_app/documents/$documentId'
 import { Route as AppDocumentsNewRouteImport } from './routes/_app/documents/new'
 import { Route as AppDocumentsUploadRouteImport } from './routes/_app/documents/upload'
+import { Route as AppSettingsNotificationsRouteImport } from './routes/_app/settings/notifications'
 import { Route as AppTemplatesIndexRouteImport } from './routes/_app/templates/index'
 import { Route as AppTemplatesTemplateIdRouteImport } from './routes/_app/templates/$templateId'
 import { Route as AppDocumentsDocumentIdCompareRouteImport } from './routes/_app/documents/$documentId_.compare'
@@ -73,6 +75,11 @@ const AppLibraryRoute = AppLibraryRouteImport.update({
   path: '/library',
   getParentRoute: () => AppRoute,
 } as any)
+const AppNotificationsRoute = AppNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppRetentionRoute = AppRetentionRouteImport.update({
   id: '/retention',
   path: '/retention',
@@ -108,6 +115,12 @@ const AppDocumentsUploadRoute = AppDocumentsUploadRouteImport.update({
   path: '/documents/upload',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSettingsNotificationsRoute =
+  AppSettingsNotificationsRouteImport.update({
+    id: '/settings/notifications',
+    path: '/settings/notifications',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppTemplatesIndexRoute = AppTemplatesIndexRouteImport.update({
   id: '/templates/',
   path: '/templates/',
@@ -134,12 +147,14 @@ export interface FileRoutesByFullPath {
   '/deputies': typeof AppDeputiesRoute
   '/legal-holds': typeof AppLegalHoldsRoute
   '/library': typeof AppLibraryRoute
+  '/notifications': typeof AppNotificationsRoute
   '/retention': typeof AppRetentionRoute
   '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
   '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/documents/new': typeof AppDocumentsNewRoute
   '/documents/upload': typeof AppDocumentsUploadRoute
+  '/settings/notifications': typeof AppSettingsNotificationsRoute
   '/templates/$templateId': typeof AppTemplatesTemplateIdRoute
   '/documents/': typeof AppDocumentsIndexRoute
   '/templates/': typeof AppTemplatesIndexRoute
@@ -153,6 +168,7 @@ export interface FileRoutesByTo {
   '/deputies': typeof AppDeputiesRoute
   '/legal-holds': typeof AppLegalHoldsRoute
   '/library': typeof AppLibraryRoute
+  '/notifications': typeof AppNotificationsRoute
   '/retention': typeof AppRetentionRoute
   '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
@@ -160,6 +176,7 @@ export interface FileRoutesByTo {
   '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/documents/new': typeof AppDocumentsNewRoute
   '/documents/upload': typeof AppDocumentsUploadRoute
+  '/settings/notifications': typeof AppSettingsNotificationsRoute
   '/templates/$templateId': typeof AppTemplatesTemplateIdRoute
   '/documents': typeof AppDocumentsIndexRoute
   '/templates': typeof AppTemplatesIndexRoute
@@ -175,6 +192,7 @@ export interface FileRoutesById {
   '/_app/deputies': typeof AppDeputiesRoute
   '/_app/legal-holds': typeof AppLegalHoldsRoute
   '/_app/library': typeof AppLibraryRoute
+  '/_app/notifications': typeof AppNotificationsRoute
   '/_app/retention': typeof AppRetentionRoute
   '/_app/search': typeof AppSearchRoute
   '/_app/tasks': typeof AppTasksRoute
@@ -182,6 +200,7 @@ export interface FileRoutesById {
   '/_app/documents/$documentId': typeof AppDocumentsDocumentIdRoute
   '/_app/documents/new': typeof AppDocumentsNewRoute
   '/_app/documents/upload': typeof AppDocumentsUploadRoute
+  '/_app/settings/notifications': typeof AppSettingsNotificationsRoute
   '/_app/templates/$templateId': typeof AppTemplatesTemplateIdRoute
   '/_app/documents/': typeof AppDocumentsIndexRoute
   '/_app/templates/': typeof AppTemplatesIndexRoute
@@ -198,12 +217,14 @@ export interface FileRouteTypes {
     | '/deputies'
     | '/legal-holds'
     | '/library'
+    | '/notifications'
     | '/retention'
     | '/search'
     | '/tasks'
     | '/documents/$documentId'
     | '/documents/new'
     | '/documents/upload'
+    | '/settings/notifications'
     | '/templates/$templateId'
     | '/documents/'
     | '/templates/'
@@ -217,6 +238,7 @@ export interface FileRouteTypes {
     | '/deputies'
     | '/legal-holds'
     | '/library'
+    | '/notifications'
     | '/retention'
     | '/search'
     | '/tasks'
@@ -224,6 +246,7 @@ export interface FileRouteTypes {
     | '/documents/$documentId'
     | '/documents/new'
     | '/documents/upload'
+    | '/settings/notifications'
     | '/templates/$templateId'
     | '/documents'
     | '/templates'
@@ -238,6 +261,7 @@ export interface FileRouteTypes {
     | '/_app/deputies'
     | '/_app/legal-holds'
     | '/_app/library'
+    | '/_app/notifications'
     | '/_app/retention'
     | '/_app/search'
     | '/_app/tasks'
@@ -245,6 +269,7 @@ export interface FileRouteTypes {
     | '/_app/documents/$documentId'
     | '/_app/documents/new'
     | '/_app/documents/upload'
+    | '/_app/settings/notifications'
     | '/_app/templates/$templateId'
     | '/_app/documents/'
     | '/_app/templates/'
@@ -322,6 +347,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppLibraryRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/notifications': {
+      id: '/_app/notifications'
+      path: '/notifications'
+      fullPath: '/notifications'
+      preLoaderRoute: typeof AppNotificationsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/retention': {
       id: '/_app/retention'
       path: '/retention'
@@ -371,6 +403,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDocumentsUploadRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/settings/notifications': {
+      id: '/_app/settings/notifications'
+      path: '/settings/notifications'
+      fullPath: '/settings/notifications'
+      preLoaderRoute: typeof AppSettingsNotificationsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/templates/': {
       id: '/_app/templates/'
       path: '/templates'
@@ -401,6 +440,7 @@ interface AppRouteChildren {
   AppDeputiesRoute: typeof AppDeputiesRoute
   AppLegalHoldsRoute: typeof AppLegalHoldsRoute
   AppLibraryRoute: typeof AppLibraryRoute
+  AppNotificationsRoute: typeof AppNotificationsRoute
   AppRetentionRoute: typeof AppRetentionRoute
   AppSearchRoute: typeof AppSearchRoute
   AppTasksRoute: typeof AppTasksRoute
@@ -408,6 +448,7 @@ interface AppRouteChildren {
   AppDocumentsDocumentIdRoute: typeof AppDocumentsDocumentIdRoute
   AppDocumentsNewRoute: typeof AppDocumentsNewRoute
   AppDocumentsUploadRoute: typeof AppDocumentsUploadRoute
+  AppSettingsNotificationsRoute: typeof AppSettingsNotificationsRoute
   AppTemplatesTemplateIdRoute: typeof AppTemplatesTemplateIdRoute
   AppDocumentsIndexRoute: typeof AppDocumentsIndexRoute
   AppTemplatesIndexRoute: typeof AppTemplatesIndexRoute
@@ -420,6 +461,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDeputiesRoute: AppDeputiesRoute,
   AppLegalHoldsRoute: AppLegalHoldsRoute,
   AppLibraryRoute: AppLibraryRoute,
+  AppNotificationsRoute: AppNotificationsRoute,
   AppRetentionRoute: AppRetentionRoute,
   AppSearchRoute: AppSearchRoute,
   AppTasksRoute: AppTasksRoute,
@@ -427,6 +469,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDocumentsDocumentIdRoute: AppDocumentsDocumentIdRoute,
   AppDocumentsNewRoute: AppDocumentsNewRoute,
   AppDocumentsUploadRoute: AppDocumentsUploadRoute,
+  AppSettingsNotificationsRoute: AppSettingsNotificationsRoute,
   AppTemplatesTemplateIdRoute: AppTemplatesTemplateIdRoute,
   AppDocumentsIndexRoute: AppDocumentsIndexRoute,
   AppTemplatesIndexRoute: AppTemplatesIndexRoute,

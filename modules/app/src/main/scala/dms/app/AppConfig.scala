@@ -10,7 +10,7 @@ import dms.rendering.core.{ConverterConfig, RendererConfig}
 import dms.search.core.{OpenSearchConfig, SearchSettings}
 import dms.storage.StorageConfig
 import zio.Config
-import zio.config.magnolia.deriveConfig
+import zio.config.magnolia.{DeriveConfig, deriveConfig}
 import dms.archive.core.{MaintenanceConfig, OrphanCleanupConfig}
 
 final case class HttpConfig(port: Int)
@@ -275,6 +275,10 @@ final case class NotificationsConfig(
       maxAttempts.max(1),
       zio.Duration.fromSeconds(retentionDays.max(1).toLong * 86400)
     )
+
+// Derived here rather than inside AppConfig's derivation, which would exceed the compiler's inline limit.
+object NotificationsConfig:
+  given DeriveConfig[NotificationsConfig] = DeriveConfig.derived
 
 final case class AppConfig(
     /** `development` (default) or `production` (DMS-117), see [[Profile]]. */
