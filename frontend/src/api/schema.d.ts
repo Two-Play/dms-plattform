@@ -1947,6 +1947,144 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/retention/rules': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The retention rules of the tenant by key. Requires the records manager role. */
+    get: operations['getApiV1RetentionRules']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/retention/rules/{key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Creates or changes a retention rule: period in months after the trigger (EndOfValidity, Approval or Creation), optionally from the end of that year. The key is what the field retentionRule of a version names. 422 for an invalid key, name or period. Audited. Requires the records manager role. */
+    put: operations['putApiV1RetentionRulesKey']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/retention/destruction-list': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The versions out of force whose retention ended (destruction list), with legal holds and open proposals marked, and how many versions have no rule or a running retention. Titles only of documents the caller may manage. Requires the records manager role. */
+    get: operations['getApiV1RetentionDestruction-list']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/retention/destruction-proposals': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Destruction proposals, the latest first. Requires the records manager role. */
+    get: operations['getApiV1RetentionDestruction-proposals']
+    put?: never
+    /** @description Proposes versions of the destruction list for destruction; a reason is required (422). 409 if a version is under legal hold or part of another open proposal, 422 if it is not on the destruction list. Another records manager approves or rejects it. Requires the records manager role for the tenant and every document. */
+    post: operations['postApiV1RetentionDestruction-proposals']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/retention/destruction-proposals/{id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description A destruction proposal with its versions and their outcome. Requires the records manager role. */
+    get: operations['getApiV1RetentionDestruction-proposalsId']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/retention/destruction-proposals/{id}/approve': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Approves a proposal and destroys its versions: content, values, working states, files no other version uses and the rendition are removed (objects after the commit, respecting Object Lock); a tombstone with checksums, the audit trail and the evidence report stay. A version under legal hold now, or whose retention no longer ended, is blocked instead. A reason is required (422); 403 four_eyes for the proposer; 409 if decided already. Requires the records manager role for the tenant and every document. */
+    post: operations['postApiV1RetentionDestruction-proposalsIdApprove']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/retention/destruction-proposals/{id}/reject': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Rejects a proposal; nothing is destroyed. A reason is required (422); 403 four_eyes for the proposer; 409 if decided already. Requires the records manager role. */
+    post: operations['postApiV1RetentionDestruction-proposalsIdReject']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/retention/storage-cleanup': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The latest clean-up runs with their reports. Requires the records manager or tenant administrator role. */
+    get: operations['getApiV1RetentionStorage-cleanup']
+    put?: never
+    /** @description Finds objects in object storage that no version references (older renditions of drafts, removed attachments, replaced originals, files of discarded drafts) and removes them, or with dryRun (default) only reports them. Objects of documents under legal hold, objects protected by Object Lock and objects younger than the grace period are kept. The run is stored and audited. Requires the records manager or tenant administrator role. */
+    post: operations['postApiV1RetentionStorage-cleanup']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/compliance/overview': {
     parameters: {
       query?: never
@@ -2582,6 +2720,49 @@ export interface components {
       /** Format: int32 */
       version: number
     }
+    /** CleanupEntryView */
+    CleanupEntryView: {
+      key: string
+      version: string
+      outcome: string
+      detail?: string
+      /** Format: date-time */
+      lastModified?: string
+    }
+    /** CleanupReportView */
+    CleanupReportView: {
+      /** Format: uuid */
+      id: string
+      dryRun: boolean
+      /** Format: date-time */
+      startedAt: string
+      /** Format: date-time */
+      finishedAt: string
+      triggeredBy: string
+      /** Format: int64 */
+      graceHours: number
+      summary: components['schemas']['CleanupSummaryView']
+      entries?: components['schemas']['CleanupEntryView'][]
+    }
+    /** CleanupSummaryView */
+    CleanupSummaryView: {
+      /** Format: int32 */
+      scanned: number
+      /** Format: int32 */
+      orphaned: number
+      /** Format: int32 */
+      deleted: number
+      /** Format: int32 */
+      keptLocked: number
+      /** Format: int32 */
+      keptHeld: number
+      /** Format: int32 */
+      keptRecent: number
+      /** Format: int32 */
+      failed: number
+      /** Format: int32 */
+      filesDeleted: number
+    }
     /** ComparedVersionView */
     ComparedVersionView: {
       /** Format: uuid */
@@ -2759,6 +2940,10 @@ export interface components {
        */
       type: 'Date'
     }
+    /** DecideDestruction */
+    DecideDestruction: {
+      reason?: string
+    }
     /** DefineWorkflow */
     DefineWorkflow: {
       definition: components['schemas']['WorkflowDefinitionView']
@@ -2785,6 +2970,79 @@ export interface components {
       endedAt?: string
       endedBy?: string
       status: string
+    }
+    /** DestroyedFileView */
+    DestroyedFileView: {
+      name: string
+      role: string
+      sha256: string
+      released: boolean
+    }
+    /** DestructionCandidateView */
+    DestructionCandidateView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title?: string
+      documentNumber?: string
+      classKey: string
+      version: string
+      status: string
+      retentionRule: string
+      retentionRuleName: string
+      /** Format: date-time */
+      outOfForceAt?: string
+      /** Format: date */
+      retentionEndsOn: string
+      underLegalHold: boolean
+      /** Format: uuid */
+      pendingProposalId?: string
+      manageable: boolean
+    }
+    /** DestructionItemView */
+    DestructionItemView: {
+      /** Format: uuid */
+      versionId: string
+      /** Format: uuid */
+      documentId: string
+      title?: string
+      documentNumber?: string
+      version: string
+      retentionRule: string
+      /** Format: date */
+      retentionEndedOn: string
+      outcome: string
+      outcomeDetail?: string
+      /** Format: date-time */
+      outcomeAt?: string
+      renditionSha256?: string
+      contentSha256?: string
+      files?: components['schemas']['DestroyedFileView'][]
+    }
+    /** DestructionListView */
+    DestructionListView: {
+      candidates?: components['schemas']['DestructionCandidateView'][]
+      /** Format: int32 */
+      withoutRule: number
+      /** Format: int32 */
+      retentionRunning: number
+    }
+    /** DestructionProposalView */
+    DestructionProposalView: {
+      /** Format: uuid */
+      id: string
+      status: string
+      reason: string
+      proposedBy: string
+      /** Format: date-time */
+      proposedAt: string
+      decidedBy?: string
+      /** Format: date-time */
+      decidedAt?: string
+      decisionReason?: string
+      items?: components['schemas']['DestructionItemView'][]
+      canDecide: boolean
     }
     /** DeviationChange */
     DeviationChange:
@@ -3749,6 +4007,11 @@ export interface components {
       classPath?: string[]
       fields?: components['schemas']['ProfileFieldView'][]
     }
+    /** ProposeDestruction */
+    ProposeDestruction: {
+      versionIds?: string[]
+      reason?: string
+    }
     /** RateView */
     RateView: {
       /** Format: int32 */
@@ -3915,6 +4178,18 @@ export interface components {
       locked: boolean
       blocks?: components['schemas']['ResolvedBlock'][]
     }
+    /** RetentionRuleView */
+    RetentionRuleView: {
+      key: string
+      name: string
+      /** Format: int32 */
+      periodMonths: number
+      trigger: string
+      fromYearEnd: boolean
+      updatedBy: string
+      /** Format: date-time */
+      updatedAt: string
+    }
     /** ReviewSettingsChange */
     ReviewSettingsChange: {
       /** Format: int32 */
@@ -3981,6 +4256,14 @@ export interface components {
        * @enum {string}
        */
       type: 'Row'
+    }
+    /** SaveRetentionRule */
+    SaveRetentionRule: {
+      name?: string
+      /** Format: int32 */
+      periodMonths?: number
+      trigger?: string
+      fromYearEnd?: boolean
     }
     /** SearchFacetsView */
     SearchFacetsView: {
@@ -4122,6 +4405,10 @@ export interface components {
       kind: string
       lanes?: components['schemas']['LaneView'][]
       when?: string
+    }
+    /** StorageCleanupRequest */
+    StorageCleanupRequest: {
+      dryRun?: boolean
     }
     /** StoredWorkflowView */
     StoredWorkflowView: {
@@ -10268,6 +10555,372 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1RetentionRules: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RetentionRuleView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1RetentionRulesKey: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Rule key, e.g. contract-10y */
+        key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveRetentionRule']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RetentionRuleView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1RetentionDestruction-list': {
+    parameters: {
+      query?: {
+        /** @description Class key */
+        class?: string
+        /** @description Retention rule key */
+        rule?: string
+        /** @description Part of the title or the document number */
+        q?: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DestructionListView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1RetentionDestruction-proposals': {
+    parameters: {
+      query?: {
+        /** @description proposed (default), approved, rejected or all */
+        status?: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DestructionProposalView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1RetentionDestruction-proposals': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ProposeDestruction']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DestructionProposalView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1RetentionDestruction-proposalsId': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Destruction proposal id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DestructionProposalView']
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1RetentionDestruction-proposalsIdApprove': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Destruction proposal id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DecideDestruction']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DestructionProposalView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1RetentionDestruction-proposalsIdReject': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Destruction proposal id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DecideDestruction']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DestructionProposalView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1RetentionStorage-cleanup': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CleanupReportView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1RetentionStorage-cleanup': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StorageCleanupRequest']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['CleanupReportView']
+        }
+      }
+      /** @description Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown

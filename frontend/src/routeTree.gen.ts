@@ -18,6 +18,7 @@ import { Route as AppComplianceRouteImport } from './routes/_app/compliance'
 import { Route as AppDeputiesRouteImport } from './routes/_app/deputies'
 import { Route as AppLegalHoldsRouteImport } from './routes/_app/legal-holds'
 import { Route as AppLibraryRouteImport } from './routes/_app/library'
+import { Route as AppRetentionRouteImport } from './routes/_app/retention'
 import { Route as AppSearchRouteImport } from './routes/_app/search'
 import { Route as AppTasksRouteImport } from './routes/_app/tasks'
 import { Route as AppDocumentsIndexRouteImport } from './routes/_app/documents/index'
@@ -70,6 +71,11 @@ const AppLegalHoldsRoute = AppLegalHoldsRouteImport.update({
 const AppLibraryRoute = AppLibraryRouteImport.update({
   id: '/library',
   path: '/library',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppRetentionRoute = AppRetentionRouteImport.update({
+  id: '/retention',
+  path: '/retention',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSearchRoute = AppSearchRouteImport.update({
@@ -128,6 +134,7 @@ export interface FileRoutesByFullPath {
   '/deputies': typeof AppDeputiesRoute
   '/legal-holds': typeof AppLegalHoldsRoute
   '/library': typeof AppLibraryRoute
+  '/retention': typeof AppRetentionRoute
   '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
   '/documents/$documentId': typeof AppDocumentsDocumentIdRoute
@@ -146,6 +153,7 @@ export interface FileRoutesByTo {
   '/deputies': typeof AppDeputiesRoute
   '/legal-holds': typeof AppLegalHoldsRoute
   '/library': typeof AppLibraryRoute
+  '/retention': typeof AppRetentionRoute
   '/search': typeof AppSearchRoute
   '/tasks': typeof AppTasksRoute
   '/': typeof AppIndexRoute
@@ -167,6 +175,7 @@ export interface FileRoutesById {
   '/_app/deputies': typeof AppDeputiesRoute
   '/_app/legal-holds': typeof AppLegalHoldsRoute
   '/_app/library': typeof AppLibraryRoute
+  '/_app/retention': typeof AppRetentionRoute
   '/_app/search': typeof AppSearchRoute
   '/_app/tasks': typeof AppTasksRoute
   '/_app/': typeof AppIndexRoute
@@ -189,6 +198,7 @@ export interface FileRouteTypes {
     | '/deputies'
     | '/legal-holds'
     | '/library'
+    | '/retention'
     | '/search'
     | '/tasks'
     | '/documents/$documentId'
@@ -207,6 +217,7 @@ export interface FileRouteTypes {
     | '/deputies'
     | '/legal-holds'
     | '/library'
+    | '/retention'
     | '/search'
     | '/tasks'
     | '/'
@@ -227,6 +238,7 @@ export interface FileRouteTypes {
     | '/_app/deputies'
     | '/_app/legal-holds'
     | '/_app/library'
+    | '/_app/retention'
     | '/_app/search'
     | '/_app/tasks'
     | '/_app/'
@@ -310,6 +322,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppLibraryRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/retention': {
+      id: '/_app/retention'
+      path: '/retention'
+      fullPath: '/retention'
+      preLoaderRoute: typeof AppRetentionRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/search': {
       id: '/_app/search'
       path: '/search'
@@ -382,6 +401,7 @@ interface AppRouteChildren {
   AppDeputiesRoute: typeof AppDeputiesRoute
   AppLegalHoldsRoute: typeof AppLegalHoldsRoute
   AppLibraryRoute: typeof AppLibraryRoute
+  AppRetentionRoute: typeof AppRetentionRoute
   AppSearchRoute: typeof AppSearchRoute
   AppTasksRoute: typeof AppTasksRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -400,6 +420,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDeputiesRoute: AppDeputiesRoute,
   AppLegalHoldsRoute: AppLegalHoldsRoute,
   AppLibraryRoute: AppLibraryRoute,
+  AppRetentionRoute: AppRetentionRoute,
   AppSearchRoute: AppSearchRoute,
   AppTasksRoute: AppTasksRoute,
   AppIndexRoute: AppIndexRoute,

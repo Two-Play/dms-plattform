@@ -171,9 +171,6 @@ object LegalHoldServiceSpec extends ZIOSpecDefault:
   private def auditOf(action: String) =
     ZIO.serviceWithZIO[Env](_.audit.get.map(_.filter(_.action == action)))
 
-  private def setStatus(version: UUID, to: String)(using DbTx): Int =
-    sql"update dms.document_version set status = $to where id = $version".update.run()
-
   /** Puts the draft into status Archived as the schema owner, with triggers disabled for this transaction:
     * the lifecycle up to the archive (approval, publication, supersession by a successor) is not under test
     * here.
@@ -187,9 +184,43 @@ object LegalHoldServiceSpec extends ZIOSpecDefault:
             where id = $version""".update.run()
     }.unit
 
-  /** Destroys an archived version as the application user. */
+  /** Destroys an archived version as the application user along the destruction path (DMS-82, migration V35):
+    * a destruction proposal approved by a second records manager, and the removal of the content.
+    */
   private def destroy(tenant: TenantId, version: UUID): ZIO[Env, DbError, Int] =
-    app(tenant)(setStatus(version, "Destroyed"))
+    for
+      _ <- app(tenant) {
+        val pending =
+          sql"select count(*) from dms.destruction_item where version_id = $version and outcome = 'Pending'"
+            .query[Long]
+            .run()
+            .head
+        if pending == 0 then
+          val proposal = UUID.randomUUID()
+          val document =
+            sql"select document_id from dms.document_version where id = $version".query[UUID].run().head
+          val _ = sql"""insert into dms.destruction_proposal (id, tenant_id, reason, proposed_by)
+                        values ($proposal, dms.current_tenant(), ${"Retention ended"}, ${"records-1"})""".update
+            .run()
+          val _ = sql"""insert into dms.destruction_item (tenant_id, proposal_id, version_id, document_id,
+                                                          retention_rule, retention_ended_on)
+                        values (dms.current_tenant(), $proposal, $version, $document, ${"contract-1y"},
+                                current_date - 1)""".update.run()
+          val _ = sql"""update dms.destruction_proposal
+                        set status = 'Approved', decided_by = ${"records-2"}, decided_at = now(),
+                            decision_reason = ${"Confirmed"}
+                        where id = $proposal""".update.run()
+      }
+      n <- app(tenant)(
+        sql"""update dms.document_version
+              set status = 'Destroyed', content = ${Jsonb("""{"format":1,"sections":[]}""")},
+                  field_values = ${Jsonb("{}")}, deviation_report = ${Jsonb(
+            """{"format":1,"deviations":[]}"""
+          )},
+                  content_removed_at = now(), content_removed_by = ${"records-2"}
+              where id = $version""".update.run()
+      )
+    yield n
 
   def spec = suite("Legal holds")(
     test("a hold covers documents with reason, audit entries, outbox events and synchronization jobs") {

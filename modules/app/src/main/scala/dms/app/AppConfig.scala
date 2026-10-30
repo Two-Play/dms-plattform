@@ -11,6 +11,7 @@ import dms.search.core.{OpenSearchConfig, SearchSettings}
 import dms.storage.StorageConfig
 import zio.Config
 import zio.config.magnolia.deriveConfig
+import dms.archive.core.{MaintenanceConfig, OrphanCleanupConfig}
 
 final case class HttpConfig(port: Int)
 
@@ -171,6 +172,45 @@ final case class AttachmentsConfig(maxSizeMegabytes: Int, blockedExtensions: Str
       case "none" | "" => Right(AttachmentScanner.None)
       case other       => Left(s"unknown attachment scanner '$other'; supported: none")
 
+/** Retention maintenance and clean-up (DMS-82, ADR 0054).
+  *
+  * @param maintenanceIntervalSeconds
+  *   how often the maintenance of every tenant runs (compaction, discarded drafts, orphaned objects)
+  * @param keepWorkingStatesOpen
+  *   working states kept at least for a version still worked on
+  * @param keepWorkingStatesClosed
+  *   working states kept at least for a version no longer open
+  * @param keepRecentWorkingStatesDays
+  *   working states saved within this many days are never compacted
+  * @param discardedContentGraceDays
+  *   the content of a discarded draft is removed this many days after it was discarded
+  * @param orphanGraceHours
+  *   orphaned objects and files are removed only once they are older than this
+  * @param sweepOrphans
+  *   whether the maintenance removes orphaned objects (otherwise only on request)
+  */
+final case class RetentionConfig(
+    maintenanceIntervalSeconds: Int = 86400,
+    keepWorkingStatesOpen: Int = 10,
+    keepWorkingStatesClosed: Int = 1,
+    keepRecentWorkingStatesDays: Int = 7,
+    discardedContentGraceDays: Int = 30,
+    orphanGraceHours: Int = 168,
+    sweepOrphans: Boolean = true
+):
+  def maintenance: MaintenanceConfig =
+    MaintenanceConfig(
+      interval = zio.Duration.fromSeconds(maintenanceIntervalSeconds.max(60).toLong),
+      keepLatestOpen = keepWorkingStatesOpen.max(1),
+      keepLatestClosed = keepWorkingStatesClosed.max(1),
+      keepRecent = zio.Duration.fromSeconds(keepRecentWorkingStatesDays.max(0).toLong * 86400),
+      discardedContentGrace = zio.Duration.fromSeconds(discardedContentGraceDays.max(0).toLong * 86400),
+      sweepOrphans = sweepOrphans
+    )
+
+  def orphans: OrphanCleanupConfig =
+    OrphanCleanupConfig(grace = zio.Duration.fromSeconds(orphanGraceHours.max(0).toLong * 3600))
+
 final case class AppConfig(
     http: HttpConfig,
     auth: AuthConfig,
@@ -187,7 +227,8 @@ final case class AppConfig(
     search: SearchConfig,
     webhooks: WebhooksConfig,
     users: UserDirectoryConfig,
-    attachments: AttachmentsConfig
+    attachments: AttachmentsConfig,
+    retention: RetentionConfig
 )
 
 object AppConfig:

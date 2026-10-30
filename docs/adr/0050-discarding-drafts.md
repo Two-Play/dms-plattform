@@ -73,7 +73,7 @@ Given: the lifecycle exists twice, in `Lifecycle` and in the guard trigger, and 
 ## Follow-ups
 
 - Should be done: reopen the periodic review task when the draft linked to a `Revised` decision is discarded.
-- Should be done (DMS-82): orphan clean-up of files unreferenced for other reasons; destruction or compaction of discarded drafts' content after a retention period.
+- Done (DMS-82, ADR 0054): orphan clean-up of files unreferenced for other reasons; removal of discarded drafts' content after a grace period.
 - Could be done: show discarded drafts with their reason in the audit or evidence views for records managers.
 - Ruled out: hard deletion of documents or versions; reusing `Withdrawn` for drafts.
 

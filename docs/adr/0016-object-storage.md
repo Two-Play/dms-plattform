@@ -78,7 +78,7 @@ SeaweedFS and RustFS are functionally equivalent for our purposes. SeaweedFS is 
 - Must be done: user confirms this ADR (status → Accepted).
 - Must be done: retention periods per document type before Object Lock is used for business data (ADR 0009).
 - Must be done: run `ObjectStoreSpec` against the production target before go-live.
-- Later: multipart upload for large archive packages; async client if throughput requires it; job to clean up orphaned unlocked objects (ADR 0009).
+- Later: multipart upload for large archive packages; async client if throughput requires it; job to clean up orphaned unlocked objects (ADR 0009; done in DMS-82, ADR 0054).
 - Ruled out: server-specific APIs (SeaweedFS filer, RustFS admin API) in application code; Garage until it supports Object Lock; LocalStack because of the auth token requirement.
 
 ## Reversibility

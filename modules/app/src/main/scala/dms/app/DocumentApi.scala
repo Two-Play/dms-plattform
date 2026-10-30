@@ -682,7 +682,7 @@ object DocumentApi:
           inTransaction(p) { ctx =>
             for
               details <- ctx.service.get(DocumentId(id))
-              _       <- ZIO.when(details.discarded)(ZIO.fail(discardedDocument(id)))
+              _       <- ZIO.when(details.gone)(ZIO.fail(discardedDocument(id, details)))
               open    <- openVersion(details)
               // Decided as if the version were a draft: a reader of a submitted version learns that it can no
               // longer be discarded (409 from the service), everyone else gets 403.
@@ -859,7 +859,7 @@ object DocumentApi:
         details: DocumentDetails
     ): IO[AccessDenied | WorkflowError | DocumentError, List[DocumentVersion]] =
       for
-        _      <- ZIO.when(details.discarded)(ZIO.fail(discardedDocument(details.document.id.value)))
+        _      <- ZIO.when(details.gone)(ZIO.fail(discardedDocument(details.document.id.value, details)))
         result <- visibleWith(details)
         (visible, participants, actor) = result
         _ <- ZIO.when(visible.isEmpty)(
@@ -953,8 +953,11 @@ object DocumentApi:
             )
           )
 
-  private[app] def discardedDocument(id: UUID): DocumentError =
-    DocumentError.NotFound(s"document $id does not exist (it was discarded)")
+  /** A document whose versions were all discarded (DMS-129) or destroyed (DMS-82) is not found. */
+  private[app] def discardedDocument(id: UUID, details: DocumentDetails): DocumentError =
+    DocumentError.NotFound(
+      s"document $id does not exist (it was ${if details.destroyed then "destroyed" else "discarded"})"
+    )
 
   private def openVersion(details: DocumentDetails): IO[DocumentError, DocumentVersion] =
     ZIO

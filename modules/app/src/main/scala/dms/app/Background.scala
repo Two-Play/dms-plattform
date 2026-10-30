@@ -1,6 +1,6 @@
 package dms.app
 
-import dms.archive.core.LegalHoldSync
+import dms.archive.core.{LegalHoldSync, ObjectCleanup, RetentionMaintenance}
 import dms.audit.core.*
 import dms.db.Db
 import dms.authz.{Groups, RoleAssignments}
@@ -87,6 +87,14 @@ object Background:
       legalHolds = LegalHoldSync(db, S3ObjectStore(s3, config.storage.bucket))
       // Objects of files released by discarded drafts (DMS-129, ADR 0050).
       fileCleanup = FileCleanupJobs(db, S3ObjectStore(s3, config.storage.bucket))
+      // Objects released by destructions and orphaned objects; compaction and discarded drafts (DMS-82, ADR 0054).
+      objectCleanup = ObjectCleanup(
+        db,
+        S3ObjectStore(s3, config.storage.bucket),
+        trail,
+        config.retention.orphans
+      )
+      maintenance = RetentionMaintenance(db, trail, objectCleanup, config.retention.maintenance)
       webhooks    = WebhookJobs(db, DocumentWebhookEvents(documents), sender, hooks)
       deputyJobs  = DeputyshipJobs(
         db,
@@ -98,7 +106,7 @@ object Background:
         db,
         jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers ++
           legalHolds.handlers ++ fileCleanup.handlers ++ webhooks.handlers ++ deputyJobs.handlers ++
-          reminders.handlers +
+          reminders.handlers ++ objectCleanup.handlers ++ maintenance.handlers +
           (RenditionRequest.JobKind -> rendering.handle),
         WorkerConfig(s"${workerName(config)}-jobs")
       )
@@ -115,6 +123,7 @@ object Background:
         .raceFirst(searchJobs.schedule)
         .raceFirst(deputyJobs.schedule)
         .raceFirst(reminders.schedule)
+        .raceFirst(maintenance.schedule)
     yield nothing
 
   /** Encrypts plain-text webhook secrets and re-encrypts those of older keys with the active key (DMS-107). A

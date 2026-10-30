@@ -1,7 +1,7 @@
 package dms.app
 
-import dms.archive.LegalHoldError
-import dms.archive.core.LegalHoldService
+import dms.archive.{DestructionError, LegalHoldError}
+import dms.archive.core.{DestructionService, LegalHoldService}
 import dms.audit.*
 import dms.audit.core.{
   AuditCheckpoints,
@@ -69,9 +69,9 @@ final case class EvidenceReportView(
   * (migration V21) and its creation is audited; it can be downloaded as that JSON or as PDF/A.
   */
 object EvidenceReportApi:
-  type Env = DocumentApi.Env & AcknowledgementService & ReviewService & LegalHoldService & RoleAssignments &
-    AuditTrail & AuditEvidence & EvidenceReportRegistry & RenditionArchive & PdfRenderer & PdfValidator &
-    AttachmentUploads
+  type Env = DocumentApi.Env & AcknowledgementService & ReviewService & LegalHoldService &
+    DestructionService & RoleAssignments & AuditTrail & AuditEvidence & EvidenceReportRegistry &
+    RenditionArchive & PdfRenderer & PdfValidator & AttachmentUploads
 
   /** Audit action of a created report. */
   val CreatedAction: String = "document.evidence-report-created"
@@ -189,6 +189,7 @@ object EvidenceReportApi:
       acks        <- ZIO.service[AcknowledgementService]
       reviews     <- ZIO.service[ReviewService]
       holds       <- ZIO.service[LegalHoldService]
+      destruction <- ZIO.service[DestructionService]
       assignments <- ZIO.service[RoleAssignments]
       groups      <- ZIO.serviceWith[Authorizer](_.groups)
       evidence    <- ZIO.service[AuditEvidence]
@@ -213,6 +214,7 @@ object EvidenceReportApi:
               )
           )
           entries <- evidence.entriesOf(id.value).mapError(DocumentError.Database(_))
+          records <- destruction.recordsOf(id).mapError(destructionError)
         yield EvidenceFacts(
           details,
           cases,
@@ -223,7 +225,8 @@ object EvidenceReportApi:
           held,
           entries,
           details.versions.map(v => v.id -> WorkflowDocuments.contentSha256(v)).toMap,
-          removals.flatten.toMap
+          removals.flatten.toMap,
+          records.map(r => r.item.versionId -> r).toMap
         )
       }
       // Outside the transaction: the chain verification opens its own, the renditions come from object storage.
@@ -293,7 +296,10 @@ object EvidenceReportApi:
   ): URIO[RenditionArchive, Map[UUID, RenditionCheck]] =
     ZIO.serviceWithZIO[RenditionArchive](archive =>
       ZIO
-        .foreach(versions.flatMap(v => v.rendition.map(v.id -> _))) { (versionId, rendition) =>
+        // Destroyed versions (DMS-82) have no rendition any more; the report checks their destruction record.
+        .foreach(
+          versions.filterNot(_.status == DocumentStatus.Destroyed).flatMap(v => v.rendition.map(v.id -> _))
+        ) { (versionId, rendition) =>
           archive
             .read(rendition)
             .as(RenditionCheck.Matches)
@@ -408,6 +414,10 @@ object EvidenceReportApi:
   private def acknowledgementError(e: AcknowledgementError): DocumentError = e match
     case AcknowledgementError.Database(db) => DocumentError.Database(db)
     case other                             => DocumentError.Conflict(other.describe)
+
+  private def destructionError(e: DestructionError): DocumentError = e match
+    case DestructionError.Database(db) => DocumentError.Database(db)
+    case other                         => DocumentError.Conflict(other.describe)
 
   private def legalHoldError(e: LegalHoldError): DocumentError = e match
     case LegalHoldError.Database(db) => DocumentError.Database(db)
