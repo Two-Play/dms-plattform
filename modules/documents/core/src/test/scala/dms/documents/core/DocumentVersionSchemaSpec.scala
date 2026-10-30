@@ -664,7 +664,7 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
       val discard       = Set(("Draft", "Discarded"))
       val withdrawValid = Set(("Published", "Withdrawn"), ("ReviewDue", "Withdrawn"))
       assertTrue(
-        pairs("V32__discard_drafts.sql") == lifecycle,
+        pairs("V31__discard_drafts.sql") == lifecycle,
         pairs("V18__periodic_review.sql") == lifecycle -- discard,
         List("V9__document_versions.sql", "V10__deviation_requests.sql").forall(f =>
           pairs(f) == lifecycle -- discard -- withdrawValid

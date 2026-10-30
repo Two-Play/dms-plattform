@@ -28,9 +28,9 @@ import java.lang.management.ManagementFactory
 import java.net.http.HttpClient
 
 /** Background processing of this instance: the job runner (audit, publication, review, rendition, search,
-  * legal hold, file clean-up, deputyship and acknowledgement reminder jobs), the outbox relay and the schedulers
-  * of periodic audit jobs, scheduled publications, the periodic review check, the search synchronization, the
-  * deputyship check and the acknowledgement reminder check.
+  * legal hold, file clean-up, deputyship and acknowledgement reminder jobs), the outbox relay and the
+  * schedulers of periodic audit jobs, scheduled publications, the periodic review check, the search
+  * synchronization, the deputyship check and the acknowledgement reminder check.
   *
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
   * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029) and the webhooks
