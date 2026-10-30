@@ -31,7 +31,7 @@ import scala.util.Try
   * version on approval (checked here and by the database guard of V19). The retention is checked again on
   * approval with the rule as it is then. The database enforces the four eyes and that a version becomes
   * `Destroyed` only through an approved proposal and together with the removal of its content (migration
-  * V35).
+  * V33).
   *
   * Every method must run inside `Db.transact(tenant)`. Authorization (records managers, per document) is the
   * caller's part.

@@ -74,7 +74,7 @@ object WorkingStateCompaction:
   *
   *   - compaction of working states ([[WorkingStateCompaction]]): never the current state, never one that was
   *     reviewed, never within the recent period, never of a document under legal hold (also refused by the
-  *     database, migration V35);
+  *     database, migration V33);
   *   - removal of the content of discarded drafts after the grace period (ADR 0050): working states deleted,
   *     content and values emptied; the version row and the audit trail stay; not while under legal hold;
   *   - the clean-up of orphaned objects ([[ObjectCleanup.sweep]]), if enabled.
@@ -180,7 +180,7 @@ final class RetentionMaintenance(
           ZIO
             .unless(numbers.isEmpty)(
               Db.sql(
-                // Ascending, so that the database's reference check sees the later states (migration V35).
+                // Ascending, so that the database's reference check sees the later states (migration V33).
                 numbers.foreach(n =>
                   sql"delete from dms.document_working_state where version_id = $id and working_state = $n".update
                     .run()

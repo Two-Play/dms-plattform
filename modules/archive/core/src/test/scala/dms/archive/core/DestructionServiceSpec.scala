@@ -22,7 +22,7 @@ import java.util.UUID
 import javax.sql.DataSource
 
 /** Destruction after retention, compaction of working states, removal of discarded drafts' content and the
-  * clean-up of orphaned objects (DMS-82, ADR 0054, migration V35). Against PostgreSQL and SeaweedFS started
+  * clean-up of orphaned objects (DMS-82, ADR 0054, migration V33). Against PostgreSQL and SeaweedFS started
   * by Testcontainers.
   */
 object DestructionServiceSpec extends ZIOSpecDefault:

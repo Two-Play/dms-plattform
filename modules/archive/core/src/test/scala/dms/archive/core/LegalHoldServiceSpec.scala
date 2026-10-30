@@ -184,7 +184,7 @@ object LegalHoldServiceSpec extends ZIOSpecDefault:
             where id = $version""".update.run()
     }.unit
 
-  /** Destroys an archived version as the application user along the destruction path (DMS-82, migration V35):
+  /** Destroys an archived version as the application user along the destruction path (DMS-82, migration V33):
     * a destruction proposal approved by a second records manager, and the removal of the content.
     */
   private def destroy(tenant: TenantId, version: UUID): ZIO[Env, DbError, Int] =
