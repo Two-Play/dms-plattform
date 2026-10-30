@@ -291,7 +291,22 @@ final class ApprovalWorkflow(
               ),
               None
             )
-            _ <- ZIO.when(eligible.isEmpty)(notifyMissing(row, subject, task, holders))
+            added = eligible.filterNot(task.candidateList.contains)
+            _ <-
+              if eligible.isEmpty then notifyMissing(row, subject, task, holders)
+              else
+                ZIO.when(added.nonEmpty)(
+                  notifyAssigned(
+                    row,
+                    subject,
+                    WorkflowStore
+                      .parse(row.definition)
+                      .step(task.stepKey)
+                      .getOrElse(Step(task.stepKey, task.stepKey, StepKind.valueOf(task.stepKind), Nil)),
+                    task,
+                    added
+                  )
+                )
           yield Some(task.id)
     yield updated
 
@@ -587,7 +602,51 @@ final class ApprovalWorkflow(
         None
       )
       _ <- sql(WorkflowStore.insertTask(task))
-      _ <- ZIO.when(eligible.isEmpty)(notifyMissing(row, subject, task, holders))
+      _ <-
+        if eligible.isEmpty then notifyMissing(row, subject, task, holders)
+        else notifyAssigned(row, subject, step, task, eligible)
+    yield ()
+
+  /** The task was assigned to `assignees` (DMS-130): outbox event `workflow.task-assigned` for the
+    * notifications module, with the deputies who may complete it now in place of an assignee (DMS-49).
+    */
+  private def notifyAssigned(
+      row: CaseRow,
+      subject: ReviewSubject,
+      step: Step,
+      task: TaskRow,
+      assignees: List[UserId]
+  ): IO[WorkflowError, Unit] =
+    for
+      deputies <- views(
+        row,
+        List(
+          task.copy(candidates = WorkflowStore.candidatesJson(assignees), status = TaskStatus.Open.toString)
+        )
+      ).map(
+        _.flatMap(_.deputies).filter(d => assignees.contains(d.principal))
+      )
+      payload = Json.Obj(
+        "caseId"     -> Json.Str(row.id.toString),
+        "taskId"     -> Json.Str(task.id),
+        "documentId" -> Json.Str(subject.documentId.value.toString),
+        "versionId"  -> Json.Str(subject.versionId.toString),
+        "version"    -> Json.Str(subject.versionLabel),
+        "step"       -> Json.Str(task.stepKey),
+        "stepName"   -> Json.Str(step.name),
+        "stepKind"   -> Json.Str(task.stepKind),
+        "lane"       -> Json.Str(task.laneKey),
+        "role"       -> Json.Str(task.role),
+        "recipients" -> Json.Arr(assignees.map(a => Json.Str(a.value))*),
+        "deputies"   -> Json.Arr(
+          deputies.map(d =>
+            Json.Obj("deputy" -> Json.Str(d.deputy.value), "principal" -> Json.Str(d.principal.value))
+          )*
+        )
+      )
+      _ <- Outbox
+        .publish("workflow", row.id, "workflow.task-assigned", Jsonb(payload.toJson))
+        .mapError(WorkflowError.Database(_))
     yield ()
 
   /** Nobody may take the task (DMS-42): the tenant administrators are notified through the outbox, and the

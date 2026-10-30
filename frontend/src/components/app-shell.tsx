@@ -1,6 +1,7 @@
 import { Link, Outlet, useNavigate, useRouter, useRouterState } from '@tanstack/react-router'
 import {
   Archive,
+  BellRing,
   CheckSquare,
   Menu,
   FileText,
@@ -36,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Toaster } from '@/components/shared/toaster'
+import { NotificationBell } from '@/components/notifications/notification-bell'
 import { useOpenTaskCount } from '@/components/tasks/use-open-task-count'
 import { Input } from '@/components/ui/input'
 import { currentTheme, setTheme, type Theme } from '@/lib/theme'
@@ -131,6 +133,12 @@ function UserMenu() {
           <Link to="/deputies">
             <UserRoundCheck />
             {t('shell.deputies')}
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/settings/notifications">
+            <BellRing />
+            {t('notifications.settingsLink')}
           </Link>
         </DropdownMenuItem>
         <DropdownMenuSeparator />
@@ -332,6 +340,7 @@ export function AppShell() {
           {pathname !== '/search' && <HeaderSearch />}
         </div>
         <div className="flex items-center gap-1">
+          <NotificationBell />
           <ThemeToggle />
           <UserMenu />
         </div>

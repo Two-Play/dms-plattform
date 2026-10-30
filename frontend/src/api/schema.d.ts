@@ -1465,6 +1465,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/acknowledgements/owned': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Valid versions of documents the caller owns that still have open acknowledgements, with the figures (no names), most open first; for the owner dashboard (DMS-130). Only versions the caller may see the figures of (owner role). */
+    get: operations['getApiV1AcknowledgementsOwned']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/{id}/acknowledgement-overview': {
     parameters: {
       query?: never
@@ -2309,6 +2326,143 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/notifications': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The caller's in-app notifications, newest first, with the number of unread ones */
+    get: operations['getApiV1Notifications']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/notifications/unread-count': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description How many of the caller's notifications are unread (the badge of the bell) */
+    get: operations['getApiV1NotificationsUnread-count']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/notifications/read-all': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Marks all of the caller's notifications as read */
+    post: operations['postApiV1NotificationsRead-all']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/notifications/preferences': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The caller's notification language and email choices per category; in-app is always on */
+    get: operations['getApiV1NotificationsPreferences']
+    /** @description Sets the caller's notification language (de, en; empty: the tenant's) and email per category; 422 for an unknown language or category */
+    put: operations['putApiV1NotificationsPreferences']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/notifications/{id}/read': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Marks one of the caller's notifications as read; 404 for notifications of others */
+    post: operations['postApiV1NotificationsIdRead']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/notifications/deliveries': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Notification deliveries that failed for good (dead letters), newest first; tenant administrators */
+    get: operations['getApiV1AdminNotificationsDeliveries']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/notifications/deliveries/{id}/redeliver': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Sends a dead delivery again; 409 if it is not dead; tenant administrators */
+    post: operations['postApiV1AdminNotificationsDeliveriesIdRedeliver']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/admin/notifications/language': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Sets the tenant's default language of notifications (de, en) for users without a choice; tenant administrators */
+    put: operations['putApiV1AdminNotificationsLanguage']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -2588,6 +2742,12 @@ export interface components {
       /** Format: date-time */
       releasedAt?: string
     }
+    /** CategoryPreferenceView */
+    CategoryPreferenceView: {
+      category: string
+      email: boolean
+      emailByDefault: boolean
+    }
     /** Cell */
     Cell: {
       /** Format: int32 */
@@ -2615,6 +2775,11 @@ export interface components {
       description?: string
       fieldType: components['schemas']['FieldType']
       multiple?: boolean
+    }
+    /** ChangeNotificationPreferences */
+    ChangeNotificationPreferences: {
+      language?: string
+      email: components['schemas']['Map_Boolean']
     }
     /** ChangeNumberRange */
     ChangeNumberRange: {
@@ -2949,6 +3114,25 @@ export interface components {
       definition: components['schemas']['WorkflowDefinitionView']
       fourEyes?: boolean
       reason?: string
+    }
+    /** DeliveryView */
+    DeliveryView: {
+      /** Format: uuid */
+      id: string
+      /** Format: int64 */
+      eventId: number
+      kind: string
+      category: string
+      recipient: string
+      channel: string
+      /** Format: uuid */
+      documentId?: string
+      status: string
+      /** Format: int32 */
+      attempts: number
+      lastError?: string
+      /** Format: date-time */
+      createdAt: string
     }
     /** DeputyshipView */
     DeputyshipView: {
@@ -3613,6 +3797,10 @@ export interface components {
        */
       type: 'Many'
     }
+    /** Map_Boolean */
+    Map_Boolean: {
+      [key: string]: boolean
+    }
     /** Map_FieldValueView */
     Map_FieldValueView: {
       [key: string]: components['schemas']['FieldValueView']
@@ -3630,6 +3818,11 @@ export interface components {
      * @enum {string}
      */
     Mark: 'Bold' | 'Italic' | 'Underline'
+    /** MarkedReadView */
+    MarkedReadView: {
+      /** Format: int32 */
+      marked: number
+    }
     /** Me */
     Me: {
       userId: string
@@ -3671,6 +3864,37 @@ export interface components {
       changeKind: string
       reason?: string
       requiresAcknowledgement?: boolean
+    }
+    /** NotificationPageView */
+    NotificationPageView: {
+      items?: components['schemas']['NotificationView'][]
+      /** Format: int32 */
+      total: number
+      /** Format: int32 */
+      unread: number
+    }
+    /** NotificationPreferencesView */
+    NotificationPreferencesView: {
+      language?: string
+      tenantLanguage: string
+      categories?: components['schemas']['CategoryPreferenceView'][]
+      emailAvailable: boolean
+    }
+    /** NotificationView */
+    NotificationView: {
+      /** Format: uuid */
+      id: string
+      kind: string
+      category: string
+      subject: string
+      body: string
+      link?: string
+      /** Format: uuid */
+      documentId?: string
+      /** Format: date-time */
+      createdAt: string
+      /** Format: date-time */
+      readAt?: string
     }
     /** Number */
     Number: {
@@ -3852,6 +4076,21 @@ export interface components {
       dueOn: string
       /** Format: int64 */
       daysOverdue: number
+    }
+    /** OwnedAcknowledgementView */
+    OwnedAcknowledgementView: {
+      /** Format: uuid */
+      documentId: string
+      title: string
+      /** Format: uuid */
+      versionId: string
+      versionLabel: string
+      /** Format: int32 */
+      audience: number
+      /** Format: int32 */
+      acknowledged: number
+      /** Format: int32 */
+      open: number
     }
     /** OwnerCountView */
     OwnerCountView: {
@@ -4595,6 +4834,10 @@ export interface components {
       /** Format: date-time */
       releasedAt?: string
     }
+    /** TenantLanguageView */
+    TenantLanguageView: {
+      language: string
+    }
     /** TestCaseView */
     TestCaseView: {
       name: string
@@ -4717,6 +4960,11 @@ export interface components {
     UnitRateView: {
       unit?: string
       rate: components['schemas']['RateView']
+    }
+    /** UnreadCountView */
+    UnreadCountView: {
+      /** Format: int32 */
+      unread: number
     }
     /** UpdateChangeSummary */
     UpdateChangeSummary: {
@@ -9264,6 +9512,33 @@ export interface operations {
       }
     }
   }
+  getApiV1AcknowledgementsOwned: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['OwnedAcknowledgementView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   'getApiV1DocumentsIdAcknowledgement-overview': {
     parameters: {
       query?: never
@@ -11546,6 +11821,323 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter deliveryId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1Notifications: {
+    parameters: {
+      query?: {
+        /** @description Only unread notifications */
+        unread?: boolean
+        /** @description Skip this many (default 0) */
+        offset?: number
+        /** @description Page size, 1 to 100 (default 20) */
+        limit?: number
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NotificationPageView']
+        }
+      }
+      /** @description Invalid value for: query parameter unread, Invalid value for: query parameter offset, Invalid value for: query parameter limit */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1NotificationsUnread-count': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['UnreadCountView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1NotificationsRead-all': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MarkedReadView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1NotificationsPreferences: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NotificationPreferencesView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1NotificationsPreferences: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ChangeNotificationPreferences']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['NotificationPreferencesView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1NotificationsIdRead: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Notification id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1AdminNotificationsDeliveries: {
+    parameters: {
+      query?: {
+        /** @description At most this many (1 to 200, default 50) */
+        limit?: number
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeliveryView'][]
+        }
+      }
+      /** @description Invalid value for: query parameter limit */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1AdminNotificationsDeliveriesIdRedeliver: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Delivery id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1AdminNotificationsLanguage: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TenantLanguageView']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TenantLanguageView']
+        }
+      }
+      /** @description Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown

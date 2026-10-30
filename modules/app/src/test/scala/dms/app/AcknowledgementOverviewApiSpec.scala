@@ -535,6 +535,25 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
         view.versions.head.nextReminderAt.exists(_.isAfter(Instant.now().plusSeconds(23 * 3600)))
       )
     },
+    test("owners see their documents with open acknowledgements (dashboard), others nothing") {
+      for
+        f        <- fixture
+        mineA    <- get(ownerA, "/api/v1/acknowledgements/owned")
+        mineB    <- get(ownerB, "/api/v1/acknowledgements/owned")
+        officers <- get(officer, "/api/v1/acknowledgements/owned")
+        readers  <- get(hr1, "/api/v1/acknowledgements/owned")
+      yield assertTrue(
+        mineA._1 == Status.Ok,
+        as[List[OwnedAcknowledgementView]](mineA).map(v =>
+          (v.versionId, v.audience, v.acknowledged, v.open)
+        ) ==
+          List((f.hrPolicy.id, 3, 1, 2)),
+        as[List[OwnedAcknowledgementView]](mineA).head.title == "Leave policy",
+        as[List[OwnedAcknowledgementView]](mineB).map(v => (v.versionId, v.open)) == List((f.general.id, 6)),
+        as[List[OwnedAcknowledgementView]](officers).isEmpty,
+        as[List[OwnedAcknowledgementView]](readers).isEmpty
+      )
+    },
     test("automatic reminders are due per interval and sent once per reader and round") {
       for
         f      <- fixture
@@ -563,6 +582,127 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
         rows.filter(_._1 == f.hrPolicy.id).map(r => (r._2, r._3)) ==
           List((boardMember.value, 1), (boardMember.value, 2), (hr2.value, 1), (hr2.value, 2)),
         rows.count(_._1 == f.general.id) == 6
+      )
+    },
+    test("recipients are asked once (notifications); people who join later are reminded an interval later") {
+      for
+        f    <- fixture
+        jobs <- reminderJobs
+        db   <- ZIO.service[Db]
+        late = UserId("reader-hr-late")
+        _ <- db.transact(tenantId)(
+          RoleAssignments.Postgres.grant(late, RoleAssignment(Role.Reader, Some("HR")), admin)
+        )
+        now <- Clock.instant
+        // the earlier test reminded hr2 and the board member up to day 15; day 16: the late joiner is asked
+        joined <- jobs.check(tenantId, now.plusSeconds(16 * 86400L))
+        asked  <- system(
+          sql"""select payload::text from dms.outbox_event
+                where event_type = ${AcknowledgementService.RequestEvent} order by id"""
+            .query[String]
+            .run()
+            .toList
+        )
+        requested <- system(
+          sql"""select user_id, notified from dms.acknowledgement_request where version_id = ${f.hrPolicy.id}
+                order by user_id""".query[(String, Boolean)].run().toList
+        )
+        tooEarly <- jobs.check(tenantId, now.plusSeconds(20 * 86400L))
+        lateRows <- system(
+          sql"""select round from dms.acknowledgement_reminder
+                where kind = 'automatic' and user_id = ${late.value}""".query[Int].run().toList
+        )
+        reminded  <- jobs.check(tenantId, now.plusSeconds(24 * 86400L))
+        lateAfter <- system(
+          sql"""select round from dms.acknowledgement_reminder
+                where kind = 'automatic' and user_id = ${late.value}""".query[Int].run().toList
+        )
+      yield assertTrue(
+        joined == 0,
+        // first request of each version at the first check (before), the late joiner alone now
+        asked.exists(a => a.contains(hr2.value) && a.contains(f.hrPolicy.id.toString)),
+        asked.last.contains(late.value),
+        !asked.last.contains(hr2.value),
+        requested.map(_._1).contains(late.value),
+        requested.forall(_._2),
+        lateRows.isEmpty,
+        tooEarly >= 0,
+        lateAfter == List(1),
+        reminded >= 1
+      )
+    },
+    test("notifications: the read check at delivery time and the meaning of acknowledgement events") {
+      for
+        f         <- fixture
+        db        <- ZIO.service[Db]
+        documents <- ZIO.service[DocumentService]
+        workflow  <- ZIO.service[ApprovalWorkflow]
+        authz     <- ZIO.service[Authorizer]
+        audit     <- ZIO.service[AuditTrail]
+        check = dms.app.PolicyNotificationDocuments(
+          documents,
+          workflow,
+          authz,
+          RoleAssignments.Postgres,
+          Groups.Postgres
+        )
+        ref = dms.notifications.DocumentRef(f.hrPolicy.documentId, Some(f.hrPolicy.id))
+        reader  <- db.transact(tenantId)(check.visibleTo(tenantId, hr1, ref))
+        outside <- db.transact(tenantId)(check.visibleTo(tenantId, fin, ref))
+        missing <- db.transact(tenantId)(
+          check.visibleTo(tenantId, hr1, dms.notifications.DocumentRef(DocumentId(UUID.randomUUID()), None))
+        )
+        row <- system(
+          sql"""select id, aggregate_id, payload::text from dms.outbox_event
+                where event_type = ${AcknowledgementService.RequestEvent} order by id limit 1"""
+            .query[(Long, UUID, String)]
+            .run()
+            .head
+        )
+        events = dms.app.PlatformNotificationEvents(
+          documents,
+          RoleAssignments.Postgres,
+          dms.archive.core.LegalHoldService(audit)
+        )
+        event = dms.db.queue.OutboxEvent(
+          row._1,
+          tenantId,
+          "document",
+          row._2,
+          AcknowledgementService.RequestEvent,
+          dms.db.Jsonb(row._3),
+          None,
+          1
+        )
+        notices <- db.transact(tenantId)(events.describe(event))
+        status  <- system(
+          sql"""select id, aggregate_id, payload::text from dms.outbox_event
+                where event_type = 'document.status-changed' and payload->>'status' = 'Published'
+                  and aggregate_id = ${f.hrPolicy.documentId.value} order by id limit 1"""
+            .query[(Long, UUID, String)]
+            .run()
+            .head
+        )
+        published <- db.transact(tenantId)(
+          events.describe(
+            event.copy(
+              id = status._1,
+              aggregateId = status._2,
+              eventType = "document.status-changed",
+              payload = dms.db.Jsonb(status._3)
+            )
+          )
+        )
+      yield assertTrue(
+        reader.map(_.title).contains("Leave policy"),
+        reader.flatMap(_.versionLabel).contains(f.hrPolicy.label),
+        outside.isEmpty,
+        missing.isEmpty,
+        notices.map(_.kind) == List("acknowledgement.requested"),
+        notices.head.category == dms.notifications.NotificationCategory.Acknowledgement,
+        notices.head.recipients.nonEmpty,
+        notices.head.document.exists(_.documentId.value == row._2),
+        published.map(n => (n.kind, n.recipients)) == List(("publication.published", List(ownerA)))
       )
     },
     test("administrators configure recipients per class and the tenant default; others may not") {

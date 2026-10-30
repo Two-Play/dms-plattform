@@ -32,6 +32,20 @@ export const home: Translation<typeof en.home> = {
     emptyText: 'Sobald ein Dokument zur Kenntnisnahme veröffentlicht wird, erscheint es hier.',
     viewAll: 'Alle Kenntnisnahmen anzeigen',
   },
+  owned: {
+    title: 'Offene Kenntnisnahmen meiner Dokumente',
+    description:
+      'Gültige Versionen Ihrer Dokumente, die noch nicht alle zur Kenntnis genommen haben.',
+    count: plural({
+      one: '{count} Dokument mit offenen Kenntnisnahmen',
+      other: '{count} Dokumente mit offenen Kenntnisnahmen',
+    }),
+    loading: 'Kenntnisnahmen Ihrer Dokumente werden geladen',
+    list: 'Meine Dokumente mit offenen Kenntnisnahmen',
+    open: '{open} von {audience} offen',
+    emptyTitle: 'Alles zur Kenntnis genommen',
+    emptyText: 'Alle Lesenden haben die gültigen Versionen Ihrer Dokumente zur Kenntnis genommen.',
+  },
   drafts: {
     title: 'Meine Entwürfe',
     description: 'Selbst begonnene Entwürfe – fortsetzen oder zur Prüfung einreichen.',

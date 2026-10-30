@@ -66,7 +66,10 @@ enum Action:
   * document classes (DMS-113, ADR 0040).
   */
 enum ConfigurationArea:
-  case DocumentClasses, Workflows, Taxonomies, Retention, Search, Groups, Webhooks, NumberRanges
+  /** `Notifications`: failed notification deliveries and the tenant's default language (DMS-130, ADR 0052).
+    */
+  case DocumentClasses, Workflows, Taxonomies, Retention, Search, Groups, Webhooks, NumberRanges,
+    Notifications
 
 enum Confidentiality:
   case Public, Internal, Confidential, StrictlyConfidential

@@ -21,6 +21,7 @@ object Versions {
   val flowable      = "8.0.0"  // embedded workflow engine, see docs/adr/0006 and 0024
   val veraPdf       = "1.30.2" // PDF/A validation, same release as the CLI of spike DMS-23 (ADR 0008, 0025)
   val pdfbox        = "3.0.8"  // on-demand PDFs of file documents (stamp, merge); text extraction in tests
+  val angusMail     = "2.0.4"  // SMTP for notification emails (ADR 0052)
 }
 
 object Dependencies {
@@ -74,6 +75,9 @@ object Dependencies {
   val flowable = Seq(
     ("org.flowable" % "flowable-engine" % Versions.flowable).exclude("commons-logging", "commons-logging")
   )
+
+  /** Jakarta Mail (Eclipse Angus) for notification emails over SMTP (ADR 0052). */
+  val mail = Seq("org.eclipse.angus" % "angus-mail" % Versions.angusMail)
 
   val jwt = Seq("com.nimbusds" % "nimbus-jose-jwt" % Versions.nimbusJose)
 
