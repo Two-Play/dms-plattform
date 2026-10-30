@@ -27,6 +27,7 @@ type EditorProps = Pick<
   | 'aside'
   | 'onCreated'
   | 'afterCreate'
+  | 'initialValues'
 >
 
 /** Loads the fields of the template version and shows the workspace for them. */
