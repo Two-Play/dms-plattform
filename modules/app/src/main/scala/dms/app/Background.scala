@@ -38,8 +38,8 @@ import java.net.http.HttpClient
 /** Background processing of this instance: the job runner (audit, publication, review, rendition, search,
   * legal hold, object retention, file clean-up, deputyship, acknowledgement reminder, notification and task
   * deadline jobs), the outbox relay and the schedulers of periodic audit jobs, scheduled publications, the
-  * periodic review check, the search synchronization, the deputyship check, the acknowledgement reminder check,
-  * the notification clean-up and the deadline check of review and approval tasks (DMS-87).
+  * periodic review check, the search synchronization, the deputyship check, the acknowledgement reminder
+  * check, the notification clean-up and the deadline check of review and approval tasks (DMS-87).
   *
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
   * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029) and the webhooks

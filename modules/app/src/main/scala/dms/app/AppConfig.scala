@@ -282,6 +282,10 @@ final case class RetentionConfig(
   def orphans: OrphanCleanupConfig =
     OrphanCleanupConfig(grace = zio.Duration.fromSeconds(orphanGraceHours.max(0).toLong * 3600))
 
+// Derived here rather than inside AppConfig's derivation, which would exceed the compiler's inline limit.
+object RetentionConfig:
+  given DeriveConfig[RetentionConfig] = DeriveConfig.derived
+
 /** Object Lock retention of the objects of approved versions (DMS-93, ADR 0055), `dms.retention.objectLock`.
   * The period comes from the version's retention rule (`dms.retention_rule`, DMS-82); these settings only add
   * the capability flag, the mode and the period for versions whose rule has no row.
