@@ -84,6 +84,10 @@ Names in the overview without stated purpose were rejected for the same reasons 
 - Later: organizational units as a membership of their own (directory or HR system) instead of scoped role assignments.
 - Ruled out: names of recipients without stated purpose; per-person recipient lists.
 
+## Addendum (DMS-130, 2026-10-30): delivery, requests and late joiners
+
+Reminders are delivered by the notifications module (ADR 0052). The reminder check also asks recipients for their acknowledgement (`document.acknowledgement-requested`, recorded once per version and recipient in `dms.acknowledgement_request`; a publication triggers the check at once). The automatic reminder rounds of a recipient count from when they were asked (the first request of a version from the snapshot time, as before), so the consequence "a late joiner can receive the current reminder round right after joining" no longer applies. The follow-up "dashboard entry for owners" is done: `GET /api/v1/acknowledgements/owned` and the dashboard tile "Offene Kenntnisnahmen meiner Dokumente".
+
 ## Reversibility
 
 **medium**: The settings and snapshot tables can be dropped (every reader is asked again) without touching the acknowledgement proof. Reminder rows are append-only records and stay. Switching to materialized recipients would replace `RecipientFilter` evaluation by a join, behind the same endpoints.

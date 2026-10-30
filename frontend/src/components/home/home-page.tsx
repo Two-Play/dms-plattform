@@ -10,10 +10,12 @@ import {
   LayoutTemplate,
   Search,
   ShieldCheck,
+  Users,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useAuth } from 'react-oidc-context'
 import { openAcknowledgementsQuery } from '@/api/acknowledgements'
+import { ownedAcknowledgementsQuery } from '@/api/notifications'
 import { complianceOverviewQuery, formatRate } from '@/api/compliance'
 import { useApiClient } from '@/api/context'
 import { documentListQuery, type DocumentSummary } from '@/api/documents'
@@ -192,6 +194,52 @@ function AcknowledgementsCard() {
                 {a.publishedAt && (
                   <span>{t('home.publishedOn', { date: formatDate(a.publishedAt) })}</span>
                 )}
+              </>
+            }
+          />
+        ))}
+      </CardList>
+    </DashboardCard>
+  )
+}
+
+/** Owners: valid versions of their documents with open read confirmations (DMS-130). */
+function OwnedAcknowledgementsCard() {
+  const owned = useQuery(ownedAcknowledgementsQuery(useApiClient()))
+  const items = owned.data ?? []
+  return (
+    <DashboardCard
+      title={t('home.owned.title')}
+      description={t('home.owned.description')}
+      icon={Users}
+      count={items.length}
+      countLabel={t('home.owned.count', { count: items.length })}
+      loadingLabel={t('home.owned.loading')}
+      query={{
+        isPending: owned.isPending,
+        error: owned.error,
+        refetch: () => void owned.refetch(),
+      }}
+      isEmpty={items.length === 0}
+      empty={
+        <EmptyState
+          icon={CheckCircle2}
+          title={t('home.owned.emptyTitle')}
+          description={t('home.owned.emptyText')}
+        />
+      }
+    >
+      <CardList label={t('home.owned.list')}>
+        {items.slice(0, TOP).map((a) => (
+          <CardListItem
+            key={a.versionId}
+            title={<DocumentLink id={a.documentId} title={a.title} />}
+            meta={
+              <>
+                <span>{t('common.version', { label: a.versionLabel })}</span>
+                <Badge variant="secondary">
+                  {t('home.owned.open', { open: a.open, audience: a.audience })}
+                </Badge>
               </>
             }
           />
@@ -422,6 +470,7 @@ export function HomePage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <TasksCard />
         <AcknowledgementsCard />
+        {hasRole(me.data, 'Owner') && <OwnedAcknowledgementsCard />}
         <DraftsCard />
         <PublishedCard />
         {hasRole(me.data, 'TemplateDesigner') && <TemplatesCard />}

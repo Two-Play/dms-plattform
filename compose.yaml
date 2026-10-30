@@ -3,7 +3,7 @@
 # object storage (SeaweedFS with Object Lock) with DMS-30; rendering worker (WeasyPrint) with DMS-44; conversion
 # worker (LibreOffice) with DMS-115;
 # search index (OpenSearch) with DMS-51; virus scanner (ClamAV, compose profile "clamav", not started by default) with
-# DMS-117.
+# DMS-117; mail catcher (Mailpit) for notification emails with DMS-130.
 
 services:
   db:
@@ -175,6 +175,24 @@ services:
       test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' > /dev/null"]
       interval: 10s
       retries: 30
+
+  # Mail catcher for notification emails (DMS-130, ADR 0052): accepts every message on SMTP port 1025 without
+  # authentication or TLS and shows it in the web UI on http://localhost:8025. Development only, nothing leaves
+  # the machine. The application sends to it with DMS_SMTP_HOST=localhost, DMS_SMTP_PORT=1025,
+  # DMS_SMTP_SECURITY=none (scripts/dev-setup.sh sets these).
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    environment:
+      MP_MAX_MESSAGES: 2000
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # web UI and API
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      retries: 10
 
 volumes:
   dms-db:

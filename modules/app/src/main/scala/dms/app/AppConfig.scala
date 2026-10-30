@@ -10,7 +10,7 @@ import dms.rendering.core.{ConverterConfig, RendererConfig}
 import dms.search.core.{OpenSearchConfig, SearchSettings}
 import dms.storage.StorageConfig
 import zio.Config
-import zio.config.magnolia.deriveConfig
+import zio.config.magnolia.{DeriveConfig, deriveConfig}
 import dms.archive.core.{MaintenanceConfig, OrphanCleanupConfig}
 
 final case class HttpConfig(port: Int)
@@ -251,6 +251,35 @@ final case class RetentionConfig(
   def orphans: OrphanCleanupConfig =
     OrphanCleanupConfig(grace = zio.Duration.fromSeconds(orphanGraceHours.max(0).toLong * 3600))
 
+/** Delivery of notifications (DMS-130, ADR 0052).
+  *
+  * @param appBaseUrl
+  *   address of the web application for links in emails
+  * @param maxAttempts
+  *   attempts per email before the delivery is dead
+  * @param retentionDays
+  *   read in-app notifications and finished deliveries are deleted after this many days
+  * @param smtp
+  *   SMTP server; an empty host turns email off (in-app only)
+  */
+final case class NotificationsConfig(
+    appBaseUrl: String,
+    maxAttempts: Int,
+    retentionDays: Int,
+    smtp: dms.notifications.core.SmtpConfig
+):
+  def settings: dms.notifications.core.DeliverySettings =
+    dms.notifications.core.DeliverySettings(
+      appBaseUrl,
+      smtp.enabled,
+      maxAttempts.max(1),
+      zio.Duration.fromSeconds(retentionDays.max(1).toLong * 86400)
+    )
+
+// Derived here rather than inside AppConfig's derivation, which would exceed the compiler's inline limit.
+object NotificationsConfig:
+  given DeriveConfig[NotificationsConfig] = DeriveConfig.derived
+
 final case class AppConfig(
     /** `development` (default) or `production` (DMS-117), see [[Profile]]. */
     profile: String,
@@ -270,7 +299,8 @@ final case class AppConfig(
     webhooks: WebhooksConfig,
     users: UserDirectoryConfig,
     attachments: AttachmentsConfig,
-    retention: RetentionConfig
+    retention: RetentionConfig,
+    notifications: NotificationsConfig
 )
 
 object AppConfig:

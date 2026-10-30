@@ -16,6 +16,7 @@ import dms.documents.core.{
 }
 import dms.integration.webhooks.{WebhookJobs, WebhookSecretMigration, WebhookSender, WebhookSettings}
 import dms.integration.{JobRunner, OutboxRelay, WorkerConfig}
+import dms.notifications.core.NotificationJobs
 import dms.rendering.RenditionRequest
 import dms.rendering.core.RenditionJobs
 import dms.search.core.{SearchIndex, SearchJobs}
@@ -35,7 +36,9 @@ import java.net.http.HttpClient
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
   * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029) and the webhooks
   * (DMS-58, ADR 0035), which record a delivery and a job per subscription, so a receiver that is down never
-  * holds up the relay.
+  * holds up the relay, the notifications (DMS-130, ADR 0052), which record a delivery and a job per recipient
+  * and channel, and the acknowledgement reminders, which check a tenant at once when a version that requires
+  * acknowledgement became valid.
   */
 object Background:
 
@@ -43,7 +46,7 @@ object Background:
       config: AppConfig
   ): ZIO[
     Db & S3Client & DocumentService & ReviewService & RenditionJobs & SearchIndex & Deputyships &
-      WebhookSettings & WebhookSender & AcknowledgementService & RoleAssignments & Groups,
+      WebhookSettings & WebhookSender & AcknowledgementService & RoleAssignments & Groups & NotificationJobs,
     Throwable,
     Nothing
   ] =
@@ -60,6 +63,7 @@ object Background:
       acks      <- ZIO.service[AcknowledgementService]
       roles     <- ZIO.service[RoleAssignments]
       groups    <- ZIO.service[Groups]
+      notices   <- ZIO.service[NotificationJobs]
       _         <- secureWebhookSecrets(db, hooks)
       tsa = TsaConfig(config.audit.tsaUrl, trustedCertificates = config.audit.tsaTrustedCertificates)
       trust <- TsaTrust.fromConfig(tsa).mapError(e => RuntimeException(e.message))
@@ -106,13 +110,16 @@ object Background:
         db,
         jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers ++
           legalHolds.handlers ++ fileCleanup.handlers ++ webhooks.handlers ++ deputyJobs.handlers ++
-          reminders.handlers ++ objectCleanup.handlers ++ maintenance.handlers +
+          reminders.handlers ++ objectCleanup.handlers ++ maintenance.handlers ++ notices.handlers +
           (RenditionRequest.JobKind -> rendering.handle),
         WorkerConfig(s"${workerName(config)}-jobs")
       )
       relay = OutboxRelay(
         db,
-        event => searchJobs.deliver(event) *> webhooks.deliver(event),
+        event =>
+          searchJobs.deliver(event) *> webhooks.deliver(event) *> notices.deliver(event) *> reminders.deliver(
+            event
+          ),
         WorkerConfig(s"${workerName(config)}-outbox")
       )
       nothing <- runner.run
@@ -124,6 +131,7 @@ object Background:
         .raceFirst(deputyJobs.schedule)
         .raceFirst(reminders.schedule)
         .raceFirst(maintenance.schedule)
+        .raceFirst(notices.schedule)
     yield nothing
 
   /** Encrypts plain-text webhook secrets and re-encrypts those of older keys with the active key (DMS-107). A

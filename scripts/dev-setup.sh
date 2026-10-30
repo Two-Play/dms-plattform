@@ -79,7 +79,7 @@ fi
 if ! $SEED_ONLY; then
   if $COMPOSE; then
     step "Starting services (docker compose up -d --build --wait)"
-    (cd "$ROOT" && docker compose up -d --build --wait db zitadel-db objectstore rendering opensearch)
+    (cd "$ROOT" && docker compose up -d --build --wait db zitadel-db objectstore rendering opensearch mailpit)
     # zitadel has no health check; objectstore-init runs once and exits.
     (cd "$ROOT" && docker compose up -d zitadel objectstore-init)
   fi
@@ -138,6 +138,10 @@ else
     . "$LOCAL/zitadel/dms.env"
     set +a
     export DMS_HTTP_PORT="$PORT"
+    # Notification emails go to Mailpit from compose.yaml (DMS-130); links point at the dev server.
+    export DMS_SMTP_HOST="${DMS_SMTP_HOST:-localhost}" DMS_SMTP_PORT="${DMS_SMTP_PORT:-1025}"
+    export DMS_SMTP_SECURITY="${DMS_SMTP_SECURITY:-none}"
+    export DMS_NOTIFICATIONS_APP_BASE_URL="${DMS_NOTIFICATIONS_APP_BASE_URL:-http://localhost:$FRONTEND_PORT}"
     cd "$ROOT"
     setsid nohup "$STAGE/bin/app" > "$LOGS/backend.log" 2>&1 < /dev/null &
     echo $! > "$LOGS/backend.pid"
@@ -164,7 +168,7 @@ step "Frontend configuration (frontend/.env.local)"
   "DMS_BACKEND_URL=http://localhost:$PORT"
 echo "Wrote $ROOT/frontend/.env.local"
 
-backend_cmd="set -a && . .local/zitadel/dms.env && set +a && DMS_HTTP_PORT=$PORT $STAGE/bin/app"
+backend_cmd="set -a && . .local/zitadel/dms.env && set +a && DMS_HTTP_PORT=$PORT DMS_SMTP_HOST=localhost DMS_SMTP_PORT=1025 DMS_SMTP_SECURITY=none $STAGE/bin/app"
 frontend_cmd="cd frontend && npm ci && npm run dev"
 
 if ! $START; then
@@ -199,3 +203,4 @@ echo "  Demo users: admin, designer, designer2, author, reviewer, approver, read
 echo "  Passwords:  $LOCAL/dev-users.env"
 echo "  Partner master: built-in demo partners (dms.partners.directory = demo)"
 echo "  Search index:   OpenSearch on http://localhost:9200 (rebuild: scripts/dev_setup.py search-rebuild --api URL)"
+echo "  Emails:         Mailpit on http://localhost:8025 (SMTP localhost:1025; notifications, DMS-130)"

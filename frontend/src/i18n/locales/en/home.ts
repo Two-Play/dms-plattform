@@ -34,6 +34,19 @@ export const home = {
     emptyText: 'When a document you have to read is published, it appears here.',
     viewAll: 'View all read confirmations',
   },
+  owned: {
+    title: 'Read confirmations of my documents',
+    description: 'Valid versions of documents you own that readers have not confirmed yet.',
+    count: plural({
+      one: '{count} document with open read confirmations',
+      other: '{count} documents with open read confirmations',
+    }),
+    loading: 'Loading the read confirmations of your documents',
+    list: 'My documents with open read confirmations',
+    open: '{open} of {audience} open',
+    emptyTitle: 'All confirmed',
+    emptyText: 'Every reader confirmed the valid versions of your documents.',
+  },
   drafts: {
     title: 'My drafts',
     description: 'Drafts you started; continue or submit them.',

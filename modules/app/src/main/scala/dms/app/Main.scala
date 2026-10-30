@@ -45,7 +45,7 @@ object Main extends ZIOAppDefault:
     SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env &
     EvidenceReportApi.Env & CurrentDocumentApi.Env & WebhookApi.Env & UserApi.Env & VersionViewApi.Env &
     NumberRangeApi.Env & AttachmentApi.Env & LibraryApi.Env & FileDocumentApi.Env & WordTemplateApi.Env &
-    AcknowledgementOverviewApi.Env & AcknowledgementSettingsApi.Env & RetentionApi.Env
+    AcknowledgementOverviewApi.Env & AcknowledgementSettingsApi.Env & RetentionApi.Env & NotificationApi.Env
 
   private[app] val apiEndpoints: List[ZServerEndpoint[Env, ZioStreams]] =
     List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
@@ -81,7 +81,8 @@ object Main extends ZIOAppDefault:
       RetentionApi.endpoints.map(_.widen[Env]) ++
       ComplianceApi.endpoints.map(_.widen[Env]) ++
       EvidenceReportApi.endpoints.map(_.widen[Env]) ++
-      WebhookApi.endpoints.map(_.widen[Env])
+      WebhookApi.endpoints.map(_.widen[Env]) ++
+      NotificationApi.endpoints.map(_.widen[Env])
 
   private val docs =
     SwaggerInterpreter()
@@ -217,6 +218,9 @@ object Main extends ZIOAppDefault:
           FileVersions.configured(cfg.conversion.previewCacheMegabytes.toLong * 1024 * 1024),
           WordTemplateService.layer,
           EvidenceReportApi.auditEvidence(cfg.audit),
-          EvidenceReportStore.layer
+          EvidenceReportStore.layer,
+          ZLayer.succeed(cfg.notifications.settings),
+          ZLayer.succeed(cfg.notifications.smtp),
+          PlatformNotifications.layer
         )
     yield ()

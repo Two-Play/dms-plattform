@@ -478,8 +478,18 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         approved   <- cases(doc.id).map(_.head)
         version    <- call(author, "GET", s"/api/v1/documents/${doc.id}").map(as[DocumentView])
         events     <- outbox("workflow.approved")
+        assigned   <- outbox("workflow.task-assigned").map(_.filter(_.contains(doc.id.toString)))
       yield assertTrue(
         submitted._1 == Status.Ok,
+        // every new task is announced to its candidates for the notifications (DMS-130)
+        assigned.size == 3,
+        assigned.exists(e =>
+          e.contains(""""lane": "department"""") && e.contains(reviewer1.value) && e.contains(
+            reviewer2.value
+          ) &&
+            !e.contains(s""""${author.value}"""")
+        ),
+        assigned.exists(e => e.contains(""""stepKind": "Approval"""") && e.contains(approver.value)),
         started.status == "Running",
         started.definitionVersion.contains(1),
         started.currentStep.contains("review"),

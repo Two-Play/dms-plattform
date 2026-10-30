@@ -61,8 +61,16 @@ lazy val searchCore        = searchCoreModule.dependsOn(searchApi, documentsApi,
 lazy val auditApi          = apiModule("audit").dependsOn(db)
 lazy val auditCore         = coreModule("audit").dependsOn(auditApi).settings(auditCoreSettings)
 lazy val integrationApi    = apiModule("integration")
-lazy val notificationsApi  = apiModule("notifications")
-lazy val notificationsCore = coreModule("notifications").dependsOn(notificationsApi)
+lazy val notificationsApi  = apiModule("notifications").dependsOn(db)
+lazy val notificationsCore = notificationsCoreModule.dependsOn(notificationsApi)
+
+/** Notification delivery (ADR 0052): in-app notifications in PostgreSQL, email over SMTP (Jakarta Mail);
+  * integration tests against PostgreSQL and an in-process SMTP test double.
+  */
+def notificationsCoreModule: Project = coreModule("notifications").settings(
+  libraryDependencies ++= Dependencies.json ++ Dependencies.mail ++ Dependencies.integrationTest ++
+    Dependencies.logging.map(_ % Test)
+)
 
 /** Document classes and metadata profiles (ADR 0019): JSON columns; integration tests against PostgreSQL. */
 def documentsCoreModule: Project = coreModule("documents").settings(

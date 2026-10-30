@@ -420,6 +420,94 @@ final class AcknowledgementService(audit: AuditTrail):
       _ <- ZIO.unless(fresh.isEmpty)(reminded(target, fresh, "automatic", Some(round), ReminderActor))
     yield fresh
 
+  /** When the recipients of each version were first asked to acknowledge it (DMS-130); versions without
+    * requests are missing.
+    */
+  def requests(versionIds: Set[UUID]): IO[AcknowledgementError, Map[UUID, Map[UserId, Instant]]] =
+    if versionIds.isEmpty then ZIO.succeed(Map.empty)
+    else
+      sql(
+        sql"""select version_id, user_id, requested_at from dms.acknowledgement_request
+              where version_id::text in (select jsonb_array_elements_text(${json(
+            versionIds.map(_.toString)
+          )}))"""
+          .query[(UUID, String, OffsetDateTime)]
+          .run()
+          .groupMap(_._1)((_, user, at) => UserId(user) -> at.toInstant)
+          .view
+          .mapValues(_.toMap)
+          .toMap
+      )
+
+  /** Versions valid before notifications were delivered (migration V34) whose recipients are not recorded as
+    * asked yet; see [[request]].
+    */
+  def requestBaselines: IO[AcknowledgementError, Set[UUID]] =
+    sql(sql"select version_id from dms.acknowledgement_request_baseline".query[UUID].run().toSet)
+
+  /** Records `readers` as asked to acknowledge the version at `at`, unless they were asked before, and
+    * returns those recorded now. With `notify` the request goes to the outbox
+    * (`document.acknowledgement-requested`, for the notifications module) and the audit trail (number of
+    * readers); without, it is recorded silently and the version's baseline mark is removed (recipients of
+    * versions valid before V34 count as asked at publication).
+    */
+  def request(
+      target: ReminderTarget,
+      readers: List[UserId],
+      at: Instant,
+      notify: Boolean
+  ): IO[AcknowledgementError, List[UserId]] =
+    for
+      fresh <- sql(
+        readers.distinct.flatMap(reader =>
+          sql"""insert into dms.acknowledgement_request (tenant_id, version_id, user_id, requested_at, notified)
+                values (dms.current_tenant(), ${target.versionId}, ${reader.value}, ${utc(at)}, $notify)
+                on conflict (version_id, user_id) do nothing
+                returning user_id""".query[String].run().map(UserId(_))
+        )
+      )
+      _ <- ZIO.unless(notify)(
+        sql(
+          sql"delete from dms.acknowledgement_request_baseline where version_id = ${target.versionId}".update
+            .run()
+        )
+      )
+      _ <- ZIO.when(notify && fresh.nonEmpty)(
+        audit
+          .record(
+            AuditEvent(
+              Actor(ReminderActor.value, ActorKind.Technical),
+              RequestAction,
+              AuditObject("document", Some(target.documentId.value), Some(target.versionLabel)),
+              Channel.Automation,
+              Jsonb(
+                Json
+                  .Obj("versionId" -> Json.Str(target.versionId.toString), "readers" -> Json.Num(fresh.size))
+                  .toJson
+              )
+            )
+          )
+          .mapError(AcknowledgementError.Database(_)) *>
+          Outbox
+            .publish(
+              "document",
+              target.documentId.value,
+              RequestEvent,
+              Jsonb(
+                Json
+                  .Obj(
+                    "documentId" -> Json.Str(target.documentId.value.toString),
+                    "versionId"  -> Json.Str(target.versionId.toString),
+                    "version"    -> Json.Str(target.versionLabel),
+                    "userIds"    -> Json.Arr(Chunk.fromIterable(fresh.map(u => Json.Str(u.value))))
+                  )
+                  .toJson
+              )
+            )
+            .mapError(AcknowledgementError.Database(_))
+      )
+    yield fresh
+
   private def reminded(
       target: ReminderTarget,
       readers: List[UserId],
@@ -501,6 +589,12 @@ object AcknowledgementService:
 
   /** Outbox event of a reminder, for the notifications module; names the reminded readers. */
   val ReminderEvent = "document.acknowledgement-reminder"
+
+  /** Audit action of asking recipients for their acknowledgement (DMS-130). */
+  val RequestAction = "document.acknowledgement-requested"
+
+  /** Outbox event asking recipients for their acknowledgement, for the notifications module (DMS-130). */
+  val RequestEvent = "document.acknowledgement-requested"
 
   /** Records the acknowledgement settings that apply to `versionId` of class `classId` now (DMS-100, ADR
     * 0048). Called when a version that requires acknowledgement becomes valid, in the same transaction.

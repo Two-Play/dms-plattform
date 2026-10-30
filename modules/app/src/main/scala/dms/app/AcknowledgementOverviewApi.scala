@@ -106,6 +106,18 @@ final case class ReminderSentView(
 ) derives JsonCodec,
       Schema
 
+/** Open acknowledgements of one valid version of a document the caller owns (owner dashboard, DMS-130). */
+final case class OwnedAcknowledgementView(
+    documentId: UUID,
+    title: String,
+    versionId: UUID,
+    versionLabel: String,
+    audience: Int,
+    acknowledged: Int,
+    open: Int
+) derives JsonCodec,
+      Schema
+
 /** Acknowledgement overview for document owners (DMS-100, ADR 0048; follows ADR 0027 and 0036).
   *
   * Requires `ViewAcknowledgementPersons` on the version: the document's owner (with the owner role) and
@@ -170,7 +182,56 @@ object AcknowledgementOverviewApi:
       .tag("Acknowledgements")
       .serverLogic(p => (id, versionId) => inTransaction(p)(ctx => remindOpen(p, ctx, id, versionId)))
 
-  def endpoints: List[ZServerEndpoint[Env, Any]] = List(overview, recipients, remind)
+  val mine: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in("api" / "v1" / "acknowledgements" / "owned")
+      .out(jsonBody[List[OwnedAcknowledgementView]])
+      .description(
+        "Valid versions of documents the caller owns that still have open acknowledgements, with the figures " +
+          "(no names), most open first; for the owner dashboard (DMS-130). Only versions the caller may see the " +
+          "figures of (owner role)."
+      )
+      .tag("Acknowledgements")
+      .serverLogic(p => _ => inTransaction(p)(ctx => owned(p, ctx)))
+
+  def endpoints: List[ZServerEndpoint[Env, Any]] = List(mine, overview, recipients, remind)
+
+  private def owned(p: Principal, ctx: DocumentApi.Context) =
+    for
+      valid <- ctx.service.currentlyValid.map(
+        _.filter(v => v.requiresAcknowledgement && v.document.ownerId.contains(p.userId))
+      )
+      permitted <- ZIO.filter(valid)(v =>
+        ctx.allowed(Action.ViewAcknowledgementPersons, ComplianceApi.resource(p.tenantId, v))
+      )
+      rows <-
+        if permitted.isEmpty then ZIO.succeed(Nil)
+        else
+          for
+            now       <- Clock.instant
+            readers   <- Recipients.population(now, p.tenantId)
+            acks      <- ZIO.service[AcknowledgementService]
+            audiences <- acks.audiencesOfValid
+            done      <- acks.acknowledgersOfValid
+          yield permitted.flatMap { v =>
+            val members = readers
+              .readers(ComplianceApi.resource(p.tenantId, v), Recipients.filterOf(audiences.get(v.versionId)))
+              .members
+            val acknowledged = members.count(done.getOrElse(v.versionId, Set.empty).contains)
+            val open         = members.size - acknowledged
+            Option.when(open > 0)(
+              OwnedAcknowledgementView(
+                v.document.id.value,
+                v.document.title,
+                v.versionId,
+                v.label,
+                members.size,
+                acknowledged,
+                open
+              )
+            )
+          }
+    yield rows.sortBy(r => (-r.open, r.title.toLowerCase))
 
   private final case class PurposeRequired(message: String)
   private final case class NothingOpen(message: String)
