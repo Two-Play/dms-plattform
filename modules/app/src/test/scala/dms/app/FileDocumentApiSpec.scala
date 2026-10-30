@@ -83,6 +83,15 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
 
   private val setup = Unsafe.unsafe(implicit u => Promise.unsafe.make[Nothing, Setup](FiberId.None))
 
+  /** The virus scanner of the uploads: the ClamAV adapter against an in-process `clamd` (DMS-117). */
+  private val clamd = Unsafe.unsafe(implicit u => Promise.unsafe.make[Nothing, FakeClamd](FiberId.None))
+
+  private val scanner: ZLayer[Any, Throwable, AttachmentScanner] = ZLayer.scoped(
+    FakeClamd.make
+      .tap(clamd.succeed)
+      .map(f => ClamAvScanner(ClamAvConfig("127.0.0.1", f.port, 5)): AttachmentScanner)
+  )
+
   private val structuredContent = TemplateContent(
     List(
       Section(
@@ -260,7 +269,7 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
       ZLayer.succeed(renderer),
       FileVersions.layer,
       WordTemplateService.layer,
-      ZLayer.succeed(AttachmentScanner.None),
+      scanner,
       ZLayer.succeed(AttachmentSettings(1024L * 1024, AttachmentSettings.DefaultBlockedExtensions)),
       AttachmentService.layer,
       AttachmentUploads.layer
@@ -1193,6 +1202,69 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
           reanalysed.fields.find(_.key == "customer").flatMap(_.value).contains("ACME"),
           reanalysed.fields.map(_.key).contains("deliveryDate")
         )
+    },
+    test(
+      "originals, upload previews and attachments are scanned by ClamAV; findings and outages store nothing"
+    ) {
+      for
+        s     <- setup.await
+        fake  <- clamd.await
+        first <- call(author, "POST", s"/api/v1/uploads/classes/${s.classId}/template")
+        upload = as[UploadTemplateView](first)
+        doc <- call(
+          author,
+          "POST",
+          "/api/v1/documents",
+          Some(
+            s"""{"templateId":"${upload.templateId}","templateVersion":${upload.version},"title":"Gescannt",""" +
+              s""""values":${values("de")},"kind":"File"}"""
+          )
+        ).map(as[DocumentView])
+        infected = s"Notiz ${FakeClamd.Marker}".getBytes(UTF_8)
+        original  <- put(author, s"/api/v1/documents/${doc.id}/file", "Notiz.txt", infected)
+        preview   <- form(author, "/api/v1/uploads/preview.pdf", "Notiz.txt", infected)
+        annex     <- form(author, s"/api/v1/documents/${doc.id}/attachments", "Anlage.txt", infected)
+        _         <- ZIO.succeed(fake.mode.set(FakeClamd.Mode.Close))
+        down      <- put(author, s"/api/v1/documents/${doc.id}/file", "Notiz.txt", "Notiz".getBytes(UTF_8))
+        downAnnex <- form(
+          author,
+          s"/api/v1/documents/${doc.id}/attachments",
+          "Anlage.txt",
+          "Anlage".getBytes(UTF_8)
+        )
+        _      <- ZIO.succeed(fake.mode.set(FakeClamd.Mode.Answer))
+        stored <- s.owner.transactSystem(
+          Db.sql(
+            sql"select count(*) from dms.document_attachment_file where document_id = ${doc.id}"
+              .query[Long]
+              .run()
+              .head
+          )
+        )
+        clean   <- put(author, s"/api/v1/documents/${doc.id}/file", "Notiz.txt", "Notiz".getBytes(UTF_8))
+        scanned <- s.owner.transactSystem(
+          Db.sql(
+            sql"""select scan_status, scanner from dms.document_attachment_file where document_id = ${doc.id}"""
+              .query[(String, String)]
+              .run()
+              .toList
+          )
+        )
+      yield assertTrue(
+        original.status == Status.UnprocessableEntity,
+        original.error.contains("attachment_infected"),
+        original.text.contains(FakeClamd.Signature),
+        preview.status == Status.UnprocessableEntity,
+        preview.error.contains("attachment_infected"),
+        annex.status == Status.UnprocessableEntity,
+        annex.error.contains("attachment_infected"),
+        down.status == Status.ServiceUnavailable,
+        down.error.contains("scanner_unavailable"),
+        downAnnex.status == Status.ServiceUnavailable,
+        stored == 0L,
+        clean.status == Status.Ok,
+        scanned == List(("Clean", "clamav"))
+      )
     },
     test("a designer uses a published Word document as template, without its values (DMS-127)") {
       for

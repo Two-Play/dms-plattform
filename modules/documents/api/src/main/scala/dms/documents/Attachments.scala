@@ -89,7 +89,7 @@ enum ScanError:
 
 /** Port for a virus scanner (DMS-114, ADR 0041). Called once per upload with the complete file, before the
   * file is written to object storage and linked to a version. Implementations: [[AttachmentScanner.None]]
-  * (no-op); a ClamAV adapter would send the file to `clamd` with `INSTREAM` (see ADR 0041).
+  * (no-op) and `dms.app.ClamAvScanner` (`clamd` with `INSTREAM`, DMS-117, ADR 0041 addendum).
   */
 trait AttachmentScanner:
   /** Recorded with every stored file, e.g. `none` or `clamav`. */

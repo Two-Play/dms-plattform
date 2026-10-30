@@ -54,7 +54,7 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0038](0038-ui-localization.md) | UI localization: German default with English, own typed message catalogs, Intl for formats | Accepted | high |
 | [0039](0039-document-view-and-on-demand-pdfs.md) | Document view and on-demand PDFs: every readable version rendered as HTML, draft PDFs and copies with change history printed on request and never stored | Accepted | high |
 | [0040](0040-number-ranges.md) | Number ranges: counter row locked in the creating transaction (gap-free on rollback), the document number as frozen core field and stable key | Accepted | medium |
-| [0041](0041-document-attachments.md) | Document attachments: files linked to versions, content-addressed per document, streamed uploads with a scan port, frozen with the version | Proposed | medium |
+| [0041](0041-document-attachments.md) | Document attachments: files linked to versions, content-addressed per document, streamed uploads with a scan port, frozen with the version | Proposed (addendum DMS-117) | medium |
 | [0042](0042-file-documents-and-word-templates.md) | File documents and Word templates: uploaded originals per version, Word fields as content controls filled on the JVM, LibreOffice as separate conversion worker | Proposed | medium |
 | [0043](0043-library-of-valid-documents.md) | Library of valid documents: served from PostgreSQL by a dedicated endpoint, filtered with the reading policy, facets computed per request | Proposed | high |
 | [0044](0044-file-document-comparison-search-and-preview-cache.md) | File documents: comparison and search by the filled Word text, in-memory preview cache, content signature check, class list for designers | Proposed | high |
