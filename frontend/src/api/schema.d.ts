@@ -3756,6 +3756,7 @@ export interface components {
       key: string
       /** Format: int32 */
       version: number
+      /** @description Statuses in which the field needs a value. Values freeze at submission, so a status after the review on the regular path takes effect at submission (ADR 0062). Withdrawn and Destroyed do not block anything. */
       requiredIn?: components['schemas']['DocumentStatus'][]
     }
     /** FieldDefinitionView */

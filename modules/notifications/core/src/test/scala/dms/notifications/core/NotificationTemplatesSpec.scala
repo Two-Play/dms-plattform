@@ -151,7 +151,10 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
       val de        = render(Language.De, "Withdrawn")
       val en        = render(Language.En, "Discarded")
       val discarded = render(Language.De, "Discarded")
+      val elsewhere = render(Language.De, "Published")
       assertTrue(
+        elsewhere.body.contains("anderen Geltungsbereich"),
+        !elsewhere.body.contains("nie gültig"),
         de.subject == "Überprüfung wieder offen: Reiserichtlinie (2.0)",
         de.body.contains("zurückgezogen"),
         de.body.contains("01.01.2027"),

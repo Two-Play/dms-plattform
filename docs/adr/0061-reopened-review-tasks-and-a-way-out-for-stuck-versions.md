@@ -109,9 +109,9 @@ Flyway V42. No new dependency.
 - Must be done: user confirms this ADR (status → Accepted).
 - Done in DMS-147 (ADR 0062): a field required in `Published` or `Approved` is checked at submission, where the author can still correct it.
 - Done in DMS-147 (ADR 0062): a field required in `Approved` but empty failed inside `completeApproval` without a way out; submission now prevents it.
-- Should: a revision moved to another validity scope is published without superseding the reviewed version. That version stays valid, its task stays decided, and its review ends too. Not covered here: the revision took effect.
-- Should: tell the approvers of a dead publication; they are among the people who can withdraw, and the notice goes to owner and records management only.
-- Later: show the chain of tasks in the evidence report; it lists both tasks but not the link.
+- Done in DMS-148 (ADR 0063): a revision moved to another validity scope reopens the task of the reviewed version.
+- Done in DMS-148 (ADR 0063): the approvers of a dead publication are told.
+- Done in DMS-148 (ADR 0063): the evidence report shows the chain of tasks.
 - Ruled out: reopening by changing the decided row.
 
 ## Reversibility

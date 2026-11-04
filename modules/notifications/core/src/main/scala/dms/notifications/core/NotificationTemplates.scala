@@ -164,17 +164,22 @@ object NotificationTemplates:
             s"The periodic review of $doc is coming up. Please decide by ${date("dueOn")}: recertify, revise or withdraw."
         )(tasks)
       case "review.task-reopened" =>
-        val discarded = p("revisionStatus") == "Discarded"
+        // Any other status: the revision took effect, in another validity scope (ADR 0063).
+        val (causeDe, causeEn) = p("revisionStatus") match
+          case "Discarded" =>
+            ("wurde verworfen und ist nie gültig geworden", "was discarded and never took effect")
+          case "Withdrawn" =>
+            ("wurde zurückgezogen und ist nie gültig geworden", "was withdrawn and never took effect")
+          case _ =>
+            (
+              "gilt für einen anderen Geltungsbereich und hat diese Version nicht abgelöst",
+              "applies to another scope and did not replace this version"
+            )
         r(de = s"Überprüfung wieder offen: $docShort", en = s"Review open again: $docShort")(
-          bodyDe = s"Die Überarbeitung von $docDat wurde " +
-            s"${
-                if discarded then "verworfen" else "zurückgezogen"
-              } und ist nie gültig geworden. Die Überprüfung ist " +
-            s"deshalb wieder offen. Bitte entscheiden Sie bis ${date("dueOn")}: bestätigen, überarbeiten oder außer " +
-            "Kraft setzen.",
-          bodyEn =
-            s"The revision of $doc was ${if discarded then "discarded" else "withdrawn"} and never took " +
-              s"effect, so the review is open again. Please decide by ${date("dueOn")}: recertify, revise or withdraw."
+          bodyDe = s"Die Überarbeitung von $docDat $causeDe. Die Überprüfung ist deshalb wieder offen. " +
+            s"Bitte entscheiden Sie bis ${date("dueOn")}: bestätigen, überarbeiten oder außer Kraft setzen.",
+          bodyEn = s"The revision of $doc $causeEn, so the review is open again. " +
+            s"Please decide by ${date("dueOn")}: recertify, revise or withdraw."
         )(tasks)
       case "review.task-due-soon" =>
         r(de = s"Überprüfung bald fällig: $docShort", en = s"Review due soon: $docShort")(

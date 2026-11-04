@@ -125,13 +125,19 @@ object Validation:
         Either.cond(all.isEmpty, target, TransitionBlocked.Incomplete(target, all))
     }
 
-  /** Empty fields an author must fill in for a status after the review, each naming the first such status. */
+  /** Empty fields needed in a status after the review, each naming the first such status. Fields the platform
+    * still fills in do not count; a system field it never sets, such as a document number a class requires
+    * without a number range, does (ADR 0063).
+    */
   def missingAfterReview(profile: MetadataProfile, values: Map[String, MetadataValue]): List[FieldIssue] =
-    profile.fields.filter(_.definition.editable).filter(f => isEmpty(values.get(f.key.value))).flatMap { f =>
-      Requiredness.afterReview
-        .find(s => f.isRequiredIn(s) || CoreFields.requiredByValues(values, s).contains(f.key.value))
-        .map(s => FieldIssue(f.key.value, f.definition.label, IssueKind.MissingRequired(s)))
-    }
+    profile.fields
+      .filterNot(f => CoreFields.SetAfterReview.contains(f.key.value))
+      .filter(f => isEmpty(values.get(f.key.value)))
+      .flatMap { f =>
+        Requiredness.afterReview
+          .find(s => f.isRequiredIn(s) || CoreFields.requiredByValues(values, s).contains(f.key.value))
+          .map(s => FieldIssue(f.key.value, f.definition.label, IssueKind.MissingRequired(s)))
+      }
 
   /** Checks the given values against their field definitions: type, rules, options and unknown fields. Fields
     * without a value are not reported here.

@@ -140,7 +140,9 @@ final case class EvidenceReview(
     decidedBy: Option[String],
     nextDueOn: Option[LocalDate],
     newVersionId: Option[UUID],
-    comment: Option[String]
+    comment: Option[String],
+    /** The decided task this one opened again (ADR 0061). */
+    reopens: Option[UUID] = None
 ) derives JsonCodec
 
 /** A file of a destroyed version (DMS-82): name, role (Attachment or Original), SHA-256 and whether its bytes
@@ -499,7 +501,8 @@ object EvidenceReport:
             t.decidedBy.map(_.value),
             t.nextDueOn,
             t.newVersionId,
-            t.comment
+            t.comment,
+            t.reopens
           )
         ),
       attachments = Option.when(v.attachments.nonEmpty)(

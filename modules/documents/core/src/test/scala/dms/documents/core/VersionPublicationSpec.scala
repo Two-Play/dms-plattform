@@ -717,6 +717,19 @@ object VersionPublicationSpec extends ZIOSpecDefault:
         notices.head.contains("\"publicationFailed\": true")
       )
     },
+    test("a field required in Withdrawn does not stop withdrawing a valid version (DMS-148)") {
+      for
+        f       <- fixture(requiredLater = true)
+        created <- validWithLaterField(f)
+        (_, v1) = created
+        _ <- schemaOwner {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          sql"""update dms.document_version set field_values = field_values - $LaterField
+                where id = ${v1.id}""".update.run()
+        }
+        withdrawn <- as(f.tenant)(_.changeStatus(v1.id, Withdraw, approver))
+      yield assertTrue(withdrawn.status == Withdrawn)
+    },
     test("the date rule stays for every version whose newest publication job is not dead") {
       def setJob(version: UUID, status: String, attempts: Int) =
         schemaOwner(

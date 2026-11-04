@@ -102,8 +102,9 @@ private[core] object ReviewStore:
       .run()
       .toList
 
-  /** Tasks decided as revised whose revision never took effect, while their version is valid with the same
-    * review date and nothing reopened them yet (DMS-145, ADR 0061). With `revision`, those of that version.
+  /** Tasks decided as revised whose revision did not replace their version: it never took effect (DMS-145,
+    * ADR 0061) or took effect in another validity scope (DMS-148, ADR 0063). Their version is still valid
+    * with the same review date and nothing reopened them yet. With `revision`, those of that version.
     */
   def lostToRevision(revision: Option[UUID])(using DbTx): List[ReviewTask] =
     sql"""select r.id, r.document_id, r.version_id, r.due_on, r.created_at, r.status, r.decided_at,
@@ -112,7 +113,7 @@ private[core] object ReviewStore:
           join dms.document_version n on n.id = r.new_version_id
           join dms.document_version v on v.id = r.version_id
           where r.status = 'Revised'
-            and n.status in ('Withdrawn', 'Discarded') and n.published_at is null
+            and (n.published_at is not null or n.status in ('Withdrawn', 'Discarded'))
             and v.status in ('Published', 'ReviewDue') and v.review_due_on = r.due_on
             and ($revision::uuid is null or r.new_version_id = $revision::uuid)
             and not exists (select 1 from dms.document_review s where s.reopens_id = r.id)

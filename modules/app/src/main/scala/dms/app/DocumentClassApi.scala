@@ -70,8 +70,15 @@ final case class ChangeFieldDefinition(
       Schema
 
 /** A class's use of a field definition version and the statuses in which the field is required. */
-final case class FieldBindingView(key: String, version: Int, requiredIn: List[DocumentStatus])
-    derives JsonCodec,
+final case class FieldBindingView(
+    key: String,
+    version: Int,
+    @Schema.annotations.description(
+      "Statuses in which the field needs a value. Values freeze at submission, so a status after the review on the " +
+        "regular path takes effect at submission (ADR 0062). Withdrawn and Destroyed do not block anything."
+    )
+    requiredIn: List[DocumentStatus]
+) derives JsonCodec,
       Schema
 
 /** Periodic review settings of a class (US-07.1). */

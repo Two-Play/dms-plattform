@@ -36,6 +36,35 @@ object EvidenceReportSpec extends ZIOSpecDefault:
         EvidenceReport.canonical(json) == """{"A":"\"quoted\"","b":[{"a":"x y","z":1}],"Ä":true}"""
       )
     },
+    test("a review task opened again names the decided task (DMS-148)") {
+      val day     = java.time.LocalDate.of(2027, 1, 1)
+      val decided = EvidenceReview(
+        UUID.randomUUID(),
+        day,
+        Instant.EPOCH,
+        "Revised",
+        Some(Instant.parse("2026-11-10T09:00:00Z")),
+        Some("owner-1"),
+        None,
+        None,
+        None
+      )
+      val reopened = decided.copy(
+        taskId = UUID.randomUUID(),
+        status = "Open",
+        decidedAt = None,
+        decidedBy = None,
+        reopens = Some(decided.taskId)
+      )
+      val all = List(decided, reopened)
+      assertTrue(
+        EvidenceReportLayout.reviewStatus(decided, all) == "Revised",
+        EvidenceReportLayout
+          .reviewStatus(reopened, all)
+          .startsWith("Open (reopens the task decided 2026-11-10"),
+        EvidenceReportLayout.reviewStatus(reopened, Nil) == "Open"
+      )
+    },
     test("the checksum is the SHA-256 of the UTF-8 bytes") {
       assertTrue(
         EvidenceReport.sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",

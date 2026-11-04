@@ -517,6 +517,37 @@ object ReviewServiceSpec extends ZIOSpecDefault:
         current.versions.map(_.status) == List(Superseded, Published)
       )
     },
+    test("a revision published for another scope leaves the version valid, so its task opens again") {
+      val otherScope = values(LocalDate.of(2027, 6, 1)) +
+        ("scope" -> FieldEntry(
+          MetadataValue.Many(List(MetadataValue.Text("Plant Bremen"))),
+          ValueOrigin.Manual
+        ))
+      for
+        f       <- fixture()
+        revised <- revisedTask(f)
+        (doc, v1, decided, _) = revised
+        _       <- as(f.tenant)(_.updateDraft(doc, DraftChange(None, otherScope, None), author))
+        v2      <- approveOpen(f, doc)
+        waiting <- openTasks(f.tenant)
+        _       <- at("2027-06-01T09:00:00Z")
+        _       <- as(f.tenant)(_.publishScheduled(v2.id))
+        open    <- openTasks(f.tenant)
+        _       <- check(f.tenant)
+        all     <- review(f.tenant)(_.tasksOfDocument(doc))
+        events  <- outbox(doc, ReviewService.Reopened)
+        current <- as(f.tenant)(_.get(doc))
+      yield assertTrue(
+        waiting.isEmpty,
+        open.map(t => (t.versionId, t.dueOn, t.reopens)) == List((v1.id, decided.dueOn, Some(decided.id))),
+        all.size == 2,
+        all.find(_.id == decided.id).contains(decided),
+        events.size == 1,
+        events.head.contains("\"revisionStatus\": \"Published\""),
+        current.versions.filter(_.id == v1.id).forall(v => Versioning.isValid(v.status)),
+        current.versions.find(_.id == v2.id).exists(_.status == Published)
+      )
+    },
     test("repeated events add no second task; a task opened again can be revised and opened again") {
       for
         f       <- fixture()
