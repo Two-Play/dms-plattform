@@ -204,4 +204,13 @@ Not assessed: availability, accessibility (WCAG 2.2 AA, accessible PDF), use on 
 
 ## Checks
 
-<!-- CHECKS -->
+Run on 2026-11-04 on this branch.
+
+| Check | Result |
+|---|---|
+| `SBT_TPOLECAT_CI=1 sbt scalafmtCheckAll scalafmtSbtCheck test` | Passed: 1,030 tests, no failures, warnings fail the build |
+| Frontend lint, typecheck, format, tests, build | This branch does not change the frontend; the pull request's CI runs them |
+| `scripts/dependency_audit.py` | 220 libraries checked. One finding: `spring-core` 7.0.3, GHSA-659m-px2c-25wj (low), brought along by Flowable |
+| `npm audit --omit=dev` | 6 findings (2 low, 4 moderate). The ones looked at come from `ts-morph` and `minimatch` through the `shadcn` package; the offered fix is a breaking change of it. Not assessed one by one (DMS-139) |
+
+Not run for this report: browser walkthroughs, backup and restore, the production profile in a real environment.
