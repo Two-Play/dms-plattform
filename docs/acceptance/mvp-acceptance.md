@@ -150,13 +150,53 @@ The first production stage covers policies and guidelines; contracts follow in s
 
 ## Load test
 
-<!-- LOADTEST-SUMMARY -->
+Reduced by 1:100 (20,000 documents, 98,000 versions, 970,000 acknowledgements, 1,000 users, 50 sessions acting about once per second, one tenant). Own stack, not the development stack. Method, volume model and limits: [scripts/loadtest/README.md](../../scripts/loadtest/README.md).
+
+| Run | Build | Requests | Errors | Requests/s |
+|---|---|---:|---:|---:|
+| 01-baseline | main at 46347af, without V38 | 240 | 240 | 0.9 |
+| 02-indexes-only | main at 46347af, with the indexes of V38 | 1,685 | 4 | 12.4 |
+| 03-after | this branch, one publication per 30 s | 19,724 | 0 | 63.9 |
+| 04-stress-publications | this branch, publications without limit | 11,713 | 0 | 61.6 |
+
+Latencies in milliseconds:
+
+| Operation | Baseline p95 | Indexes only p95 | After p50 | After p95 | After p99 | Stress p95 |
+|---|---:|---:|---:|---:|---:|---:|
+| Library | failed | 12,288 | 57 | 95 | 137 | 167 |
+| Library, filtered | failed | 13,906 | 54 | 92 | 136 | 188 |
+| Document list | failed | 11,332 | 27 | 131 | 198 | 183 |
+| Search with facets | failed | 6,502 | 8 | 30 | 45 | 52 |
+| Document view | – | 4,436 | 9 | 25 | 56 | 63 |
+| Document content (HTML) | – | 5,502 | 10 | 27 | 51 | 68 |
+| Live preview | – | – | 4 | 9 | 19 | 34 |
+| Draft save | – | 7,525 | 21 | 53 | 95 | 143 |
+| Submit | – | 6,049 | 54 | 136 | 183 | 292 |
+| Approver inbox | failed | 11,387 | 450 | 780 | 982 | 41 |
+| Approve | – | 6,726 | 58 | 80 | 80 | 212 |
+| Open acknowledgements | failed | 7,401 | 21 | 100 | 140 | 257 |
+| Acknowledge | – | 4,720 | 17 | 40 | 73 | 110 |
+| Upload attachment | – | 7,381 | 37 | 83 | 140 | 173 |
+| Upload Word | – | 8,063 | 27 | 68 | 123 | 174 |
+| PDF rendition | – | 5,503 | 11 | 31 | 54 | 73 |
+| Draft PDF (on demand) | – | – | 212 | 341 | 535 | 578 |
+| PDF preview of a Word file (conversion) | – | 9,661 | 1,256 | 2,543 | 3,125 | 3,159 |
+| Approval to published (asynchronous) | – | 120,975 | 6,350 | 8,617 | 8,617 | 46,038 |
+
+The code as it was on `main` collapsed under this load: every request failed. With the fixes (ADR 0056) a five-minute run had no errors, and with publications unlimited none either.
 
 ## Non-functional requirements
 
 Targets of chapter 13 of the business concept as far as this report can say something about them.
 
-<!-- NFR-TABLE -->
+| Requirement | Target | Measured at 1:100 | Assessment |
+|---|---|---|---|
+| Page of a document | p95 ≤ 1.5 s | API calls of the page 25–31 ms p95, without browser | Met for the API; not measured in a browser |
+| Search with facets | p95 ≤ 2 s at 10 million versions | 30 ms p95 at 98,000 versions | Met at this volume; 10 million were not tested |
+| Live preview (US-03.2) | p95 ≤ 2 s | 9 ms p95 in the API | Met for the API |
+| Rendering up to 50 pages | p95 ≤ 10 s | Approval to published 8.6 s p95, with one-page documents | Not proven for 50 pages |
+| Acknowledgement peak (14.2) | 100,000 in 48 h, that is 0.6 per second | 5 per second at 40 ms p95, at 1:100 data | Met with a wide margin |
+| Data loss, downtime | ≤ 15 minutes, ≤ 4 hours | Not rehearsed | Open, see above |
 
 Not assessed: availability, accessibility (WCAG 2.2 AA, accessible PDF), use on mobile devices, per-tenant encryption keys, export of all data per tenant, configuration export between environments, tenant quotas and throttling (14.2). Rate limiting per tenant does not exist; the production checklist asks for it at the reverse proxy per client.
 

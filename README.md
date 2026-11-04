@@ -8,6 +8,9 @@ Document and template management for contracts, policies, guidelines, handbooks 
 | [docs/adr/](docs/adr/README.md) | Architecture decisions with alternatives, consequences and reversibility |
 | [docs/backlog.md](docs/backlog.md) | Backlog, planning assumptions and sprint plan |
 | [docs/jira-mapping.md](docs/jira-mapping.md) | Mapping of planning IDs to issues in Jira project DMS |
+| [docs/operations/production.md](docs/operations/production.md) | Production checklist, health and readiness, backup and restore |
+| [docs/acceptance/mvp-acceptance.md](docs/acceptance/mvp-acceptance.md) | Acceptance status of the MVP stories and what blocks a release |
+| [scripts/loadtest/README.md](scripts/loadtest/README.md) | Repeatable load test with the measured results |
 
 ## Stack
 
