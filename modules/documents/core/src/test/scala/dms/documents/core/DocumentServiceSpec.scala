@@ -225,6 +225,7 @@ object DocumentServiceSpec extends ZIOSpecDefault:
           classes.createField("monthlyFee", FieldDraft("Monthly fee", None, FieldType.Amount()), admin) *>
           classes.createField("termMonths", FieldDraft("Term in months", None, FieldType.Number()), admin) *>
           classes.createField("partnerId", FieldDraft("Partner number", None, FieldType.Text()), admin) *>
+          classes.createField("signatory", FieldDraft("Signatory", None, FieldType.Text()), admin) *>
           classes.createClass(
             "contract",
             None,
@@ -235,7 +236,8 @@ object DocumentServiceSpec extends ZIOSpecDefault:
                 FieldBinding(FieldKey.unsafe("contractPartner"), 1, Requiredness.from(InReview)),
                 FieldBinding(FieldKey.unsafe("monthlyFee"), 1),
                 FieldBinding(FieldKey.unsafe("termMonths"), 1),
-                FieldBinding(FieldKey.unsafe("partnerId"), 1)
+                FieldBinding(FieldKey.unsafe("partnerId"), 1),
+                FieldBinding(FieldKey.unsafe("signatory"), 1, Set(Published))
               )
             ),
             admin
@@ -311,7 +313,8 @@ object DocumentServiceSpec extends ZIOSpecDefault:
     "confidentiality"      -> MetadataValue.Selection("Internal"),
     "language"             -> MetadataValue.Text("de"),
     "retentionRule"        -> MetadataValue.Text("contract-10y"),
-    "containsPersonalData" -> MetadataValue.YesNo(false)
+    "containsPersonalData" -> MetadataValue.YesNo(false),
+    "signatory"            -> MetadataValue.Text("Managing director")
   )
 
   private def create(f: Fixture, values: Map[String, FieldEntry] = initialValues) =
@@ -324,6 +327,20 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         _.owner.transactSystem(
           Db.sql(sql"update dms.document_version set change_reason = null where id = $version".update.run())
         )
+      )
+      .unit
+
+  /** A version in review as it could exist from before DMS-147; the guard forbids this to the application. */
+  private def clearValues(version: UUID, keys: String*): ZIO[Env, DbError, Unit] =
+    ZIO
+      .serviceWithZIO[Env](
+        _.owner.transactSystem(Db.sql {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          keys.foreach { key =>
+            val _ = sql"""update dms.document_version set field_values = field_values - $key
+                          where id = $version""".update.run()
+          }
+        })
       )
       .unit
 
@@ -701,7 +718,8 @@ object DocumentServiceSpec extends ZIOSpecDefault:
             "confidentiality",
             "language",
             "containsPersonalData",
-            "contractPartner"
+            "contractPartner",
+            "signatory"
           )
         ),
         submitted.status == InReview,
@@ -744,14 +762,46 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         rendition.left.exists(_.isInstanceOf[DocumentError.Conflict])
       )
     },
+    test("a field only required on publication blocks the submission, while the author can still add it") {
+      for
+        f       <- fixture
+        created <- create(f, reviewValues - "signatory")
+        (doc, _) = created
+        blocked   <- as(f.tenant)(_.submit(doc.id, author)).either
+        _         <- as(f.tenant)(_.updateDraft(doc.id, DraftChange(None, reviewValues, None), author))
+        submitted <- as(f.tenant)(_.submit(doc.id, author))
+      yield assertTrue(
+        blocked.left.toOption.collect { case DocumentError.Incomplete(InReview, issues) =>
+          issues.map(i => (i.field, i.kind))
+        } == Some(List("signatory" -> IssueKind.MissingRequired(Published))),
+        submitted.status == InReview
+      )
+    },
     test(
-      "approval is blocked while a computed field has no value because a field it reads is empty (DMS-83)"
+      "a field a computed field reads blocks the submission, where the author can still add it (DMS-147)"
     ) {
       for
         f       <- fixture
         created <- create(f, reviewValues - "termMonths")
+        (doc, _) = created
+        blocked <- as(f.tenant)(_.submit(doc.id, author)).either
+        stored  <- as(f.tenant)(_.get(doc.id)).map(_.versions.head)
+      yield assertTrue(
+        blocked.left.toOption.collect { case DocumentError.Incomplete(InReview, issues) =>
+          issues.map(i => (i.field, i.kind))
+        } == Some(List("termMonths" -> IssueKind.MissingRequired(Approved))),
+        stored.status == Draft
+      )
+    },
+    test(
+      "approval stays blocked for a version submitted before DMS-147 whose computed field has no value (DMS-83)"
+    ) {
+      for
+        f       <- fixture
+        created <- create(f, reviewValues)
         (doc, v) = created
         _ <- as(f.tenant)(_.submit(doc.id, author))
+        _ <- clearValues(v.id, "termMonths", "totalValue")
         _ <- as(f.tenant)(_.changeStatus(v.id, ReviewPassed, UserId("reviewer-1")))
         _ <- as(f.tenant)(_.attachRendition(v.id, Rendition("renditions/1.pdf", None, "b" * 64), author))
         blocked <- as(f.tenant)(_.changeStatus(v.id, Approve, approver)).either

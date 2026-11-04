@@ -142,6 +142,12 @@ final case class ProfileField(
   def key: FieldKey                                 = definition.key
   def isRequiredIn(status: DocumentStatus): Boolean = requiredIn.contains(status)
 
+  /** Whether an author must fill the field in although it is only required after the review: values freeze at
+    * submission, so nobody can add it later (DMS-147, ADR 0062). The platform sets its own fields itself.
+    */
+  def isRequiredAfterReview: Boolean =
+    definition.editable && Requiredness.afterReview.exists(isRequiredIn)
+
 /** The effective metadata profile of a document class version: core fields, inherited fields and the class's
   * own fields. Documents refer to `(classId, version)` and keep it until migrated explicitly.
   *
@@ -194,3 +200,6 @@ object Requiredness:
     if forwardPath.contains(status) then forwardPath.dropWhile(_ != status).toSet else Set(status)
 
   val always: Set[DocumentStatus] = from(Draft)
+
+  /** The statuses of the regular path a submitted version can still reach, in order. */
+  val afterReview: List[DocumentStatus] = forwardPath.dropWhile(_ != InReview).drop(1)

@@ -107,8 +107,8 @@ Flyway V42. No new dependency.
 ## Follow-ups
 
 - Must be done: user confirms this ADR (status → Accepted).
-- Should: decide whether a field required in `Published` (or `Approved`) is checked at submission, where the author can still correct it. Until then such a class setting produces a version that fails after approval.
-- Should: a field required in `Approved` but empty fails inside `completeApproval` today: check what the case and the version look like then and whether there is a way out. Not looked at in this change.
+- Done in DMS-147 (ADR 0062): a field required in `Published` or `Approved` is checked at submission, where the author can still correct it.
+- Done in DMS-147 (ADR 0062): a field required in `Approved` but empty failed inside `completeApproval` without a way out; submission now prevents it.
 - Should: a revision moved to another validity scope is published without superseding the reviewed version. That version stays valid, its task stays decided, and its review ends too. Not covered here: the revision took effect.
 - Should: tell the approvers of a dead publication; they are among the people who can withdraw, and the notice goes to owner and records management only.
 - Later: show the chain of tasks in the evidence report; it lists both tasks but not the link.

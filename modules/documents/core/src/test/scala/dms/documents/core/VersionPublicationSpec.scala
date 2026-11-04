@@ -264,6 +264,23 @@ object VersionPublicationSpec extends ZIOSpecDefault:
       a <- approveOpen(f, doc)
     yield a
 
+  /** Like [[scheduled]], as approved before DMS-147: the field required on publication is empty. Submission
+    * refuses that now, so the value goes after approval, past the guard that forbids this to the application.
+    */
+  private def scheduledWithGap(f: Fixture, doc: DocumentId, validFrom: LocalDate) =
+    val filled = values(validFrom) +
+      (LaterField -> FieldEntry(MetadataValue.Text("Section 1"), ValueOrigin.Manual))
+    for
+      _ <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Content revised"), author))
+      _ <- as(f.tenant)(_.updateDraft(doc, DraftChange(None, filled, None), author))
+      a <- approveOpen(f, doc)
+      _ <- schemaOwner {
+        val _ = sql"set local session_replication_role = replica".update.run()
+        sql"""update dms.document_version set field_values = field_values - $LaterField
+              where id = ${a.id}""".update.run()
+      }
+    yield a
+
   private val LaterField = "legalBasis"
 
   /** Like [[valid]], with the field of `fixture(requiredLater = true)` filled in for version 1.0. */
@@ -662,8 +679,8 @@ object VersionPublicationSpec extends ZIOSpecDefault:
         f       <- fixture(requiredLater = true)
         created <- validWithLaterField(f)
         (doc, v1) = created
-        // The field is required in Published and Withdrawn only: the draft leaves it empty, approval lets it pass.
-        v2        <- scheduled(f, doc, validFrom)
+        // The field is required in Published and Withdrawn only and empty, as submission allowed before DMS-147.
+        v2        <- scheduledWithGap(f, doc, validFrom)
         runner    <- jobs()
         _         <- runner.enqueue(f.tenant)
         _         <- TestClock.setTime(due)
