@@ -23,7 +23,62 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
 
   private val allKinds = NotificationTemplates.Kinds.toList.sorted
 
+  private val reviewParams = Map("dueOn" -> "2026-12-01")
+
+  private def review(
+      kind: String,
+      language: Language,
+      facts: Option[DocumentFacts],
+      params: Map[String, String]
+  ) =
+    NotificationTemplates.render(kind, language, params, Some(doc), ctx(facts))
+
   def spec = suite("NotificationTemplates")(
+    test("review tasks: German and English, the date, the task inbox for the owner (DMS-141)") {
+      val created   = review("review.task-created", Language.De, Some(facts), reviewParams)
+      val createdEn = review("review.task-created", Language.En, Some(facts), reviewParams)
+      val soon      = review("review.task-due-soon", Language.De, Some(facts), reviewParams)
+      val soonEn    = review("review.task-due-soon", Language.En, Some(facts), reviewParams)
+      val late      = review("review.task-overdue", Language.De, Some(facts), reviewParams)
+      val lateEn    = review("review.task-overdue", Language.En, Some(facts), reviewParams)
+      val up        = review("review.task-escalated", Language.De, Some(facts), reviewParams)
+      val upEn      = review("review.task-escalated", Language.En, Some(facts), reviewParams)
+      assertTrue(
+        created.subject == "Überprüfung steht an: Reiserichtlinie (2.0)",
+        created.body.contains("bis 01.12.2026"),
+        created.link.contains("/tasks"),
+        createdEn.subject == "Review coming up: Reiserichtlinie (2.0)",
+        createdEn.body.contains("by 1 Dec 2026"),
+        soon.subject == "Überprüfung bald fällig: Reiserichtlinie (2.0)",
+        soonEn.subject == "Review due soon: Reiserichtlinie (2.0)",
+        late.subject == "Überprüfung überfällig: Reiserichtlinie (2.0)",
+        late.body.contains("bleibt gültig"),
+        late.link.contains("/tasks"),
+        lateEn.subject == "Review overdue: Reiserichtlinie (2.0)",
+        lateEn.body.contains("stays valid"),
+        up.subject == "Eskalation Überprüfung: Reiserichtlinie (2.0)",
+        up.link.contains(s"/documents/${doc.documentId.value}"),
+        upEn.subject == "Review escalated: Reiserichtlinie (2.0)",
+        upEn.body.contains("overdue since 1 Dec 2026")
+      )
+    },
+    test("review tasks: no title for someone who may not read the document; deputies are only told") {
+      val kinds =
+        List("review.task-created", "review.task-due-soon", "review.task-overdue", "review.task-escalated")
+      val hidden = for
+        kind     <- kinds
+        language <- Language.values.toList
+      yield review(kind, language, None, reviewParams)
+      val deputy   = reviewParams + ("actingFor" -> ben.value)
+      val toDeputy = review("review.task-overdue", Language.De, Some(facts), deputy)
+      val deputyEn = review("review.task-overdue", Language.En, Some(facts), deputy)
+      assertTrue(
+        hidden.forall(r => !r.subject.contains("Reiserichtlinie") && !r.body.contains("Reiserichtlinie")),
+        toDeputy.body.contains("als Vertretung von Ben Becker; entscheiden kann nur der Eigentümer"),
+        toDeputy.link.contains(s"/documents/${doc.documentId.value}"),
+        deputyEn.body.contains("as deputy of Ben Becker; only the owner can decide")
+      )
+    },
     test("every kind has a German and an English text with a subject and a body") {
       val rendered = for
         kind     <- allKinds

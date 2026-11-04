@@ -91,7 +91,7 @@ PR numbers refer to GitHub pull requests; early items without a number were comm
 | US-09.2 | DMS-52 | Permission-filtered search | done | #44, `AccessFilterSpec`, `SearchApiSpec` | |
 | US-09.1 | DMS-53 | "Valid on" search | done | #43, `ValidAtApiSpec` (with CSV export) | |
 | US-05.1 | DMS-54 | Compare versions | done | #45, ADR 0033, `VersionCompareApiSpec` | |
-| US-07.1 | DMS-55 | Review task and recertification | done | #47, ADR 0030, `ReviewApiSpec` | The task appears in the inbox, but nobody is notified or escalated to: see the blockers |
+| US-07.1 | DMS-55 | Review task and recertification | done | #47, ADR 0030, `ReviewApiSpec` | Notified and escalated since DMS-141 (ADR 0057) |
 | US-08.1 | DMS-56 | Legal hold | done | #48, ADR 0031, 0047, `LegalHoldApiSpec` | |
 | US-12.1 | DMS-57 | Evidence report | done | #51, ADR 0034, `EvidenceReportApiSpec` | |
 | US-14.1 | DMS-58 | Stable address | done | #52, ADR 0035, `CurrentDocumentApiSpec` | |
@@ -111,7 +111,7 @@ The 14 follow-ups still open in Jira, each checked criterion by criterion agains
 | DMS-91 Document page | Display names (#56), version history, rendered versions, votes on the page (#38, #57), no workflow query per document (this branch) | Paged list with filters (search and library cover finding documents), partner id, reload button on 409 | Defer; close the list point by decision |
 | DMS-92 Publication | | Notice on a dead publication job, withdrawing an approved version, time zone endpoint, editorial settings, overlapping scopes | **First two block**, the rest defer |
 | DMS-102 Search | Notifications as outbox subscriber (#79); Word text (#63); basic auth, https and replicas are configurable, the profile now requires them | Clause text, PDF and OCR text, a later subscriber misses earlier events, owner change and version time | Defer, except PDF text if policies are uploaded as PDFs |
-| DMS-104 Review | | Notification and escalation, inheritance, recalculation, backfill | **Notification and escalation block**, the rest defer |
+| DMS-104 Review | Notification and escalation (DMS-141, ADR 0057) | Inheritance, recalculation, backfill | Defer |
 | DMS-108 Report and cockpit | Owner UI for the name list (#71), display names in the UI | Purpose in the request body, chain cache, report list and retention, cockpit export and actions, names in the PDF | **Purpose blocks**, the rest defer |
 | DMS-118 On-demand PDFs | | Limits and a plain variant | Defer: `draft.pdf` stayed fast in the load test |
 | DMS-124 Office fields | | Everything | Defer |
@@ -128,7 +128,7 @@ The first production stage covers policies and guidelines; contracts follow in s
 
 | # | Issue | Why it blocks |
 |---|---|---|
-| 1 | DMS-104 | Nobody is notified of a review task or its overdue date. Periodic review is the core compliance promise for policies, and an owner who is told nothing misses it silently |
+| 1 | DMS-104 | Solved by DMS-141 (ADR 0057). Was: nobody is notified of a review task or its overdue date. Periodic review is the core compliance promise for policies, and an owner who is told nothing misses it silently |
 | 2 | DMS-92, US-06.1 | A failed rendition or publication notifies nobody, so a policy may silently not take effect. The criterion of US-06.1 requires the notice |
 | 3 | DMS-92 | An approved version with a future valid-from date cannot be stopped: it will be published even if it was approved by mistake |
 | 4 | DMS-108 | The stated purpose for viewing named people travels as a query parameter and so ends up in access logs |

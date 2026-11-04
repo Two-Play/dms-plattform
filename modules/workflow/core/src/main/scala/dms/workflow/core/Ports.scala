@@ -118,6 +118,15 @@ trait ParticipantDirectory:
   /** All role assignments of `user`, including expired and future ones (callers check the validity). */
   def heldRoles(user: UserId): IO[WorkflowError, List[HeldRole]]
 
+/** Who hears of a deadline: the responsible people, their deputies and the escalation targets (without the
+  * responsible people).
+  */
+final case class DeadlineAudience(
+    recipients: List[UserId],
+    deputies: List[dms.workflow.TaskDeputy],
+    escalatedTo: List[UserId]
+)
+
 /** Produces the archive rendition before a version is approved (DMS-44, ADR 0025): the database requires a
   * rendition for `Approved` (ADR 0021). Called inside the transaction of the last approving vote; the
   * application enqueues an idempotent rendering job, which stores the rendition, attaches it and then calls

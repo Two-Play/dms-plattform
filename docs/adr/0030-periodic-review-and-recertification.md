@@ -30,7 +30,7 @@ Given:
 4. **Daily check through the job queue.** `ReviewJobs.tick` (every `dms.documents.reviewCheckSeconds`, 3600) enqueues `document.review-check` per tenant and interval (idempotency key). The job (`ReviewJobs.check`) reads what is due on the tenant's local date and handles every item in its own transaction: closes obsolete tasks, creates the tasks whose lead time is reached (`review_due_on - lead_days <= today`, insert `on conflict do nothing`), and moves published versions whose review date has come to ReviewDue (they stay valid). Each step re-checks under a row lock and is idempotent. The platform acts as `system:review` (technical actor, automation channel).
 5. **Decisions (owner only, no deputies).** `ReviewService.recertify` sets the new review date (chosen, after today; default today plus the interval), returns a ReviewDue version to Published (`Recertify`), records `document.recertified` with the previous and next date; no new version. `revise` starts the next version with `DocumentService.newVersion` (Major by default) or links the open version; the valid version stays in force. `withdraw` applies the new lifecycle transition Published/ReviewDue → Withdrawn ("out of force"); other versions are not touched, an approved version waiting for its valid-from date is still published on its date (it supersedes nothing). The API (`/api/v1/reviews`) requires the caller to be the document's owner plus `Recertify` (new action: owner role and owner of the document), `EditDraft` (as for a new version) or `Withdraw`.
 6. **Withdrawal of a valid version.** V18 replaces the V10 lifecycle guard function with the two added transitions; the database records `withdrawn_at` (trigger), a withdrawn released version keeps its number (the number index now exempts only withdrawn drafts), the validity history (DMS-53) counts a withdrawn version until `withdrawn_at`, and the search index removes it through the existing `document.status-changed` event.
-7. **Events.** Review events are recorded in the audit trail and published to the outbox with the audit action as event type: `document.review-task-created`, `document.recertified`, `document.review-revised`, `document.review-withdrawn`, `document.review-task-closed` (payload: task, document, version, due date, outcome). No subscriber yet; notifications can use them.
+7. **Events.** Review events are recorded in the audit trail and published to the outbox with the audit action as event type: `document.review-task-created`, `document.recertified`, `document.review-revised`, `document.review-withdrawn`, `document.review-task-closed` (payload: task, document, version, due date, outcome). No subscriber yet; notifications can use them (since DMS-141, ADR 0057: `document.review-task-created`).
 
 ## Alternatives considered
 
@@ -70,11 +70,11 @@ Given:
 - A class's new interval applies to versions published afterwards; existing review dates are not recomputed.
 - Tasks appear up to one check interval (1 h) after 00:00 of the lead day.
 - The V10 lifecycle guard function is replaced; later migrations replacing it (e.g. DMS-56) must start from V18.
-- No notification (e-mail) yet; the task is visible in the inbox only.
+- No notification (e-mail) yet; the task is visible in the inbox only. (Since DMS-141, ADR 0057: in-app and email when created, before the date, overdue and escalated.)
 
 ## Follow-ups
 
-- Must be done: notify the owner when a task is created and escalate overdue reviews (compliance cockpit, business concept 6.2).
+- Done (DMS-141, ADR 0057): notify the owner when a task is created and escalate overdue reviews (compliance cockpit, business concept 6.2).
 - Must be done: orphaned documents (owner left, F-07.5): reassign open review tasks.
 - Should: inherit review settings from parent classes; recompute review dates when a class interval changes; a view of a version's next review date in the document page.
 - Should: review context in the task (changes of parent documents, open comments; F-07.2) and event-driven reviews (US-07.2, DMS-65).

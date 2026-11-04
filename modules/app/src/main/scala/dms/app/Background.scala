@@ -39,7 +39,8 @@ import java.net.http.HttpClient
   * legal hold, object retention, file clean-up, deputyship, acknowledgement reminder, notification and task
   * deadline jobs), the outbox relay and the schedulers of periodic audit jobs, scheduled publications, the
   * periodic review check, the search synchronization, the deputyship check, the acknowledgement reminder
-  * check, the notification clean-up and the deadline check of review and approval tasks (DMS-87).
+  * check, the notification clean-up and the deadline check of workflow tasks (DMS-87) and periodic review
+  * tasks (DMS-141).
   *
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
   * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029) and the webhooks
@@ -121,7 +122,8 @@ object Background:
       deadlineJobs = DeadlineJobs(
         db,
         workflow,
-        DeadlineScheduleConfig(config.workflow.deadlineCheckSeconds.max(1).seconds)
+        DeadlineScheduleConfig(config.workflow.deadlineCheckSeconds.max(1).seconds),
+        List(ReviewDeadlines(reviews, documents, workflow))
       )
       reminders = AcknowledgementReminderJobs(db, documents, acks, roles, groups, config.documents.reminders)
       lanes     = jobLanes(

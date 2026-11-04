@@ -21,6 +21,8 @@ enum DeadlineStage(val key: String, val eventType: String, val auditAction: Stri
 /** Pure deadline rules: working days, the policy that applies, the stage at a point in time. */
 object Deadlines:
 
+  private val EndOfDay = LocalTime.of(23, 59, 59)
+
   /** Monday to Friday. Public holidays are not known (ADR 0053). */
   def isWorkingDay(d: LocalDate): Boolean =
     d.getDayOfWeek != DayOfWeek.SATURDAY && d.getDayOfWeek != DayOfWeek.SUNDAY
@@ -40,7 +42,7 @@ object Deadlines:
 
   /** The last moment of the day of `at` in `zone`, to the second (23:59:59). */
   def endOfDay(at: Instant, zone: ZoneId): Instant =
-    at.atZone(zone).toLocalDate.atTime(LocalTime.of(23, 59, 59)).atZone(zone).toInstant
+    at.atZone(zone).toLocalDate.atTime(EndOfDay).atZone(zone).toInstant
 
   /** The policy for a task of `step`: the step's due days override the workflow's or else the tenant's or
     * else the installation's due days; reminder and escalation come from the workflow, the tenant or the
@@ -60,15 +62,24 @@ object Deadlines:
     * many after. `None` without deadline.
     */
   def deadline(policy: DeadlinePolicy, createdAt: Instant, zone: ZoneId): Option[TaskDeadline] =
-    Option.when(policy.hasDeadlines) {
-      val due    = shift(endOfDay(createdAt, zone), policy.dueWorkingDays, zone)
-      val remind = Option
-        .when(policy.reminderWorkingDays > 0)(shift(due, -policy.reminderWorkingDays, zone))
-        .filter(_.isAfter(createdAt))
-      val escalate =
-        Option.when(policy.escalationWorkingDays > 0)(shift(due, policy.escalationWorkingDays, zone))
-      TaskDeadline(due, remind, escalate)
-    }
+    Option.when(policy.hasDeadlines)(
+      around(shift(endOfDay(createdAt, zone), policy.dueWorkingDays, zone), policy, createdAt, zone)
+    )
+
+  /** The deadline of something due on a fixed date, e.g. a review task on its review date (DMS-141, ADR
+    * 0057): the end of `dueOn`; reminder and escalation as in [[deadline]]. `dueWorkingDays` plays no part:
+    * the date is given.
+    */
+  def onDate(policy: DeadlinePolicy, dueOn: LocalDate, createdAt: Instant, zone: ZoneId): TaskDeadline =
+    around(dueOn.atTime(EndOfDay).atZone(zone).toInstant, policy, createdAt, zone)
+
+  private def around(due: Instant, policy: DeadlinePolicy, createdAt: Instant, zone: ZoneId): TaskDeadline =
+    val remind = Option
+      .when(policy.reminderWorkingDays > 0)(shift(due, -policy.reminderWorkingDays, zone))
+      .filter(_.isAfter(createdAt))
+    val escalate =
+      Option.when(policy.escalationWorkingDays > 0)(shift(due, policy.escalationWorkingDays, zone))
+    TaskDeadline(due, remind, escalate)
 
   /** The stage of a task's deadline at `now`, if any: the latest one reached. */
   def stage(deadline: TaskDeadline, now: Instant): Option[DeadlineStage] =

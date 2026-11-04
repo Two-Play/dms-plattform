@@ -26,6 +26,9 @@ import scala.util.Try
   *     behalf
   *   - `workflow.task-due-soon`, `workflow.task-overdue`, `workflow.task-escalated` (DMS-87): the candidates,
   *     their deputies when overdue, the escalation targets when escalated
+  *   - `document.review-task-created` (DMS-141): the document's owner
+  *   - `document.review-task-due-soon`, `-overdue`, `-escalated` (DMS-141): the owner, the owner's deputies
+  *     when overdue, the escalation targets when escalated
   *   - `workflow.returned`: author and owner (changes requested or rejected)
   *   - `workflow.approved`: author and owner, without the approver
   *   - `workflow.participant-missing`: the tenant administrators
@@ -81,17 +84,42 @@ final class PlatformNotificationEvents(
         case "workflow.task-due-soon" | "workflow.task-overdue" | "workflow.task-escalated" =>
           val base = params("version", "stepKind", "taskId", "dueOn") ++ text("stepName").map("step" -> _)
           ZIO.succeed(
-            Notice(event.eventType, NotificationCategory.Deadline, users("recipients"), document, base) ::
-              Notice(event.eventType, NotificationCategory.Deadline, users("escalatedTo"), document, base) ::
-              deputiesOf(payload).map((deputy, principal) =>
-                Notice(
-                  event.eventType,
-                  NotificationCategory.Deadline,
-                  List(deputy),
-                  document,
-                  base + ("actingFor" -> principal)
+            deadlineNotices(
+              event.eventType,
+              users("recipients"),
+              users("escalatedTo"),
+              payload,
+              document,
+              base
+            )
+          )
+        case "document.review-task-created" =>
+          ZIO
+            .foreach(document)(ref => owner(ref).map(ref -> _))
+            .map(
+              _.toList.flatMap((ref, owner) =>
+                owner.map(o =>
+                  Notice(
+                    "review.task-created",
+                    NotificationCategory.Workflow,
+                    List(o),
+                    Some(ref),
+                    params("taskId", "dueOn")
+                  )
                 )
               )
+            )
+        case "document.review-task-due-soon" | "document.review-task-overdue" |
+            "document.review-task-escalated" =>
+          ZIO.succeed(
+            deadlineNotices(
+              s"review.${event.eventType.stripPrefix("document.review-")}",
+              users("recipients"),
+              users("escalatedTo"),
+              payload,
+              document,
+              params("taskId", "dueOn")
+            )
           )
         case "workflow.returned" =>
           val kind =
@@ -202,6 +230,27 @@ final class PlatformNotificationEvents(
         case _ => ZIO.succeed(Nil)
     }
 
+  /** The notices of a deadline: to the people responsible, the escalation targets and the deputies. */
+  private def deadlineNotices(
+      kind: String,
+      recipients: List[UserId],
+      escalatedTo: List[UserId],
+      payload: Json.Obj,
+      document: Option[DocumentRef],
+      base: Map[String, String]
+  ): List[Notice] =
+    Notice(kind, NotificationCategory.Deadline, recipients, document, base) ::
+      Notice(kind, NotificationCategory.Deadline, escalatedTo, document, base) ::
+      deputiesOf(payload).map((deputy, principal) =>
+        Notice(
+          kind,
+          NotificationCategory.Deadline,
+          List(deputy),
+          document,
+          base + ("actingFor" -> principal)
+        )
+      )
+
   /** The `deputies` of a workflow event: deputy and the principal they stand in for. */
   private def deputiesOf(payload: Json.Obj): List[(UserId, String)] =
     payload
@@ -255,6 +304,10 @@ object PlatformNotificationEvents:
     "workflow.task-due-soon",
     "workflow.task-overdue",
     "workflow.task-escalated",
+    "document.review-task-created",
+    "document.review-task-due-soon",
+    "document.review-task-overdue",
+    "document.review-task-escalated",
     "workflow.returned",
     "workflow.approved",
     "workflow.participant-missing",

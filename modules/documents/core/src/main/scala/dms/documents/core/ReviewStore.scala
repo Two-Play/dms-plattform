@@ -146,6 +146,34 @@ private[core] object ReviewStore:
           from dms.document_review where document_id = ${document.value}
           order by created_at, id""".query[TaskRow].run().map(_.toTask).toList
 
+  /** Open tasks of valid versions with a review date up to `until`, the earliest first (DMS-141). */
+  def openUntil(until: LocalDate)(using DbTx): List[ReviewTask] =
+    sql"""select r.id, r.document_id, r.version_id, r.due_on, r.created_at, r.status, r.decided_at,
+                 r.decided_by, r.next_due_on, r.new_version_id, r.comment
+          from dms.document_review r
+          join dms.document_version v on v.id = r.version_id
+          where r.status = 'Open' and v.status in ('Published', 'ReviewDue') and r.due_on <= $until
+          order by r.due_on, r.id""".query[TaskRow].run().map(_.toTask).toList
+
+  /** The deadline notices published for open tasks: task and kind. */
+  def noticesOfOpenTasks()(using DbTx): List[(UUID, String)] =
+    sql"""select n.review_id, n.kind from dms.document_review_deadline_notice n
+          join dms.document_review r on r.id = n.review_id
+          where r.status = 'Open'""".query[(UUID, String)].run().toList
+
+  /** The deadline notices published for a task. */
+  def deadlineNotices(task: UUID)(using DbTx): Set[String] =
+    sql"select kind from dms.document_review_deadline_notice where review_id = $task"
+      .query[String]
+      .run()
+      .toSet
+
+  /** Records that the deadline notice `kind` of a task was published; `false` if it was before. */
+  def insertDeadlineNotice(task: UUID, kind: String)(using DbTx): Boolean =
+    sql"""insert into dms.document_review_deadline_notice (tenant_id, review_id, kind)
+          values (dms.current_tenant(), $task, $kind)
+          on conflict do nothing""".update.run() == 1
+
   /** Records the decision on an open task; `false` if it was decided already. */
   def decide(task: ReviewTask)(using DbTx): Boolean =
     sql"""update dms.document_review
