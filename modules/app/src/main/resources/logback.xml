@@ -1,4 +1,6 @@
 <configuration>
+  <!-- Keeps logback's own start messages out of the log stream, which may be JSON. -->
+  <statusListener class="ch.qos.logback.core.status.NopStatusListener"/>
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
       <pattern>%d{HH:mm:ss.SSS} %-5level %logger{24} - %msg%n</pattern>

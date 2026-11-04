@@ -1,13 +1,13 @@
 {
   "label": "04-stress-publications",
-  "started": "2026-11-04T15:03:47",
+  "started": "2026-11-04T15:27:11",
   "factor": 100,
-  "duration_s": 194,
+  "duration_s": 190,
   "sessions": 50,
   "think_s": 1.0,
-  "requests": 8795,
-  "errors": 84,
-  "throughput_rps": 45.2,
+  "requests": 11713,
+  "errors": 0,
+  "throughput_rps": 61.6,
   "volume_before": {
     "documents": 20006,
     "versions": 98006,
@@ -18,329 +18,321 @@
     "roleAssignments": 1101
   },
   "volume_after": {
-    "documents": 20240,
-    "versions": 98240,
-    "validVersions": 19116,
-    "workflowCases": 95121,
-    "workflowTasks": 95121,
-    "acknowledgements": 970730,
+    "documents": 20328,
+    "versions": 98328,
+    "validVersions": 19160,
+    "workflowCases": 95165,
+    "workflowTasks": 95165,
+    "acknowledgements": 971262,
     "roleAssignments": 1101
   },
   "operations": {
     "acknowledgement.confirm": {
-      "count": 730,
+      "count": 983,
       "errors": 0,
-      "rps": 3.75,
-      "p50_ms": 24,
-      "p95_ms": 164,
-      "p99_ms": 322,
-      "max_ms": 361,
-      "mean_ms": 48,
+      "rps": 5.17,
+      "p50_ms": 22,
+      "p95_ms": 110,
+      "p99_ms": 208,
+      "max_ms": 366,
+      "mean_ms": 35,
       "statuses": {
-        "201": 730
+        "201": 983
       },
       "sample_failures": []
     },
     "acknowledgement.opened": {
-      "count": 730,
+      "count": 982,
       "errors": 0,
-      "rps": 3.75,
-      "p50_ms": 25,
-      "p95_ms": 191,
-      "p99_ms": 5409,
-      "max_ms": 6515,
-      "mean_ms": 111,
+      "rps": 5.16,
+      "p50_ms": 21,
+      "p95_ms": 106,
+      "p99_ms": 216,
+      "max_ms": 295,
+      "mean_ms": 35,
       "statuses": {
-        "204": 730
+        "204": 982
       },
       "sample_failures": []
     },
     "acknowledgements.open": {
-      "count": 730,
+      "count": 982,
       "errors": 0,
-      "rps": 3.75,
-      "p50_ms": 77,
-      "p95_ms": 183,
-      "p99_ms": 4745,
-      "max_ms": 5464,
-      "mean_ms": 158,
+      "rps": 5.16,
+      "p50_ms": 79,
+      "p95_ms": 257,
+      "p99_ms": 315,
+      "max_ms": 439,
+      "mean_ms": 104,
       "statuses": {
-        "200": 730
+        "200": 982
       },
       "sample_failures": []
     },
     "document.html": {
-      "count": 730,
-      "errors": 28,
-      "rps": 3.75,
-      "p50_ms": 14,
-      "p95_ms": 61,
-      "p99_ms": 152,
-      "max_ms": 281,
-      "mean_ms": 23,
+      "count": 973,
+      "errors": 0,
+      "rps": 5.12,
+      "p50_ms": 17,
+      "p95_ms": 68,
+      "p99_ms": 102,
+      "max_ms": 280,
+      "mean_ms": 24,
       "statuses": {
-        "200": 702,
-        "-404": 28
+        "200": 973
       },
-      "sample_failures": [
-        "404: {\"code\":\"not_found\",\"message\":\"document a451d4c2-61f4-46f5-95ea-9809b326d55f does not exist\"}",
-        "404: {\"code\":\"not_found\",\"message\":\"document 3273eb7e-3bd5-4feb-8259-bf46524483ad does not exist\"}",
-        "404: {\"code\":\"not_found\",\"message\":\"document 85eee57f-5240-46eb-8010-dbafb34632fc does not exist\"}",
-        "404: {\"code\":\"not_found\",\"message\":\"document 8d9eee79-1925-4c3b-8be4-838f243db3f3 does not exist\"}",
-        "404: {\"code\":\"not_found\",\"message\":\"document 9effbcdd-0151-4a1e-a5db-986313423ea3 does not exist\"}"
-      ]
+      "sample_failures": []
     },
     "document.submit": {
-      "count": 117,
+      "count": 129,
       "errors": 0,
-      "rps": 0.6,
-      "p50_ms": 83,
-      "p95_ms": 297,
-      "p99_ms": 368,
-      "max_ms": 408,
-      "mean_ms": 112,
+      "rps": 0.68,
+      "p50_ms": 90,
+      "p95_ms": 292,
+      "p99_ms": 434,
+      "max_ms": 519,
+      "mean_ms": 115,
       "statuses": {
-        "200": 117
+        "200": 129
       },
       "sample_failures": []
     },
     "document.view": {
-      "count": 730,
-      "errors": 28,
-      "rps": 3.75,
-      "p50_ms": 12,
-      "p95_ms": 61,
-      "p99_ms": 129,
-      "max_ms": 5128,
-      "mean_ms": 60,
+      "count": 973,
+      "errors": 0,
+      "rps": 5.12,
+      "p50_ms": 15,
+      "p95_ms": 63,
+      "p99_ms": 98,
+      "max_ms": 220,
+      "mean_ms": 21,
       "statuses": {
-        "200": 702,
-        "-404": 28
+        "200": 973
       },
-      "sample_failures": [
-        "404: {\"code\":\"not_found\",\"message\":\"document a451d4c2-61f4-46f5-95ea-9809b326d55f does not exist\"}",
-        "404: {\"code\":\"not_found\",\"message\":\"document 3273eb7e-3bd5-4feb-8259-bf46524483ad does not exist\"}",
-        "404: {\"code\":\"not_found\",\"message\":\"document 85eee57f-5240-46eb-8010-dbafb34632fc does not exist\"}",
-        "404: {\"code\":\"not_found\",\"message\":\"document 8d9eee79-1925-4c3b-8be4-838f243db3f3 does not exist\"}",
-        "404: {\"code\":\"not_found\",\"message\":\"document 9effbcdd-0151-4a1e-a5db-986313423ea3 does not exist\"}"
-      ]
+      "sample_failures": []
     },
     "documents.list": {
-      "count": 730,
+      "count": 959,
       "errors": 0,
-      "rps": 3.75,
-      "p50_ms": 40,
-      "p95_ms": 199,
-      "p99_ms": 391,
-      "max_ms": 4941,
-      "mean_ms": 95,
+      "rps": 5.04,
+      "p50_ms": 37,
+      "p95_ms": 183,
+      "p99_ms": 280,
+      "max_ms": 367,
+      "mean_ms": 64,
       "statuses": {
-        "200": 730
+        "200": 959
       },
       "sample_failures": []
     },
     "draft.create": {
-      "count": 117,
+      "count": 125,
       "errors": 0,
-      "rps": 0.6,
-      "p50_ms": 32,
-      "p95_ms": 5023,
-      "p99_ms": 5656,
-      "max_ms": 5802,
-      "mean_ms": 404,
+      "rps": 0.66,
+      "p50_ms": 29,
+      "p95_ms": 178,
+      "p99_ms": 315,
+      "max_ms": 324,
+      "mean_ms": 51,
       "statuses": {
-        "201": 117
+        "201": 125
+      },
+      "sample_failures": []
+    },
+    "draft.preview": {
+      "count": 380,
+      "errors": 0,
+      "rps": 2.0,
+      "p50_ms": 6,
+      "p95_ms": 34,
+      "p99_ms": 76,
+      "max_ms": 199,
+      "mean_ms": 10,
+      "statuses": {
+        "200": 380
       },
       "sample_failures": []
     },
     "draft.save": {
-      "count": 351,
+      "count": 380,
       "errors": 0,
-      "rps": 1.81,
-      "p50_ms": 30,
-      "p95_ms": 190,
-      "p99_ms": 278,
-      "max_ms": 332,
-      "mean_ms": 54,
+      "rps": 2.0,
+      "p50_ms": 29,
+      "p95_ms": 143,
+      "p99_ms": 230,
+      "max_ms": 375,
+      "mean_ms": 45,
       "statuses": {
-        "200": 351
+        "200": 380
       },
       "sample_failures": []
     },
     "library": {
-      "count": 730,
+      "count": 948,
       "errors": 0,
-      "rps": 3.75,
-      "p50_ms": 643,
-      "p95_ms": 4905,
-      "p99_ms": 5747,
-      "max_ms": 6308,
-      "mean_ms": 1438,
+      "rps": 4.99,
+      "p50_ms": 81,
+      "p95_ms": 167,
+      "p99_ms": 2205,
+      "max_ms": 2503,
+      "mean_ms": 135,
       "statuses": {
-        "200": 730
+        "200": 948
       },
       "sample_failures": []
     },
     "library.filtered": {
-      "count": 730,
+      "count": 956,
       "errors": 0,
-      "rps": 3.75,
-      "p50_ms": 87,
-      "p95_ms": 4261,
-      "p99_ms": 6174,
-      "max_ms": 8222,
-      "mean_ms": 886,
+      "rps": 5.03,
+      "p50_ms": 78,
+      "p95_ms": 188,
+      "p99_ms": 2165,
+      "max_ms": 2436,
+      "mean_ms": 127,
       "statuses": {
-        "200": 730
+        "200": 956
       },
       "sample_failures": []
     },
     "pdf.draft": {
-      "count": 117,
+      "count": 127,
       "errors": 0,
-      "rps": 0.6,
-      "p50_ms": 263,
-      "p95_ms": 500,
-      "p99_ms": 699,
-      "max_ms": 751,
-      "mean_ms": 296,
+      "rps": 0.67,
+      "p50_ms": 289,
+      "p95_ms": 578,
+      "p99_ms": 606,
+      "max_ms": 726,
+      "mean_ms": 326,
       "statuses": {
-        "200": 117
+        "200": 127
       },
       "sample_failures": []
     },
     "pdf.preview": {
-      "count": 117,
+      "count": 132,
       "errors": 0,
-      "rps": 0.6,
-      "p50_ms": 1517,
-      "p95_ms": 4870,
-      "p99_ms": 6535,
-      "max_ms": 6613,
-      "mean_ms": 1894,
+      "rps": 0.69,
+      "p50_ms": 1559,
+      "p95_ms": 3159,
+      "p99_ms": 4018,
+      "max_ms": 4044,
+      "mean_ms": 1776,
       "statuses": {
-        "200": 117
+        "200": 132
       },
       "sample_failures": []
     },
     "pdf.rendition": {
-      "count": 730,
-      "errors": 28,
-      "rps": 3.75,
-      "p50_ms": 17,
-      "p95_ms": 92,
-      "p99_ms": 135,
-      "max_ms": 4762,
-      "mean_ms": 40,
+      "count": 978,
+      "errors": 0,
+      "rps": 5.14,
+      "p50_ms": 19,
+      "p95_ms": 73,
+      "p99_ms": 106,
+      "max_ms": 171,
+      "mean_ms": 26,
       "statuses": {
-        "200": 702,
-        "-404": 28
+        "200": 978
       },
-      "sample_failures": [
-        "404: {\"code\":\"not_found\",\"message\":\"document a451d4c2-61f4-46f5-95ea-9809b326d55f does not exist\"}",
-        "404: {\"code\":\"not_found\",\"message\":\"document 3273eb7e-3bd5-4feb-8259-bf46524483ad does not exist\"}",
-        "404: {\"code\":\"not_found\",\"message\":\"document 85eee57f-5240-46eb-8010-dbafb34632fc does not exist\"}",
-        "404: {\"code\":\"not_found\",\"message\":\"document 8d9eee79-1925-4c3b-8be4-838f243db3f3 does not exist\"}",
-        "404: {\"code\":\"not_found\",\"message\":\"document 9effbcdd-0151-4a1e-a5db-986313423ea3 does not exist\"}"
-      ]
+      "sample_failures": []
     },
     "publication.latency": {
-      "count": 112,
+      "count": 133,
       "errors": 0,
-      "rps": 0.58,
-      "p50_ms": 6014,
-      "p95_ms": 9476,
-      "p99_ms": 10795,
-      "max_ms": 11219,
-      "mean_ms": 6177,
+      "rps": 0.7,
+      "p50_ms": 28047,
+      "p95_ms": 46038,
+      "p99_ms": 49470,
+      "max_ms": 49605,
+      "mean_ms": 30168,
       "statuses": {
-        "200": 112
+        "200": 133
       },
       "sample_failures": []
     },
     "search": {
-      "count": 730,
+      "count": 964,
       "errors": 0,
-      "rps": 3.75,
-      "p50_ms": 16,
-      "p95_ms": 77,
-      "p99_ms": 408,
-      "max_ms": 5336,
-      "mean_ms": 73,
+      "rps": 5.07,
+      "p50_ms": 15,
+      "p95_ms": 52,
+      "p99_ms": 120,
+      "max_ms": 252,
+      "mean_ms": 22,
       "statuses": {
-        "200": 730
+        "200": 964
       },
       "sample_failures": []
     },
     "upload.attachment": {
-      "count": 117,
+      "count": 128,
       "errors": 0,
-      "rps": 0.6,
-      "p50_ms": 47,
-      "p95_ms": 274,
-      "p99_ms": 417,
-      "max_ms": 461,
-      "mean_ms": 80,
+      "rps": 0.67,
+      "p50_ms": 53,
+      "p95_ms": 173,
+      "p99_ms": 332,
+      "max_ms": 425,
+      "mean_ms": 73,
       "statuses": {
-        "201": 117
+        "201": 128
       },
       "sample_failures": []
     },
     "upload.word": {
-      "count": 117,
+      "count": 129,
       "errors": 0,
-      "rps": 0.6,
-      "p50_ms": 36,
-      "p95_ms": 254,
-      "p99_ms": 301,
-      "max_ms": 384,
-      "mean_ms": 63,
+      "rps": 0.68,
+      "p50_ms": 39,
+      "p95_ms": 174,
+      "p99_ms": 275,
+      "max_ms": 311,
+      "mean_ms": 55,
       "statuses": {
-        "200": 117
+        "200": 129
       },
       "sample_failures": []
     },
     "word.create": {
-      "count": 117,
+      "count": 129,
       "errors": 0,
-      "rps": 0.6,
-      "p50_ms": 65,
-      "p95_ms": 406,
-      "p99_ms": 514,
-      "max_ms": 620,
-      "mean_ms": 111,
+      "rps": 0.68,
+      "p50_ms": 61,
+      "p95_ms": 232,
+      "p99_ms": 310,
+      "max_ms": 483,
+      "mean_ms": 83,
       "statuses": {
-        "201": 117
+        "201": 129
       },
       "sample_failures": []
     },
     "workflow.approve": {
-      "count": 133,
+      "count": 157,
       "errors": 0,
-      "rps": 0.68,
-      "p50_ms": 64,
-      "p95_ms": 256,
-      "p99_ms": 367,
-      "max_ms": 376,
-      "mean_ms": 90,
+      "rps": 0.83,
+      "p50_ms": 61,
+      "p95_ms": 212,
+      "p99_ms": 274,
+      "max_ms": 355,
+      "mean_ms": 76,
       "statuses": {
-        "200": 112,
-        "409": 20,
-        "403": 1
+        "409": 33,
+        "200": 124
       },
       "sample_failures": []
     },
     "workflow.inbox": {
-      "count": 192,
+      "count": 199,
       "errors": 0,
-      "rps": 0.99,
-      "p50_ms": 9,
-      "p95_ms": 83,
-      "p99_ms": 4296,
-      "max_ms": 4496,
-      "mean_ms": 64,
+      "rps": 1.05,
+      "p50_ms": 10,
+      "p95_ms": 41,
+      "p99_ms": 65,
+      "max_ms": 115,
+      "mean_ms": 15,
       "statuses": {
-        "200": 192
+        "200": 199
       },
       "sample_failures": []
     }
