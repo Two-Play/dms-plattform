@@ -10,7 +10,7 @@ import dms.documents.metadata.{CoreFields, FieldIssue, IssueKind, MetadataProfil
 import dms.identity.{Authenticator, Principal}
 import dms.kernel.{DocumentId, TemplateId, UserId}
 import dms.templates.{DeviationChange, Inline, PathStep, SectionId, TemplateContent}
-import dms.workflow.CaseDetails
+import dms.workflow.{CaseDetails, StepKind}
 import dms.workflow.core.{ApprovalWorkflow, WorkflowError}
 import dms.templates.core.ContentJson.given
 import dms.templates.core.DeviationJson.given
@@ -107,6 +107,9 @@ final case class SuccessorView(
       Schema
 
 /** The automatic comparison of an editorial (minor) version with the version it is based on (DMS-46). */
+/** The withdrawal of an approved version before it took effect (DMS-143, ADR 0059). */
+final case class WithdrawalView(at: Instant, by: String, reason: String) derives JsonCodec, Schema
+
 final case class EditorialCheckView(
     /** The released version compared with. */
     basedOn: String,
@@ -194,7 +197,9 @@ final case class DocumentVersionView(
     publishedAt: Option[Instant] = None,
     /** For a file document (DMS-115): the uploaded original of this version, empty before the first upload.
       */
-    file: Option[VersionFileView] = None
+    file: Option[VersionFileView] = None,
+    /** Set if the version was approved but withdrawn before it became valid: it was never in force. */
+    withdrawal: Option[WithdrawalView] = None
 ) derives JsonCodec,
       Schema
 
@@ -290,7 +295,27 @@ final case class DocumentView(
       * DMS-129): the open version is a draft that is not submitted, and the caller is its author, the
       * document's owner or a tenant administrator.
       */
-    canDiscardDraft: Boolean = false
+    canDiscardDraft: Boolean = false,
+    /** The approved version the caller may withdraw now (`POST
+      * /api/v1/documents/{id}/versions/{versionId}/withdraw`, DMS-143): it waits for its valid-from date and
+      * the caller holds the owner role or approved it.
+      */
+    withdrawable: Option[WithdrawableVersionView] = None,
+    /** The highest version number ever approved: new versions count on from it, also if that version was
+      * withdrawn before it took effect, whose number is not given again.
+      */
+    latestReleasedVersion: Option[String] = None
+) derives JsonCodec,
+      Schema
+
+/** The approved version the caller may withdraw now (DMS-143, ADR 0059), for the dialog. */
+final case class WithdrawableVersionView(
+    versionId: UUID,
+    version: String,
+    validFrom: Option[LocalDate],
+    /** The version that stays valid; empty if the document has none: it then stays without a valid version.
+      */
+    validVersion: Option[String]
 ) derives JsonCodec,
       Schema
 
@@ -453,7 +478,7 @@ object DocumentApi:
                 .heldAmong(readable.collect { case (d, _ :: _) => d.document.id }.toSet)
                 .mapError(DocumentError.Database(_))
             yield readable.collect { case (details, versions @ (_ :: _)) =>
-              val current = versions.find(v => Versioning.isOpen(v.status)).getOrElse(versions.last)
+              val current = currentOf(versions)
               summaryView(details, current, p.userId).copy(legalHold = held.contains(details.document.id))
             }
           }
@@ -471,7 +496,7 @@ object DocumentApi:
             for
               details  <- ctx.service.get(DocumentId(id))
               readable <- ctx.readable(details)
-              current = readable.find(v => Versioning.isOpen(v.status)).getOrElse(readable.last)
+              current = currentOf(readable)
               holds   <- LegalHoldStore.activeHolds(details.document.id).mapError(DocumentError.Database(_))
               manage  <- ctx.allowed(Action.ManageRetention, resource(p, details, current))
               number  <- ctx.allowed(Action.AssignDocumentNumber, resource(p, details, current))
@@ -479,6 +504,7 @@ object DocumentApi:
               discard <- details.open.filter(_.status == DocumentStatus.Draft) match
                 case Some(open) => ctx.allowed(Action.DiscardDraft, resource(p, details, open))
                 case None       => ZIO.succeed(false)
+              withdrawable <- withdrawableVersion(ctx, p, details)
             yield documentView(
               details.document,
               details.profile,
@@ -489,7 +515,10 @@ object DocumentApi:
               canAssignNumber = number && details.numberAssignable,
               canStartVersion = start.contains(None),
               startVersionBlocked = start.flatten,
-              canDiscardDraft = discard
+              canDiscardDraft = discard,
+              withdrawable = withdrawable,
+              latestReleasedVersion =
+                details.versions.filter(_.releasedAt.isDefined).map(_.number).maxOption.map(_.show)
             )
           }
       )
@@ -612,7 +641,7 @@ object DocumentApi:
                 )
               details <- ctx.service.get(DocumentId(id))
               base    <- ZIO
-                .fromOption(details.versions.filter(v => Versioning.isValid(v.status)).lastOption)
+                .fromOption(Versioning.startingPoint(details.versions))
                 .orElseFail(
                   DocumentError.Conflict("only a document with a valid version can get a new version")
                 )
@@ -707,6 +736,44 @@ object DocumentApi:
           }
       )
 
+  val withdrawVersion: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.post
+      .in(
+        documents / documentId / "versions" / path[UUID]("versionId").description("Version id") / "withdraw"
+      )
+      .in(jsonBody[WithdrawVersion])
+      .out(jsonBody[DocumentVersionView])
+      .description(
+        "Stops an approved version before its valid-from date (DMS-143): it goes to Withdrawn, is never " +
+          "published, and the valid version stays valid. Requires Withdraw: the owner role or having approved " +
+          "this version. The reason is required (422), at most 4000 characters, and recorded in the audit " +
+          "trail. Approvers and the owner are notified, readers are not. 409 with the code `version_published` " +
+          "if the publication got there first, `version_due` from its valid-from date on, `version_withdrawn` " +
+          "if it was withdrawn already, `version_not_approved` if it was never approved."
+      )
+      .tag("Documents")
+      .serverLogic(p =>
+        (id, versionId, req) =>
+          inTransaction(p) { ctx =>
+            for
+              details <- ctx.service.get(DocumentId(id))
+              _       <- ZIO.when(details.gone)(ZIO.fail(discardedDocument(id, details)))
+              version <- ZIO
+                .fromOption(details.versions.find(_.id == versionId))
+                .orElseFail(DocumentError.NotFound(s"document $id has no version $versionId"))
+              cases <- ctx.workflow.cases(details.document.id)
+              approvers = approversOf(cases, versionId)
+              // Decided as if the version were still approved: whoever may withdraw it learns why it did not work
+              // (409 from the service, which decides under the lock of the version), everyone else gets 403.
+              _         <- ctx.check(Action.Withdraw, withdrawalResource(p, details, version, approvers))
+              withdrawn <- ctx.service.withdrawApproved(versionId, req.reason, approvers, p.userId)
+            yield versionViewIn(
+              details.copy(versions = details.versions.map(v => if v.id == versionId then withdrawn else v)),
+              ctx.service.settings
+            )(withdrawn)
+          }
+      )
+
   private val deviationRequests = documents / documentId / "deviation-requests"
 
   val requestDeviation: ZServerEndpoint[Env, Any] =
@@ -798,6 +865,7 @@ object DocumentApi:
       newVersion,
       updateChangeSummary,
       discardDraft,
+      withdrawVersion,
       requestDeviation,
       withdrawDeviation,
       deviations,
@@ -957,7 +1025,7 @@ object DocumentApi:
       p: Principal,
       details: DocumentDetails
   ): UIO[Option[Option[String]]] =
-    details.versions.filter(v => Versioning.isValid(v.status)).lastOption match
+    Versioning.startingPoint(details.versions) match
       case None       => ZIO.none
       case Some(base) =>
         ctx
@@ -973,6 +1041,70 @@ object DocumentApi:
               else None
             )
           )
+
+  /** The version a document is shown with: the open one, else the latest that took or can take effect. A
+    * version withdrawn before it took effect (DMS-143) is shown only if nothing else is left.
+    */
+  private def currentOf(readable: List[DocumentVersion]): DocumentVersion =
+    readable
+      .find(v => Versioning.isOpen(v.status))
+      .orElse(readable.filter(_.withdrawal.isEmpty).lastOption)
+      .getOrElse(readable.last)
+
+  /** Who approved a version: the voters of its approval steps and whom they stood in for, and the final
+    * approver.
+    */
+  private[app] def approversOf(cases: List[CaseDetails], versionId: UUID): Set[UserId] =
+    cases
+      .filter(_.workflowCase.versionId == versionId)
+      .flatMap { c =>
+        val approvalTasks = c.tasks.filter(_.kind == StepKind.Approval).map(_.id).toSet
+        c.votes
+          .filter(v => approvalTasks(v.taskId) && v.decision.approves && v.invalidatedAt.isEmpty)
+          .flatMap(v => v.voter :: v.actingFor.toList) ++
+          c.approval.toList.flatMap(a => a.approvedBy :: a.actingFor.toList)
+      }
+      .toSet
+
+  /** The resource `Withdraw` decides on: the version as approved, with everyone who approved it. */
+  private def withdrawalResource(
+      p: Principal,
+      details: DocumentDetails,
+      v: DocumentVersion,
+      approvers: Set[UserId]
+  ): Resource =
+    resource(p, details, v).copy(
+      status = Some(DocumentStatus.Approved),
+      approvedBy = approvers ++ v.releasedBy,
+      withdrawnBeforeValid = false
+    )
+
+  /** The approved version the caller may withdraw now, if any. Mirrors the checks of `withdrawVersion`, which
+    * decides again.
+    */
+  private def withdrawableVersion(
+      ctx: Context,
+      p: Principal,
+      details: DocumentDetails
+  ): IO[WorkflowError, Option[WithdrawableVersionView]] =
+    details.versions.find(_.status == DocumentStatus.Approved) match
+      case None    => ZIO.none
+      case Some(v) =>
+        for
+          cases <- ctx.workflow.cases(details.document.id)
+          now   <- Clock.instant
+          may   <- ctx.allowed(Action.Withdraw, withdrawalResource(p, details, v, approversOf(cases, v.id)))
+        yield Option.when(may && !Publication.isDue(v.validFrom, details.zone, now))(
+          WithdrawableVersionView(
+            v.id,
+            v.label,
+            v.validFrom,
+            details.versions
+              .filter(o => Versioning.isValid(o.status) && o.scope == v.scope)
+              .lastOption
+              .map(_.label)
+          )
+        )
 
   /** A document whose versions were all discarded (DMS-129) or destroyed (DMS-82) is not found. */
   private[app] def discardedDocument(id: UUID, details: DocumentDetails): DocumentError =
@@ -1131,7 +1263,8 @@ object DocumentApi:
       validFrom = v.validFrom.orElse(Publication.validFrom(v.metadata)),
       requiresAcknowledgement = v.requiresAcknowledgement,
       publishedAt = v.publishedAt,
-      file = v.file.map(fileView(v.documentId.value, _))
+      file = v.file.map(fileView(v.documentId.value, _)),
+      withdrawal = v.withdrawal.map(w => WithdrawalView(w.at, w.by.value, w.reason))
     )
 
   private[app] def fileView(documentId: UUID, f: VersionFile): VersionFileView =
@@ -1218,7 +1351,9 @@ object DocumentApi:
       (StatusCode.Forbidden, ApiError("segregation_of_duties", e.describe))
     case e @ DocumentError.Lifecycle(_)  => (StatusCode.Conflict, ApiError("lifecycle", e.describe))
     case DocumentError.Conflict(message) => (StatusCode.Conflict, ApiError("conflict", message))
-    case DocumentError.Database(e)       => databaseError(e)
-    case e: DbError                      => databaseError(e)
+    case DocumentError.WithdrawalRefused(refusal, message) =>
+      (StatusCode.Conflict, ApiError(refusal.code, message))
+    case DocumentError.Database(e) => databaseError(e)
+    case e: DbError                => databaseError(e)
 
   private def databaseError(error: DbError): (StatusCode, ApiError) = HttpHardening.databaseError(error)

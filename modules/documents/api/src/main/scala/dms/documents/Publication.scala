@@ -66,10 +66,14 @@ final case class EditorialCheck(basedOn: String, changedRatio: Double, threshold
 
 object EditorialCheck:
 
-  /** The released version a version was started from: the latest approved version with a lower number. */
+  /** The released version a version was started from: the latest approved version with a lower number that
+    * was not withdrawn before it took effect (DMS-143): the next version starts from the valid one.
+    */
   def basis(v: DocumentVersion, versions: List[DocumentVersion]): Option[DocumentVersion] =
     import scala.math.Ordering.Implicits.infixOrderingOps
-    versions.filter(o => o.releasedAt.isDefined && o.number < v.number).maxByOption(_.number)
+    versions
+      .filter(o => o.releasedAt.isDefined && o.withdrawal.isEmpty && o.number < v.number)
+      .maxByOption(_.number)
 
   /** The check of a minor version; `None` for major versions and versions without a released basis. */
   def of(v: DocumentVersion, versions: List[DocumentVersion], threshold: Double): Option[EditorialCheck] =

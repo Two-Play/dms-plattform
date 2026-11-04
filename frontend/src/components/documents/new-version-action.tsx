@@ -49,7 +49,8 @@ function NewVersionForm({
   const [summary, setSummary] = useState('')
   const [attempted, setAttempted] = useState(false)
   const fileDocument = document.kind === 'File'
-  const labels = nextLabels(document.current.version)
+  // Numbers count on from the highest approved version, also one that was withdrawn before it took effect.
+  const labels = nextLabels(document.latestReleasedVersion ?? document.current.version)
 
   const trimmed = summary.trim()
   // Every new version needs a change summary, major and minor (DMS-126, business concept 5.1).

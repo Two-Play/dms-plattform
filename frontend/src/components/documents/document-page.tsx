@@ -23,6 +23,7 @@ import { DocumentEditor } from './new-document-page'
 import { LegalHoldBadge } from '@/components/legal-holds/legal-hold-badge'
 import { StatusBadge } from './status-badge'
 import { PublicationStatusNotice } from './publication-failures'
+import { versionStatus } from './status-label'
 import { WorkflowPanel } from './workflow-panel'
 import { AcknowledgementPanel } from './acknowledgement-panel'
 import { AcknowledgementOverviewPanel } from './acknowledgement-overview-panel'
@@ -36,6 +37,7 @@ import { VersionMetadata } from './version-metadata'
 import { FileContentPanel } from './file-content-panel'
 import { NewVersionAction } from './new-version-action'
 import { DiscardDraftAction } from './discard-draft-action'
+import { WithdrawVersionAction } from './withdraw-version-action'
 import { ChangeSummaryPanel } from './change-summary-panel'
 
 /** Whether the page shows the acknowledgement card for a version: valid and requiring it. */
@@ -148,6 +150,7 @@ export function DocumentPage({
               />
               <NewVersionAction document={document.data} />
               {!showingOther && <DiscardDraftAction document={document.data} />}
+              <WithdrawVersionAction document={document.data} />
               <EvidenceReportAction documentId={document.data.id} />
             </>
           )
@@ -155,7 +158,7 @@ export function DocumentPage({
       >
         {document.data && shown && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <StatusBadge status={shown.status} />
+            <StatusBadge status={versionStatus(shown)} />
             {document.data.legalHold && <LegalHoldBadge holds={document.data.legalHolds} />}
             <span>{t('docs.page.version', { label: shown.version })}</span>
             {document.data.classPath && document.data.classPath.length > 0 && (
@@ -194,6 +197,12 @@ export function DocumentPage({
               >
                 {t('docs.view.toCurrent')}
               </Link>
+            </p>
+          )}
+          {shown.withdrawal && (
+            <p className="rounded-md border bg-muted/50 p-3 text-sm" role="status">
+              {t('withdrawVersion.notice')}{' '}
+              {t('withdrawVersion.neverValidReason', { reason: shown.withdrawal.reason })}
             </p>
           )}
           {showsChangeSummary(shown, editing) && (

@@ -40,6 +40,13 @@ object JobQueue:
                                    ${runAt.map(utc)}, $maxAttempts)""".query[Option[Long]].run().head
     )
 
+  /** Cancels the queued jobs of `kind` of the tenant of the current transaction whose idempotency key starts
+    * with `keyPrefix`, so they never run; `reason` stays with them. Returns how many. A running job is not
+    * touched: its handler has to find out for itself.
+    */
+  def cancel(kind: String, keyPrefix: String, reason: String): IO[DbError, Int] =
+    Db.sql(sql"select dms.job_cancel($kind, $keyPrefix, $reason)".query[Int].run().head)
+
   /** Enqueues a system job without tenant; runs inside `Db.transactSystem`. */
   def enqueueSystem(
       kind: String,

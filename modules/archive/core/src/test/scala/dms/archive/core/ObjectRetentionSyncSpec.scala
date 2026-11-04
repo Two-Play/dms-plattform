@@ -333,6 +333,51 @@ object ObjectRetentionSyncSpec extends ZIOSpecDefault:
       )
     },
     test(
+      "a version withdrawn before it took effect keeps its object; the lock counts on from the withdrawal"
+    ) {
+      val withdrawnAt = approvedAt.plus(100, ChronoUnit.DAYS)
+      for
+        e     <- ZIO.service[Env]
+        t     <- tenant
+        d     <- document(t)
+        v     <- draft(t, d, 1)
+        _     <- rule(t._1, "policy-5y", 60, trigger = "EndOfValidity")
+        put   <- approve(t._1, d, v, Some("policy-5y"), approvedAt)
+        sync  <- retained(ObjectRetentionPolicy.default)
+        _     <- sync.lock(t._1, d, v)
+        first <- e.objects.head(put.key, Some(put.versionId))
+        // The withdrawal as the application writes it; the database queues the job (trigger of migration V36).
+        _ <- app(t._1)(
+          sql"""update dms.document_version
+                set status = 'Withdrawn', status_changed_at = ${OffsetDateTime.ofInstant(
+              withdrawnAt,
+              ZoneOffset.UTC
+            )},
+                    status_changed_by = ${"owner-1"}, withdrawn_by = ${"owner-1"},
+                    withdrawal_reason = ${"Approved by mistake"}
+                where id = $v""".update.run()
+        )
+        queued <- owner(
+          sql"""select count(*) from dms.job where kind = ${ObjectRetentions.JobKind}
+                and idempotency_key = ${"object-retention:" + v + ":Withdrawn"}""".query[Long].run().head
+        )
+        _      <- sync.lock(t._1, d, v)
+        head   <- e.objects.head(put.key, Some(put.versionId))
+        rows   <- recorded(t._1, d)
+        delete <- e.objects.delete(put.key, put.versionId).either
+      yield assertTrue(
+        queued == 1L,
+        // Same object version, with the same bytes: nothing was rewritten, the lock only grows.
+        head.version == first.version,
+        head.retention.exists(r => first.retention.forall(!_.until.isAfter(r.until))),
+        head.retention.exists(_.until == through("2032-06-09")),
+        rows.exists(r =>
+          r.objectKey == put.key && r.versionId == v && r.retainUntil == through("2032-06-09")
+        ),
+        delete.isLeft
+      )
+    },
+    test(
       "compliance refuses even the governance bypass; a longer rule extends the lock; legal holds keep it"
     ) {
       for

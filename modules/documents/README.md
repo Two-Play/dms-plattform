@@ -294,3 +294,16 @@ The core field `retentionRule` names a rule of `dms.retention_rule` (module `arc
 - API (`dms.app.RetentionApi`): `GET /api/v1/retention/class-rules`, `PUT /api/v1/retention/class-rules/{classKey}`, `GET` and `PUT /api/v1/documents/{id}/retention`.
 
 Tests: `DocumentServiceSpec` (rule on creation, new version and submission of older drafts, inheritance, author cannot enter another rule, the document's rule sticks and is audited, message without rule); `EvidenceReportApiSpec` (endpoints and permissions); in the frontend `class-retention.test.tsx`, `document-pages.test.tsx`.
+
+## Withdrawing an approved version (DMS-143, ADR 0059)
+
+`DocumentService.withdrawApproved(versionId, reason, approvers, actor)` stops an approved version before 00:00 of its valid-from date in the tenant's time zone: status `Withdrawn`, who and why in the same statement (`DocumentVersion.withdrawal`), queued `document.publish` jobs cancelled (`dms.job_cancel`). Nothing frozen changes. It locks the version row and reads the clock afterwards, as `publishScheduled` does, so exactly one of the two changes the version. A withdrawal that loses fails with `DocumentError.WithdrawalRefused` (`WithdrawalRefusal`, codes `version_published`, `version_due`, `version_withdrawn`, `version_not_approved`), a job that loses does nothing.
+
+| Method | Path | Purpose | Authorization |
+|---|---|---|---|
+| POST | `/api/v1/documents/{id}/versions/{versionId}/withdraw` | Stops the approved version; `{reason}` required, at most 4000 characters | `Withdraw` |
+
+- `DocumentView.withdrawable` names the version the caller may withdraw now, `DocumentVersionView.withdrawal` when, by whom and why one was withdrawn, `DocumentView.latestReleasedVersion` where new version numbers count on from.
+- `Versioning.startingPoint`: the next version starts from the valid version, without one from the version withdrawn last.
+- Audit `document.withdrawn-before-valid`; outbox `document.status-changed` and `document.approved-version-withdrawn` (notification of approvers and owner).
+- Migration V41: `withdrawn_by`, `withdrawal_reason` (with a column grant to `dms_app`; `dms.document_version` has RLS), `Approved → Withdrawn` in the guards, job status `cancelled`, `dms.job_cancel` (security definer, limited to the current tenant, executable by `dms_app`).

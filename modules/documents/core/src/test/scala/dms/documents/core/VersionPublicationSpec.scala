@@ -16,7 +16,7 @@ import zio.*
 import zio.json.*
 import zio.test.*
 
-import java.time.{Instant, LocalDate}
+import java.time.{Instant, LocalDate, ZoneOffset}
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -283,6 +283,57 @@ object VersionPublicationSpec extends ZIOSpecDefault:
       )
     )
 
+  private val ownerUser = UserId("owner-1")
+
+  /** 2027-01-01 00:00 in Berlin, when a version valid from that date becomes due. */
+  private val due           = Instant.parse("2026-12-31T23:00:00Z")
+  private val validFrom     = LocalDate.of(2027, 1, 1)
+  private val justBefore    = Clock.ClockJava(java.time.Clock.fixed(due.minusMillis(1), ZoneOffset.UTC))
+  private val justAtOrAfter = Clock.ClockJava(java.time.Clock.fixed(due, ZoneOffset.UTC))
+
+  private def withdraw(
+      f: Fixture,
+      version: UUID,
+      reason: String = "Approved by mistake",
+      by: UserId = ownerUser
+  ) =
+    as(f.tenant)(_.withdrawApproved(version, reason, Set(approver), by))
+
+  private def schemaOwner[A](query: DbTx ?=> A): ZIO[Env, DbError, A] =
+    ZIO.serviceWithZIO[Env](_.owner.transactSystem(Db.sql(query)))
+
+  private def jobStates(version: UUID) =
+    schemaOwner(
+      sql"""select status, coalesce(last_error, '') from dms.job
+            where kind = ${PublicationJobs.PublishKind} and payload ->> 'versionId' = ${version.toString}"""
+        .query[(String, String)]
+        .run()
+        .toList
+    )
+
+  private def outbox(doc: DocumentId, eventType: String) =
+    schemaOwner(
+      sql"""select payload::text from dms.outbox_event
+            where aggregate_id = ${doc.value} and event_type = $eventType order by id"""
+        .query[String]
+        .run()
+        .toList
+    )
+
+  private def audited(doc: DocumentId, action: String) =
+    ZIO.serviceWithZIO[Env](
+      _.audit.get.map(_.filter(e => e.action == action && e.target.id.contains(doc.value)))
+    )
+
+  /** Waits until a statement waits for a lock: the other side of a race got to its row lock. */
+  private val someoneWaitsForALock =
+    schemaOwner(
+      sql"select count(*) from pg_stat_activity where wait_event_type = 'Lock' and state = 'active'"
+        .query[Long]
+        .run()
+        .head
+    ).repeatUntil(_ >= 1L)
+
   def spec = suite("Scheduled publication and editorial versions")(
     test(
       "an approved version is published at 00:00 of its valid-from date, replacing the valid one at once"
@@ -336,6 +387,364 @@ object VersionPublicationSpec extends ZIOSpecDefault:
           e.action == "document.published" && e.actor.kind == ActorKind.Technical &&
             e.channel == Channel.Automation && e.actor.id == DocumentService.Scheduler.value
         )
+      )
+    },
+    test("a withdrawn version is never published; the valid version stays; frozen data stays as it was") {
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, v1) = created
+        v2     <- scheduled(f, doc, validFrom)
+        runner <- jobs()
+        _      <- TestClock.setTime(Instant.parse("2026-12-30T10:00:00Z"))
+        _      <- runner.enqueue(f.tenant)
+        queued <- jobStates(v2.id)
+        // Stands for a publication job a worker claimed just before the withdrawal.
+        withdrawn    <- withdraw(f, v2.id, "  Approved by mistake  ")
+        cancelled    <- jobStates(v2.id)
+        again        <- runner.enqueue(f.tenant)
+        _            <- TestClock.setTime(due.plusSeconds(5))
+        _            <- runner.handlers(PublicationJobs.PublishKind)(claimed(f.tenant, v2.id))
+        direct       <- as(f.tenant)(_.publishScheduled(v2.id))
+        forced       <- as(f.tenant)(_.changeStatus(v2.id, Publish, approver)).either
+        after        <- as(f.tenant)(_.get(doc))
+        scheduledNow <- as(f.tenant)(_.scheduledPublications)
+        current      <- as(f.tenant)(_.currentlyValid)
+        validOn      <- as(f.tenant)(_.validAt(Instant.parse("2027-06-01T12:00:00Z")))
+        action       <- audited(doc, "document.withdrawn-before-valid")
+        published    <- audited(doc, "document.published")
+        notices      <- outbox(doc, "document.approved-version-withdrawn")
+        changes      <- outbox(doc, "document.status-changed")
+        stored = after.versions.find(_.id == v2.id).get
+        old    = after.versions.find(_.id == v1.id).get
+      yield assertTrue(
+        queued.map(_._1) == List("queued"),
+        cancelled.size == 1,
+        cancelled.head._1 == "cancelled",
+        cancelled.head._2.contains("withdrawn"),
+        again == 0,
+        direct.isEmpty,
+        forced.isLeft,
+        withdrawn.status == Withdrawn,
+        withdrawn.withdrawal.map(w => (w.by, w.reason)) == Some((ownerUser, "Approved by mistake")),
+        after.versions.map(v => (v.label, v.status)) == List(("1.0", Published), ("2.0", Withdrawn)),
+        stored.withdrawal.map(_.reason) == Some("Approved by mistake"),
+        stored.withdrawal.map(_.at) == Some(Instant.parse("2026-12-30T10:00:00Z")),
+        stored.publishedAt.isEmpty,
+        stored.rendition == v2.rendition,
+        stored.metadataSnapshot == v2.metadataSnapshot,
+        stored.releasedBy == v2.releasedBy,
+        stored.content == v2.content,
+        old.supersededBy.isEmpty,
+        old.withdrawal.isEmpty,
+        after.successor(old).isEmpty,
+        after.publicationDue(stored).isEmpty,
+        scheduledNow.isEmpty,
+        current.map(_.versionId) == List(v1.id),
+        validOn.map(_.versionId) == List(v1.id),
+        action.size == 1,
+        action.head.reason.contains("Approved by mistake"),
+        action.head.actor.id == ownerUser.value,
+        action.head.actor.kind == ActorKind.Person,
+        action.head.target.version.contains("2.0"),
+        !published.exists(_.target.version.contains("2.0")),
+        notices.size == 1,
+        notices.head.contains("""recipients": ["approver-1"]"""),
+        notices.head.contains("Approved by mistake"),
+        changes.count(c =>
+          c.contains("""status": "Withdrawn"""") && c.contains("""previousStatus": "Approved"""")
+        ) == 1
+      )
+    },
+    test(
+      "the retention job runs for the withdrawn version; no acknowledgement or review ever exists for it"
+    ) {
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, v1) = created
+        v2   <- scheduled(f, doc, validFrom)
+        _    <- TestClock.setTime(Instant.parse("2026-12-30T10:00:00Z"))
+        _    <- withdraw(f, v2.id)
+        keys <- schemaOwner(
+          sql"""select idempotency_key from dms.job where kind = 'archive.object-retention'
+                and payload ->> 'versionId' = ${v2.id.toString} order by id""".query[String].run().toList
+        )
+        audience <- schemaOwner(
+          sql"""select count(*) from dms.version_acknowledgement_audience where version_id = ${v2.id}"""
+            .query[Long]
+            .run()
+            .head
+        )
+        reviewDue <- schemaOwner(
+          sql"select review_due_on is null, withdrawn_at is not null from dms.document_version where id = ${v2.id}"
+            .query[(Boolean, Boolean)]
+            .run()
+            .head
+        )
+        // The archive PDF stays what it was: the application cannot change the reference, even after withdrawal.
+        changed <- ZIO
+          .serviceWithZIO[Env](
+            _.app.transact(f.tenant)(
+              Db.sql(
+                sql"update dms.document_version set rendition_sha256 = ${"b" * 64} where id = ${v2.id}".update
+                  .run()
+              )
+            )
+          )
+          .either
+        attach <- as(f.tenant)(
+          _.attachRendition(v2.id, Rendition("r/other.pdf", None, "c" * 64), admin)
+        ).either
+        kept <- as(f.tenant)(_.get(doc)).map(_.versions.find(_.id == v2.id).get)
+      yield assertTrue(
+        keys == List(s"object-retention:${v2.id}", s"object-retention:${v2.id}:Withdrawn"),
+        audience == 0L,
+        reviewDue == (true, true),
+        changed.isLeft,
+        attach.isLeft,
+        kept.rendition == v2.rendition,
+        // The valid version keeps its own state.
+        v1.status == Published
+      )
+    },
+    test("the reason is written once, and another tenant cannot cancel a publication job") {
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, v1) = created
+        v2      <- scheduled(f, doc, validFrom)
+        runner  <- jobs()
+        _       <- TestClock.setTime(Instant.parse("2026-12-30T10:00:00Z"))
+        _       <- runner.enqueue(f.tenant)
+        e       <- ZIO.service[Env]
+        other   <- fixture()
+        foreign <- e.app.transact(other.tenant)(PublicationJobs.cancel(v2.id, "not yours"))
+        queued  <- jobStates(v2.id)
+        _       <- withdraw(f, v2.id)
+        rewrite <- e.app
+          .transact(f.tenant)(
+            Db.sql(
+              sql"""update dms.document_version set withdrawal_reason = ${"Another one"}
+                    where id = ${v2.id}""".update.run()
+            )
+          )
+          .either
+        onValid <- e.app
+          .transact(f.tenant)(
+            Db.sql(
+              sql"""update dms.document_version
+                    set status = 'Withdrawn', status_changed_at = now(), status_changed_by = ${"x"},
+                        withdrawn_by = ${"x"}, withdrawal_reason = ${"Not this way"}
+                    where id = ${v1.id}""".update.run()
+            )
+          )
+          .either
+      yield assertTrue(foreign == 0, queued.map(_._1) == List("queued"), rewrite.isLeft, onValid.isLeft)
+    },
+    test("a reason is required, and only the service's withdrawal can stop an approved version") {
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, _) = created
+        v2       <- scheduled(f, doc, validFrom)
+        _        <- TestClock.setTime(Instant.parse("2026-12-30T10:00:00Z"))
+        blank    <- withdraw(f, v2.id, "   ").either
+        long     <- withdraw(f, v2.id, "x" * 4001).either
+        noReason <- as(f.tenant)(_.changeStatus(v2.id, Withdraw, ownerUser)).either
+        direct   <- ZIO
+          .serviceWithZIO[Env](
+            _.app.transact(f.tenant)(
+              Db.sql(
+                sql"""update dms.document_version set status = 'Withdrawn', status_changed_at = now(),
+                      status_changed_by = ${"x"} where id = ${v2.id}""".update.run()
+              )
+            )
+          )
+          .either
+        after <- as(f.tenant)(_.get(doc))
+      yield assertTrue(
+        blank.left.exists(_.isInstanceOf[DocumentError.Invalid]),
+        long.left.exists(_.isInstanceOf[DocumentError.Invalid]),
+        noReason.left.exists(_.isInstanceOf[DocumentError.Invalid]),
+        direct.isLeft,
+        after.versions.map(_.status) == List(Published, Approved)
+      )
+    },
+    test("a version cannot be withdrawn from its valid-from date on, twice, or before it is approved") {
+      def refusal[A](result: Either[DocumentError | DbError, A]) = result.left.toOption.collect {
+        case DocumentError.WithdrawalRefused(r, _) => r
+      }
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, v1) = created
+        v2        <- scheduled(f, doc, validFrom)
+        _         <- TestClock.setTime(due)
+        late      <- withdraw(f, v2.id).either
+        still     <- as(f.tenant)(_.get(doc))
+        _         <- as(f.tenant)(_.publishScheduled(v2.id))
+        published <- withdraw(f, v2.id).either
+        // The day before the date in the tenant's time zone is still early enough; twice is not.
+        other <- fixture("Asia/Tokyo")
+        again <- valid(other)
+        (doc2, _) = again
+        v3    <- scheduled(other, doc2, validFrom)
+        _     <- TestClock.setTime(Instant.parse("2026-12-31T14:59:59Z"))
+        first <- withdraw(other, v3.id)
+        twice <- withdraw(other, v3.id).either
+        draft <- as(other.tenant)(_.newVersion(doc2, ChangeKind.Major, Some("Next"), author))
+        open  <- withdraw(other, draft.id).either
+        none  <- withdraw(other, UUID.randomUUID()).either
+      yield assertTrue(
+        refusal(late).contains(WithdrawalRefusal.Due),
+        still.versions.map(_.status) == List(Published, Approved),
+        refusal(published).contains(WithdrawalRefusal.AlreadyPublished),
+        first.status == Withdrawn,
+        refusal(twice).contains(WithdrawalRefusal.AlreadyWithdrawn),
+        refusal(open).contains(WithdrawalRefusal.NotApproved),
+        none.left.exists(_.isInstanceOf[DocumentError.NotFound]),
+        v1.status == Published
+      )
+    },
+    test("race: the publication holds the version, the withdrawal waits and is told it lost") {
+      for
+        e       <- ZIO.service[Env]
+        s       <- service(DocumentSettings.default)
+        f       <- fixture()
+        created <- valid(f)
+        (doc, v1) = created
+        v2      <- scheduled(f, doc, validFrom)
+        locked  <- Promise.make[Nothing, Unit]
+        release <- Promise.make[Nothing, Unit]
+        job     <- ZIO
+          .withClock(justAtOrAfter)(
+            e.app.transact(f.tenant)(s.publishScheduled(v2.id) <* locked.succeed(()) <* release.await)
+          )
+          .fork
+        _          <- locked.await
+        withdrawal <- ZIO.withClock(justBefore)(withdraw(f, v2.id)).either.fork
+        _          <- someoneWaitsForALock
+        _          <- release.succeed(())
+        published  <- job.join
+        refused    <- withdrawal.join
+        after      <- as(f.tenant)(_.get(doc))
+        action     <- audited(doc, "document.withdrawn-before-valid")
+        notices    <- outbox(doc, "document.approved-version-withdrawn")
+      yield assertTrue(
+        published.exists(_.status == Published),
+        refused.left.exists {
+          case DocumentError.WithdrawalRefused(WithdrawalRefusal.AlreadyPublished, m) => m.contains("2.0")
+          case _                                                                      => false
+        },
+        after.versions.map(v => (v.id, v.status)) == List((v1.id, Superseded), (v2.id, Published)),
+        after.versions.forall(_.withdrawal.isEmpty),
+        action.isEmpty,
+        notices.isEmpty
+      )
+    },
+    test("race: the withdrawal holds the version, the job that was claimed already waits and does nothing") {
+      for
+        e       <- ZIO.service[Env]
+        s       <- service(DocumentSettings.default)
+        runner  <- jobs()
+        f       <- fixture()
+        created <- valid(f)
+        (doc, v1) = created
+        v2         <- scheduled(f, doc, validFrom)
+        locked     <- Promise.make[Nothing, Unit]
+        release    <- Promise.make[Nothing, Unit]
+        withdrawal <- ZIO
+          .withClock(justBefore)(
+            e.app.transact(f.tenant)(
+              s.withdrawApproved(v2.id, "Approved by mistake", Set(approver), ownerUser) <*
+                locked.succeed(()) <* release.await
+            )
+          )
+          .fork
+        _   <- locked.await
+        job <- ZIO
+          .withClock(justAtOrAfter)(runner.handlers(PublicationJobs.PublishKind)(claimed(f.tenant, v2.id)))
+          .either
+          .fork
+        _         <- someoneWaitsForALock
+        _         <- release.succeed(())
+        withdrawn <- withdrawal.join
+        finished  <- job.join
+        after     <- as(f.tenant)(_.get(doc))
+        published <- audited(doc, "document.published")
+      yield assertTrue(
+        withdrawn.status == Withdrawn,
+        finished.isRight,
+        after.versions.map(v => (v.id, v.status)) == List((v1.id, Published), (v2.id, Withdrawn)),
+        after.versions.find(_.id == v2.id).exists(_.publishedAt.isEmpty),
+        !published.exists(_.target.version.contains("2.0"))
+      )
+    },
+    test("race: run at the same moment, exactly one of withdrawal and publication changes the version") {
+      def round(f: Fixture) =
+        for
+          e       <- ZIO.service[Env]
+          s       <- service(DocumentSettings.default)
+          created <- valid(f)
+          (doc, v1) = created
+          v2     <- scheduled(f, doc, validFrom)
+          result <- ZIO.withClock(justBefore)(withdraw(f, v2.id)).either <&>
+            ZIO.withClock(justAtOrAfter)(e.app.transact(f.tenant)(s.publishScheduled(v2.id)))
+          (withdrawal, published) = result
+          after  <- as(f.tenant)(_.get(doc))
+          action <- audited(doc, "document.withdrawn-before-valid")
+        yield
+          val statuses = after.versions.map(_.status)
+          val stored   = after.versions.find(_.id == v2.id).get
+          if withdrawal.isRight then
+            published.isEmpty && statuses == List(Published, Withdrawn) && stored.publishedAt.isEmpty &&
+            stored.withdrawal.isDefined && action.size == 1 && after.versions.head.id == v1.id
+          else
+            published.isDefined && statuses == List(Superseded, Published) && stored.publishedAt.isDefined &&
+            stored.withdrawal.isEmpty && action.isEmpty && withdrawal.left.exists {
+              case DocumentError.WithdrawalRefused(WithdrawalRefusal.AlreadyPublished, _) => true
+              case _                                                                      => false
+            }
+      for
+        f      <- fixture()
+        rounds <- ZIO.foreach((1 to 10).toList)(_ => round(f))
+      yield assertTrue(rounds.forall(identity))
+    },
+    test("the next version counts on, starts from the valid version and is compared with it") {
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, v1) = created
+        v2      <- scheduled(f, doc, validFrom)
+        _       <- TestClock.setTime(Instant.parse("2026-12-30T10:00:00Z"))
+        _       <- withdraw(f, v2.id)
+        minor   <- as(f.tenant)(_.newVersion(doc, ChangeKind.Minor, Some("Typo"), author))
+        details <- as(f.tenant)(_.get(doc))
+      yield assertTrue(
+        minor.label == "2.1-draft.1",
+        EditorialCheck.basis(minor, details.versions).map(_.id) == Some(v1.id)
+      )
+    },
+    test("a first version approved by mistake leaves no valid version and can be corrected by a new one") {
+      for
+        f       <- fixture()
+        _       <- TestClock.setTime(Instant.parse("2026-01-02T12:00:00Z"))
+        created <- as(f.tenant)(
+          _.create(NewDocument(f.templateId, 1, "Code of conduct", values(validFrom)), author)
+        )
+        (doc, v1) = created
+        approved  <- approveOpen(f, doc.id)
+        withdrawn <- withdraw(f, approved.id)
+        current   <- as(f.tenant)(_.currentlyValid)
+        noSummary <- as(f.tenant)(_.newVersion(doc.id, ChangeKind.Major, None, author)).either
+        next      <- as(f.tenant)(_.newVersion(doc.id, ChangeKind.Major, Some("Corrected"), author))
+      yield assertTrue(
+        withdrawn.id == v1.id,
+        !current.exists(_.document.id == doc.id),
+        noSummary.isLeft,
+        next.label == "2.0-draft.1",
+        next.content == withdrawn.content
       )
     },
     test("the switch follows the tenant's time zone") {

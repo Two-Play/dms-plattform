@@ -91,6 +91,12 @@ object Policy:
             )
           case Some(Superseded) =>
             readable(roles.exists(_ != TenantAdmin))
+          // Never in force (ADR 0059): those who could read it while it was approved keep it, e.g. to correct it.
+          case Some(Withdrawn) if resource.withdrawnBeforeValid =>
+            readable(
+              has(Owner) || has(RecordsManager) || has(Auditor) || has(Author) ||
+                participant(Reviewer, Approver) || resource.approvedBy.contains(subject.userId)
+            )
           case Some(Withdrawn | Archived) => readable(has(Owner) || has(RecordsManager) || has(Auditor))
           case Some(Destroyed | Discarded) | None => Decision.Deny("there is no readable document version")
 
@@ -139,9 +145,15 @@ object Policy:
         )
 
       case Withdraw =>
-        requireStatus(Published, ReviewDue)(
-          grantIf(has(Owner) || has(Approver), "withdrawing requires the owner or approver role")
-        )
+        if statusIn(Approved) then
+          grantIf(
+            has(Owner) || (has(Approver) && resource.approvedBy.contains(subject.userId)),
+            "withdrawing an approved version requires the owner role or having approved this version"
+          )
+        else
+          requireStatus(Published, ReviewDue)(
+            grantIf(has(Owner) || has(Approver), "withdrawing requires the owner or approver role")
+          )
 
       case Recertify =>
         requireStatus(Published, ReviewDue)(

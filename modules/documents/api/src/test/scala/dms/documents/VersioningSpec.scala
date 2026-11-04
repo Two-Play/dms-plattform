@@ -3,8 +3,12 @@ package dms.documents
 import dms.documents.ChangeKind.*
 import dms.documents.DocumentStatus.*
 import dms.documents.metadata.MetadataValue
-import dms.kernel.VersionNo
+import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
+import dms.templates.TemplateContent
 import zio.test.*
+
+import java.time.Instant
+import java.util.UUID
 
 object VersioningSpec extends ZIOSpecDefault:
 
@@ -41,6 +45,44 @@ object VersioningSpec extends ZIOSpecDefault:
         Versioning.label(VersionNo(1, 1), InApproval, 4) == "1.1-draft.4",
         Versioning.label(VersionNo(1, 1), Approved, 4) == "1.1",
         Versioning.label(VersionNo(2, 0), Published, 9) == "2.0"
+      )
+    },
+    test("the next version starts from the valid version, else from one withdrawn before it took effect") {
+      val template                                                                = TemplateId.random()
+      def version(major: Int, status: DocumentStatus, withdrawn: Boolean = false) =
+        DocumentVersion(
+          UUID.randomUUID(),
+          DocumentId.random(),
+          VersionNo(major, 0),
+          1,
+          status,
+          Major,
+          None,
+          "",
+          1,
+          template,
+          1,
+          TemplateContent(Nil),
+          Map.empty,
+          None,
+          None,
+          UserId("author"),
+          Instant.EPOCH,
+          Instant.EPOCH,
+          None,
+          None,
+          withdrawal =
+            Option.when(withdrawn)(VersionWithdrawal(Instant.EPOCH, UserId("owner"), "Approved by mistake"))
+        )
+      val valid        = version(1, Published)
+      val stopped      = version(2, Withdrawn, withdrawn = true)
+      val outOfForce   = version(1, Withdrawn)
+      val stoppedAgain = version(3, Withdrawn, withdrawn = true)
+      assertTrue(
+        Versioning.startingPoint(List(valid, stopped)).contains(valid),
+        Versioning.startingPoint(List(stopped, stoppedAgain)).contains(stoppedAgain),
+        Versioning.startingPoint(List(outOfForce)).isEmpty,
+        Versioning.startingPoint(Nil).isEmpty
       )
     },
     test("labels can be parsed back") {

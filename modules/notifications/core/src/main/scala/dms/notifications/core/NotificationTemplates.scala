@@ -37,7 +37,7 @@ object NotificationTemplates:
 
   /** Parameters holding user ids; the delivery resolves their display names. */
   val PersonParams: Set[String] =
-    Set("returnedBy", "approvedBy", "principal", "deputy", "actingFor", "assignee")
+    Set("returnedBy", "approvedBy", "principal", "deputy", "actingFor", "assignee", "withdrawnBy")
 
   /** Notices of jobs that failed for good (DMS-142, ADR 0058). Parameters: `reason` (the failure code),
     * `audience` and `canRetry`.
@@ -80,6 +80,7 @@ object NotificationTemplates:
     "publication.published",
     "failure.rendition",
     "failure.publication",
+    "publication.withdrawn",
     "legal-hold.created",
     "legal-hold.released"
   )
@@ -214,6 +215,18 @@ object NotificationTemplates:
           bodyEn =
             s"The publication of $doc failed: every attempt failed. $reasonEn The version has not become valid. $retryHintEn"
         )(failureLink)
+      case "publication.withdrawn" =>
+        // The reason may say what the document is about: like the title, only for those who may read it.
+        val reason = Option.when(ctx.document.isDefined)(p("reason"))
+        r(de = s"Zurückgezogen: $docShort", en = s"Withdrawn: $docShort")(
+          bodyDe =
+            s"${person("withdrawnBy")} hat $doc vor dem Gültigkeitsdatum${validFromDe} zurückgezogen. " +
+              "Die Version wird nicht veröffentlicht; die bisher gültige Version bleibt gültig." +
+              reason.fold("")(t => s" Begründung: $t"),
+          bodyEn = s"${person("withdrawnBy")} withdrew $doc before its valid-from date${validFromEn}. " +
+            "The version will not be published; the version valid so far stays valid." +
+            reason.fold("")(t => s" Reason: $t")
+        )(docLink)
       case "legal-hold.created" =>
         r(de = s"Legal Hold gesetzt: ${p("name")}", en = s"Legal hold set: ${p("name")}")(
           bodyDe = s"Der Legal Hold „${p("name")}“ wurde gesetzt und umfasst ${p("documents")} Dokument(e).",

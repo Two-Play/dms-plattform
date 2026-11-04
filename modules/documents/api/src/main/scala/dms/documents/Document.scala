@@ -79,6 +79,11 @@ final case class Document(
     kind: DocumentKind = DocumentKind.Structured
 )
 
+/** The withdrawal of an approved version before it took effect (DMS-143, ADR 0059). A version withdrawn while
+  * it was valid has none: its reason is in its review task (ADR 0030).
+  */
+final case class VersionWithdrawal(at: Instant, by: UserId, reason: String)
+
 /** One version of a document: a complete, self-contained version package (ADR 0021). Open versions (draft,
   * review, approval) are worked on; from approval on, the package is frozen.
   *
@@ -119,6 +124,8 @@ final case class Document(
   * @param file
   *   the uploaded original of a version of a file document (DMS-115); replaced only while the version is a
   *   draft, `None` for structured documents and for a file document before the first upload
+  * @param withdrawal
+  *   set if the version was approved but withdrawn before it became valid (DMS-143); it was never in force
   */
 final case class DocumentVersion(
     id: UUID,
@@ -147,7 +154,8 @@ final case class DocumentVersion(
     requiresAcknowledgement: Boolean = true,
     publishedAt: Option[Instant] = None,
     attachments: List[VersionAttachment] = Nil,
-    file: Option[VersionFile] = None
+    file: Option[VersionFile] = None,
+    withdrawal: Option[VersionWithdrawal] = None
 ):
   def label: String = Versioning.label(number, status, workingState)
 
