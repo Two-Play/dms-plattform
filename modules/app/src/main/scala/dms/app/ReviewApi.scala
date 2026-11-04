@@ -46,6 +46,8 @@ final case class ReviewTaskView(
     newVersionId: Option[UUID],
     /** The owner's note; for Withdrawn the reason. */
     comment: Option[String],
+    /** The task decided as Revised that this one opens again: its new version never took effect (DMS-145). */
+    reopens: Option[UUID],
     /** Review interval of the document's class; recertifying without a date sets today plus this interval. */
     reviewIntervalMonths: Option[Int]
 ) derives JsonCodec,
@@ -277,6 +279,7 @@ object ReviewApi:
       t.nextDueOn,
       t.newVersionId,
       t.comment,
+      t.reopens,
       interval
     )
 

@@ -71,15 +71,19 @@ function RetryPublicationButton({
 
 /**
  * The failed publication of an approved version on the document page (DMS-142): the cause and, for
- * the document's owner, records managers and tenant administrators, a retry button. Shows nothing
- * while the publication is simply waiting for its date.
+ * the document's owner, records managers and tenant administrators, a retry button. A publication
+ * that failed for good also names the way out if a retry cannot help: withdrawing the version
+ * (DMS-145), which `canWithdraw` callers find in the page's actions. Shows nothing while the
+ * publication is simply waiting for its date.
  */
 export function PublicationStatusNotice({
   documentId,
   versionId,
+  canWithdraw = false,
 }: {
   documentId: string
   versionId: string
+  canWithdraw?: boolean
 }) {
   const client = useApiClient()
   const status = useQuery(publicationStatusQuery(client, documentId, versionId))
@@ -108,6 +112,9 @@ export function PublicationStatusNotice({
           <summary className="cursor-pointer">{t('publications.technicalDetail')}</summary>
           <p className="mt-1 break-words font-mono">{s.lastError.message}</p>
         </details>
+      )}
+      {s.state === 'Failed' && (
+        <p>{canWithdraw ? t('publications.withdrawHint') : t('publications.withdrawHintOthers')}</p>
       )}
       {s.canRetry && (
         <RetryPublicationButton documentId={documentId} versionId={versionId} version={s.version} />

@@ -66,7 +66,7 @@ Given: the lifecycle exists twice, in `Lifecycle` and in the guard trigger, and 
 
 - The content of a discarded draft stays in the database (version row and working states), only unreadable through the API. Removing it for data protection needs the destruction path (DMS-82) or a compaction of working states.
 - Files that became unreferenced earlier (an attachment removed from a draft, a replaced original) are not cleaned up by a discard; that stays the orphan clean-up of DMS-82.
-- A periodic review decided as "revision required" (ADR 0030) links the review task to the new draft; if that draft is discarded, the task stays `Revised` and no new review task is opened for the same review date. The owner has to start a new version or the next periodic check must handle it.
+- A periodic review decided as "revision required" (ADR 0030) links the review task to the new draft; if that draft is discarded, the task stays `Revised` and no new review task is opened for the same review date. The owner has to start a new version or the next periodic check must handle it. (Since DMS-145, ADR 0061: a new task opens for the same review date.)
 - Tenant administrators can discard by API only: the document page does not show drafts to them (they do not read content, ADR 0018).
 - The constraint `document_version_check4` of V9 (snapshot required outside open statuses) is replaced by a named constraint; a further status needs the same care.
 

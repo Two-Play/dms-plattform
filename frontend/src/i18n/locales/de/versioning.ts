@@ -31,7 +31,7 @@ export const newVersion: Translation<typeof en.newVersion> = {
   blocked: {
     OpenVersion: 'Eine neue Version ist bereits in Arbeit; bitte zuerst abschließen.',
     ScheduledVersion:
-      'Eine freigegebene Version wartet auf ihr Gültigkeitsdatum; die nächste Version erst danach starten.',
+      'Eine freigegebene Version wartet auf ihr Gültigkeitsdatum; die nächste Version erst danach starten. Ist ihre Veröffentlichung endgültig fehlgeschlagen, lässt sie sich vorher zurückziehen.',
   },
   blockedOther: 'Eine neue Version kann gerade nicht gestartet werden.',
 }

@@ -876,7 +876,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Stops an approved version before its valid-from date (DMS-143): it goes to Withdrawn, is never published, and the valid version stays valid. Requires Withdraw: the owner role or having approved this version. The reason is required (422), at most 4000 characters, and recorded in the audit trail. Approvers and the owner are notified, readers are not. 409 with the code `version_published` if the publication got there first, `version_due` from its valid-from date on, `version_withdrawn` if it was withdrawn already, `version_not_approved` if it was never approved. */
+    /** @description Stops an approved version before its valid-from date (DMS-143), or later if its publication failed for good (Failed, DMS-145): it goes to Withdrawn, is never published, the valid version stays valid and the document can get a new version. Requires Withdraw: the owner role or having approved this version. The reason is required (422), at most 4000 characters, and recorded in the audit trail. Approvers and the owner are notified, readers are not. 409 with the code `version_published` if the publication got there first, `version_due` from its valid-from date on unless the publication failed for good (also if a retry got there first), `version_withdrawn` if it was withdrawn already, `version_not_approved` if it was never approved. */
     post: operations['postApiV1DocumentsIdVersionsVersionidWithdraw']
     delete?: never
     options?: never
@@ -1456,7 +1456,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Requeues the publication job of an approved version whose publication failed (Failed: starts over with all attempts) or waits for its next attempt (Retrying: runs now). 409 publication_not_failed in any other state. Requires RetryPublication: the document's owner (without owner: its author), records managers and tenant administrators. Audited. */
+    /** @description Requeues the publication job of an approved version whose publication failed (Failed: starts over with all attempts) or waits for its next attempt (Retrying: runs now). 409 publication_not_failed in any other state, also if a withdrawal got there first. Requires RetryPublication: the document's owner (without owner: its author), records managers and tenant administrators. Audited. */
     post: operations['postApiV1DocumentsIdVersionsVersionidPublicationRetry']
     delete?: never
     options?: never
@@ -4838,6 +4838,8 @@ export interface components {
       /** Format: uuid */
       newVersionId?: string
       comment?: string
+      /** Format: uuid */
+      reopens?: string
       /** Format: int32 */
       reviewIntervalMonths?: number
     }
@@ -5651,6 +5653,7 @@ export interface components {
       /** Format: date */
       validFrom?: string
       validVersion?: string
+      publicationFailed: boolean
     }
     /** WithdrawalView */
     WithdrawalView: {

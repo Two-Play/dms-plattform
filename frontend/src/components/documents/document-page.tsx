@@ -257,6 +257,7 @@ export function DocumentPage({
               key={`publication-${shown.id}`}
               documentId={document.data.id}
               versionId={shown.id}
+              canWithdraw={document.data.withdrawable?.versionId === shown.id}
             />
           )}
           <WorkflowPanel

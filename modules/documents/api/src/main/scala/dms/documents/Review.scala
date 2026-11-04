@@ -63,7 +63,8 @@ final case class ReviewTask(
     decidedBy: Option[UserId] = None,
     nextDueOn: Option[LocalDate] = None,
     newVersionId: Option[UUID] = None,
-    comment: Option[String] = None
+    comment: Option[String] = None,
+    reopens: Option[UUID] = None
 ):
   def isOpen: Boolean = status == ReviewStatus.Open
 

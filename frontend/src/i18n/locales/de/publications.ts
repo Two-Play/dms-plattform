@@ -6,6 +6,10 @@ export const publications: Translation<typeof en.publications> = {
     'Die Veröffentlichung dieser Version ist fehlgeschlagen (Versuch {attempt} von {max}). Sie wird automatisch erneut versucht, nächster Versuch am {date}.',
   failed:
     'Diese Version konnte nicht veröffentlicht werden: alle {max} Versuche sind fehlgeschlagen. Sie bleibt freigegeben und wird erst gültig, wenn die Veröffentlichung erneut angestoßen wird und gelingt.',
+  withdrawHint:
+    'Hilft ein neuer Versuch nicht, können Sie diese Version zurückziehen und danach eine neue beginnen: über „Version zurückziehen“ oben.',
+  withdrawHintOthers:
+    'Hilft ein neuer Versuch nicht, können Inhaber der Eigentümerrolle oder die Freigebenden diese Version zurückziehen; danach lässt sich eine neue Version beginnen.',
   cause: 'Ursache:',
   technicalDetail: 'Technische Details',
   causes: {
@@ -25,7 +29,7 @@ export const publications: Translation<typeof en.publications> = {
   failures: {
     title: 'Fehlgeschlagene Veröffentlichungen',
     description:
-      'Freigegebene Versionen, deren Veröffentlichung fehlgeschlagen ist oder erneut versucht wird. Sie werden erst gültig, wenn sie gelingt.',
+      'Freigegebene Versionen, deren Veröffentlichung fehlgeschlagen ist oder erneut versucht wird. Sie werden erst gültig, wenn sie gelingt. Hilft ein neuer Versuch nicht, können Inhaber der Eigentümerrolle oder die Freigebenden eine Version auf ihrer Dokumentseite zurückziehen.',
     loading: 'Fehlgeschlagene Veröffentlichungen werden geladen',
     empty: 'Keine Veröffentlichung ist fehlgeschlagen.',
     caption: 'Versionen mit fehlgeschlagener Veröffentlichung',

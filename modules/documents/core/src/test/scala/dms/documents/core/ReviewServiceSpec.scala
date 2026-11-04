@@ -241,6 +241,24 @@ object ReviewServiceSpec extends ZIOSpecDefault:
       a <- approveOpen(f, doc)
     yield a
 
+  /** A document whose version 1.0 is valid and whose review task is decided as "revise": the document, the
+    * valid version, the decided task and the draft.
+    */
+  private def revisedTask(f: Fixture) =
+    for
+      created <- valid(f)
+      (doc, v1) = created
+      _       <- at("2026-11-10T09:00:00Z")
+      _       <- check(f.tenant)
+      task    <- openTasks(f.tenant).map(_.head)
+      revised <- review(f.tenant)(_.revise(task.id, ChangeKind.Major, Some("New regulation"), owner))
+    yield (doc, v1, revised._1, revised._2)
+
+  /** The draft of a revision, approved and valid from 2027-06-01. */
+  private def approveRevision(f: Fixture, doc: DocumentId) =
+    as(f.tenant)(_.updateDraft(doc, DraftChange(None, values(LocalDate.of(2027, 6, 1)), None), author)) *>
+      approveOpen(f, doc)
+
   private def reviews: ZIO[Env, Nothing, ReviewService] =
     ZIO.serviceWith[Env] { e =>
       val audit   = RecordingAuditTrail(e.audit)
@@ -418,6 +436,193 @@ object ReviewServiceSpec extends ZIOSpecDefault:
         linked._1.newVersionId == Some(open.id),
         linked._2.id == open.id,
         events.size == 1
+      )
+    },
+    test("a discarded revision gives the valid version an open review task again, with the same date") {
+      for
+        f       <- fixture()
+        revised <- revisedTask(f)
+        (doc, v1, decided, _) = revised
+        before    <- openTasks(f.tenant)
+        _         <- as(f.tenant)(_.discardDraft(doc, Some("Not needed after all"), owner))
+        open      <- openTasks(f.tenant)
+        checked   <- check(f.tenant)
+        again     <- openTasks(f.tenant)
+        all       <- review(f.tenant)(_.tasksOfDocument(doc))
+        deadlines <- review(f.tenant)(_.openForDeadlines(decided.dueOn))
+        locked    <- review(f.tenant)(_.lockForDeadline(open.head.id))
+        events    <- outbox(doc, ReviewService.Reopened)
+        audit     <- auditOf(doc).map(_.filter(_.action == ReviewService.Reopened))
+        done      <- review(f.tenant)(_.recertify(open.head.id, None, None, owner))
+      yield assertTrue(
+        before.isEmpty,
+        open.map(t => (t.versionId, t.dueOn, t.reopens)) == List((v1.id, decided.dueOn, Some(decided.id))),
+        checked == ReviewCheck(0, 0, 0),
+        again == open,
+        // the decision stays as it was recorded
+        all.size == 2,
+        all.find(_.id == decided.id).contains(decided),
+        // the deadline check of ADR 0057 sees it, without notices of the decided task
+        deadlines.map((t, sent) => (t.id, sent)) == List((open.head.id, Set.empty[String])),
+        locked.map(_._1.id).contains(open.head.id),
+        events.size == 1,
+        events.head.contains("\"revisionStatus\": \"Discarded\""),
+        audit.size == 1,
+        audit.head.actor.kind == ActorKind.Technical,
+        done.status == ReviewStatus.Recertified
+      )
+    },
+    test("a revision withdrawn before it took effect gives the valid version its task again") {
+      for
+        f       <- fixture()
+        revised <- revisedTask(f)
+        (doc, v1, decided, _) = revised
+        v2      <- approveRevision(f, doc)
+        waiting <- openTasks(f.tenant)
+        _       <- as(f.tenant)(_.withdrawApproved(v2.id, "Approved by mistake", Set(approver), owner))
+        open    <- openTasks(f.tenant)
+        _       <- check(f.tenant)
+        _       <- check(f.tenant)
+        all     <- review(f.tenant)(_.tasksOfDocument(doc))
+        events  <- outbox(doc, ReviewService.Reopened)
+        current <- as(f.tenant)(_.get(doc))
+      yield assertTrue(
+        waiting.isEmpty,
+        open.map(t => (t.versionId, t.dueOn, t.reopens)) == List((v1.id, decided.dueOn, Some(decided.id))),
+        all.size == 2,
+        all.find(_.id == decided.id).contains(decided),
+        events.size == 1,
+        events.head.contains("\"revisionStatus\": \"Withdrawn\""),
+        current.versions.map(_.status) == List(Published, Withdrawn)
+      )
+    },
+    test("a revision published as usual leaves the task decided: nothing opens again") {
+      for
+        f       <- fixture()
+        revised <- revisedTask(f)
+        (doc, _, decided, _) = revised
+        v2      <- approveRevision(f, doc)
+        _       <- at("2027-06-01T09:00:00Z")
+        _       <- as(f.tenant)(_.publishScheduled(v2.id))
+        checked <- check(f.tenant)
+        all     <- review(f.tenant)(_.tasksOfDocument(doc))
+        open    <- openTasks(f.tenant)
+        events  <- outbox(doc, ReviewService.Reopened)
+        current <- as(f.tenant)(_.get(doc))
+      yield assertTrue(
+        checked.reopened == 0,
+        all == List(decided),
+        open.isEmpty,
+        events.isEmpty,
+        current.versions.map(_.status) == List(Superseded, Published)
+      )
+    },
+    test("repeated events add no second task; a task opened again can be revised and opened again") {
+      for
+        f       <- fixture()
+        revised <- revisedTask(f)
+        (doc, _, decided, _) = revised
+        _        <- as(f.tenant)(_.discardDraft(doc, None, owner))
+        repeat   <- review(f.tenant)(_.reopen(decided.id))
+        parallel <- ZIO.foreachPar(List(1, 2, 3))(_ => review(f.tenant)(_.reopen(decided.id)))
+        second   <- openTasks(f.tenant).map(_.head)
+        // while the second revision is alive, there is nothing to open
+        next    <- review(f.tenant)(_.revise(second.id, ChangeKind.Major, Some("Second try"), owner))
+        early   <- review(f.tenant)(_.reopen(next._1.id))
+        _       <- as(f.tenant)(_.discardDraft(doc, None, owner))
+        third   <- openTasks(f.tenant)
+        all     <- review(f.tenant)(_.tasksOfDocument(doc))
+        checked <- check(f.tenant)
+        events  <- outbox(doc, ReviewService.Reopened)
+      yield assertTrue(
+        repeat.isEmpty,
+        parallel.forall(_.isEmpty),
+        early.isEmpty,
+        third.map(_.reopens) == List(Some(second.id)),
+        all.map(_.status).sortBy(_.ordinal) ==
+          List(ReviewStatus.Open, ReviewStatus.Revised, ReviewStatus.Revised),
+        all.map(_.dueOn).toSet == Set(decided.dueOn),
+        checked == ReviewCheck(0, 0, 0),
+        events.size == 2
+      )
+    },
+    test("the periodic check opens what was lost before, once") {
+      for
+        f       <- fixture()
+        revised <- revisedTask(f)
+        (_, v1, decided, draft) = revised
+        // nothing reopens on this path at once: it stands for a task lost before the change
+        _     <- as(f.tenant)(_.changeStatus(draft.id, Withdraw, owner))
+        none  <- openTasks(f.tenant)
+        first <- check(f.tenant)
+        again <- check(f.tenant)
+        open  <- openTasks(f.tenant)
+      yield assertTrue(
+        none.isEmpty,
+        first == ReviewCheck(0, 0, 0, reopened = 1),
+        again == ReviewCheck(0, 0, 0),
+        open.map(t => (t.versionId, t.dueOn, t.reopens)) == List((v1.id, decided.dueOn, Some(decided.id)))
+      )
+    },
+    test("a task whose version is not valid any more stays closed") {
+      for
+        f       <- fixture()
+        revised <- revisedTask(f)
+        (doc, v1, _, _) = revised
+        _       <- as(f.tenant)(_.changeStatus(v1.id, Withdraw, owner))
+        _       <- as(f.tenant)(_.discardDraft(doc, None, owner))
+        checked <- check(f.tenant)
+        open    <- openTasks(f.tenant)
+      yield assertTrue(checked.reopened == 0, open.isEmpty)
+    },
+    test("the database opens a decided task again only for a revision that never took effect, and once") {
+      def insert(f: Fixture, doc: DocumentId, version: UUID, dueOn: LocalDate, reopens: UUID) =
+        ZIO.serviceWithZIO[Env](
+          _.app
+            .transact(f.tenant)(
+              Db.sql(
+                sql"""insert into dms.document_review (id, tenant_id, document_id, version_id, due_on, reopens_id)
+                      values (${UUID.randomUUID()}, ${f.tenant.value}, ${doc.value}, $version, ${java.sql.Date
+                    .valueOf(dueOn)},
+                              $reopens)""".update.run()
+              )
+            )
+            .either
+        )
+      for
+        f       <- fixture()
+        revised <- revisedTask(f)
+        (doc, v1, decided, _) = revised
+        e             <- ZIO.service[Env]
+        whileAlive    <- insert(f, doc, v1.id, decided.dueOn, decided.id)
+        _             <- as(f.tenant)(_.discardDraft(doc, None, owner))
+        twice         <- insert(f, doc, v1.id, decided.dueOn, decided.id)
+        open          <- openTasks(f.tenant).map(_.head)
+        otherDate     <- insert(f, doc, v1.id, decided.dueOn.plusDays(1), decided.id)
+        openIsNoBasis <- insert(f, doc, v1.id, decided.dueOn, open.id)
+        relinked      <- e.app
+          .transact(f.tenant)(
+            Db.sql(
+              sql"update dms.document_review set reopens_id = null where id = ${open.id}".update.run()
+            )
+          )
+          .either
+        firstRow <- e.app
+          .transact(f.tenant)(
+            Db.sql(
+              sql"""insert into dms.document_review (id, tenant_id, document_id, version_id, due_on)
+                    values (${UUID.randomUUID()}, ${f.tenant.value}, ${doc.value}, ${v1.id},
+                            ${java.sql.Date.valueOf(decided.dueOn)})""".update.run()
+            )
+          )
+          .either
+      yield assertTrue(
+        whileAlive.isLeft,
+        twice.isLeft,
+        otherDate.isLeft,
+        openIsNoBasis.isLeft,
+        relinked.isLeft,
+        firstRow.isLeft
       )
     },
     test("withdrawal puts the version out of force and leaves the approved successor alone") {

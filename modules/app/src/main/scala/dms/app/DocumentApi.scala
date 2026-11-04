@@ -297,8 +297,8 @@ final case class DocumentView(
       */
     canDiscardDraft: Boolean = false,
     /** The approved version the caller may withdraw now (`POST
-      * /api/v1/documents/{id}/versions/{versionId}/withdraw`, DMS-143): it waits for its valid-from date and
-      * the caller holds the owner role or approved it.
+      * /api/v1/documents/{id}/versions/{versionId}/withdraw`, DMS-143): it waits for its valid-from date, or
+      * its publication failed for good (DMS-145), and the caller holds the owner role or approved it.
       */
     withdrawable: Option[WithdrawableVersionView] = None,
     /** The highest version number ever approved: new versions count on from it, also if that version was
@@ -308,14 +308,18 @@ final case class DocumentView(
 ) derives JsonCodec,
       Schema
 
-/** The approved version the caller may withdraw now (DMS-143, ADR 0059), for the dialog. */
+/** The approved version the caller may withdraw now (DMS-143, ADR 0059; DMS-145, ADR 0061), for the dialog.
+  */
 final case class WithdrawableVersionView(
     versionId: UUID,
     version: String,
     validFrom: Option[LocalDate],
     /** The version that stays valid; empty if the document has none: it then stays without a valid version.
       */
-    validVersion: Option[String]
+    validVersion: Option[String],
+    /** Whether every attempt to publish it failed: it can then be withdrawn after its valid-from date, too.
+      */
+    publicationFailed: Boolean
 ) derives JsonCodec,
       Schema
 
@@ -744,11 +748,13 @@ object DocumentApi:
       .in(jsonBody[WithdrawVersion])
       .out(jsonBody[DocumentVersionView])
       .description(
-        "Stops an approved version before its valid-from date (DMS-143): it goes to Withdrawn, is never " +
-          "published, and the valid version stays valid. Requires Withdraw: the owner role or having approved " +
+        "Stops an approved version before its valid-from date (DMS-143), or later if its publication failed " +
+          "for good (Failed, DMS-145): it goes to Withdrawn, is never published, the valid version stays valid " +
+          "and the document can get a new version. Requires Withdraw: the owner role or having approved " +
           "this version. The reason is required (422), at most 4000 characters, and recorded in the audit " +
           "trail. Approvers and the owner are notified, readers are not. 409 with the code `version_published` " +
-          "if the publication got there first, `version_due` from its valid-from date on, `version_withdrawn` " +
+          "if the publication got there first, `version_due` from its valid-from date on unless the publication " +
+          "failed for good (also if a retry got there first), `version_withdrawn` " +
           "if it was withdrawn already, `version_not_approved` if it was never approved."
       )
       .tag("Documents")
@@ -1091,10 +1097,11 @@ object DocumentApi:
       case None    => ZIO.none
       case Some(v) =>
         for
-          cases <- ctx.workflow.cases(details.document.id)
-          now   <- Clock.instant
-          may   <- ctx.allowed(Action.Withdraw, withdrawalResource(p, details, v, approversOf(cases, v.id)))
-        yield Option.when(may && !Publication.isDue(v.validFrom, details.zone, now))(
+          cases  <- ctx.workflow.cases(details.document.id)
+          now    <- Clock.instant
+          may    <- ctx.allowed(Action.Withdraw, withdrawalResource(p, details, v, approversOf(cases, v.id)))
+          failed <- ctx.service.publicationFailed(v.id).mapError(WorkflowDocuments.toWorkflowError)
+        yield Option.when(may && (failed || !Publication.isDue(v.validFrom, details.zone, now)))(
           WithdrawableVersionView(
             v.id,
             v.label,
@@ -1102,7 +1109,8 @@ object DocumentApi:
             details.versions
               .filter(o => Versioning.isValid(o.status) && o.scope == v.scope)
               .lastOption
-              .map(_.label)
+              .map(_.label),
+            failed
           )
         )
 

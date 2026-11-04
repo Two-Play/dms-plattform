@@ -1,5 +1,6 @@
 package dms.documents.core
 
+import com.augustnagro.magnum.sql
 import dms.db.queue.{ClaimedJob, JobQueue}
 import dms.db.{Db, DbError, Jsonb}
 import dms.documents.LifecycleError
@@ -29,7 +30,8 @@ final case class PublicationScheduleConfig(checkInterval: Duration = 1.minute)
   *
   * A failed job is retried with backoff. Its error starts with a failure code in brackets (like renditions,
   * ADR 0055), so its status and notices can explain it. Once it is dead, [[tick]] does not bring it back (its
-  * key exists): the version stays approved until someone retries it (DMS-142, ADR 0058).
+  * key exists): the version stays approved until someone retries it (DMS-142, ADR 0058) or withdraws it
+  * ([[DocumentService.withdrawApproved]], DMS-145, ADR 0061).
   */
 final class PublicationJobs(db: Db, service: DocumentService, config: PublicationScheduleConfig):
   import PublicationJobs.*
@@ -93,6 +95,18 @@ object PublicationJobs:
     */
   def cancel(version: UUID, reason: String): IO[DbError, Int] =
     JobQueue.cancel(PublishKind, s"$PublishKind:$version:", reason)
+
+  /** Whether the publication of a version failed for good: its newest job is dead. Older jobs belong to an
+    * earlier due moment (a time zone change, ADR 0026). Only a decision that holds the row lock of the
+    * version can rely on the answer: a job comes back from the dead only by a retry, which takes the same
+    * lock.
+    */
+  def isDead(version: UUID): IO[DbError, Boolean] =
+    Db.sql(
+      sql"""select status = 'dead' from dms.job
+            where kind = $PublishKind and payload ->> 'versionId' = ${version.toString}
+            order by id desc limit 1""".query[Boolean].run().headOption.getOrElse(false)
+    )
 
   private def versionOf(payload: Jsonb): Either[String, UUID] =
     payload.value

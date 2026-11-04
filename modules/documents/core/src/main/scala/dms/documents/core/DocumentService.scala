@@ -39,7 +39,8 @@ enum WithdrawalRefusal(val code: String):
   /** The publication got there first: the version is valid (or was valid) now. */
   case AlreadyPublished extends WithdrawalRefusal("version_published")
 
-  /** The valid-from date has come: the publication job publishes the version. */
+  /** The valid-from date has come and the publication job has not failed for good: it publishes the version.
+    */
   case Due extends WithdrawalRefusal("version_due")
 
   /** Another withdrawal got there first. */
@@ -983,17 +984,34 @@ final class DocumentService(
             .asSome
     yield published
 
-  /** Stops an approved version before its valid-from date (DMS-143, ADR 0059): it goes to `Withdrawn` and
-    * never takes effect, the valid version of its scope stays as it is, and its queued publication jobs are
-    * cancelled. The reason is required. Frozen data stays: content, snapshot, approval, the rendition and its
-    * retention (the database queues the Object Lock job of a version going out of force). No acknowledgement
-    * exists yet, because the audience is fixed at publication. Recorded in the audit trail
+  /** Whether the publication of a version failed for good, for showing the way out. The withdrawal and the
+    * retry decide again under the lock of the version.
+    */
+  def publicationFailed(versionId: UUID): IO[DocumentError, Boolean] =
+    PublicationJobs.isDead(versionId).mapError(DocumentError.Database(_))
+
+  /** Locks a version for a decision on its publication job and returns it as it is now: a retry takes this
+    * lock first, as [[withdrawApproved]] does, so that exactly one of the two wins (DMS-145, ADR 0061).
+    */
+  def lockForPublicationRetry(versionId: UUID): IO[DocumentError, DocumentVersion] =
+    sql(DocumentStore.lockVersion(versionId, templates)).someOrFail(versionNotFound(versionId))
+
+  /** Stops an approved version before its valid-from date (DMS-143, ADR 0059), or later if its publication
+    * failed for good, so that a version that can never become valid does not block the document (DMS-145, ADR
+    * 0061): it goes to `Withdrawn` and never takes effect, the valid version of its scope stays as it is, and
+    * its queued publication jobs are cancelled. The reason is required; the values of the version play no
+    * part, they may be what the publication failed on. Frozen data stays: content, snapshot, approval, the
+    * rendition and its retention (the database queues the Object Lock job of a version going out of force).
+    * No acknowledgement exists yet, because the audience is fixed at publication. Recorded in the audit trail
     * (`document.withdrawn-before-valid`) and published to the outbox (`document.status-changed`, and
     * `document.approved-version-withdrawn` for the notification) in the same transaction.
     *
     * A race with [[publishScheduled]] is decided by the row lock of the version: the clock is read after it,
     * so exactly one of the two changes the version and the other finds its result. A withdrawal that loses
-    * fails with [[DocumentError.WithdrawalRefused]]; a publication job that loses does nothing.
+    * fails with [[DocumentError.WithdrawalRefused]]; a publication job that loses does nothing. A race with a
+    * retry of the publication is decided the same way: the state of the job is read after the lock, too.
+    *
+    * A review task decided as revised with this version opens again ([[ReviewService.reopenFor]]).
     *
     * @param approvers
     *   who approved the version, known to the workflow; they are notified with the document's owner, without
@@ -1011,10 +1029,13 @@ final class DocumentService(
       _ <- ZIO.when(why.length > MaxReasonLength)(
         ZIO.fail(DocumentError.Invalid(List(s"the reason must have at most $MaxReasonLength characters")))
       )
-      current  <- sql(DocumentStore.lockVersion(versionId, templates)).someOrFail(versionNotFound(versionId))
-      zone     <- sql(DocumentStore.tenantZone)
-      now      <- Clock.instant
-      _        <- ZIO.foreachDiscard(withdrawalRefusal(current, zone, now))(ZIO.fail(_))
+      current <- sql(DocumentStore.lockVersion(versionId, templates)).someOrFail(versionNotFound(versionId))
+      zone    <- sql(DocumentStore.tenantZone)
+      now     <- Clock.instant
+      failed  <- ZIO
+        .when(current.status == DocumentStatus.Approved)(PublicationJobs.isDead(versionId))
+        .mapBoth(DocumentError.Database(_), _.contains(true))
+      _        <- ZIO.foreachDiscard(withdrawalRefusal(current, failed, zone, now))(ZIO.fail(_))
       document <- sql(DocumentStore.document(current.documentId))
         .someOrFail(documentNotFound(current.documentId))
       updated <- transition(
@@ -1022,7 +1043,8 @@ final class DocumentService(
         current,
         LifecycleEvent.Withdraw,
         actor,
-        withdrawalReason = Some(why)
+        withdrawalReason = Some(why),
+        publicationFailed = failed
       )
       _ <- PublicationJobs
         .cancel(versionId, s"version ${current.label} was withdrawn by ${actor.value}")
@@ -1043,12 +1065,14 @@ final class DocumentService(
                   "withdrawnBy" -> Json.Str(actor.value),
                   "reason"      -> Json.Str(why),
                   "recipients"  -> Json.Arr(recipients.map(u => Json.Str(u.value))*)
-                ) ++ current.validFrom.map(d => "validFrom" -> Json.Str(d.toString)))*
+                ) ++ current.validFrom.map(d => "validFrom" -> Json.Str(d.toString)) ++
+                  Option.when(failed)("publicationFailed" -> Json.Bool(true)))*
               )
               .toJson
           )
         )
         .mapError(DocumentError.Database(_))
+      _ <- ReviewService.reopenFor(audit, versionId)
     yield updated
 
   /** Applies a lifecycle event to a version (review, approval, publication, ...). Approval needs a person
@@ -1312,6 +1336,7 @@ final class DocumentService(
         note
       )
       _ <- publish("document.discarded", document, discarded, Some(current.status))
+      _ <- ReviewService.reopenFor(audit, current.id)
     yield DiscardedDraft(
       discarded,
       whole,
@@ -1751,7 +1776,8 @@ final class DocumentService(
       event: LifecycleEvent,
       actor: UserId,
       successor: Option[UUID] = None,
-      withdrawalReason: Option[String] = None
+      withdrawalReason: Option[String] = None,
+      publicationFailed: Boolean = false
   ): IO[DocumentError, DocumentVersion] =
     for
       current <-
@@ -1775,6 +1801,10 @@ final class DocumentService(
                 val all    = issues ++ computedInputs.filterNot(i => issues.exists(_.field == i.field))
                 Either.cond(all.isEmpty, target, TransitionBlocked.Incomplete(target, all))
               }
+          // Stopping an approved version never depends on its values: they are frozen, and a class can name
+          // `Withdrawn` among the statuses a field is required in. It would be the way out that fails.
+          case LifecycleEvent.Withdraw if withdrawalReason.isDefined =>
+            Lifecycle.transition(current.status, event).left.map(TransitionBlocked.NotAllowed(_))
           case other => Validation.checkTransition(profile, values, current.status, other))
         .mapError {
           case TransitionBlocked.NotAllowed(e)             => DocumentError.Lifecycle(e)
@@ -1842,7 +1872,8 @@ final class DocumentService(
         ) ++ validFrom.map(d => "validFrom" -> Json.Str(d.toString)) ++
           supersededBy.map(s => "supersededBy" -> Json.Str(s.toString)) ++
           reviewDueOn.map(d => "reviewDueOn" -> Json.Str(d.toString)) ++
-          withdrawalReason.map(r => "reason" -> Json.Str(r)))*
+          withdrawalReason.map(r => "reason" -> Json.Str(r)) ++
+          Option.when(publicationFailed)("publicationFailed" -> Json.Bool(true)))*
       )
       _ <- record(
         actor,
@@ -2006,12 +2037,19 @@ object DocumentService:
     */
   val ApprovedVersionWithdrawn = "document.approved-version-withdrawn"
 
-  /** Why `v` cannot be withdrawn at `now`, if so: it must be approved and before its valid-from date. */
-  private def withdrawalRefusal(v: DocumentVersion, zone: ZoneId, now: Instant): Option[DocumentError] =
+  /** Why `v` cannot be withdrawn at `now`, if so: it must be approved, and before its valid-from date unless
+    * its publication failed for good.
+    */
+  private def withdrawalRefusal(
+      v: DocumentVersion,
+      publicationFailed: Boolean,
+      zone: ZoneId,
+      now: Instant
+  ): Option[DocumentError] =
     def refused(refusal: WithdrawalRefusal, message: String) =
       Some(DocumentError.WithdrawalRefused(refusal, s"version ${v.label} $message"))
     v.status match
-      case DocumentStatus.Approved if Publication.isDue(v.validFrom, zone, now) =>
+      case DocumentStatus.Approved if !publicationFailed && Publication.isDue(v.validFrom, zone, now) =>
         refused(
           WithdrawalRefusal.Due,
           s"became due on ${v.validFrom.fold("its approval")(_.toString)} and is being published; it can " +

@@ -21,9 +21,16 @@ import java.util.UUID
   *   versions whose review task is due
   * @param reviewDue
   *   published versions whose review date has come
+  * @param toReopen
+  *   tasks decided as revised whose revision never took effect and that nothing reopened yet
   */
-final case class ReviewWork(obsolete: List[UUID], toOpen: List[UUID], reviewDue: List[UUID]):
-  def isEmpty: Boolean = obsolete.isEmpty && toOpen.isEmpty && reviewDue.isEmpty
+final case class ReviewWork(
+    obsolete: List[UUID],
+    toOpen: List[UUID],
+    reviewDue: List[UUID],
+    toReopen: List[UUID] = Nil
+):
+  def isEmpty: Boolean = obsolete.isEmpty && toOpen.isEmpty && reviewDue.isEmpty && toReopen.isEmpty
 
 /** Periodic review and recertification of valid versions (business concept 6.2, US-07.1, ADR 0030).
   *
@@ -33,6 +40,11 @@ final case class ReviewWork(obsolete: List[UUID], toOpen: List[UUID], reviewDue:
   * The owner decides once: [[recertify]] (new review date, same version), [[revise]] (new draft, the version
   * stays valid until the draft is published) or [[withdraw]] (the version goes out of force; other versions,
   * e.g. an approved one waiting for its valid-from date, are not affected).
+  *
+  * A revision that never takes effect (withdrawn before its valid-from date, discarded as a draft) leaves the
+  * decision of its task as it is, and a new open task of the same version and review date takes over
+  * ([[ReviewService.reopenFor]], DMS-145, ADR 0061). The withdrawal and the discarding do that in their own
+  * transaction; the periodic check picks up what they could not reach ([[reopen]]).
   *
   * Every method must run inside `Db.transact(tenant)`; every change is recorded in the audit trail and
   * published to the outbox in the same transaction. Authorization is the caller's job: decisions are the
@@ -55,7 +67,8 @@ final class ReviewService(audit: AuditTrail, documents: DocumentService, classes
         ReviewWork(
           ReviewStore.obsoleteTasks(),
           ReviewStore.tasksToOpen(day).map(_.versionId),
-          ReviewStore.reviewDateReached(day)
+          ReviewStore.reviewDateReached(day),
+          ReviewStore.lostToRevision(None).map(_.id)
         )
       )
     )
@@ -84,6 +97,7 @@ final class ReviewService(audit: AuditTrail, documents: DocumentService, classes
             inserted =>
               ZIO.when(inserted)(
                 recorded(
+                  audit,
                   ReviewActor,
                   "document.review-task-created",
                   task,
@@ -93,6 +107,12 @@ final class ReviewService(audit: AuditTrail, documents: DocumentService, classes
           )
         case _ => ZIO.none
     yield created
+
+  /** Opens a task decided as revised again if its revision never took effect, for what happened before the
+    * withdrawal and the discarding did this themselves. Idempotent.
+    */
+  def reopen(taskId: UUID): IO[DocumentError, Option[ReviewTask]] =
+    sql(ReviewStore.task(taskId)).someOrFail(taskNotFound(taskId)).flatMap(reopenTask(audit, _))
 
   /** Moves a published version whose review date has come to ReviewDue (it stays valid). Idempotent. */
   def markReviewDue(versionId: UUID): IO[DocumentError, Option[DocumentVersion]] =
@@ -155,7 +175,7 @@ final class ReviewService(audit: AuditTrail, documents: DocumentService, classes
       details: Json.Obj
   ): IO[DocumentError, Boolean] =
     sql(ReviewStore.insertDeadlineNotice(task.id, kind))
-      .tap(inserted => ZIO.when(inserted)(recorded(ReviewActor, action, task, details)))
+      .tap(inserted => ZIO.when(inserted)(recorded(audit, ReviewActor, action, task, details)))
 
   def task(id: UUID): IO[DocumentError, ReviewTask] =
     sql(ReviewStore.task(id)).someOrFail(taskNotFound(id))
@@ -286,6 +306,7 @@ final class ReviewService(audit: AuditTrail, documents: DocumentService, classes
         DocumentError.Conflict(s"review task ${task.id} was decided concurrently")
       )
       _ <- recorded(
+        audit,
         actor,
         decisionAction(task.status),
         task,
@@ -299,8 +320,80 @@ final class ReviewService(audit: AuditTrail, documents: DocumentService, classes
       )
     yield task
 
+object ReviewService:
+  val layer: URLayer[AuditTrail & DocumentService & DocumentClassService, ReviewService] =
+    ZLayer.fromFunction(ReviewService(_, _, _))
+
+  /** The platform as actor of the periodic review check; recorded as technical actor. */
+  val ReviewActor: UserId = UserId("system:review")
+
+  /** Largest number of tasks listed at once. */
+  val MaxTasks: Int = 200
+
+  /** Longest accepted comment or reason. */
+  val MaxCommentLength: Int = 4000
+
+  /** Audit action and outbox event of a task opened again (DMS-145, ADR 0061). */
+  val Reopened: String = "document.review-task-reopened"
+
+  /** Opens the tasks decided as revised with `revision` again, in the transaction that ended it: it was
+    * withdrawn before it took effect or discarded as a draft, so their versions still need a decision for the
+    * same review date. There can be several, one per valid version: a revision can be linked to the task of
+    * each validity scope. Tasks whose version is not valid any more or has another review date stay closed.
+    */
+  private[core] def reopenFor(audit: AuditTrail, revision: UUID): IO[DocumentError, List[ReviewTask]] =
+    sql(ReviewStore.lostToRevision(Some(revision)))
+      .flatMap(ZIO.foreach(_)(reopenTask(audit, _)))
+      .map(_.flatten)
+
+  /** Opens `decided` again with a new row: the decision stays as it was recorded. The version row is locked
+    * first, like a decision or a publication does it, and everything is read after that. The unique index on
+    * the decided task keeps a repeated call from adding a second task.
+    */
+  private def reopenTask(audit: AuditTrail, decided: ReviewTask): IO[DocumentError, Option[ReviewTask]] =
+    for
+      _    <- sql(ReviewStore.lockVersion(decided.versionId))
+      lost <- sql(ReviewStore.lostToRevision(decided.newVersionId).exists(_.id == decided.id))
+      now  <- Clock.instant
+      task = decided.copy(
+        id = UUID.randomUUID(),
+        createdAt = now,
+        status = ReviewStatus.Open,
+        decidedAt = None,
+        decidedBy = None,
+        newVersionId = None,
+        comment = None,
+        reopens = Some(decided.id)
+      )
+      inserted <- if lost then sql(ReviewStore.insertReopened(task.id, decided, now)) else ZIO.succeed(false)
+      reopened <- ZIO.when(inserted)(
+        for
+          revision <- sql(decided.newVersionId.flatMap(ReviewStore.versionLabel))
+          status   <- sql(decided.newVersionId.flatMap(ReviewStore.versionStatus))
+          _        <- recorded(
+            audit,
+            ReviewActor,
+            Reopened,
+            task,
+            Json.Obj(
+              "reopens"        -> Json.Str(decided.id.toString),
+              "dueOn"          -> Json.Str(task.dueOn.toString),
+              "revision"       -> revision.fold(Json.Null)(Json.Str(_)),
+              "revisionStatus" -> status.fold(Json.Null)(s => Json.Str(s.toString))
+            )
+          )
+        yield task
+      )
+    yield reopened
+
   /** Records a review event in the audit trail and the outbox (event type = audit action). */
-  private def recorded(actor: UserId, action: String, task: ReviewTask, details: Json.Obj) =
+  private def recorded(
+      audit: AuditTrail,
+      actor: UserId,
+      action: String,
+      task: ReviewTask,
+      details: Json.Obj
+  ) =
     val platform = DocumentService.isPlatform(actor)
     for
       label <- sql(ReviewStore.versionLabel(task.versionId))
@@ -326,19 +419,6 @@ final class ReviewService(audit: AuditTrail, documents: DocumentService, classes
         .publish("document", task.documentId.value, action, Jsonb(payload.toJson))
         .mapError(DocumentError.Database(_))
     yield ()
-
-object ReviewService:
-  val layer: URLayer[AuditTrail & DocumentService & DocumentClassService, ReviewService] =
-    ZLayer.fromFunction(ReviewService(_, _, _))
-
-  /** The platform as actor of the periodic review check; recorded as technical actor. */
-  val ReviewActor: UserId = UserId("system:review")
-
-  /** Largest number of tasks listed at once. */
-  val MaxTasks: Int = 200
-
-  /** Longest accepted comment or reason. */
-  val MaxCommentLength: Int = 4000
 
   private def sql[A](f: DbTx ?=> A): IO[DocumentError, A] = Db.sql(f).mapError(DocumentError.Database(_))
 
