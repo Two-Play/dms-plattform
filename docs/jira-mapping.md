@@ -182,3 +182,8 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | – | DMS-137 | Task | Backlog (MVP) | – | DMS-60: background jobs at full volume, rendering queue metric |
 | – | DMS-138 | Task | Backlog (MVP) | – | DMS-60: approver's inbox batched, index migrations on filled databases |
 | – | DMS-139 | Task | Backlog (MVP) | – | DMS-60: build the production environment and rehearse operations |
+| – | DMS-140 | Bug | Sprint 13 | – | Template editor: keys typed right after Enter landed in the old paragraph |
+| – | DMS-142 | Task | Sprint 14 | – | DMS-92, US-06.1: notices of renditions and publications that failed for good, publication retry |
+| – | DMS-143 | Task | Sprint 14 | – | DMS-92: withdraw an approved version before its valid-from date |
+| – | DMS-144 | Task | Sprint 14 | – | DMS-108: purpose and reason in the request body |
+| – | DMS-145 | Task | Backlog (MVP) | – | DMS-143: follow-ups of withdrawn versions |

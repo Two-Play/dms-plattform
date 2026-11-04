@@ -6,11 +6,11 @@ As of 2026-11-04 · Jira DMS-60 (T-00.13) · Code state: `main` at 46347af plus 
 
 ## Result
 
-- **Scope:** 44 planned MVP items (`docs/backlog.md`, DMS-17 to DMS-60). 40 are done, 3 partly done, and T-00.13 is completed by this branch once it is merged.
+- **Scope:** 44 planned MVP items (`docs/backlog.md`, DMS-17 to DMS-60). 40 are done, 3 partly done, and T-00.13 waits for the sign-off.
 - **Jira:** every planned MVP story and task except DMS-60 is Done. 14 follow-up issues are still open. None of them can be closed as written; see [Open follow-ups](#open-follow-ups).
 - **Load test:** carried out at 1:100 of the volumes of section 14.2, with the result in [Load test](#load-test). It found a total outage under load, which is fixed.
 - **High-priority defects:** Jira has no open bug. The defects the load test found are fixed on this branch.
-- **Release:** four small features block the first production stage, and a set of operational tasks must be done before going live; see [What blocks an MVP release](#what-blocks-an-mvp-release).
+- **Release:** the four features that blocked the first production stage are built (DMS-141 to DMS-144), and a set of operational tasks must be done before going live; see [What blocks an MVP release](#what-blocks-an-mvp-release).
 
 ## How the status was decided
 
@@ -77,7 +77,7 @@ PR numbers refer to GitHub pull requests; early items without a number were comm
 | US-04.1 | DMS-41 | Approval bound to a version | done | #28, `WorkflowApiSpec` | |
 | US-04.2 | DMS-42 | Four-eyes principle | **partly** | #28, `WorkflowApiSpec` | Enforced, also with a notice to the administrator when nobody is eligible. Configurable per class for review steps only: the final approval always keeps four eyes, which is stricter than the criterion (DMS-88) |
 | US-06.1 | DMS-44 | PDF/A rendition | done | #33, #81, DMS-142, ADR 0025, 0055, 0058, `PdfRenditionSpec`, `RenditionApiSpec` | The status stays "In approval" on failure; a dead job notifies owner and records managers in the app and by email, with a link to the retry |
-| US-06.3 | DMS-45 | Scheduled publication | done | #32, ADR 0026, `VersionPublicationSpec` | Failure notice with retry: DMS-142, ADR 0058. Withdrawal: DMS-92 |
+| US-06.3 | DMS-45 | Scheduled publication | done | #32, ADR 0026, `VersionPublicationSpec` | Failure notice with retry: DMS-142, ADR 0058. Withdrawal: DMS-143, ADR 0059 |
 | US-05.2 | DMS-46 | Editorial correction | done | #32, `PublicationApiSpec` | |
 | US-06.2 | DMS-47 | Acknowledgement | done | #41, ADR 0027, `AcknowledgementApiSpec` | |
 | S-10.a | DMS-48 | Central task inbox | done | #38, `task-inbox-page.test.tsx` | |
@@ -109,10 +109,10 @@ The 14 follow-ups still open in Jira, each checked criterion by criterion agains
 | DMS-88 Workflow extensions | My tasks, votes, workflow status in the UI (#38); deputyships instead of per-task delegation (DMS-49, 99, 105) | Review modes, metadata conditions, parent owner, per-task delegation, four-eyes switch for the approval, workflow configuration UI | Defer; configure the workflow of the class through the API |
 | DMS-89 Partner master | | Everything; the profile warns about `demo` | Defer to stage 2 |
 | DMS-91 Document page | Display names (#56), version history, rendered versions, votes on the page (#38, #57), no workflow query per document (this branch) | Paged list with filters (search and library cover finding documents), partner id, reload button on 409 | Defer; close the list point by decision |
-| DMS-92 Publication | Notice on a dead publication job, with a retry (DMS-142) | Withdrawing an approved version, time zone endpoint, editorial settings, overlapping scopes | **Withdrawal blocks**, the rest defer |
+| DMS-92 Publication | Notice on a dead publication job, with a retry (DMS-142); withdrawing an approved version (DMS-143) | Time zone endpoint, editorial settings, overlapping scopes | Defer |
 | DMS-102 Search | Notifications as outbox subscriber (#79); Word text (#63); basic auth, https and replicas are configurable, the profile now requires them | Clause text, PDF and OCR text, a later subscriber misses earlier events, owner change and version time | Defer, except PDF text if policies are uploaded as PDFs |
 | DMS-104 Review | Notification and escalation (DMS-141, ADR 0057) | Inheritance, recalculation, backfill | Defer |
-| DMS-108 Report and cockpit | Owner UI for the name list (#71), display names in the UI | Purpose in the request body, chain cache, report list and retention, cockpit export and actions, names in the PDF | **Purpose blocks**, the rest defer |
+| DMS-108 Report and cockpit | Owner UI for the name list (#71), display names in the UI, purpose in the request body (DMS-144) | Chain cache, report list and retention, cockpit export and actions, names in the PDF | Defer |
 | DMS-118 On-demand PDFs | | Limits and a plain variant | Defer: `draft.pdf` stayed fast in the load test |
 | DMS-124 Office fields | | Everything | Defer |
 | DMS-125 People picker | Service user described in ADR 0037 and `docs/operations/production.md` | Fuzzy search, paging, hiding chosen people | Defer |
@@ -130,8 +130,8 @@ The first production stage covers policies and guidelines; contracts follow in s
 |---|---|---|
 | 1 | DMS-104 | Solved by DMS-141 (ADR 0057). Was: nobody is notified of a review task or its overdue date. Periodic review is the core compliance promise for policies, and an owner who is told nothing misses it silently |
 | 2 | DMS-92, US-06.1 | Solved by DMS-142 (ADR 0058): a rendition or publication that failed for good now notifies owner and records managers |
-| 3 | DMS-92 | An approved version with a future valid-from date cannot be stopped: it will be published even if it was approved by mistake |
-| 4 | DMS-108 | The stated purpose for viewing named people travels as a query parameter and so ends up in access logs |
+| 3 | DMS-92 | Solved by DMS-143 (ADR 0059): an approved version can be withdrawn with a reason before its valid-from date. Follow-ups: DMS-145 |
+| 4 | DMS-108 | Solved by DMS-144 (ADR 0060): purpose and reason travel in the request body |
 
 ### Before going live (operations)
 
