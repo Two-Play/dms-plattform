@@ -127,6 +127,7 @@ object SearchApiSpec extends ZIOSpecDefault:
             _   <- Groups.Postgres.addMember("board", reviewer, admin)
             _   <- Groups.Postgres.addMember("board", approver, admin)
             cls <- classes.createClass("policy", None, ClassDraft("Policy", None, Nil), admin)
+            _   <- RetentionFixtures.assign(classes, cls.classId, "policy-10y")
             draft = TemplateDraft("Code of conduct", None, cls.classId.value, 1, content)
             t <- templates.create(draft, designer)
             _ <- templates.changeStatus(t.templateId, 1, TemplateStatus.Testing, designer)

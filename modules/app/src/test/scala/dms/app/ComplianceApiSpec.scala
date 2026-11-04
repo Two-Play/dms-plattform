@@ -190,6 +190,7 @@ object ComplianceApiSpec extends ZIOSpecDefault:
               ClassDraft("Policy", None, Nil, review = Some(ReviewPolicy(Some(12), 60))),
               admin
             )
+            _ <- RetentionFixtures.assign(classes, cls.classId, "policy-10y")
             t <- templates
               .create(TemplateDraft("Policy", None, cls.classId.value, 1, content), UserId("designer"))
             _ <- templates.changeStatus(t.templateId, 1, TemplateStatus.Testing, UserId("designer"))

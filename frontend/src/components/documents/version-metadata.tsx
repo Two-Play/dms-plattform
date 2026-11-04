@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { t, tOptional } from '@/i18n'
 import { formatDate, formatPlainDate } from '@/i18n/format'
 import { displayValue } from './draft-values'
+import { RetentionRow } from './retention-row'
 import { StatusBadge } from './status-badge'
 
 /**
@@ -27,6 +28,7 @@ const PANEL_KEYS = new Set([
   'validFrom',
   'validUntil',
   'confidentiality',
+  'retentionRule',
   'template',
   'templateVersion',
   'renditionChecksum',
@@ -59,8 +61,9 @@ function NotSet() {
 
 /**
  * The metadata of a version (DMS-112): status, version and revision index, document number, author,
- * owner, issuing body (the organizational unit), class, validity, confidentiality, approval (who,
- * when, on behalf of whom) and template; then the further field values of the template.
+ * owner, issuing body (the organizational unit), class, validity, confidentiality, retention rule
+ * (DMS-133), approval (who, when, on behalf of whom) and template; then the further field values of
+ * the template.
  */
 export function VersionMetadata({
   document,
@@ -135,6 +138,7 @@ export function VersionMetadata({
           <Row label={t('docs.meta.confidentiality')}>
             {levelCode ? (tOptional(`docs.meta.levels.${levelCode}`) ?? levelCode) : <NotSet />}
           </Row>
+          <RetentionRow documentId={document.id} version={version} />
           <Row label={t('docs.meta.approval')}>
             {approvedBy && approvedAt ? (
               <span data-testid="approval">

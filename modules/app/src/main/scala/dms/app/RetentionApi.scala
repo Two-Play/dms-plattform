@@ -4,10 +4,18 @@ import dms.archive.*
 import dms.archive.core.{CleanupReport, DestructionService, ObjectCleanup}
 import dms.authz.{AccessDenied, Action, Authorizer, ConfigurationArea, Policy, Resource, Subject}
 import dms.db.{Db, DbError}
-import dms.documents.DocumentStatus
-import dms.documents.core.{DocumentDetails, DocumentError, DocumentService}
+import dms.documents.{ClassRetention, DocumentStatus, DocumentVersion, FieldEntry, ValueOrigin, Versioning}
+import dms.documents.core.{
+  DocumentClassService,
+  DocumentDetails,
+  DocumentError,
+  DocumentService,
+  MetadataError
+}
+import dms.documents.metadata.MetadataValue
 import dms.identity.{Authenticator, Principal}
 import dms.kernel.DocumentId
+import dms.workflow.core.ApprovalWorkflow
 import sttp.model.StatusCode
 import sttp.tapir.Schema
 import sttp.tapir.json.zio.jsonBody
@@ -41,6 +49,69 @@ final case class SaveRetentionRule(
     trigger: Option[String],
     /** Default true. */
     fromYearEnd: Option[Boolean]
+) derives JsonCodec,
+      Schema
+
+/** A retention rule as shown with a class or a document (DMS-133). */
+final case class RetentionRuleSummaryView(
+    key: String,
+    /** Absent if no rule has this key (a value entered before DMS-133). */
+    name: Option[String],
+    periodMonths: Option[Int],
+    /** EndOfValidity, Approval or Creation. */
+    trigger: Option[String],
+    fromYearEnd: Option[Boolean]
+) derives JsonCodec,
+      Schema
+
+/** The retention rule of a document class (DMS-133): its own and the one its documents get. */
+final case class ClassRetentionView(
+    classId: UUID,
+    classKey: String,
+    label: String,
+    parentId: Option[UUID],
+    /** The rule the class itself assigns; absent: inherited from an ancestor or none. */
+    ruleKey: Option[String],
+    /** The rule documents of the class get: its own or the nearest ancestor's. */
+    effectiveRule: Option[String],
+    /** The ancestor class (key) the effective rule comes from, if not the class itself. */
+    inheritedFrom: Option[String],
+    updatedBy: Option[String],
+    updatedAt: Option[Instant]
+) derives JsonCodec,
+      Schema
+
+final case class SaveClassRetention(
+    /** Key of a retention rule; absent or empty: the class inherits again. */
+    rule: Option[String]
+) derives JsonCodec,
+      Schema
+
+/** The retention rule of a document version (DMS-133). */
+final case class DocumentRetentionView(
+    versionId: UUID,
+    /** The rule of the version (core field retentionRule); absent if none. */
+    rule: Option[RetentionRuleSummaryView],
+    /** Class (from the document class), RecordsManagement (set for this document), Entered (before DMS-133)
+      * or None.
+      */
+    source: String,
+    /** The rule of the document class now (own or inherited); absent: the class has none. */
+    classRule: Option[RetentionRuleSummaryView],
+    /** The rule records management set for the document instead of the class's rule, for its open draft and
+      * later versions; absent: the document follows its class.
+      */
+    documentRule: Option[RetentionRuleSummaryView],
+    /** Whether the caller may set the rule of the document (records manager). */
+    canChange: Boolean,
+    /** The rules to choose from, if the caller may change it. */
+    rules: List[RetentionRuleSummaryView]
+) derives JsonCodec,
+      Schema
+
+final case class SetDocumentRetention(
+    /** Key of a retention rule; absent or empty: the document follows the rule of its class again. */
+    rule: Option[String]
 ) derives JsonCodec,
       Schema
 
@@ -180,7 +251,8 @@ final case class CleanupReportView(
   * real) is a configuration task of the retention area (records managers and tenant administrators).
   */
 object RetentionApi:
-  type Env = Authenticator & Db & Authorizer & DocumentService & DestructionService & ObjectCleanup
+  type Env = Authenticator & Db & Authorizer & DocumentService & DestructionService & ObjectCleanup &
+    DocumentClassService & ApprovalWorkflow
 
   private val base      = "api" / "v1" / "retention"
   private val proposals = base / "destruction-proposals"
@@ -442,10 +514,107 @@ object RetentionApi:
           yield runs.map(reportView)
       )
 
+  val listClassRules: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(base / "class-rules")
+      .out(jsonBody[List[ClassRetentionView]])
+      .description(
+        "The retention rule of every document class (DMS-133): its own and the effective one (inherited from the " +
+          "nearest ancestor). Documents of a class get the effective rule. Requires the records manager role."
+      )
+      .tag("Retention")
+      .serverLogic(p =>
+        _ => checkedSubject(p) *> classTransaction(p)(_.retentionRules).map(_.map(classRetentionView))
+      )
+
+  val saveClassRule: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.put
+      .in(base / "class-rules" / path[String]("classKey").description("Document class key"))
+      .in(jsonBody[SaveClassRetention])
+      .out(jsonBody[ClassRetentionView])
+      .description(
+        "Assigns a retention rule to a document class, for its documents and the subclasses without an own rule; " +
+          "without a rule the class inherits again (DMS-133). New drafts and versions get the rule; open drafts on " +
+          "their next save or submission. 404 for an unknown class, 422 for an unknown rule. Audited. Requires the " +
+          "records manager role."
+      )
+      .tag("Retention")
+      .serverLogic(p =>
+        (classKey, req) =>
+          checkedSubject(p) *> classTransaction(p)(classes =>
+            for
+              all <- classes.retentionRules
+              cls <- ZIO
+                .fromOption(all.find(_.classKey.value == classKey))
+                .orElseFail(MetadataError.NotFound(s"document class $classKey does not exist"))
+              result <- classes.assignRetentionRule(cls.classId, req.rule, p.userId)
+            yield classRetentionView(result)
+          )
+      )
+
+  val documentRetention: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in("api" / "v1" / "documents" / path[UUID]("id").description("Document id") / "retention")
+      .in(
+        query[Option[UUID]]("version").description("Version id; default: the open or latest readable version")
+      )
+      .out(jsonBody[DocumentRetentionView])
+      .description(
+        "The retention rule of a document version with name and period, where it comes from (the class, records " +
+          "management), the rule of the class and the rule set for the document (DMS-133). Requires reading the " +
+          "version."
+      )
+      .tag("Retention")
+      .serverLogic(p => (id, version) => retentionOf(p, DocumentId(id), version))
+
+  val setDocumentRetention: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.put
+      .in("api" / "v1" / "documents" / path[UUID]("id").description("Document id") / "retention")
+      .in(jsonBody[SetDocumentRetention])
+      .out(jsonBody[DocumentRetentionView])
+      .description(
+        "Sets the retention rule of the document instead of the rule of its class: the open draft gets it at once, " +
+          "every later version keeps it (DMS-133). Without a rule the document follows its class again. Versions in " +
+          "review or approved keep their rule. 422 for an unknown rule, 404 for a discarded or destroyed document. " +
+          "Audited. Requires the records manager role. Returns the open or latest version's retention."
+      )
+      .tag("Retention")
+      .serverLogic(p =>
+        (id, req) =>
+          for
+            _           <- checkedSubject(p)
+            destruction <- ZIO.service[DestructionService]
+            _           <- DocumentApi.inTransaction(p) { ctx =>
+              for
+                details <- ctx.service.get(DocumentId(id))
+                _       <- ZIO.when(details.gone)(
+                  ZIO.fail(DocumentApi.discardedDocument(id, details))
+                )
+                latest <- ZIO
+                  .fromOption(details.versions.lastOption)
+                  .orElseFail(DocumentError.NotFound(s"document $id does not exist"))
+                _     <- ctx.check(Action.ManageRetention, DocumentApi.resource(p.tenantId, details, latest))
+                rules <- destruction.rules.mapError(fromDestruction)
+                rule = req.rule.map(_.trim).filter(_.nonEmpty)
+                _ <- ZIO.foreachDiscard(rule.filterNot(k => rules.exists(_.key == k)))(k =>
+                  ZIO.fail(DocumentError.Invalid(List(s"retention rule '$k' does not exist")))
+                )
+                _ <- ctx.service.setRetentionRule(DocumentId(id), rule, p.userId)
+              yield ()
+            }
+            // Records managers manage documents they may not read (e.g. a draft): the view needs no read access.
+            view <- retentionOf(p, DocumentId(id), None, requireRead = false)
+          yield view
+      )
+
   def endpoints: List[ZServerEndpoint[Env, Any]] =
     List(
       listRules,
       saveRule,
+      listClassRules,
+      saveClassRule,
+      documentRetention,
+      setDocumentRetention,
       destructionList,
       propose,
       listProposals,
@@ -457,6 +626,111 @@ object RetentionApi:
     )
 
   private type Failure = DestructionError | DocumentError | AccessDenied
+
+  /** The retention view of a version the caller may read (default: the open or latest readable version);
+    * without `requireRead` of the open or latest version.
+    */
+  private def retentionOf(
+      p: Principal,
+      id: DocumentId,
+      versionId: Option[UUID],
+      requireRead: Boolean = true
+  ): ZIO[Env, (StatusCode, ApiError), DocumentRetentionView] =
+    for
+      destruction <- ZIO.service[DestructionService]
+      classes     <- ZIO.service[DocumentClassService]
+      view        <- DocumentApi.inTransaction(p) { ctx =>
+        for
+          details  <- ctx.service.get(id)
+          _        <- ZIO.when(details.gone)(ZIO.fail(DocumentApi.discardedDocument(id.value, details)))
+          readable <- if requireRead then ctx.readable(details) else ZIO.succeed(details.versions)
+          version  <- versionId match
+            case Some(v) =>
+              ZIO
+                .fromOption(details.versions.find(_.id == v))
+                .orElseFail(DocumentError.NotFound(s"version $v of document ${id.value} does not exist"))
+                .tap(v => ctx.checkRead(details, v))
+            case None =>
+              ZIO.succeed(readable.find(v => Versioning.isOpen(v.status)).getOrElse(readable.last))
+          rules     <- destruction.rules.mapError(fromDestruction)
+          classRule <- classes
+            .effectiveRetentionRule(details.document.classId)
+            .mapError(DocumentService.metadataError)
+          documentRule <- ctx.service.documentRetentionRule(id)
+          manager      <- ctx.allowed(Action.ManageRetention, Resource(p.tenantId))
+          onDoc        <- ctx.allowed(
+            Action.ManageRetention,
+            DocumentApi.resource(p.tenantId, details, details.versions.lastOption.getOrElse(version))
+          )
+        yield documentRetentionView(version, classRule, documentRule, rules, manager && onDoc)
+      }
+    yield view
+
+  private def documentRetentionView(
+      v: DocumentVersion,
+      classRule: Option[String],
+      documentRule: Option[String],
+      rules: List[RetentionRule],
+      canChange: Boolean
+  ): DocumentRetentionView =
+    def summary(key: String) = rules.find(_.key == key) match
+      case Some(r) =>
+        RetentionRuleSummaryView(
+          key,
+          Some(r.name),
+          Some(r.periodMonths),
+          Some(r.trigger.toString),
+          Some(r.fromYearEnd)
+        )
+      case None => RetentionRuleSummaryView(key, None, None, None, None)
+    val entry  = v.values.get(ClassRetention.Field)
+    val key    = entry.collect { case FieldEntry(MetadataValue.Text(k), _) if k.trim.nonEmpty => k.trim }
+    val source = entry.filter(_ => key.isDefined).map(_.origin) match
+      case None                                 => "None"
+      case Some(ValueOrigin.RecordsManagement)  => "RecordsManagement"
+      case Some(o) if o == ValueOrigin.Platform => "Class"
+      case Some(_)                              => "Entered"
+    DocumentRetentionView(
+      v.id,
+      key.map(summary),
+      source,
+      classRule.map(summary),
+      documentRule.map(summary),
+      canChange,
+      if canChange then rules.map(r => summary(r.key)) else Nil
+    )
+
+  private def classRetentionView(c: ClassRetention): ClassRetentionView =
+    ClassRetentionView(
+      c.classId.value,
+      c.classKey.value,
+      c.label,
+      c.parent.map(_.value),
+      c.ruleKey,
+      c.effectiveRule,
+      c.inheritedFrom.map(_.value),
+      c.updatedBy.map(_.value),
+      c.updatedAt
+    )
+
+  private def classTransaction[A](p: Principal)(
+      f: DocumentClassService => IO[MetadataError, A]
+  ): ZIO[Env, (StatusCode, ApiError), A] =
+    for
+      db      <- ZIO.service[Db]
+      classes <- ZIO.service[DocumentClassService]
+      result  <- db.transact(p.tenantId)(f(classes)).mapError {
+        case e: MetadataError => DocumentApi.toResponse(DocumentService.metadataError(e))
+        case e: DbError       => DocumentApi.toResponse(e)
+      }
+    yield result
+
+  private def fromDestruction(e: DestructionError): DocumentError = e match
+    case DestructionError.NotFound(m)   => DocumentError.NotFound(m)
+    case DestructionError.Invalid(m)    => DocumentError.Invalid(m)
+    case DestructionError.Conflict(m)   => DocumentError.Conflict(m)
+    case DestructionError.SamePerson(m) => DocumentError.Conflict(m)
+    case DestructionError.Database(e)   => DocumentError.Database(e)
 
   private def invalid(message: String): (StatusCode, ApiError) =
     (StatusCode.UnprocessableEntity, ApiError("invalid", message))

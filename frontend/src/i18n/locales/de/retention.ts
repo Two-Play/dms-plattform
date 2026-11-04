@@ -173,6 +173,37 @@ export const retention: Translation<typeof en.retention> = {
       done: 'Regel {key} gespeichert.',
     },
   },
+  classRules: {
+    caption: 'Aufbewahrungsregeln der Dokumentenklassen',
+    description:
+      'Dokumente erhalten die Regel ihrer Klasse; eine Unterklasse ohne eigene Regel erbt die Regel der übergeordneten Klasse. Neue Entwürfe und Versionen erhalten die Regel sofort, offene Entwürfe beim nächsten Speichern oder Einreichen. Änderungen werden im Audit-Trail protokolliert.',
+    loading: 'Dokumentenklassen werden geladen',
+    empty: 'Noch keine Dokumentenklassen.',
+    colClass: 'Dokumentenklasse',
+    colRule: 'Eigene Regel',
+    colEffective: 'Dokumente erhalten',
+    inherit: 'Keine (erben)',
+    inheritedFrom: 'geerbt von {class}',
+    none: 'Keine Regel',
+    noneHint: 'Entwürfe dieser Klasse können nicht eingereicht werden.',
+    ruleLabel: 'Aufbewahrungsregel von {class}',
+    save: 'Speichern',
+    saveLabel: 'Aufbewahrungsregel von {class} speichern',
+    done: 'Aufbewahrungsregel von {class} gespeichert.',
+    noRules: 'Zuerst eine Aufbewahrungsregel anlegen.',
+  },
+  rule: {
+    years: plural({ one: '{count} Jahr', other: '{count} Jahre' }),
+    months: plural({ one: '{count} Monat', other: '{count} Monate' }),
+    from: {
+      EndOfValidity: 'ab Ende der Gültigkeit',
+      Approval: 'ab Freigabe',
+      Creation: 'ab Erstellung des Dokuments',
+    },
+    yearEnd: ', gerechnet ab Jahresende',
+    text: '{name} – {period} {from}{yearEnd}',
+    unknown: '{key} (unbekannte Regel)',
+  },
   cleanup: {
     description:
       'Findet Objekte im Objektspeicher, auf die keine Version mehr verweist (ältere Renditions von Entwürfen, entfernte Anhänge, ersetzte Originale, Dateien verworfener Entwürfe), und entfernt sie. Objekte unter Legal Hold oder Object Lock und neue Objekte bleiben erhalten.',

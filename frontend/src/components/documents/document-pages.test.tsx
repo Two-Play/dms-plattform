@@ -402,6 +402,37 @@ describe('Document page with a draft', () => {
     expect(screen.queryByText('Must be at most 60.')).not.toBeInTheDocument()
   })
 
+  it('names a missing retention rule of the class instead of the field (DMS-133)', async () => {
+    state.document = draftDocument({})
+    state.submitReplies = [
+      () =>
+        failed(422, {
+          code: 'incomplete',
+          message: 'the document cannot move to InReview: retentionRule: no retention rule',
+          issues: [
+            {
+              field: 'retentionRule',
+              label: 'Retention rule',
+              code: 'no_retention_rule',
+              message:
+                'The document class has no retention rule; please inform records management.',
+            },
+          ],
+        }),
+    ]
+    const { user } = renderAt(`/documents/${documentId}`)
+    await waitFor(() => {
+      expect(screen.getByLabelText(/^Title\*?$/)).toHaveValue('Service contract ACME')
+    })
+    await user.click(screen.getByRole('button', { name: 'Submit for review' }))
+
+    const alert = await findStatusAlert()
+    expect(alert).toHaveTextContent(
+      'The document class has no retention rule – please inform records management.',
+    )
+    expect(within(alert).queryByRole('button', { name: 'Retention rule' })).not.toBeInTheDocument()
+  })
+
   it('lists the values missing for review, then submits and shows the workflow state', async () => {
     state.document = draftDocument({})
     state.submitReplies = [

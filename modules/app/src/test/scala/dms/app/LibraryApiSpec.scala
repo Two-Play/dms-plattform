@@ -187,7 +187,9 @@ object LibraryApiSpec extends ZIOSpecDefault:
               ClassDraft("Central instruction", None, binding),
               admin
             )
+            _             <- RetentionFixtures.assign(classes, instruction.classId, "policy-10y")
             policy        <- classes.createClass("policy", None, ClassDraft("Policy", None, binding), admin)
+            _             <- RetentionFixtures.assign(classes, policy.classId, "policy-10y")
             instructions  <- template(templates, "Instruction", instruction)
             policies      <- template(templates, "Policy", policy)
             travelCreated <- documents.create(

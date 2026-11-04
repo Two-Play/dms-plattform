@@ -149,6 +149,7 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
               ClassDraft("Contract", None, List(FieldBinding(FieldKey.unsafe("contractPartner"), 1))),
               admin
             )
+            _ <- RetentionFixtures.assign(classes, cls.classId, "contract-10y")
             draft = TemplateDraft("Dienstleistungsvertrag", None, cls.classId.value, 1, content)
             t <- templates.create(draft, designer)
             _ <- templates.changeStatus(t.templateId, 1, TemplateStatus.Testing, designer)
@@ -218,7 +219,8 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
   private type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow &
     AcknowledgementService & ReviewService & LegalHoldService & RoleAssignments & AuditTrail & AuditEvidence &
     EvidenceReportRegistry & RenditionArchive & PdfRenderer & PdfValidator & Deputyships & RenditionSource &
-    ObjectStore & AuditCheckpoints & AttachmentUploads & DestructionService & ObjectCleanup
+    ObjectStore & AuditCheckpoints & AttachmentUploads & DestructionService & ObjectCleanup &
+    DocumentClassService
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -816,6 +818,99 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         view.integrityStatus == "Intact",
         parsed.auditTrail.exists(_.action == "document.destroyed"),
         texts.contains("Destruction")
+      )
+    },
+    test("records managers assign retention rules to classes and documents; readers see the rule (DMS-133)") {
+      for
+        s           <- setup.await
+        byAuthor    <- call(author, "GET", "/api/v1/retention/class-rules")
+        classes     <- call(records, "GET", "/api/v1/retention/class-rules")
+        unknownRule <- call(
+          records,
+          "PUT",
+          "/api/v1/retention/class-rules/contract",
+          Some("""{"rule":"x-1y"}""")
+        )
+        noClass <- call(records, "PUT", "/api/v1/retention/class-rules/nothing", Some("""{"rule":null}"""))
+        _       <- call(
+          records,
+          "PUT",
+          "/api/v1/retention/rules/contract-7y",
+          Some("""{"name":"Verträge kurz","periodMonths":84,"trigger":"EndOfValidity","fromYearEnd":true}""")
+        )
+        created <- call(
+          author,
+          "POST",
+          "/api/v1/documents",
+          Some(
+            s"""{"templateId":"${s.released.value}","templateVersion":1,"title":"Vertrag Initech",
+               |"values":{"contractPartner":{"type":"Text","value":"Initech"}}}""".stripMargin
+          )
+        ).map(as[DocumentView])
+        forAuthor <- call(author, "GET", s"/api/v1/documents/${created.id}/retention")
+        // Records managers may not read drafts, but set the rule of the document.
+        forRecords <- call(records, "GET", s"/api/v1/documents/${created.id}/retention")
+        denied     <- call(
+          author,
+          "PUT",
+          s"/api/v1/documents/${created.id}/retention",
+          Some("""{"rule":"contract-7y"}""")
+        )
+        invalid <- call(
+          records,
+          "PUT",
+          s"/api/v1/documents/${created.id}/retention",
+          Some("""{"rule":"x-1y"}""")
+        )
+        set <- call(
+          records,
+          "PUT",
+          s"/api/v1/documents/${created.id}/retention",
+          Some("""{"rule":"contract-7y"}""")
+        )
+        byReader <- call(reader, "GET", s"/api/v1/documents/${created.id}/retention")
+        afterSet <- call(author, "GET", s"/api/v1/documents/${created.id}/retention")
+        audited  <- ownerQuery(
+          sql"""select count(*) from dms.audit_event
+                where object_id = ${created.id} and action = 'document.retention-rule-changed'"""
+            .query[Long]
+            .run()
+            .head
+        )
+        authorView  = as[DocumentRetentionView](forAuthor)
+        setView     = as[DocumentRetentionView](set)
+        authorAfter = as[DocumentRetentionView](afterSet)
+      yield assertTrue(
+        byAuthor.status == Status.Forbidden,
+        as[List[ClassRetentionView]](classes).exists(c =>
+          c.classKey == "contract" && c.ruleKey.contains("contract-10y") && c.effectiveRule.contains(
+            "contract-10y"
+          )
+        ),
+        unknownRule.status == Status.UnprocessableEntity,
+        noClass.status == Status.NotFound,
+        created.current.values
+          .get("retentionRule")
+          .exists(v => v.origin == "System" && v.source.contains("dms")),
+        authorView.rule.exists(r => r.key == "contract-10y" && r.periodMonths.contains(120)),
+        authorView.source == "Class",
+        !authorView.canChange,
+        authorView.rules.isEmpty,
+        forRecords.status == Status.Forbidden,
+        denied.status == Status.Forbidden,
+        invalid.status == Status.UnprocessableEntity,
+        set.status == Status.Ok,
+        setView.canChange,
+        setView.rules.exists(_.name.contains("Verträge kurz")),
+        setView.source == "RecordsManagement",
+        setView.rule.exists(_.key == "contract-7y"),
+        setView.documentRule.exists(_.key == "contract-7y"),
+        setView.classRule.exists(_.key == "contract-10y"),
+        authorAfter.rule.exists(r => r.key == "contract-7y" && r.name.contains("Verträge kurz")),
+        authorAfter.source == "RecordsManagement",
+        // Drafts are not readable for readers.
+        byReader.status == Status.Forbidden,
+        audited == 1L
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

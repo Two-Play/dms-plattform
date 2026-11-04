@@ -144,7 +144,10 @@ object CoreFields:
       FieldType.Text(maxLength = Some(200)),
       System,
       fromReview,
-      description = Some("Set from the class; only records managers change it")
+      description = Some(
+        "Set by the platform from the rule of the class or its nearest ancestor (DMS-133); records managers can " +
+          "set another rule for a document"
+      )
     ),
     field("containsPersonalData", "Contains personal data", FieldType.YesNo, Core, fromReview),
     field("tags", "Tags", FieldType.Text(maxLength = Some(100)), Core, Set.empty, multiple = true),

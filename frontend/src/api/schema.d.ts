@@ -2068,6 +2068,58 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/retention/class-rules': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The retention rule of every document class (DMS-133): its own and the effective one (inherited from the nearest ancestor). Documents of a class get the effective rule. Requires the records manager role. */
+    get: operations['getApiV1RetentionClass-rules']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/retention/class-rules/{classKey}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** @description Assigns a retention rule to a document class, for its documents and the subclasses without an own rule; without a rule the class inherits again (DMS-133). New drafts and versions get the rule; open drafts on their next save or submission. 404 for an unknown class, 422 for an unknown rule. Audited. Requires the records manager role. */
+    put: operations['putApiV1RetentionClass-rulesClasskey']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/retention': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The retention rule of a document version with name and period, where it comes from (the class, records management), the rule of the class and the rule set for the document (DMS-133). Requires reading the version. */
+    get: operations['getApiV1DocumentsIdRetention']
+    /** @description Sets the retention rule of the document instead of the rule of its class: the open draft gets it at once, every later version keeps it (DMS-133). Without a rule the document follows its class again. Versions in review or approved keep their rule. 422 for an unknown rule, 404 for a discarded or destroyed document. Audited. Requires the records manager role. Returns the open or latest version's retention. */
+    put: operations['putApiV1DocumentsIdRetention']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/retention/destruction-list': {
     parameters: {
       query?: never
@@ -2913,6 +2965,21 @@ export interface components {
       /** Format: uuid */
       inheritedFrom?: string
     }
+    /** ClassRetentionView */
+    ClassRetentionView: {
+      /** Format: uuid */
+      classId: string
+      classKey: string
+      label: string
+      /** Format: uuid */
+      parentId?: string
+      ruleKey?: string
+      effectiveRule?: string
+      inheritedFrom?: string
+      updatedBy?: string
+      /** Format: date-time */
+      updatedAt?: string
+    }
     /** ClauseChanged */
     ClauseChanged: {
       fromKey: string
@@ -3438,6 +3505,17 @@ export interface components {
        * @enum {string}
        */
       type: 'DocumentRef'
+    }
+    /** DocumentRetentionView */
+    DocumentRetentionView: {
+      /** Format: uuid */
+      versionId: string
+      rule?: components['schemas']['RetentionRuleSummaryView']
+      source: string
+      classRule?: components['schemas']['RetentionRuleSummaryView']
+      documentRule?: components['schemas']['RetentionRuleSummaryView']
+      canChange: boolean
+      rules?: components['schemas']['RetentionRuleSummaryView'][]
     }
     /**
      * DocumentStatus
@@ -4557,6 +4635,15 @@ export interface components {
       locked: boolean
       blocks?: components['schemas']['ResolvedBlock'][]
     }
+    /** RetentionRuleSummaryView */
+    RetentionRuleSummaryView: {
+      key: string
+      name?: string
+      /** Format: int32 */
+      periodMonths?: number
+      trigger?: string
+      fromYearEnd?: boolean
+    }
     /** RetentionRuleView */
     RetentionRuleView: {
       key: string
@@ -4635,6 +4722,10 @@ export interface components {
        * @enum {string}
        */
       type: 'Row'
+    }
+    /** SaveClassRetention */
+    SaveClassRetention: {
+      rule?: string
     }
     /** SaveRetentionRule */
     SaveRetentionRule: {
@@ -4768,6 +4859,10 @@ export interface components {
        * @enum {string}
        */
       type: 'Selection'
+    }
+    /** SetDocumentRetention */
+    SetDocumentRetention: {
+      rule?: string
     }
     /** StatusCountView */
     StatusCountView: {
@@ -11248,6 +11343,161 @@ export interface operations {
         }
       }
       /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1RetentionClass-rules': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ClassRetentionView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'putApiV1RetentionClass-rulesClasskey': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document class key */
+        classKey: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SaveClassRetention']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ClassRetentionView']
+        }
+      }
+      /** @description Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdRetention: {
+    parameters: {
+      query?: {
+        /** @description Version id; default: the open or latest readable version */
+        version?: string
+      }
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentRetentionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: query parameter version */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  putApiV1DocumentsIdRetention: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SetDocumentRetention']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DocumentRetentionView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown

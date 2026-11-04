@@ -301,9 +301,10 @@ final class DocumentService(
       (template, profile) <- templateContext(request.templateId, request.templateVersion)
       id     = DocumentId.random()
       number = Versioning.first
-      now      <- Clock.instant
-      numbered <- documentNumber(profile, request.values, now)
-      values   <- prepare(
+      now       <- Clock.instant
+      numbered  <- documentNumber(profile, request.values, now)
+      retention <- retentionEntry(profile.classId, None, None)
+      values    <- prepare(
         profile,
         template,
         template.content,
@@ -311,7 +312,8 @@ final class DocumentService(
         request.title,
         id,
         number,
-        numbered.map(_._2)
+        numbered.map(_._2),
+        retention
       )
       document = Document(
         id,
@@ -731,8 +733,19 @@ final class DocumentService(
       )
       _ <- ZIO.when(change.content.exists(_ != current.content))(checkContent(template, content, requests))
       title = change.title.getOrElse(titleOf(current).getOrElse(document.title))
-      entered <- protectSystemValues(profile, current, change.values)
-      values  <- prepare(profile, template, content, entered, title, id, current.number, document.number)
+      entered   <- protectSystemValues(profile, current, change.values)
+      retention <- retentionEntry(document.classId, Some(id), current.values.get(ClassRetention.Field))
+      values    <- prepare(
+        profile,
+        template,
+        content,
+        entered,
+        title,
+        id,
+        current.number,
+        document.number,
+        retention
+      )
       next = current.copy(
         workingState = current.workingState + 1,
         content = content,
@@ -764,7 +777,9 @@ final class DocumentService(
       current  <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
       // Drafts started before DMS-126 may lack the summary; they cannot be submitted without one.
       _ <- checkChangeReason(current.changeKind, current.number, current.changeReason)
-      _ <- ZIO.when(document.kind == DocumentKind.File)(
+      // Drafts saved before DMS-133 (or before their class got a rule) get the class's retention rule now.
+      refreshed <- refreshRetention(document, current, actor)
+      _         <- ZIO.when(document.kind == DocumentKind.File)(
         current.file match
           case None =>
             ZIO.fail(DocumentError.Invalid(List("upload the file of the document before submitting it")))
@@ -772,9 +787,104 @@ final class DocumentService(
             val problems = WordFields.check(file.fields, file.values, complete = true, DocumentJson.readRows)
             ZIO.unless(problems.isEmpty)(ZIO.fail(DocumentError.Invalid(problems)))
       )
-      updated <- transition(document, current, LifecycleEvent.Submit, actor)
-      _       <- ZIO.when(updated.changeKind == ChangeKind.Minor)(recordEditorialCheck(updated, actor))
+      updated <- transition(document, refreshed, LifecycleEvent.Submit, actor).mapError {
+        case DocumentError.Incomplete(target, issues) => DocumentError.Incomplete(target, issues.map(noRule))
+        case other                                    => other
+      }
+      _ <- ZIO.when(updated.changeKind == ChangeKind.Minor)(recordEditorialCheck(updated, actor))
     yield updated
+
+  /** The retention rule of a version (DMS-133): the rule records management set for the document; otherwise
+    * the rule of the class (own or inherited, origin platform); without one a value entered by hand before
+    * DMS-133 stays.
+    */
+  private def retentionEntry(
+      classId: DocumentClassId,
+      document: Option[DocumentId],
+      current: Option[FieldEntry]
+  ): IO[DocumentError, Option[FieldEntry]] =
+    for
+      own <- ZIO.foreach(document)(id => sql(MetadataStore.documentRetentionRule(id))).map(_.flatten)
+      cls <-
+        if own.isDefined then ZIO.none
+        else classes.effectiveRetentionRule(classId).mapError(metadataError)
+    yield own
+      .map(rule => FieldEntry(MetadataValue.Text(rule), ValueOrigin.RecordsManagement))
+      .orElse(cls.map(rule => FieldEntry(MetadataValue.Text(rule), ValueOrigin.Platform)))
+      .orElse(current.filter(_.origin == ValueOrigin.Manual))
+
+  /** Stores the retention rule of a draft whose value is missing or outdated (the class or the document got
+    * another rule) as its next working state, recorded like a draft change. Other versions stay as they are.
+    */
+  private def refreshRetention(
+      document: Document,
+      current: DocumentVersion,
+      actor: UserId
+  ): IO[DocumentError, DocumentVersion] =
+    val before = current.values.get(ClassRetention.Field)
+    retentionEntry(document.classId, Some(document.id), before).flatMap { retention =>
+      if retention == before || !Versioning.isEditable(current.status) then ZIO.succeed(current)
+      else
+        val values = (current.values - ClassRetention.Field) ++ retention.map(ClassRetention.Field -> _)
+        val next   = current.copy(workingState = current.workingState + 1, values = values, rendition = None)
+        for
+          _ <- sql(DocumentStore.updateDraft(next, templates))
+            .filterOrFail(identity)(changedConcurrently(next))
+          _ <- sql(DocumentStore.insertWorkingState(next, actor, templates))
+          _ <- record(
+            actor,
+            "document.draft-changed",
+            next,
+            Json.Obj("fields" -> fieldChanges(current.values, values), "contentChanged" -> Json.Bool(false))
+          )
+        yield next
+    }
+
+  /** The retention rule records management set for a document instead of its class's rule, if any (DMS-133).
+    */
+  def documentRetentionRule(id: DocumentId): IO[DocumentError, Option[String]] =
+    sql(MetadataStore.documentRetentionRule(id))
+
+  /** Sets the retention rule of a document as records manager (DMS-133): `Some(rule)` replaces the class's
+    * rule for the open draft and every later version (origin records management) until it is removed with
+    * `None`, after which the document follows its class again. The rule must exist (checked by the caller).
+    * An open draft gets the value at once (as its next working state); versions in review or approved keep
+    * theirs (the snapshot of an approved version is frozen). Audited as `document.retention-rule-changed`
+    * with before and after; an unchanged rule records nothing. Authorization (records managers) is the
+    * caller's job.
+    */
+  def setRetentionRule(
+      id: DocumentId,
+      rule: Option[String],
+      actor: UserId
+  ): IO[DocumentError, Option[String]] =
+    for
+      document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
+      latest   <- sql(DocumentStore.versions(id, templates))
+        .map(_.maxByOption(v => (v.createdAt, v.number)))
+        .someOrFail(documentNotFound(id))
+      key = rule.map(_.trim).filter(_.nonEmpty)
+      before <- sql(
+        key.fold(MetadataStore.removeDocumentRetentionRule(id))(
+          MetadataStore.setDocumentRetentionRule(id, _, actor.value)
+        )
+      )
+      _ <- ZIO.when(before != key)(
+        record(
+          actor,
+          "document.retention-rule-changed",
+          latest,
+          Json.Obj(
+            "before" -> before.fold(Json.Null)(Json.Str(_)),
+            "after"  -> key.fold(Json.Null)(Json.Str(_))
+          )
+        )
+      )
+      open <- sql(DocumentStore.lockOpenVersion(id, templates))
+      _    <- ZIO.foreachDiscard(open.filter(v => Versioning.isEditable(v.status)))(
+        refreshRetention(document, _, actor)
+      )
+    yield key
 
   /** The automatic comparison of a submitted minor version with its basis (DMS-46), recorded in the audit
     * trail so that the confirmation of the editorial classification can be traced to the warning.
@@ -907,6 +1017,7 @@ final class DocumentService(
       workingState <- sql(DocumentStore.workingStates(id, number)).map(Versioning.nextWorkingState)
       template     <- templates.version(base.templateId, base.templateVersion)
       profile      <- profile(document.classId, base.classVersion)
+      retention    <- retentionEntry(document.classId, Some(id), base.values.get(ClassRetention.Field))
       baseRequests <- sql(DocumentStore.deviationRequests(base.id)).map(_.filter(_.active))
       now          <- Clock.instant
       versionId = UUID.randomUUID()
@@ -926,7 +1037,9 @@ final class DocumentService(
         status = DocumentStatus.Draft,
         changeKind = kind,
         changeReason = changeReason,
-        values = base.values ++ systemValues(id, profile, number, template, document.number),
+        values = (base.values - ClassRetention.Field) ++
+          systemValues(id, profile, number, template, document.number) ++
+          retention.map(ClassRetention.Field -> _),
         metadataSnapshot = None,
         rendition = None,
         createdBy = actor,
@@ -1424,10 +1537,27 @@ final class DocumentService(
       title: String,
       id: DocumentId,
       number: VersionNo,
-      documentNumber: Option[String]
+      documentNumber: Option[String],
+      retention: Option[FieldEntry]
   ): IO[DocumentError, Map[String, FieldEntry]] =
-    val input  = entered + (TitleField -> FieldEntry(MetadataValue.Text(title.trim), ValueOrigin.Manual))
-    val system = systemValues(id, profile, number, template, documentNumber)
+    // The retention rule comes from the class or records management (DMS-133): an entered value equal to it is
+    // accepted, another one rejected; a value carried over with its origin (e.g. one records management set
+    // before) is replaced.
+    val retentionIssue = entered
+      .get(ClassRetention.Field)
+      .filter(_.origin == ValueOrigin.Manual)
+      .filterNot(e => retention.exists(_.value == e.value))
+      .map(_ =>
+        FieldIssue(
+          ClassRetention.Field,
+          profile.field(ClassRetention.Field).fold(ClassRetention.Field)(_.definition.label),
+          IssueKind.NotEditable
+        )
+      )
+    val input = entered - ClassRetention.Field +
+      (TitleField -> FieldEntry(MetadataValue.Text(title.trim), ValueOrigin.Manual))
+    val system = systemValues(id, profile, number, template, documentNumber) ++
+      retention.map(ClassRetention.Field -> _)
     // A field filled by a reference field only takes values from its source (ADR 0023).
     def fromReference(key: String, origin: ValueOrigin) =
       TemplateContent.referenceOf(content, key).exists((r, _) => origin != ValueOrigin.System(r.source.key))
@@ -1438,7 +1568,7 @@ final class DocumentService(
         FieldIssue(key, profile.field(key).fold(key)(_.definition.label), IssueKind.NotEditable)
     }
     val base   = input ++ system
-    val issues = notEnterable ++ Validation.validate(
+    val issues = notEnterable ++ retentionIssue.toList ++ Validation.validate(
       profile,
       metadataOf(base) + (StatusField -> MetadataValue.Selection(DocumentStatus.Draft.toString)),
       DocumentStatus.Draft
@@ -1757,8 +1887,8 @@ object DocumentService:
   /** Longest accepted reason of a deviation request. */
   val MaxReasonLength: Int = 4000
 
-  /** Fields only the platform sets. Other system fields of the core profile (the retention rule) can be
-    * entered until they are derived from the class configuration.
+  /** Fields only the platform sets. The retention rule (DMS-133) comes from the class or records management
+    * and is handled separately (see `retentionEntry`).
     */
   private val PlatformFields: Set[String] =
     Set(
@@ -1804,6 +1934,12 @@ object DocumentService:
       "templateVersion" -> template.version.toString
     ) ++ documentNumber.map(CoreFields.DocumentNumber -> _))
       .map((k, v) => k -> FieldEntry(MetadataValue.Text(v), ValueOrigin.Platform))
+
+  /** A missing retention rule on submission names its cause (DMS-133): the class has none. */
+  private def noRule(issue: FieldIssue): FieldIssue = issue match
+    case FieldIssue(ClassRetention.Field, label, IssueKind.MissingRequired(_)) =>
+      FieldIssue(ClassRetention.Field, label, IssueKind.NoRetentionRule)
+    case other => other
 
   /** A value set by a business system rather than by the platform. */
   private def isExternal(origin: ValueOrigin): Boolean = origin match

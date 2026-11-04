@@ -123,6 +123,7 @@ object ReviewApiSpec extends ZIOSpecDefault:
               ClassDraft("Policy", None, Nil, review = Some(ReviewPolicy(Some(12), 60))),
               admin
             )
+            _ <- RetentionFixtures.assign(classes, cls.classId, "policy-10y")
             draft = TemplateDraft("Code of conduct", None, cls.classId.value, 1, content(words))
             t <- templates.create(draft, designer)
             _ <- templates.changeStatus(t.templateId, 1, TemplateStatus.Testing, designer)

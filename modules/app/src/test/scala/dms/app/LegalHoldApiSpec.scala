@@ -120,6 +120,7 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
             _ <- RoleAssignments.Postgres
               .grant(recordsHr, RoleAssignment(Role.RecordsManager, Some("HR")), admin)
             cls <- classes.createClass("contract", None, ClassDraft("Contract", None, Nil), admin)
+            _   <- RetentionFixtures.assign(classes, cls.classId, "contract-10y")
             draft = TemplateDraft("Supply contract", None, cls.classId.value, 1, content)
             t <- templates.create(draft, designer)
             _ <- templates.changeStatus(t.templateId, 1, TemplateStatus.Testing, designer)

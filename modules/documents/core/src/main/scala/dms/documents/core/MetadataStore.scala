@@ -112,6 +112,82 @@ private[core] object MetadataStore:
                   ${cls.label}, ${cls.description}, ${Jsonb(cls.fields.toJson)}, ${cls.review.intervalMonths},
                   ${cls.review.leadDays}, $createdBy)""".update.run()
 
+  /** The own retention rule assignments of all classes (DMS-133, V37). */
+  def retentionAssignments()(using DbTx): List[(UUID, String, String, java.time.Instant)] =
+    sql"""select class_id, rule_key, updated_by, updated_at from dms.class_retention_rule"""
+      .query[(UUID, String, String, java.time.OffsetDateTime)]
+      .run()
+      .map((id, rule, by, at) => (id, rule, by, at.toInstant))
+      .toList
+
+  /** The retention rule of a class: its own assignment or that of the nearest ancestor. */
+  def effectiveRetentionRule(id: DocumentClassId)(using DbTx): Option[String] =
+    sql"""with recursive chain (class_id, parent_id, depth) as (
+                 select id, parent_id, 0 from dms.document_class where id = ${id.value}
+                 union all
+                 select c.id, c.parent_id, chain.depth + 1
+                 from dms.document_class c join chain on c.id = chain.parent_id
+                 where chain.depth < 64)
+          select r.rule_key from chain join dms.class_retention_rule r on r.class_id = chain.class_id
+          order by chain.depth limit 1""".query[String].run().headOption
+
+  /** Whether a retention rule with this key exists (`dms.retention_rule`, V33). */
+  def retentionRuleExists(key: String)(using DbTx): Boolean =
+    sql"select count(*) from dms.retention_rule where key = $key".query[Long].run().head > 0
+
+  /** Sets or replaces the own retention rule of a class; returns the previous one. */
+  def assignRetentionRule(id: DocumentClassId, rule: String, actor: String)(using DbTx): Option[String] =
+    val previous = ownRetentionRule(id)
+    val _        = sql"""insert into dms.class_retention_rule (tenant_id, class_id, rule_key, updated_by)
+          values (dms.current_tenant(), ${id.value}, $rule, $actor)
+          on conflict (tenant_id, class_id) do update
+            set rule_key = excluded.rule_key, updated_by = excluded.updated_by, updated_at = now()""".update
+      .run()
+    previous
+
+  /** Removes the own retention rule of a class (it inherits again); returns the removed one. */
+  def removeRetentionRule(id: DocumentClassId)(using DbTx): Option[String] =
+    val previous = ownRetentionRule(id)
+    val _        = sql"delete from dms.class_retention_rule where class_id = ${id.value}".update.run()
+    previous
+
+  /** The retention rule records management set for a document (DMS-133, V37). */
+  def documentRetentionRule(id: dms.kernel.DocumentId)(using DbTx): Option[String] =
+    sql"select rule_key from dms.document_retention_rule where document_id = ${id.value}"
+      .query[String]
+      .run()
+      .headOption
+
+  /** Sets or replaces the retention rule of a document; returns the previous one. */
+  def setDocumentRetentionRule(id: dms.kernel.DocumentId, rule: String, actor: String)(using
+      DbTx
+  ): Option[String] =
+    val previous = lockedDocumentRule(id)
+    val _        = sql"""insert into dms.document_retention_rule (tenant_id, document_id, rule_key, updated_by)
+          values (dms.current_tenant(), ${id.value}, $rule, $actor)
+          on conflict (tenant_id, document_id) do update
+            set rule_key = excluded.rule_key, updated_by = excluded.updated_by, updated_at = now()""".update
+      .run()
+    previous
+
+  /** Removes the retention rule of a document (it follows its class again); returns the removed one. */
+  def removeDocumentRetentionRule(id: dms.kernel.DocumentId)(using DbTx): Option[String] =
+    val previous = lockedDocumentRule(id)
+    val _        = sql"delete from dms.document_retention_rule where document_id = ${id.value}".update.run()
+    previous
+
+  private def lockedDocumentRule(id: dms.kernel.DocumentId)(using DbTx): Option[String] =
+    sql"select rule_key from dms.document_retention_rule where document_id = ${id.value} for update"
+      .query[String]
+      .run()
+      .headOption
+
+  private def ownRetentionRule(id: DocumentClassId)(using DbTx): Option[String] =
+    sql"select rule_key from dms.class_retention_rule where class_id = ${id.value} for update"
+      .query[String]
+      .run()
+      .headOption
+
   private def toClass(row: ClassRow): DocumentClassVersion =
     val (id, key, version, parentId, parentVersion, label, description, fields, interval, leadDays) = row
     DocumentClassVersion(

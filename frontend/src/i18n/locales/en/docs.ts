@@ -63,6 +63,8 @@ export const docs = {
     draftSaved: 'Draft saved',
     submitted: 'Submitted for review',
     incomplete: 'The draft was saved but cannot be submitted yet. Fill in these values first:',
+    noRetentionRule:
+      'The document class has no retention rule – please inform records management. The draft was saved.',
     invalid:
       'The draft was saved but cannot be submitted: {message} Changes to locked sections need an authorized deviation request.',
     submitFailed: 'Submitting failed: {message}',
@@ -152,6 +154,25 @@ export const docs = {
     templateValue: '{name}, version {version}',
     notSet: 'not set',
     more: 'Further details',
+    retention: 'Retention',
+    retentionLoading: 'Loading the retention rule',
+    retentionFrom: {
+      Class: 'from the document class',
+      RecordsManagement: 'set by records management for this document',
+      Entered: 'entered before the class had a rule',
+    },
+    retentionNone:
+      'The document class has no retention rule – please inform records management. The draft cannot be submitted without one.',
+    retentionNoneReleased: 'No retention rule',
+    retentionDocumentRule: 'For this document: {rule} (open draft and later versions)',
+    retentionChange: 'Change',
+    retentionChangeLabel: 'Change the retention rule of this document',
+    retentionSelect: 'Retention rule for this document',
+    retentionClassOption: 'Rule of the document class ({rule})',
+    retentionClassNone: 'Rule of the document class (none)',
+    retentionSave: 'Save rule',
+    retentionCancel: 'Cancel',
+    retentionSaved: 'Retention rule saved.',
     levels: {
       Public: 'Public',
       Internal: 'Internal',

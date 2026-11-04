@@ -140,6 +140,7 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
             _   <- RoleAssignments.Postgres.grant(designer, RoleAssignment(Role.TemplateDesigner), admin)
             _   <- RoleAssignments.Postgres.grant(designer2, RoleAssignment(Role.TemplateDesigner), admin)
             cls <- classes.createClass("contract", None, ClassDraft("Contract", None, Nil), admin)
+            _   <- RetentionFixtures.assign(classes, cls.classId, "policy-10y")
             t   <- templates.create(
               TemplateDraft("Maintenance contract", None, cls.classId.value, 1, structuredContent),
               designer

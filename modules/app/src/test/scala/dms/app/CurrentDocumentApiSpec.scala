@@ -131,7 +131,9 @@ object CurrentDocumentApiSpec extends ZIOSpecDefault:
             _        <- Groups.Postgres.addMember("board", reviewer, admin)
             _        <- Groups.Postgres.addMember("board", approver, admin)
             policy   <- classes.createClass("policy", None, ClassDraft("Policy", None, Nil), admin)
+            _        <- RetentionFixtures.assign(classes, policy.classId, "policy-10y")
             contract <- classes.createClass("contract", None, ClassDraft("Contract", None, Nil), admin)
+            _        <- RetentionFixtures.assign(classes, contract.classId, "policy-10y")
             ids      <- ZIO.foreach(List(policy, contract)) { cls =>
               for
                 t <- templates

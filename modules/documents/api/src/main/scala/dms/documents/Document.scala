@@ -22,6 +22,11 @@ object ValueOrigin:
   /** The platform as source of system values (document id, class, version, template). */
   val Platform: ValueOrigin = System("dms")
 
+  /** A records manager set the value of the core field `retentionRule` of a document, deviating from the rule
+    * of its class (DMS-133). Protected like a business system's value: authors cannot replace it.
+    */
+  val RecordsManagement: ValueOrigin = System("records-management")
+
 /** A field value of a document version with its origin. */
 final case class FieldEntry(value: MetadataValue, origin: ValueOrigin)
 

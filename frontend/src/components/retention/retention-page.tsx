@@ -51,6 +51,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
 import { formatDate, formatDateTime } from '@/i18n/format'
 import { toast } from '@/lib/toast'
+import { ClassRulesSection } from './class-rules-section'
 import type { RetentionPageSearch } from './retention-params'
 
 const th = 'py-2 pr-4 font-medium'
@@ -1256,7 +1257,8 @@ function CleanupSection() {
 
 /**
  * Retention for records managers (business concept 7.4, DMS-82, ADR 0054): the destruction list,
- * proposals decided with four eyes, retention rules and the clean-up of object storage.
+ * proposals decided with four eyes, retention rules and their assignment to document classes (DMS-133)
+ * and the clean-up of object storage.
  */
 export function RetentionPage() {
   const search = useSearch({ from: '/_app/retention' })
@@ -1294,7 +1296,12 @@ export function RetentionPage() {
           </nav>
           {tab === 'list' && <DestructionListSection search={search} />}
           {tab === 'proposals' && <ProposalsSection search={search} />}
-          {tab === 'rules' && <RulesSection />}
+          {tab === 'rules' && (
+            <>
+              <RulesSection />
+              <ClassRulesSection />
+            </>
+          )}
           {tab === 'cleanup' && <CleanupSection />}
         </>
       )}

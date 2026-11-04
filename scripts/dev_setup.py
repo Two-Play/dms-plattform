@@ -5,9 +5,10 @@ Subcommands:
   tenant          ensure the tenant of the local ZITADEL organization (SQL as schema owner, idempotent)
   users           ensure the demo users in ZITADEL and their role assignments (idempotent)
   token USER      print an access token for a demo user (e.g. `author`)
-  seed --api URL  create demo field definitions, classes, workflows, number ranges, templates, an access group
-                  and a draft through the API; publish the demo central instructions through the approval
-                  workflow (approver signs in afresh for the step-up check) and add a Word template with a draft
+  seed --api URL  create demo field definitions, classes, workflows, number ranges, retention rules of the
+                  classes, templates, an access group and a draft through the API; publish the demo central
+                  instructions through the approval workflow (approver signs in afresh for the step-up check)
+                  and add a Word template with a draft
   check [--dump DIR]            check the demo content offline (no services needed); --dump writes the
                                 central instruction contents, values and the Word template to DIR
   approve-tasks USER --api URL  approve all open workflow tasks of a demo user (until the UI can vote, DMS-91)
@@ -858,6 +859,40 @@ NUMBER_RANGES = {
 }
 
 
+# Retention rules (DMS-82, DMS-133): key -> (name, months, trigger, from year end, classes they are assigned to).
+# contract-10y and policy-10y are the keys documents seeded before DMS-133 carry; documents get the rule of their
+# class from the platform.
+RETENTION_RULES = {
+    "contract-10y": ("Verträge", 120, "EndOfValidity", True, ["contract"]),
+    "policy-10y": ("Richtlinien", 120, "EndOfValidity", False, ["policy"]),
+    "central-instruction-10y": ("Zentralanweisungen", 120, "EndOfValidity", False, ["central-instruction"]),
+}
+
+
+def ensure_retention_rules(records: Api) -> None:
+    """Creates the demo retention rules and assigns them to their classes as records manager; keeps rules and
+    class assignments that exist (idempotent)."""
+    existing = {r["key"] for r in records("GET", "/api/v1/retention/rules")}
+    for key, (name, months, trigger, year_end, _) in RETENTION_RULES.items():
+        if key in existing:
+            print(f"  retention rule {key}: exists")
+            continue
+        records("PUT", f"/api/v1/retention/rules/{key}", {
+            "name": name, "periodMonths": months, "trigger": trigger, "fromYearEnd": year_end})
+        print(f"  retention rule {key}: created")
+    assigned = {c["classKey"]: c for c in records("GET", "/api/v1/retention/class-rules")}
+    for key, (_, _, _, _, class_keys) in RETENTION_RULES.items():
+        for class_key in class_keys:
+            current = assigned.get(class_key)
+            if current is None:
+                fail(f"class {class_key} does not exist")
+            if current.get("ruleKey"):
+                print(f"  retention rule of class {class_key}: kept ({current['ruleKey']})")
+                continue
+            records("PUT", f"/api/v1/retention/class-rules/{class_key}", {"rule": key})
+            print(f"  retention rule {key}: assigned to class {class_key}")
+
+
 def ensure_number_ranges(admin: Api, classes: dict[str, dict]) -> None:
     """Creates the demo number ranges and assigns them to their classes; skips what exists (idempotent)."""
     existing = {r["key"]: r for r in admin("GET", "/api/v1/admin/number-ranges")}
@@ -920,7 +955,6 @@ def ensure_sample_draft(author: Api, author_id: str, template: dict) -> None:
         "validFrom": {"type": "Date", "value": today.isoformat()},
         "confidentiality": {"type": "Selection", "code": "Internal"},
         "language": {"type": "Text", "value": "en"},
-        "retentionRule": {"type": "Text", "value": "contract-10y"},
         "containsPersonalData": {"type": "YesNo", "value": False},
     }
     doc = author("POST", "/api/v1/documents", {
@@ -931,14 +965,14 @@ def ensure_sample_draft(author: Api, author_id: str, template: dict) -> None:
 
 
 def instruction_values(spec: dict, author_id: str, today: datetime.date) -> dict:
-    """Field values of a central instruction: the core fields needed from review on, tags and the class fields."""
+    """Field values of a central instruction: the core fields needed from review on (the retention rule comes from
+    the class), tags and the class fields."""
     return {
         "owner": {"type": "PersonRef", "userId": author_id},
         "organizationalUnit": {"type": "Text", "value": spec["unit"]},
         "validFrom": {"type": "Date", "value": (today - datetime.timedelta(days=spec["valid_from"])).isoformat()},
         "confidentiality": {"type": "Selection", "code": "Internal"},
         "language": {"type": "Text", "value": "de"},
-        "retentionRule": {"type": "Text", "value": "policy-10y"},
         "containsPersonalData": {"type": "YesNo", "value": False},
         "tags": {"type": "Many", "values": [{"type": "Text", "value": tag} for tag in spec["tags"]]},
         "summary": {"type": "Text", "value": spec["summary"]},
@@ -1095,11 +1129,14 @@ def cmd_seed(api_base: str) -> None:
         designer = Api(api_base, user_token(z, "designer"))
         designer2 = Api(api_base, user_token(z, "designer2"))
         author = Api(api_base, user_token(z, "author"))
+        records = Api(api_base, user_token(z, "records"))
         versions = ensure_fields(admin)
         classes = ensure_classes(admin, versions)
         ensure_workflows(admin)
         ensure_groups(admin, users)
         ensure_number_ranges(admin, classes)
+        # Before any document: drafts get the retention rule of their class (DMS-133).
+        ensure_retention_rules(records)
         contract = ensure_template(designer, designer2, SERVICE_CONTRACT, classes["contract"])
         ensure_template(designer, designer2, POLICY, classes["policy"])
         if contract["status"] == "Released":

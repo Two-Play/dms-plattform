@@ -122,6 +122,7 @@ object VersionCompareApiSpec extends ZIOSpecDefault:
               ClassDraft("Policy", None, List(FieldBinding(FieldKey.unsafe("audience"), 1))),
               admin
             )
+            _ <- RetentionFixtures.assign(classes, cls.classId, "policy-10y")
             draft = TemplateDraft("Code of conduct", None, cls.classId.value, 1, content(words))
             t <- templates.create(draft, designer)
             _ <- templates.changeStatus(t.templateId, 1, TemplateStatus.Testing, designer)
