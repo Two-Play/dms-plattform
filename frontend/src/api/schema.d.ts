@@ -21,6 +21,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/ready': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Readiness check for load balancers: 200 while the instance can serve, also with an optional dependency down (`degraded`); 503 without database or object store and while shutting down (`draining`). */
+    get: operations['getReady']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/me': {
     parameters: {
       query?: never
@@ -1557,10 +1574,10 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description Who must acknowledge the version, with display names, and whether they did (acknowledgement time). For the document's owner and compliance officers in scope, with a stated purpose and reason (403 purpose_required otherwise); every access is recorded in the audit trail. 422 if the version does not ask for acknowledgement. */
-    get: operations['getApiV1DocumentsIdVersionsVersionidAcknowledgement-recipients']
+    get?: never
     put?: never
-    post?: never
+    /** @description Who must acknowledge the version, with display names, and whether they did (acknowledgement time). For the document's owner and compliance officers in scope, with a stated purpose and reason (403 purpose_required otherwise); every access is recorded in the audit trail, which is why this is a POST with purpose and reason in the body. 422 if the version does not ask for acknowledgement. */
+    post: operations['postApiV1DocumentsIdVersionsVersionidAcknowledgement-recipients']
     delete?: never
     options?: never
     head?: never
@@ -2282,10 +2299,10 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description Who has not acknowledged the version yet (purpose limitation, ADR 0036): for compliance officers in scope and the document's owner, with a stated purpose and reason (403 purpose_required otherwise). Every access is recorded in the audit trail with purpose and reason. 422 if the version does not require acknowledgement. */
-    get: operations['getApiV1ComplianceAcknowledgementsDocumentidVersionidOpen']
+    get?: never
     put?: never
-    post?: never
+    /** @description Who has not acknowledged the version yet (purpose limitation, ADR 0036): for compliance officers in scope and the document's owner, with a stated purpose and reason (403 purpose_required otherwise). Purpose and reason are sent in the request body (POST) and recorded in the audit trail with every access, which is why this is not a GET. 422 if the version does not require acknowledgement. */
+    post: operations['postApiV1ComplianceAcknowledgementsDocumentidVersionidOpen']
     delete?: never
     options?: never
     head?: never
@@ -3088,6 +3105,12 @@ export interface components {
       overdueByOwner?: components['schemas']['OwnerCountView'][]
       acknowledgements: components['schemas']['RateView']
       acknowledgementsByUnit?: components['schemas']['UnitRateView'][]
+    }
+    /** ComponentView */
+    ComponentView: {
+      name: string
+      status: string
+      required: boolean
     }
     /** ComputedField */
     ComputedField: {
@@ -4328,6 +4351,11 @@ export interface components {
        */
       type: 'PersonRef'
     }
+    /** PersonsAccessRequest */
+    PersonsAccessRequest: {
+      purpose?: string
+      reason?: string
+    }
     /** Placeholder */
     Placeholder: {
       path: string
@@ -4430,6 +4458,11 @@ export interface components {
       open: number
       /** Format: double */
       rate?: number
+    }
+    /** ReadinessView */
+    ReadinessView: {
+      status: string
+      components?: components['schemas']['ComponentView'][]
     }
     /** RecertifyVersion */
     RecertifyVersion: {
@@ -5644,6 +5677,25 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['Health']
+        }
+      }
+    }
+  }
+  getReady: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ReadinessView']
         }
       }
     }
@@ -9927,15 +9979,11 @@ export interface operations {
       }
     }
   }
-  'getApiV1DocumentsIdVersionsVersionidAcknowledgement-recipients': {
+  'postApiV1DocumentsIdVersionsVersionidAcknowledgement-recipients': {
     parameters: {
       query?: {
         /** @description open, done or absent for all */
         status?: string
-        /** @description Required: escalation or reminder */
-        purpose?: string
-        /** @description Required: why the names are needed, up to 500 characters; recorded in the audit trail */
-        reason?: string
       }
       header?: never
       path: {
@@ -9946,7 +9994,12 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    /** @description Required: purpose (escalation or reminder) and reason (up to 500 characters; recorded in the audit trail). A body, not query parameters, so they stay out of access logs (ADR 0060). */
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PersonsAccessRequest']
+      }
+    }
     responses: {
       200: {
         headers: {
@@ -9956,7 +10009,7 @@ export interface operations {
           'application/json': components['schemas']['RecipientListView']
         }
       }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown
@@ -11912,14 +11965,9 @@ export interface operations {
       }
     }
   }
-  getApiV1ComplianceAcknowledgementsDocumentidVersionidOpen: {
+  postApiV1ComplianceAcknowledgementsDocumentidVersionidOpen: {
     parameters: {
-      query?: {
-        /** @description Required: escalation or reminder */
-        purpose?: string
-        /** @description Required: why the names are needed, up to 500 characters; recorded in the audit trail */
-        reason?: string
-      }
+      query?: never
       header?: never
       path: {
         /** @description Document id */
@@ -11929,7 +11977,12 @@ export interface operations {
       }
       cookie?: never
     }
-    requestBody?: never
+    /** @description Required: purpose (escalation or reminder) and reason (up to 500 characters; recorded in the audit trail). A body, not query parameters, so they stay out of access logs (ADR 0060). */
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PersonsAccessRequest']
+      }
+    }
     responses: {
       200: {
         headers: {
@@ -11939,7 +11992,7 @@ export interface operations {
           'application/json': components['schemas']['OpenAcknowledgementsView']
         }
       }
-      /** @description Invalid value for: path parameter documentId, Invalid value for: path parameter versionId */
+      /** @description Invalid value for: path parameter documentId, Invalid value for: path parameter versionId, Invalid value for: body */
       400: {
         headers: {
           [name: string]: unknown

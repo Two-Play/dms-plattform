@@ -80,6 +80,18 @@ final case class VersionRateView(
 ) derives JsonCodec,
       Schema
 
+/** The stated purpose and reason for looking at named people. They travel in the request body, never in the
+  * URL, so they stay out of access logs, browser history and referrers (DMS-144, ADR 0060). Both are optional
+  * in the JSON so that a missing one answers 403 `purpose_required` rather than a decoding failure.
+  */
+final case class PersonsAccessRequest(
+    /** `escalation` or `reminder`. */
+    purpose: Option[String] = None,
+    /** Why the names are needed, 1 to 500 characters; recorded in the audit trail. */
+    reason: Option[String] = None
+) derives JsonCodec,
+      Schema
+
 /** Who has not acknowledged a version yet (purpose-limited, ADR 0036). */
 final case class OpenAcknowledgementsView(
     documentId: UUID,
@@ -223,27 +235,28 @@ object ComplianceApi:
       )
 
   val openAcknowledgements: ZServerEndpoint[Env, Any] =
-    SecuredApi.base.get
+    SecuredApi.base.post
       .in(
         base / "acknowledgements" / path[UUID]("documentId").description("Document id") /
           path[UUID]("versionId").description("Version id") / "open"
       )
-      .in(query[Option[String]]("purpose").description("Required: escalation or reminder"))
       .in(
-        query[Option[String]]("reason").description(
-          s"Required: why the names are needed, up to $MaxReasonLength characters; recorded in the audit trail"
+        jsonBody[PersonsAccessRequest].description(
+          s"Required: purpose (escalation or reminder) and reason (up to $MaxReasonLength characters; recorded " +
+            "in the audit trail). A body, not query parameters, so they stay out of access logs (ADR 0060)."
         )
       )
       .out(jsonBody[OpenAcknowledgementsView])
       .description(
         "Who has not acknowledged the version yet (purpose limitation, ADR 0036): for compliance officers in " +
           "scope and the document's owner, with a stated purpose and reason (403 purpose_required otherwise). " +
-          "Every access is recorded in the audit trail with purpose and reason. 422 if the version does not " +
+          "Purpose and reason are sent in the request body (POST) and recorded in the audit trail with every " +
+          "access, which is why this is not a GET. 422 if the version does not " +
           "require acknowledgement."
       )
       .tag("Compliance")
       .serverLogic(p =>
-        (documentId, versionId, purpose, reason) => persons(p, documentId, versionId, purpose, reason)
+        (documentId, versionId, body) => persons(p, documentId, versionId, body.purpose, body.reason)
       )
 
   def endpoints: List[ZServerEndpoint[Env, Any]] =

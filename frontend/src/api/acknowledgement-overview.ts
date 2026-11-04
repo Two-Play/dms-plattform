@@ -59,9 +59,10 @@ export async function fetchRecipients(
   purpose: AcknowledgementPurpose,
   reason: string,
 ): Promise<RecipientList> {
-  const { data, error, response } = await client.GET(
+  // POST with a body: purpose and reason must not travel in the URL (access logs, ADR 0060).
+  const { data, error, response } = await client.POST(
     '/api/v1/documents/{id}/versions/{versionId}/acknowledgement-recipients',
-    { params: { path: { id: documentId, versionId }, query: { purpose, reason } } },
+    { params: { path: { id: documentId, versionId } }, body: { purpose, reason } },
   )
   if (!response.ok || !data) {
     throw requestError(

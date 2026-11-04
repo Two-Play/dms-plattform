@@ -148,26 +148,27 @@ object AcknowledgementOverviewApi:
       .serverLogic(p => id => inTransaction(p)(ctx => overviewOf(p, ctx, DocumentId(id))))
 
   val recipients: ZServerEndpoint[Env, Any] =
-    SecuredApi.base.get
+    SecuredApi.base.post
       .in(version / "acknowledgement-recipients")
       .in(query[Option[String]]("status").description("open, done or absent for all"))
-      .in(query[Option[String]]("purpose").description("Required: escalation or reminder"))
       .in(
-        query[Option[String]]("reason").description(
-          s"Required: why the names are needed, up to ${ComplianceApi.MaxReasonLength} characters; recorded in " +
-            "the audit trail"
+        jsonBody[PersonsAccessRequest].description(
+          s"Required: purpose (escalation or reminder) and reason (up to ${ComplianceApi.MaxReasonLength} " +
+            "characters; recorded in the audit trail). A body, not query parameters, so they stay out of " +
+            "access logs (ADR 0060)."
         )
       )
       .out(jsonBody[RecipientListView])
       .description(
         "Who must acknowledge the version, with display names, and whether they did (acknowledgement time). " +
           "For the document's owner and compliance officers in scope, with a stated purpose and reason (403 " +
-          "purpose_required otherwise); every access is recorded in the audit trail. 422 if the version does " +
+          "purpose_required otherwise); every access is recorded in the audit trail, which is why this is a POST " +
+          "with purpose and reason in the body. 422 if the version does " +
           "not ask for acknowledgement."
       )
       .tag("Acknowledgements")
       .serverLogic(p =>
-        (id, versionId, status, purpose, reason) => recipientList(p, id, versionId, status, purpose, reason)
+        (id, versionId, status, body) => recipientList(p, id, versionId, status, body.purpose, body.reason)
       )
 
   val remind: ZServerEndpoint[Env, Any] =

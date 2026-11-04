@@ -84,10 +84,10 @@ function renderPanel({
       201,
     ),
 }: { load?: () => Reply; remind?: () => Reply } = {}) {
-  const get = vi.fn((path: string) =>
-    path.endsWith('acknowledgement-recipients') ? ok(recipients) : load(),
+  const get = vi.fn(() => load())
+  const post = vi.fn((path: string) =>
+    path.endsWith('acknowledgement-recipients') ? ok(recipients) : remind(),
   )
-  const post = vi.fn(remind)
   const client = { GET: get, POST: post } as unknown as ApiClient
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const view = render(
@@ -189,27 +189,23 @@ describe('Acknowledgement overview for owners (DMS-100)', () => {
     ) {
       downloads.push(this.download)
     })
-    const { get, user } = renderPanel()
+    const { post, user } = renderPanel()
     await user.click(
       await screen.findByRole('button', { name: 'Show who must confirm version 2.0' }),
     )
     const dialog = await screen.findByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: 'Show people' }))
     expect(within(dialog).getByRole('alert')).toHaveTextContent('Please state a reason.')
-    expect(get).not.toHaveBeenCalledWith(
-      '/api/v1/documents/{id}/versions/{versionId}/acknowledgement-recipients',
-      expect.anything(),
-    )
+    expect(post).not.toHaveBeenCalled()
 
     await user.type(within(dialog).getByLabelText('Reason *'), 'Policy rollout')
     await user.click(within(dialog).getByRole('button', { name: 'Show people' }))
-    expect(get).toHaveBeenCalledWith(
+    // Purpose and reason travel in the body, never in the URL (ADR 0060).
+    expect(post).toHaveBeenCalledWith(
       '/api/v1/documents/{id}/versions/{versionId}/acknowledgement-recipients',
       {
-        params: {
-          path: { id: documentId, versionId },
-          query: { purpose: 'reminder', reason: 'Policy rollout' },
-        },
+        params: { path: { id: documentId, versionId } },
+        body: { purpose: 'reminder', reason: 'Policy rollout' },
       },
     )
     const table = await within(dialog).findByRole('table', { name: 'Recipients of version 2.0' })
