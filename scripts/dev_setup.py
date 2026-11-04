@@ -8,10 +8,13 @@ Subcommands:
   seed --api URL  create demo field definitions, classes, workflows, number ranges, retention rules of the
                   classes, templates, an access group and a draft through the API; publish the demo central
                   instructions through the approval workflow (approver signs in afresh for the step-up check)
-                  and add a Word template with a draft
-  check [--dump DIR]            check the demo content offline (no services needed); --dump writes the
-                                central instruction contents, values and the Word template to DIR
-  approve-tasks USER --api URL  approve all open workflow tasks of a demo user (until the UI can vote, DMS-91)
+                  and add a Word template with a draft. Only ever works on first versions: a document or
+                  template with a valid version is finished, newer open versions stay untouched (DMS-135)
+  check [--dump DIR]            check the demo content and the seed's decisions offline (no services needed);
+                                --dump writes the central instruction contents, values and the Word template to DIR
+  approve-tasks USER --api URL [--document ID]
+                                approve the open workflow tasks of a demo user, all of them or only those of
+                                one document; a manual tool, the seed never calls it
   search-rebuild --api URL      rebuild the tenant's search index from the database (DMS-51, idempotent)
   intranet        ensure the intranet's technical user: a ZITADEL machine user with the platform role Reader
                   scoped to the class `policy` (DMS-58, idempotent); its client credentials are kept in
@@ -25,6 +28,7 @@ never printed.
 from __future__ import annotations
 
 import base64
+import contextlib
 import datetime
 import hashlib
 import io
@@ -916,13 +920,35 @@ def ensure_number_ranges(admin: Api, classes: dict[str, dict]) -> None:
             print(f"  number range {key}: assigned to class {class_key}")
 
 
+def template_step(latest: dict | None) -> str:
+    """What the seed does with a template, given its latest version in any status: `create` it, `advance` the first
+    version through its lifecycle, or leave a `finished` one alone. A later version was started by hand: the seed
+    releases only the first version and never someone else's work (DMS-135)."""
+    if latest is None:
+        return "create"
+    if latest["version"] == 1 and latest["status"] in ("Draft", "Testing"):
+        return "advance"
+    return "finished"
+
+
+def released_template(designer: Api, latest: dict) -> dict:
+    """The newest released version of a template, or `latest` if none is released: documents are created from it,
+    also while a newer version is being worked on."""
+    versions = designer("GET", f"/api/v1/admin/templates/{latest['templateId']}/versions")
+    return next((v for v in reversed(versions) if v["status"] == "Released"), latest)
+
+
 def ensure_template(designer: Api, designer2: Api, spec: dict, cls: dict) -> dict:
     """Creates the template as `designer`, moves it to Testing and releases it as `designer2` (four eyes)."""
     latest = {v["name"]: v for v in designer("GET", "/api/v1/admin/templates")}.get(spec["name"])
-    if latest is None:
+    step = template_step(latest)
+    if step == "create":
         body = {**spec, "documentClassId": cls["id"], "documentClassVersion": cls["version"]}
         latest = designer("POST", "/api/v1/admin/templates", body)
         print(f"  template {spec['name']}: created")
+    if step == "finished":
+        print(f"  template {spec['name']}: {latest['status']} (version {latest['version']})")
+        return released_template(designer, latest)
     path = f"/api/v1/admin/templates/{latest['templateId']}/versions/{latest['version']}/status"
     if latest["status"] == "Draft":
         latest = designer("POST", path, {"status": "Testing"})
@@ -930,8 +956,6 @@ def ensure_template(designer: Api, designer2: Api, spec: dict, cls: dict) -> dic
     if latest["status"] == "Testing":
         latest = designer2("POST", path, {"status": "Released"})
         print(f"  template {spec['name']}: released by designer2")
-    else:
-        print(f"  template {spec['name']}: {latest['status']} (version {latest['version']})")
     return latest
 
 
@@ -980,58 +1004,99 @@ def instruction_values(spec: dict, author_id: str, today: datetime.date) -> dict
     }
 
 
-VALID = ("Published", "ReviewDue")
+# The label of the first version: `1.0-draft.3` while it is open, `1.0` from approval on.
+FIRST_VERSION = "1.0"
+IN_WORKFLOW = ("InReview", "InApproval", "Approved")
 
 
-def document_statuses(author: Api) -> dict[str, dict]:
-    """The author's documents by title (the latest change wins for equal titles)."""
-    documents: dict[str, dict] = {}
-    for d in reversed(author("GET", "/api/v1/documents?limit=200")):
-        documents[d["title"]] = d
-    return documents
+def is_first_version(label: str) -> bool:
+    return label.split("-draft.")[0] == FIRST_VERSION
+
+
+def instruction_step(doc: dict | None) -> str:
+    """What the seed does with a demo instruction, given its entry in the document list: `create` it, `fill` and
+    submit its first draft, `wait` while its first version is in the workflow, or leave a `finished` one alone.
+
+    The list shows a document's open version if there is one, so a version someone started by hand looks like a
+    draft to continue: only the first version counts, a document that got past it is finished (DMS-135). So is
+    every other status of the first version: it was valid already or was taken out of use by hand."""
+    if doc is None:
+        return "create"
+    if not is_first_version(doc["version"]):
+        return "finished"
+    if doc["status"] == "Draft":
+        return "fill"
+    return "wait" if doc["status"] in IN_WORKFLOW else "finished"
+
+
+def listed_documents(author: Api) -> list[dict]:
+    """The documents the author sees, the most recently changed first."""
+    return author("GET", "/api/v1/documents?limit=200")
+
+
+def instruction_document(documents: list[dict], title: str, template_id: str) -> dict | None:
+    """The demo instruction with this title: from its template, and a finished one wins over a namesake someone
+    created by hand; otherwise the latest change."""
+    same = [d for d in documents if d["title"] == title and d["templateId"] == template_id]
+    return next((d for d in same if instruction_step(d) == "finished"), same[0] if same else None)
+
+
+def advance_instructions(author: Api, author_id: str, template: dict) -> dict[str, dict]:
+    """Creates, fills and submits the first versions of the demo instructions as far as they have not got there.
+    Returns the instructions in the workflow: version id -> document list entry."""
+    today = datetime.date.today()
+    documents = listed_documents(author)
+    waiting: dict[str, dict] = {}
+    for spec in INSTRUCTIONS:
+        title = spec["title"]
+        doc = instruction_document(documents, title, template["templateId"])
+        step = instruction_step(doc)
+        if step == "finished":
+            print(f"  instruction '{title}': published ({doc.get('documentNumber', 'no number')}), "
+                  f"shown as {doc['version']} {doc['status']}")
+            continue
+        values = instruction_values(spec, author_id, today)
+        if step == "create":
+            created = author("POST", "/api/v1/documents", {
+                "templateId": template["templateId"], "templateVersion": template["version"], "title": title,
+                "values": values})
+            doc = {"id": created["id"], "title": title, "templateId": template["templateId"],
+                   "versionId": created["current"]["id"], "version": created["current"]["version"],
+                   "status": created["current"]["status"]}
+            print(f"  instruction '{title}': created as {created.get('documentNumber', 'draft without number')}")
+        if step in ("create", "fill"):
+            author("PUT", f"/api/v1/documents/{doc['id']}/draft",
+                   {"title": title, "values": values, "content": spec["content"]})
+            author("POST", f"/api/v1/documents/{doc['id']}/submit")
+            print(f"  instruction '{title}': submitted")
+        waiting[doc["versionId"]] = doc
+    return waiting
 
 
 def ensure_instructions(z: Zitadel, api_base: str, author: Api, author_id: str, template: dict) -> None:
     """Publishes the demo central instructions through the regular workflow: `author` creates, fills and
     submits each one, `approver` approves it with a fresh sign-in (step-up, as `approve-tasks` does), the
     rendering job seals the rendition and the publication job publishes it (its valid-from date has come).
-    Idempotent: documents are found by title and continued from their current status."""
-    today = datetime.date.today()
-    existing = document_statuses(author)
-    waiting: dict[str, str] = {}
-    for spec in INSTRUCTIONS:
-        title = spec["title"]
-        doc = existing.get(title)
-        if doc and doc["status"] in VALID:
-            print(f"  instruction '{title}': published ({doc.get('documentNumber', 'no number')})")
-            continue
-        values = instruction_values(spec, author_id, today)
-        if doc is None:
-            doc = author("POST", "/api/v1/documents", {
-                "templateId": template["templateId"], "templateVersion": template["version"], "title": title,
-                "values": values})
-            doc["status"] = "Draft"
-            print(f"  instruction '{title}': created as {doc.get('documentNumber', 'draft without number')}")
-        if doc["status"] == "Draft":
-            author("PUT", f"/api/v1/documents/{doc['id']}/draft",
-                   {"title": title, "values": values, "content": spec["content"]})
-            author("POST", f"/api/v1/documents/{doc['id']}/submit")
-            print(f"  instruction '{title}': submitted")
-        waiting[doc["id"]] = title
+    Idempotent: documents are found by title and template and continued from the status of their first version."""
+    waiting = advance_instructions(author, author_id, template)
     if not waiting:
         return
-    approve_documents(z, "approver", api_base, set(waiting))
-    wait_for_publication(author, waiting)
+    approve_versions(z, "approver", api_base, set(waiting))
+    wait_for_publication(author, waiting, template["templateId"])
 
 
-def approve_documents(z: Zitadel, username: str, api_base: str, document_ids: set[str]) -> None:
-    """Approves the open tasks of `username` on the given documents with a fresh sign-in (ID token for the
+def open_tasks_of(tasks: list[dict], version_ids: set[str]) -> list[dict]:
+    """The open tasks of these versions: the seed votes only for the versions it submitted itself."""
+    return [task for task in tasks if task["status"] == "Open" and task["versionId"] in version_ids]
+
+
+def approve_versions(z: Zitadel, username: str, api_base: str, version_ids: set[str]) -> None:
+    """Approves the open tasks of `username` on the given versions with a fresh sign-in (ID token for the
     step-up check). Tasks are created with the submission; a short retry covers a slow workflow start."""
     tokens = z.tokens(username, user_password(username))
     api = Api(api_base, tokens["access_token"], tokens.get("id_token"))
     for _ in range(10):
-        tasks = [task for task in api("GET", "/api/v1/workflow/tasks")
-                 if task["status"] == "Open" and task["documentId"] in document_ids]
+        tasks = open_tasks_of(api("GET", "/api/v1/workflow/tasks"), version_ids)
         for task in tasks:
             api("POST", f"/api/v1/workflow/tasks/{task['id']}/votes", {"decision": "Approve"})
             print(f"  {username} approved '{task['stepName']}' of document {task['documentId']}")
@@ -1041,21 +1106,22 @@ def approve_documents(z: Zitadel, username: str, api_base: str, document_ids: se
     print(f"  no open tasks of {username} for the instructions (approved already?)")
 
 
-def wait_for_publication(author: Api, waiting: dict[str, str], seconds: int = 180) -> None:
+def wait_for_publication(author: Api, waiting: dict[str, dict], template_id: str, seconds: int = 180) -> None:
     """Waits until the instructions are published: the rendering job seals the approved versions (rendering
     worker) and the publication job publishes them, as their valid-from date has come."""
     print("  waiting for rendition and publication ...")
+    titles = [doc["title"] for doc in waiting.values()]
     deadline = time.monotonic() + seconds
-    statuses: dict[str, str] = {}
+    current: dict[str, dict | None] = {}
     while time.monotonic() < deadline:
-        current = document_statuses(author)
-        statuses = {title: current.get(title, {}).get("status", "?") for title in waiting.values()}
-        if all(s in VALID for s in statuses.values()):
+        documents = listed_documents(author)
+        current = {title: instruction_document(documents, title, template_id) for title in titles}
+        if all(instruction_step(doc) == "finished" for doc in current.values()):
             break
         time.sleep(3)
-    for title, status in statuses.items():
-        print(f"  instruction '{title}': {status}")
-    if not all(s in VALID for s in statuses.values()):
+    for title, doc in current.items():
+        print(f"  instruction '{title}': {doc['status'] if doc else '?'}")
+    if not all(instruction_step(doc) == "finished" for doc in current.values()):
         print("  not all instructions are published yet: the rendering worker and the background jobs must run "
               "(see .local/logs/backend.log); run the seed again later to continue")
 
@@ -1074,7 +1140,10 @@ def ensure_word_example(designer: Api, designer2: Api, author: Api, author_id: s
     """A Word template for central instructions (DOCX with content controls) released with four eyes, and a
     draft file document from it with its manual field filled (DMS-115). Idempotent by name and title."""
     latest = {v["name"]: v for v in designer("GET", "/api/v1/admin/templates")}.get(WORD_TEMPLATE_NAME)
-    if latest is None:
+    step = template_step(latest)
+    if step == "finished":
+        latest = released_template(designer, latest)
+    if step == "create":
         latest = designer("POST", "/api/v1/admin/templates", {
             "name": WORD_TEMPLATE_NAME,
             "description": "Zentralanweisung als Word-Dokument mit Feldern für Nummer, Index und Freigabe",
@@ -1100,7 +1169,7 @@ def ensure_word_example(designer: Api, designer2: Api, author: Api, author_id: s
         print(f"  template {WORD_TEMPLATE_NAME}: {latest['status']}; no Word document")
         return
     print(f"  template {WORD_TEMPLATE_NAME}: released (version {latest['version']})")
-    if WORD_DOCUMENT_TITLE in document_statuses(author):
+    if any(d["title"] == WORD_DOCUMENT_TITLE for d in listed_documents(author)):
         print(f"  document '{WORD_DOCUMENT_TITLE}': exists")
         return
     spec = {"unit": "Einkauf", "valid_from": 0, "tags": ["Dienstwagen", "Fuhrpark"],
@@ -1234,14 +1303,103 @@ def check_demo_content(dump: Path | None) -> list[str]:
     return problems
 
 
+class FakeApi:
+    """Stands in for an `Api` in the offline check: answers GETs from `responses` and records every write."""
+
+    def __init__(self, responses: dict[str, list[dict]]):
+        self.responses = responses
+        self.writes: list[tuple[str, str]] = []
+
+    def __call__(self, method: str, path: str, body=None):
+        if method == "GET":
+            return self.responses[path]
+        self.writes.append((method, path))
+        if path == "/api/v1/documents":
+            return {"id": "created", "current": {"id": "created-1", "version": "1.0-draft.1", "status": "Draft"}}
+        return {"status": body["status"]} if body and "status" in body else {}
+
+
+def listed(i: int, version: str, status: str, template: str = "t") -> dict:
+    """An entry of the document list for the demo instruction `i`."""
+    return {"id": f"d{i}", "versionId": f"v{i}", "title": INSTRUCTIONS[i]["title"], "templateId": template,
+            "version": version, "status": status}
+
+
+def check_seed_decisions() -> list[str]:
+    """Offline checks that the seed works on first versions only and leaves everything else alone (DMS-135)."""
+    problems: list[str] = []
+    steps = [
+        (None, "create"),
+        ({"version": "1.0-draft.1", "status": "Draft"}, "fill"),
+        ({"version": "1.0-draft.4", "status": "InReview"}, "wait"),
+        ({"version": "1.0-draft.4", "status": "InApproval"}, "wait"),
+        ({"version": "1.0", "status": "Approved"}, "wait"),
+        ({"version": "1.0", "status": "Published"}, "finished"),
+        ({"version": "1.0", "status": "ReviewDue"}, "finished"),
+        ({"version": "1.0", "status": "Withdrawn"}, "finished"),
+        ({"version": "2.0-draft.1", "status": "Draft"}, "finished"),
+        ({"version": "1.1-draft.2", "status": "Draft"}, "finished"),
+        ({"version": "2.0-draft.3", "status": "InApproval"}, "finished"),
+        ({"version": "2.0", "status": "Approved"}, "finished"),
+        ({"version": "10.0-draft.1", "status": "Draft"}, "finished"),
+    ]
+    for doc, expected in steps:
+        if instruction_step(doc) != expected:
+            problems.append(f"seed: {doc} should be '{expected}', is '{instruction_step(doc)}'")
+    template_steps = [
+        (None, "create"),
+        ({"version": 1, "status": "Draft"}, "advance"),
+        ({"version": 1, "status": "Testing"}, "advance"),
+        ({"version": 1, "status": "Released"}, "finished"),
+        ({"version": 2, "status": "Draft"}, "finished"),
+        ({"version": 2, "status": "Testing"}, "finished"),
+    ]
+    for template, expected in template_steps:
+        if template_step(template) != expected:
+            problems.append(f"seed: template {template} should be '{expected}', is '{template_step(template)}'")
+
+    # A run over all cases at once: only first versions are written to and waited for.
+    published, newer, first_draft, in_approval = (listed(i, v, s) for i, (v, s) in enumerate([
+        ("1.0", "Published"), ("2.0-draft.1", "Draft"), ("1.0-draft.2", "Draft"), ("1.0-draft.3", "InApproval")]))
+    namesake = {**listed(0, "1.0-draft.1", "Draft"), "id": "namesake", "versionId": "namesake-1"}
+    other_template = {**listed(2, "1.0-draft.1", "Draft", template="other"), "id": "foreign"}
+    documents = [namesake, other_template, published, newer, first_draft, in_approval]
+    author = FakeApi({"/api/v1/documents?limit=200": documents})
+    silent = io.StringIO()
+    with contextlib.redirect_stdout(silent):
+        waiting = advance_instructions(author, "author-1", {"templateId": "t", "version": 1})
+    expected_writes = [("PUT", "/api/v1/documents/d2/draft"), ("POST", "/api/v1/documents/d2/submit")]
+    if author.writes != expected_writes:
+        problems.append(f"seed: wrote {author.writes} instead of {expected_writes}")
+    if set(waiting) != {"v2", "v3"}:
+        problems.append(f"seed: waits for {sorted(waiting)} instead of the first versions v2 and v3")
+
+    tasks = [{"status": "Open", "versionId": "v2"}, {"status": "Open", "versionId": "v1"},
+             {"status": "Completed", "versionId": "v3"}]
+    if open_tasks_of(tasks, set(waiting)) != tasks[:1]:
+        problems.append("seed: votes on tasks of versions it did not submit")
+    if tasks_for_document([{"documentId": "a"}, {"documentId": "b"}], "b") != [{"documentId": "b"}]:
+        problems.append("approve-tasks: --document does not narrow the tasks")
+
+    # A template version started by hand stays a draft, and documents come from the released version.
+    released = {"templateId": "t", "version": 1, "status": "Released", "name": "n"}
+    draft = {**released, "version": 2, "status": "Draft"}
+    designer = FakeApi({"/api/v1/admin/templates": [draft], "/api/v1/admin/templates/t/versions": [released, draft]})
+    with contextlib.redirect_stdout(silent):
+        used = ensure_template(designer, designer, {"name": "n"}, {"id": "c", "version": 1})
+    if designer.writes or used != released:
+        problems.append(f"seed: template draft written to ({designer.writes}) or used instead of {released}")
+    return problems
+
+
 def cmd_check(dump: Path | None) -> None:
-    problems = check_demo_content(dump)
+    problems = check_demo_content(dump) + check_seed_decisions()
     for problem in problems:
         print(f"problem: {problem}", file=sys.stderr)
     if problems:
         sys.exit(1)
     print(f"Demo content consistent: {len(CLASSES)} classes, {len(INSTRUCTIONS)} central instructions and a "
-          f"Word template{f'; written to {dump}' if dump else ''}")
+          f"Word template; the seed leaves versions after the first alone{f'; written to {dump}' if dump else ''}")
 
 
 def cmd_search_rebuild(api_base: str) -> None:
@@ -1252,13 +1410,19 @@ def cmd_search_rebuild(api_base: str) -> None:
           f"in {result['index']} ({result['tookMillis']} ms)")
 
 
-def cmd_approve_tasks(username: str, api_base: str) -> None:
-    """Approves every open task of a demo user with a fresh sign-in. Stands in for voting in the web UI until it
-    exists (DMS-91). Approval votes need a sign-in within dms.workflow.reauthenticationSeconds (step-up); the API
-    reads it from the auth_time of the ID token sent in X-DMS-Id-Token, because ZITADEL access tokens have none."""
+def tasks_for_document(tasks: list[dict], document_id: str | None) -> list[dict]:
+    return [task for task in tasks if document_id is None or task["documentId"] == document_id]
+
+
+def cmd_approve_tasks(username: str, api_base: str, document_id: str | None = None) -> None:
+    """Approves the open tasks of a demo user with a fresh sign-in, all of them or only those of one document: a
+    manual shortcut for the walkthrough in the README, whatever the drafts are, so the seed does not use it. Approval
+    votes need a sign-in within dms.workflow.reauthenticationSeconds (step-up); the API reads it from the auth_time of
+    the ID token sent in X-DMS-Id-Token, because ZITADEL access tokens have none."""
     tokens = Zitadel().tokens(username, user_password(username))
     api = Api(api_base, tokens["access_token"], tokens.get("id_token"))
     tasks = [task for task in api("GET", "/api/v1/workflow/tasks") if task["status"] == "Open"]
+    tasks = tasks_for_document(tasks, document_id)
     if not tasks:
         print(f"No open tasks for {username}")
     for task in tasks:
@@ -1288,6 +1452,8 @@ def main(argv: list[str]) -> None:
         cmd_search_rebuild(args[1])
     elif command == "approve-tasks" and len(args) == 3 and args[1] == "--api":
         cmd_approve_tasks(args[0], args[2])
+    elif command == "approve-tasks" and len(args) == 5 and args[1] == "--api" and args[3] == "--document":
+        cmd_approve_tasks(args[0], args[2], args[4])
     elif command == "env-file" and args:
         set_env_keys(Path(args[0]), dict(a.split("=", 1) for a in args[1:]))
     else:
