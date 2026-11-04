@@ -72,3 +72,7 @@ New business role `ComplianceOfficer` (business concept 2.2, "Compliance-Beauftr
 ## Addendum (DMS-57, 2026-10-29): evidence reports
 
 New action `GenerateEvidenceReport` (ADR 0034): creating and downloading the evidence report of a document, granted to auditors and records managers whose assignment covers the document (class/unit scope) in any status; the confidentiality rules apply unchanged, so a confidential document additionally needs an allowed group. It is checked on the `DocumentResource` of the latest version. The permission matrix of business concept 2.3 has no row for audit reports; the action follows the audit role's "evidence" duties.
+
+## Addendum (DMS-143, 2026-11-04): withdrawing an approved version
+
+`Withdraw` also covers an approved version that is not valid yet: holders of the owner role and approvers of this version, the same people as `Publish` (ADR 0059). `ReadDocument` on a version withdrawn before it took effect (`Resource.withdrawnBeforeValid`) follows the rule of an approved version, plus records managers and auditors.

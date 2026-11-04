@@ -30,6 +30,24 @@ import java.time.temporal.ChronoUnit
 import java.time.{Instant, LocalDate, ZoneId}
 import java.util.UUID
 
+/** Why a version was not withdrawn, for clients to tell the outcomes of a race apart (DMS-143, ADR 0059).
+  *
+  * @param code
+  *   the code of the API error
+  */
+enum WithdrawalRefusal(val code: String):
+  /** The publication got there first: the version is valid (or was valid) now. */
+  case AlreadyPublished extends WithdrawalRefusal("version_published")
+
+  /** The valid-from date has come: the publication job publishes the version. */
+  case Due extends WithdrawalRefusal("version_due")
+
+  /** Another withdrawal got there first. */
+  case AlreadyWithdrawn extends WithdrawalRefusal("version_withdrawn")
+
+  /** The version was never approved. */
+  case NotApproved extends WithdrawalRefusal("version_not_approved")
+
 enum DocumentError:
   case NotFound(message: String)
 
@@ -47,6 +65,9 @@ enum DocumentError:
   /** A concurrent change got there first, or the version is not in a status that allows the change. */
   case Conflict(message: String)
 
+  /** An approved version cannot be withdrawn (any more), see [[DocumentService.withdrawApproved]]. */
+  case WithdrawalRefused(refusal: WithdrawalRefusal, message: String)
+
   case Database(error: DbError)
 
   def describe: String = this match
@@ -62,8 +83,9 @@ enum DocumentError:
     case Lifecycle(LifecycleError.LegalHoldActive)                => "a legal hold is active"
     case Lifecycle(LifecycleError.SegregationOfDutiesViolated(_)) =>
       "segregation of duties: the author of a version cannot approve it"
-    case Conflict(m) => m
-    case Database(e) => s"database error: $e"
+    case Conflict(m)             => m
+    case WithdrawalRefused(_, m) => m
+    case Database(e)             => s"database error: $e"
 
 /** Access to templates (module `templates`) for documents: the catalog of released versions, the content
   * check, computed fields and the stored content format. Implemented by the application, which wires the
@@ -961,9 +983,78 @@ final class DocumentService(
             .asSome
     yield published
 
+  /** Stops an approved version before its valid-from date (DMS-143, ADR 0059): it goes to `Withdrawn` and
+    * never takes effect, the valid version of its scope stays as it is, and its queued publication jobs are
+    * cancelled. The reason is required. Frozen data stays: content, snapshot, approval, the rendition and its
+    * retention (the database queues the Object Lock job of a version going out of force). No acknowledgement
+    * exists yet, because the audience is fixed at publication. Recorded in the audit trail
+    * (`document.withdrawn-before-valid`) and published to the outbox (`document.status-changed`, and
+    * `document.approved-version-withdrawn` for the notification) in the same transaction.
+    *
+    * A race with [[publishScheduled]] is decided by the row lock of the version: the clock is read after it,
+    * so exactly one of the two changes the version and the other finds its result. A withdrawal that loses
+    * fails with [[DocumentError.WithdrawalRefused]]; a publication job that loses does nothing.
+    *
+    * @param approvers
+    *   who approved the version, known to the workflow; they are notified with the document's owner, without
+    *   the actor
+    */
+  def withdrawApproved(
+      versionId: UUID,
+      reason: String,
+      approvers: Set[UserId],
+      actor: UserId
+  ): IO[DocumentError, DocumentVersion] =
+    val why = reason.trim
+    for
+      _ <- ZIO.when(why.isEmpty)(ZIO.fail(DocumentError.Invalid(List("a reason is required"))))
+      _ <- ZIO.when(why.length > MaxReasonLength)(
+        ZIO.fail(DocumentError.Invalid(List(s"the reason must have at most $MaxReasonLength characters")))
+      )
+      current  <- sql(DocumentStore.lockVersion(versionId, templates)).someOrFail(versionNotFound(versionId))
+      zone     <- sql(DocumentStore.tenantZone)
+      now      <- Clock.instant
+      _        <- ZIO.foreachDiscard(withdrawalRefusal(current, zone, now))(ZIO.fail(_))
+      document <- sql(DocumentStore.document(current.documentId))
+        .someOrFail(documentNotFound(current.documentId))
+      updated <- transition(
+        document,
+        current,
+        LifecycleEvent.Withdraw,
+        actor,
+        withdrawalReason = Some(why)
+      )
+      _ <- PublicationJobs
+        .cancel(versionId, s"version ${current.label} was withdrawn by ${actor.value}")
+        .mapError(DocumentError.Database(_))
+      recipients = (approvers ++ document.ownerId - actor).toList.sortBy(_.value)
+      _ <- Outbox
+        .publish(
+          "document",
+          document.id.value,
+          ApprovedVersionWithdrawn,
+          Jsonb(
+            Json
+              .Obj(
+                (List(
+                  "documentId"  -> Json.Str(document.id.value.toString),
+                  "versionId"   -> Json.Str(versionId.toString),
+                  "version"     -> Json.Str(current.label),
+                  "withdrawnBy" -> Json.Str(actor.value),
+                  "reason"      -> Json.Str(why),
+                  "recipients"  -> Json.Arr(recipients.map(u => Json.Str(u.value))*)
+                ) ++ current.validFrom.map(d => "validFrom" -> Json.Str(d.toString)))*
+              )
+              .toJson
+          )
+        )
+        .mapError(DocumentError.Database(_))
+    yield updated
+
   /** Applies a lifecycle event to a version (review, approval, publication, ...). Approval needs a person
     * other than the author and freezes the version with a metadata snapshot; publication supersedes the valid
-    * version of the same scope.
+    * version of the same scope. An approved version is withdrawn with [[withdrawApproved]] only: it needs a
+    * reason.
     */
   def changeStatus(
       versionId: UUID,
@@ -971,7 +1062,10 @@ final class DocumentService(
       actor: UserId
   ): IO[DocumentError, DocumentVersion] =
     for
-      current  <- sql(DocumentStore.lockVersion(versionId, templates)).someOrFail(versionNotFound(versionId))
+      current <- sql(DocumentStore.lockVersion(versionId, templates)).someOrFail(versionNotFound(versionId))
+      _       <- ZIO.when(event == LifecycleEvent.Withdraw && current.status == DocumentStatus.Approved)(
+        ZIO.fail(DocumentError.Invalid(List("withdrawing an approved version needs a reason")))
+      )
       document <- sql(DocumentStore.document(current.documentId))
         .someOrFail(documentNotFound(current.documentId))
       updated <- transition(document, current, event, actor)
@@ -1002,9 +1096,9 @@ final class DocumentService(
       )
     yield updated
 
-  /** Starts the next version of a document from its valid version: a major version for a change of content, a
-    * minor version for an editorial change. Every new version needs a change summary (DMS-126, business
-    * concept 5.1). A document has at most one open version.
+  /** Starts the next version of a document from its valid version (see [[Versioning.startingPoint]]): a major
+    * version for a change of content, a minor version for an editorial change. Every new version needs a
+    * change summary (DMS-126, business concept 5.1). A document has at most one open version.
     */
   def newVersion(
       id: DocumentId,
@@ -1029,8 +1123,12 @@ final class DocumentService(
         )
       )
       base <- ZIO
-        .fromOption(versions.filter(v => Versioning.isValid(v.status)).maxByOption(_.number))
+        .fromOption(Versioning.startingPoint(versions))
         .orElseFail(DocumentError.Conflict("only a document with a valid version can get a new version"))
+      // A minor version needs only the owner's confirmation: nothing may first take effect that way (ADR 0059).
+      _ <- ZIO.when(kind == ChangeKind.Minor && !Versioning.isValid(base.status))(
+        ZIO.fail(DocumentError.Conflict("without a valid version, only a major version can be started"))
+      )
       number = Versioning.next(versions.filter(_.releasedAt.isDefined).map(_.number).maxOption, kind)
       changeReason <- checkChangeReason(kind, number, reason)
       workingState <- sql(DocumentStore.workingStates(id, number)).map(Versioning.nextWorkingState)
@@ -1069,6 +1167,7 @@ final class DocumentService(
         deviations = DeviationReport.compare(template.content, base.content, carried.map(_.request)),
         validFrom = None,
         supersededBy = None,
+        withdrawal = None,
         requiresAcknowledgement = requiresAcknowledgement.getOrElse(
           kind == ChangeKind.Major || settings.minorVersionsRequireAcknowledgement
         ),
@@ -1651,7 +1750,8 @@ final class DocumentService(
       before: DocumentVersion,
       event: LifecycleEvent,
       actor: UserId,
-      successor: Option[UUID] = None
+      successor: Option[UUID] = None,
+      withdrawalReason: Option[String] = None
   ): IO[DocumentError, DocumentVersion] =
     for
       current <-
@@ -1699,16 +1799,18 @@ final class DocumentService(
         )
         .map(_.flatten)
       _ <- sql(
-        DocumentStore.changeStatus(
-          current.id,
-          current.status,
-          target,
-          actor,
-          now,
-          snapshot,
-          validFrom,
-          supersededBy
-        )
+        withdrawalReason.fold(
+          DocumentStore.changeStatus(
+            current.id,
+            current.status,
+            target,
+            actor,
+            now,
+            snapshot,
+            validFrom,
+            supersededBy
+          )
+        )(DocumentStore.withdrawApproved(current.id, actor, now, _))
       )
         .filterOrFail(identity)(changedConcurrently(current))
         .mapError(conflict(s"document ${document.id.value} already has a valid version in this scope"))
@@ -1729,7 +1831,8 @@ final class DocumentService(
         // The database records the same moment on Approved -> Published (migration V15).
         publishedAt =
           if current.status == DocumentStatus.Approved && target == DocumentStatus.Published then Some(now)
-          else current.publishedAt
+          else current.publishedAt,
+        withdrawal = withdrawalReason.map(VersionWithdrawal(now, actor, _)).orElse(current.withdrawal)
       )
       details = Json.Obj(
         (List(
@@ -1738,9 +1841,16 @@ final class DocumentService(
           "to"    -> Json.Str(target.toString)
         ) ++ validFrom.map(d => "validFrom" -> Json.Str(d.toString)) ++
           supersededBy.map(s => "supersededBy" -> Json.Str(s.toString)) ++
-          reviewDueOn.map(d => "reviewDueOn" -> Json.Str(d.toString)))*
+          reviewDueOn.map(d => "reviewDueOn" -> Json.Str(d.toString)) ++
+          withdrawalReason.map(r => "reason" -> Json.Str(r)))*
       )
-      _ <- record(actor, statusAction(event), updated, details)
+      _ <- record(
+        actor,
+        withdrawalReason.fold(statusAction(event))(_ => WithdrawnBeforeValid),
+        updated,
+        details,
+        withdrawalReason
+      )
       _ <- publish(
         if event == LifecycleEvent.Submit then "document.submitted" else "document.status-changed",
         document,
@@ -1887,6 +1997,36 @@ object DocumentService:
       settings: DocumentSettings
   ): URLayer[AuditTrail & DocumentClassService & TemplateSource, DocumentService] =
     ZLayer.fromFunction(DocumentService(_, _, _, settings))
+
+  /** Audit action of [[DocumentService.withdrawApproved]]. */
+  val WithdrawnBeforeValid = "document.withdrawn-before-valid"
+
+  /** Outbox event of [[DocumentService.withdrawApproved]] for the notification of approvers and owner; the
+    * status change itself is a `document.status-changed` like every other.
+    */
+  val ApprovedVersionWithdrawn = "document.approved-version-withdrawn"
+
+  /** Why `v` cannot be withdrawn at `now`, if so: it must be approved and before its valid-from date. */
+  private def withdrawalRefusal(v: DocumentVersion, zone: ZoneId, now: Instant): Option[DocumentError] =
+    def refused(refusal: WithdrawalRefusal, message: String) =
+      Some(DocumentError.WithdrawalRefused(refusal, s"version ${v.label} $message"))
+    v.status match
+      case DocumentStatus.Approved if Publication.isDue(v.validFrom, zone, now) =>
+        refused(
+          WithdrawalRefusal.Due,
+          s"became due on ${v.validFrom.fold("its approval")(_.toString)} and is being published; it can " +
+            "only be withdrawn as a valid version"
+        )
+      case DocumentStatus.Approved  => None
+      case DocumentStatus.Withdrawn =>
+        refused(WithdrawalRefusal.AlreadyWithdrawn, "has been withdrawn already")
+      case status if v.publishedAt.isDefined =>
+        refused(
+          WithdrawalRefusal.AlreadyPublished,
+          s"was published first and is $status now; it can only be withdrawn as a valid version"
+        )
+      case status =>
+        refused(WithdrawalRefusal.NotApproved, s"is $status; only an approved version can be withdrawn")
 
   /** The platform as actor of scheduled publications (DMS-45); recorded as technical actor. */
   val Scheduler: UserId = UserId("system:publication")

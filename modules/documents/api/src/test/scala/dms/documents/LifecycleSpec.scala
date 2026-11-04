@@ -39,7 +39,7 @@ object LifecycleSpec extends ZIOSpecDefault:
         Lifecycle.transition(Published, Withdraw) == Right(Withdrawn),
         Lifecycle.transition(ReviewDue, Withdraw) == Right(Withdrawn),
         Lifecycle.transition(Superseded, Withdraw).isLeft,
-        Lifecycle.transition(Approved, Withdraw).isLeft,
+        Lifecycle.transition(Approved, Withdraw) == Right(Withdrawn),
         Lifecycle.transition(Withdrawn, Archive) == Right(Archived)
       )
     },

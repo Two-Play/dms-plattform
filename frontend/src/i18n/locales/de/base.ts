@@ -150,6 +150,7 @@ export const status: Translation<typeof en.status> = {
   ReviewDue: 'Rezertifizierung fällig',
   Superseded: 'Abgelöst',
   Withdrawn: 'Außer Kraft',
+  WithdrawnBeforeValid: 'Zurückgezogen, nie gültig',
   Archived: 'Archiviert',
   Destroyed: 'Vernichtet',
   Discarded: 'Verworfen',

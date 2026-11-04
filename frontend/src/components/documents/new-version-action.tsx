@@ -49,7 +49,8 @@ function NewVersionForm({
   const [summary, setSummary] = useState('')
   const [attempted, setAttempted] = useState(false)
   const fileDocument = document.kind === 'File'
-  const labels = nextLabels(document.current.version)
+  // Numbers count on from the highest approved version, also one that was withdrawn before it took effect.
+  const labels = nextLabels(document.latestReleasedVersion ?? document.current.version)
 
   const trimmed = summary.trim()
   // Every new version needs a change summary, major and minor (DMS-126, business concept 5.1).
@@ -89,9 +90,19 @@ function NewVersionForm({
   const error = attempted ? problem : undefined
   const summaryId = `${id}-summary`
   const hintId = `${id}-summary-hint`
+  // Without a valid version nothing may first take effect on the owner's confirmation alone (ADR 0059).
+  const neverValid = document.current.status === 'Withdrawn'
   const options: { value: ChangeKind; label: string; hint: string }[] = [
     { value: 'Major', label: t('newVersion.major'), hint: t('newVersion.majorHint') },
-    { value: 'Minor', label: t('newVersion.minor'), hint: t('newVersion.minorHint') },
+    ...(neverValid
+      ? []
+      : [
+          {
+            value: 'Minor' as const,
+            label: t('newVersion.minor'),
+            hint: t('newVersion.minorHint'),
+          },
+        ]),
   ]
 
   return (

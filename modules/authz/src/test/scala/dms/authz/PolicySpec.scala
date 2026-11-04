@@ -295,6 +295,52 @@ object PolicySpec extends ZIOSpecDefault:
         !reads(Destroyed, RecordsManager)()
       )
     },
+    test("an approved version is withdrawn by those who could publish it (ADR 0059)") {
+      def decide(resource: Resource, roles: Role*) =
+        Policy
+          .decide(Subject(user, tenant, roles.map(RoleAssignment(_)).toSet), Withdraw, resource, now)
+          .isPermitted
+      val approved = document(Approved)
+      val byCaller = approved.copy(approvedBy = Set(user))
+      assertTrue(
+        decide(approved, Owner),
+        decide(approved.copy(authorId = Some(user)), Owner),
+        decide(byCaller, Approver),
+        !decide(approved, Approver),
+        !decide(byCaller, Reviewer),
+        !decide(approved, Author),
+        !decide(approved.copy(authorId = Some(user)), Author),
+        !decide(approved, RecordsManager),
+        !decide(approved, TenantAdmin),
+        !decide(approved, Reader),
+        // Valid versions as before; nothing else can be withdrawn.
+        decide(document(Published), Approver),
+        !decide(document(Draft), Owner),
+        !decide(document(Withdrawn), Owner),
+        // Confidentiality applies as to everything else.
+        !decide(approved.copy(confidentiality = Confidentiality.Confidential), Owner)
+      )
+    },
+    test("a version withdrawn before it took effect stays readable for those who could read it approved") {
+      def reads(resource: Resource, roles: Role*) =
+        Policy
+          .decide(Subject(user, tenant, roles.map(RoleAssignment(_)).toSet), ReadDocument, resource, now)
+          .isPermitted
+      val stopped = document(Withdrawn).copy(withdrawnBeforeValid = true)
+      assertTrue(
+        reads(stopped, Owner),
+        reads(stopped, RecordsManager),
+        reads(stopped, Auditor),
+        reads(stopped, Author),
+        reads(stopped.copy(assignedParticipants = Set(user)), Approver),
+        reads(stopped.copy(approvedBy = Set(user)), Approver),
+        !reads(stopped, Approver),
+        !reads(stopped, Reader),
+        !reads(stopped, TenantAdmin),
+        !reads(document(Withdrawn), Author),
+        !reads(document(Withdrawn).copy(approvedBy = Set(user)), Approver)
+      )
+    },
     test("the compliance cockpit follows the scope and the confidentiality of the version (ADR 0036)") {
       val hrOfficer =
         Subject(user, tenant, Set(RoleAssignment(ComplianceOfficer, organizationalUnit = Some("hr"))))

@@ -72,7 +72,7 @@ Given: `validFrom` is a core field required from review on (ADR 0019); versions 
 - Must be done: administration endpoint for the tenant time zone (today only by SQL as schema owner).
 - Must be done: acknowledgement story reads `requiresAcknowledgement` (outbox `document.status-changed` with status `Published`).
 - Should: per-class editorial path (opt out, other confirmers), owner lanes in custom definitions, owner deputies instead of the `Approver` role.
-- Should: withdrawing an approved, not yet valid version (lifecycle change).
+- Done (DMS-143, ADR 0059): withdrawing an approved, not yet valid version (lifecycle change).
 - Ruled out: computing validity at read time.
 
 ## Reversibility

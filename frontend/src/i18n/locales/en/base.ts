@@ -150,6 +150,7 @@ export const status = {
   ReviewDue: 'Review due',
   Superseded: 'Superseded',
   Withdrawn: 'Withdrawn',
+  WithdrawnBeforeValid: 'Withdrawn, never valid',
   Archived: 'Archived',
   Destroyed: 'Destroyed',
   Discarded: 'Discarded',

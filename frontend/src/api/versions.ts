@@ -108,6 +108,36 @@ export async function discardDraft(
   return data
 }
 
+export type WithdrawableVersion = components['schemas']['WithdrawableVersionView']
+
+/** Longest reason for withdrawing a version the backend accepts. */
+export const MAX_WITHDRAWAL_REASON = 4000
+
+/**
+ * Stops an approved version before its valid-from date (POST
+ * /api/v1/documents/{id}/versions/{versionId}/withdraw, DMS-143). The error code tells a lost race
+ * (`version_published`, `version_due`, `version_withdrawn`).
+ */
+export async function withdrawVersion(
+  client: ApiClient,
+  id: string,
+  versionId: string,
+  reason: string,
+): Promise<DocumentVersionView> {
+  const { data, error, response } = await client.POST(
+    '/api/v1/documents/{id}/versions/{versionId}/withdraw',
+    { params: { path: { id, versionId } }, body: { reason } },
+  )
+  if (!response.ok || !data) {
+    throw requestError(
+      response,
+      error,
+      `Withdrawing the version failed with HTTP ${response.status}`,
+    )
+  }
+  return data
+}
+
 /** Text, field and metadata changes between two versions (GET /api/v1/documents/{id}/compare). */
 export function versionComparisonQuery(client: ApiClient, id: string, from: string, to: string) {
   return queryOptions({

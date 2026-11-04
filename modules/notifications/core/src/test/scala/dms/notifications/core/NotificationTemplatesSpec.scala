@@ -94,6 +94,31 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
           rendered.filter(_._2 == Language.En).map(_._3.subject).distinct.size
       )
     },
+    test("a withdrawn version: who, the date, and the reason only for those who may read the document") {
+      val params =
+        Map(
+          "withdrawnBy" -> "ben",
+          "validFrom"   -> "2027-01-01",
+          "reason"      -> "Falsche Anlage",
+          "version"     -> "2.0"
+        )
+      def render(language: Language, document: Option[DocumentFacts]) =
+        NotificationTemplates.render("publication.withdrawn", language, params, Some(doc), ctx(document))
+      val de     = render(Language.De, Some(facts))
+      val en     = render(Language.En, Some(facts))
+      val hidden = render(Language.De, None)
+      assertTrue(
+        de.subject == "Zurückgezogen: Reiserichtlinie (2.0)",
+        de.body.contains("Ben Becker"),
+        de.body.contains("01.01.2027"),
+        de.body.contains("Begründung: Falsche Anlage"),
+        en.subject == "Withdrawn: Reiserichtlinie (2.0)",
+        en.body.contains("Reason: Falsche Anlage"),
+        de.link.exists(_.startsWith("/documents/")),
+        !hidden.body.contains("Falsche Anlage"),
+        !hidden.body.contains("Reiserichtlinie")
+      )
+    },
     test("task assigned: review or approval, the step, deputies acting for someone, a link to the inbox") {
       val params = Map("step" -> "Rechtsprüfung", "stepKind" -> "Approval", "actingFor" -> "ben")
       val de     = NotificationTemplates.render(

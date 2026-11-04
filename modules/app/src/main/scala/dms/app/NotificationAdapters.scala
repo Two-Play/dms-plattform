@@ -42,6 +42,8 @@ import scala.util.Try
   *   - `document.acknowledgement-requested`, `document.acknowledgement-reminder`: the named readers
   *   - `workflow.deputyship-*`: principal and deputy
   *   - `document.status-changed` Approved → Published: the owner
+  *   - `document.approved-version-withdrawn`: approvers and owner, without who withdrew it; never readers,
+  *     for whom nothing changed (DMS-143)
   *   - `legal-hold.created`, `legal-hold.released`: tenant-wide records managers
   *   - `document.rendition-dead`, `document.publication-dead` (DMS-142, ADR 0058): the document's owner
   *     (without owner: the version's author) and the tenant-wide records managers, or the tenant
@@ -218,6 +220,18 @@ final class PlatformNotificationEvents(
                   )
                 )
               )
+        case DocumentService.ApprovedVersionWithdrawn =>
+          ZIO.succeed(
+            List(
+              Notice(
+                "publication.withdrawn",
+                NotificationCategory.Publication,
+                users("recipients"),
+                document,
+                params("version", "validFrom", "withdrawnBy", "reason")
+              )
+            )
+          )
         case "legal-hold.created" | "legal-hold.released" =>
           val count = payload.get("documentIds").collect { case Json.Arr(items) => items.size }.getOrElse(0)
           for
@@ -401,6 +415,7 @@ object PlatformNotificationEvents:
     "workflow.deputyship-ended",
     "workflow.deputyship-ended-by-period",
     "document.status-changed",
+    DocumentService.ApprovedVersionWithdrawn,
     "legal-hold.created",
     "legal-hold.released",
     RenditionEvents.Dead,

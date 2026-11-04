@@ -64,7 +64,10 @@ private[core] object DocumentStore:
       validFrom: Option[LocalDate],
       supersededBy: Option[UUID],
       requiresAcknowledgement: Boolean,
-      publishedAt: Option[OffsetDateTime]
+      publishedAt: Option[OffsetDateTime],
+      withdrawnAt: Option[OffsetDateTime],
+      withdrawnBy: Option[String],
+      withdrawalReason: Option[String]
   ) derives DbCodec
 
   final case class DeviationRequestRow(
@@ -270,7 +273,7 @@ private[core] object DocumentStore:
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
                  released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement,
-                 published_at
+                 published_at, withdrawn_at, withdrawn_by, withdrawal_reason
           from dms.document_version where document_id = any(cast($array as uuid[]))
           order by major, minor, created_at"""
       .query[VersionRow]
@@ -291,7 +294,7 @@ private[core] object DocumentStore:
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
                  released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement,
-                 published_at
+                 published_at, withdrawn_at, withdrawn_by, withdrawal_reason
           from dms.document_version where id = $id for update"""
       .query[VersionRow]
       .run()
@@ -307,7 +310,7 @@ private[core] object DocumentStore:
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
                  released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement,
-                 published_at
+                 published_at, withdrawn_at, withdrawn_by, withdrawal_reason
           from dms.document_version
           where document_id = ${id.value} and status in ('Draft', 'InReview', 'InApproval') for update"""
       .query[VersionRow]
@@ -388,6 +391,17 @@ private[core] object DocumentStore:
       .query[Int]
       .run()
       .toList
+
+  /** Withdraws an approved version: the status, who did it and why in one statement; the database records the
+    * time (migration V41).
+    */
+  def withdrawApproved(id: UUID, actor: UserId, at: Instant, reason: String)(using DbTx): Boolean =
+    val time = OffsetDateTime.ofInstant(at, ZoneOffset.UTC)
+    sql"""update dms.document_version
+          set status = ${DocumentStatus.Withdrawn.toString}, status_changed_at = $time,
+              status_changed_by = ${actor.value}, withdrawn_by = ${actor.value}, withdrawal_reason = $reason,
+              updated_at = $time
+          where id = $id and status = ${DocumentStatus.Approved.toString}""".update.run() == 1
 
   /** Changes the status of a version. On approval (`snapshot`) the metadata snapshot, the approval and the
     * valid-from date are recorded; on supersession the successor (`supersededBy`).
@@ -626,7 +640,12 @@ private[core] object DocumentStore:
       r.validFrom,
       r.supersededBy,
       r.requiresAcknowledgement,
-      r.publishedAt.map(_.toInstant)
+      r.publishedAt.map(_.toInstant),
+      withdrawal = for
+        at     <- r.withdrawnAt
+        by     <- r.withdrawnBy
+        reason <- r.withdrawalReason
+      yield VersionWithdrawal(at.toInstant, UserId(by), reason)
     )
 
   private def toDeviationRequest(r: DeviationRequestRow): RecordedDeviationRequest =

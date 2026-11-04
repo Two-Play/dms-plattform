@@ -385,6 +385,31 @@ object DestructionServiceSpec extends ZIOSpecDefault:
           !list.candidates.exists(_.versionId == r.version)
         )
     },
+    test(
+      "a version withdrawn before it took effect is a record: kept for its retention, counted from the withdrawal"
+    ) {
+      for
+        f       <- tenant
+        _       <- rules(f.tenant)
+        stopped <- record(f, status = "Approved")
+        // The withdrawal as the application writes it (DMS-143): the database records the time.
+        _ <- app(f.tenant)(
+          sql"""update dms.document_version
+                set status = 'Withdrawn', status_changed_at = ${java.time.OffsetDateTime.parse(
+              "2015-06-01T10:00:00Z"
+            )},
+                    status_changed_by = ${"owner-1"}, withdrawn_by = ${"owner-1"},
+                    withdrawal_reason = ${"Approved by mistake"}
+                where id = ${stopped.version}""".update.run()
+        )
+        list <- service(f.tenant)(_.destructionList)
+      yield assertTrue(
+        list.candidates.map(_.versionId) == List(stopped.version),
+        list.candidates.head.status == "Withdrawn",
+        list.candidates.head.outOfForceAt.contains(Instant.parse("2015-06-01T10:00:00Z")),
+        list.candidates.head.retentionEndsOn == LocalDate.of(2016, 12, 31)
+      )
+    },
     test("a legal hold blocks: held versions are not proposed, a hold set later blocks the approval") {
       for
         f     <- tenant

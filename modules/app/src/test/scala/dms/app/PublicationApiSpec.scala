@@ -12,11 +12,16 @@ import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
 import dms.audit.AuditTrail
 import dms.audit.core.{AuditTrailLive, TsaTrust}
 import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
-import dms.db.{Db, DbConfig, DbError, Migrations}
+import dms.archive.core.LegalHoldService
+import dms.db.queue.OutboxEvent
+import dms.db.{Db, DbConfig, DbError, Jsonb, Migrations}
+import dms.documents.DocumentStatus
 import dms.documents.core.*
 import dms.identity.*
 import dms.integration.{JobRunner, WorkerConfig}
-import dms.kernel.{TemplateId, TenantId, UserId}
+import dms.kernel.{DocumentId, TemplateId, TenantId, UserId}
+import dms.notifications.DocumentRef
+import dms.search.SearchDocument
 import dms.templates.*
 import dms.templates.core.ContentJson.given
 import dms.templates.core.{TemplateDraft, TemplateService}
@@ -142,7 +147,8 @@ object PublicationApiSpec extends ZIOSpecDefault:
     Authenticator(verifier, tenants)
   }
 
-  private type Env = DocumentApi.Env & WorkflowApi.Env & RenditionSource & AuditTrail
+  private type Env = DocumentApi.Env & WorkflowApi.Env & RenditionSource & AuditTrail & RoleAssignments &
+    Groups
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -188,7 +194,8 @@ object PublicationApiSpec extends ZIOSpecDefault:
     jwt.sign(RSASSASigner(signingKey))
     jwt.serialize()
 
-  private val routes = ZioHttpInterpreter().toHttp(DocumentApi.endpoints ++ WorkflowApi.endpoints)
+  private val routes =
+    ZioHttpInterpreter().toHttp(ValidAtApi.endpoints ++ DocumentApi.endpoints ++ WorkflowApi.endpoints)
 
   private def call(
       user: UserId,
@@ -319,6 +326,29 @@ object PublicationApiSpec extends ZIOSpecDefault:
             .toList
         )
       )
+    )
+
+  /** A document valid in version 1.0 whose version 2.0 is approved and waits for a date far ahead. */
+  private def scheduledVersion(ownerId: UserId): ZIO[Env, Any, (DocumentView, DocumentVersionView)] =
+    for
+      doc <- validDocument(ownerId)
+      _   <- newVersion(doc.id, """{"changeKind":"Major","reason":"Content revised"}""")
+      _   <- call(
+        author,
+        "PUT",
+        s"/api/v1/documents/${doc.id}/draft",
+        Some(s"""{"values":${values(ownerId, LocalDate.of(2099, 1, 1))}}""")
+      )
+      _     <- approveDefault(doc.id)
+      found <- versions(doc.id, ownerId)
+    yield (doc, found.last)
+
+  private def withdraw(doc: UUID, version: UUID, user: UserId, reason: String = "Approved by mistake") =
+    call(
+      user,
+      "POST",
+      s"/api/v1/documents/$doc/versions/$version/withdraw",
+      Some(WithdrawVersion(reason).toJson)
     )
 
   def spec = suite("Publication and editorial versions")(
@@ -508,6 +538,168 @@ object PublicationApiSpec extends ZIOSpecDefault:
         started.tasks.map(t => (t.step, t.candidates)) == List(
           ("editorial-confirmation", List(approver.value))
         )
+      )
+    },
+    test("the owner withdraws an approved version with a reason; only the people concerned see it") {
+      for
+        created <- scheduledVersion(owner)
+        (doc, v2) = created
+        forOwner    <- document(doc.id, owner)
+        forApprover <- document(doc.id, approver)
+        forAuthor   <- document(doc.id, author)
+        byReader    <- withdraw(doc.id, v2.id, reader)
+        byAuthor    <- withdraw(doc.id, v2.id, author)
+        byReviewer  <- withdraw(doc.id, v2.id, reviewer)
+        byAdmin     <- withdraw(doc.id, v2.id, admin)
+        blank       <- withdraw(doc.id, v2.id, owner, "  ")
+        unknown     <- withdraw(doc.id, UUID.randomUUID(), owner)
+        done        <- withdraw(doc.id, v2.id, owner)
+        twice       <- withdraw(doc.id, v2.id, owner)
+        ran         <- runPublicationJobs
+        history     <- versions(doc.id, owner)
+        readers     <- versions(doc.id, reader)
+        approvers   <- versions(doc.id, approver)
+        authors     <- versions(doc.id, author)
+        afterOwner  <- document(doc.id, owner)
+        afterReader <- document(doc.id, reader)
+        validOn     <- call(reader, "GET", "/api/v1/documents/valid-at?date=2099-06-01")
+        validOwner  <- call(owner, "GET", "/api/v1/documents/valid-at?date=2099-06-01")
+        audit       <- setup.await.flatMap(s =>
+          s.owner.transactSystem(
+            Db.sql(
+              sql"""select actor_id, reason, details ->> 'from', details ->> 'to' from dms.audit_event
+                    where action = 'document.withdrawn-before-valid' and object_id = ${doc.id}"""
+                .query[(String, Option[String], String, String)]
+                .run()
+                .toList
+            )
+          )
+        )
+        events <- outbox("document.approved-version-withdrawn")
+        next   <- newVersion(doc.id, """{"changeKind":"Major","reason":"Corrected"}""").map(
+          as[DocumentVersionView]
+        )
+        withdrawnView = as[DocumentVersionView](done)
+      yield assertTrue(
+        forOwner.withdrawable.map(w => (w.versionId, w.version, w.validFrom, w.validVersion)) ==
+          Some((v2.id, "2.0", Some(LocalDate.of(2099, 1, 1)), Some("1.0"))),
+        forApprover.withdrawable.map(_.versionId).contains(v2.id),
+        forAuthor.withdrawable.isEmpty,
+        byReader._1 == Status.Forbidden,
+        byAuthor._1 == Status.Forbidden,
+        byReviewer._1 == Status.Forbidden,
+        byAdmin._1 == Status.Forbidden,
+        blank._1 == Status.UnprocessableEntity,
+        unknown._1 == Status.NotFound,
+        done._1 == Status.Ok,
+        withdrawnView.status == "Withdrawn",
+        withdrawnView.publicationDue.isEmpty,
+        withdrawnView.withdrawal.map(w => (w.by, w.reason)) == Some((owner.value, "Approved by mistake")),
+        twice._1 == Status.Conflict,
+        error(twice._2).exists(_.code == "version_withdrawn"),
+        ran == 0,
+        history.map(v => (v.version, v.status)) == List(("1.0", "Published"), ("2.0", "Withdrawn")),
+        history.head.successor.isEmpty,
+        history.last.withdrawal.exists(_.reason == "Approved by mistake"),
+        readers.map(_.version) == List("1.0"),
+        approvers.map(_.version) == List("1.0", "2.0"),
+        authors.map(_.version) == List("1.0", "2.0"),
+        afterOwner.current.version == "1.0",
+        afterOwner.withdrawable.isEmpty,
+        afterOwner.canStartVersion,
+        afterOwner.latestReleasedVersion.contains("2.0"),
+        afterReader.current.version == "1.0",
+        as[ValidAtView](validOn).items.filter(_.documentId == doc.id).map(_.versionLabel) == List("1.0"),
+        as[ValidAtView](validOwner).items.filter(_.documentId == doc.id).map(_.versionLabel) == List("1.0"),
+        audit == List((owner.value, Some("Approved by mistake"), "Approved", "Withdrawn")),
+        events.exists(e => e.contains(v2.id.toString) && e.contains("""recipients": ["approver-1"]""")),
+        next.version.startsWith("3.0"),
+        // Withdrawn versions never reach the index (ADR 0029): it holds valid and superseded versions only.
+        !SearchDocument.isIndexed(DocumentStatus.Withdrawn)
+      )
+    },
+    test("whoever approved the version may withdraw it; the notice goes to the owner, with the title") {
+      for
+        created <- scheduledVersion(owner)
+        (doc, v2) = created
+        done   <- withdraw(doc.id, v2.id, approver)
+        events <- outbox("document.approved-version-withdrawn")
+        event       = events.find(_.contains(v2.id.toString)).get
+        outboxEvent = OutboxEvent(
+          1L,
+          tenantId,
+          "document",
+          doc.id,
+          DocumentService.ApprovedVersionWithdrawn,
+          Jsonb(event),
+          None,
+          0
+        )
+        service  <- ZIO.service[DocumentService]
+        roles    <- ZIO.service[RoleAssignments]
+        groups   <- ZIO.service[Groups]
+        authz    <- ZIO.service[Authorizer]
+        workflow <- ZIO.service[ApprovalWorkflow]
+        audit    <- ZIO.service[AuditTrail]
+        db       <- ZIO.service[Db]
+        events    = PlatformNotificationEvents(service, roles, LegalHoldService(audit))
+        documents = PolicyNotificationDocuments(service, workflow, authz, roles, groups)
+        ref       = DocumentRef(DocumentId(doc.id), Some(v2.id))
+        notices   <- db.transact(tenantId)(events.describe(outboxEvent))
+        forOwner  <- db.transact(tenantId)(documents.visibleTo(tenantId, owner, ref))
+        forAuthor <- db.transact(tenantId)(documents.visibleTo(tenantId, author, ref))
+        forReader <- db.transact(tenantId)(documents.visibleTo(tenantId, reader, ref))
+        changed   <- outbox("document.status-changed")
+        statusEvent = OutboxEvent(
+          2L,
+          tenantId,
+          "document",
+          doc.id,
+          "document.status-changed",
+          Jsonb(changed.filter(_.contains(v2.id.toString)).last),
+          None,
+          0
+        )
+        forReaders <- db.transact(tenantId)(events.describe(statusEvent))
+        webhook    <- db.transact(tenantId)(DocumentWebhookEvents(service).describe(statusEvent))
+      yield assertTrue(
+        done._1 == Status.Ok,
+        notices.map(n => (n.kind, n.recipients)) == List(("publication.withdrawn", List(owner))),
+        notices.head.params.get("reason").contains("Approved by mistake"),
+        notices.head.params.get("withdrawnBy").contains(approver.value),
+        forOwner.exists(_.title == "Code of conduct"),
+        forAuthor.isDefined,
+        forReader.isEmpty,
+        forReaders.isEmpty,
+        webhook.isEmpty
+      )
+    },
+    test("the publication job gets there first: the withdrawal is told so") {
+      for
+        created <- scheduledVersion(owner)
+        (doc, v2) = created
+        s <- setup.await
+        // The valid-from date has come: as if it had been today all along.
+        _ <- s.owner.transactSystem(
+          Db.sql {
+            val _ = sql"set local session_replication_role = replica".update.run()
+            sql"""update dms.document_version set valid_from = date '2026-01-01' where id = ${v2.id}""".update
+              .run()
+          }
+        )
+        due       <- withdraw(doc.id, v2.id, owner)
+        forOwner  <- document(doc.id, owner)
+        ran       <- runPublicationJobs
+        published <- withdraw(doc.id, v2.id, owner)
+        found     <- versions(doc.id, owner)
+      yield assertTrue(
+        due._1 == Status.Conflict,
+        error(due._2).exists(_.code == "version_due"),
+        forOwner.withdrawable.isEmpty,
+        ran == 1,
+        published._1 == Status.Conflict,
+        error(published._2).exists(_.code == "version_published"),
+        found.map(v => (v.version, v.status)) == List(("1.0", "Superseded"), ("2.0", "Published"))
       )
     },
     test("a version valid from a future date waits for it; readers of the valid version see the coming one") {

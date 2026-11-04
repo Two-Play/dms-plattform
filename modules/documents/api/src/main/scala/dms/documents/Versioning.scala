@@ -36,6 +36,20 @@ object Versioning:
   def isOpen(status: DocumentStatus): Boolean  = open.contains(status)
   def isValid(status: DocumentStatus): Boolean = valid.contains(status)
 
+  /** The version the next version starts from: the latest valid one. Without a valid version, the latest
+    * version that was withdrawn before it took effect (DMS-143, ADR 0059), so that a first version approved
+    * by mistake can be corrected.
+    */
+  def startingPoint(versions: List[DocumentVersion]): Option[DocumentVersion] =
+    versions
+      .filter(v => isValid(v.status))
+      .maxByOption(_.number)
+      .orElse(
+        versions
+          .filter(v => v.withdrawal.isDefined && v.status != DocumentStatus.Destroyed)
+          .maxByOption(_.number)
+      )
+
   /** The number of the first version of a document. */
   val first: VersionNo = VersionNo.Initial
 

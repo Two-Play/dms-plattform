@@ -44,7 +44,7 @@ object DocumentResource:
       version.releasedBy,
       version.metadata
     )
-      .copy(assignedParticipants = participants)
+      .copy(assignedParticipants = participants, withdrawnBeforeValid = version.withdrawal.isDefined)
 
   /** The resource of a version given by its attributes, e.g. from a bulk query (compliance cockpit, DMS-59).
     *

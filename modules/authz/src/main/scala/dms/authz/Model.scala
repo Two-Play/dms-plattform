@@ -47,6 +47,10 @@ enum Role:
   * role) and tenant administrators, who clean up drafts without reading their content. Only in status
   * `Draft`; submitted, approved and published versions are withdrawn or destroyed instead.
   *
+  * `Withdraw` takes a valid version out of force (business concept 6.2, US-07.1): the owner and approver
+  * roles. On an approved version that is not valid yet it stops the publication (DMS-143, ADR 0059): those
+  * who could have published it, the owner role and whoever approved this version.
+  *
   * `SearchUsers` is finding people of the own tenant by name or email, to pick a group member, a deputy or a
   * person in a metadata field (DMS-111, ADR 0037 addendum): every role of the tenant, the tenant
   * administrator included; users without any role assignment may not browse the directory.
@@ -130,7 +134,9 @@ final case class Resource(
     /** Users who changed the resource besides its author, e.g. editors of a template version (segregation of
       * duties).
       */
-    contributors: Set[UserId] = Set.empty
+    contributors: Set[UserId] = Set.empty,
+    /** Whether the version was withdrawn before it became valid (ADR 0059): it was never in force. */
+    withdrawnBeforeValid: Boolean = false
 ):
   def isDocument: Boolean = status.isDefined
 

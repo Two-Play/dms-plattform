@@ -24,7 +24,8 @@ final case class PublicationScheduleConfig(checkInterval: Duration = 1.minute)
   * moment, so each job exists once; if the tenant's time zone changes, a job for the new moment is added and
   * the old one finds the version not due and does nothing. The job publishes the version and supersedes the
   * valid one of the same scope in one transaction ([[DocumentService.publishScheduled]]); it is idempotent,
-  * so at-least-once delivery is safe.
+  * so at-least-once delivery is safe. A withdrawn version loses its queued jobs ([[PublicationJobs.cancel]]);
+  * one that was claimed already finds the version withdrawn and does nothing (ADR 0059).
   *
   * A failed job is retried with backoff. Its error starts with a failure code in brackets (like renditions,
   * ADR 0055), so its status and notices can explain it. Once it is dead, [[tick]] does not bring it back (its
@@ -86,6 +87,12 @@ object PublicationJobs:
         case _: DocumentError.NotFound                               => "not_found"
         case _                                                       => "invalid"
       s"[$code] ${e.describe}"
+
+  /** Cancels the queued publication jobs of a version inside the current transaction (DMS-143): there can be
+    * several, one per due moment. Returns how many.
+    */
+  def cancel(version: UUID, reason: String): IO[DbError, Int] =
+    JobQueue.cancel(PublishKind, s"$PublishKind:$version:", reason)
 
   private def versionOf(payload: Jsonb): Either[String, UUID] =
     payload.value

@@ -11,6 +11,7 @@ import { UserName } from '@/components/shared/user-name'
 import { t } from '@/i18n'
 import { formatDate } from '@/i18n/format'
 import { StatusBadge } from './status-badge'
+import { versionStatus } from './status-label'
 import { changeKindLabel } from './version-labels'
 
 /**
@@ -80,7 +81,7 @@ export function VersionHistory({ documentId, shownId }: { documentId: string; sh
                         <label htmlFor={`pick-${version.id}`} className="font-medium">
                           {t('docPanels.history.version', { label: version.version })}
                         </label>
-                        <StatusBadge status={version.status} />
+                        <StatusBadge status={versionStatus(version)} />
                         <span className="text-muted-foreground">
                           {changeKindLabel(version.changeKind)} · {formatDate(version.createdAt)} ·{' '}
                           {t('docPanels.history.by')} <UserName id={version.createdBy} />
@@ -88,6 +89,17 @@ export function VersionHistory({ documentId, shownId }: { documentId: string; sh
                       </div>
                       {version.changeReason && (
                         <p className="text-muted-foreground">{version.changeReason}</p>
+                      )}
+                      {version.withdrawal && (
+                        <p>
+                          {t('withdrawVersion.neverValid', {
+                            date: formatDate(version.withdrawal.at),
+                          })}{' '}
+                          <UserName id={version.withdrawal.by} />.{' '}
+                          {t('withdrawVersion.neverValidReason', {
+                            reason: version.withdrawal.reason,
+                          })}
+                        </p>
                       )}
                     </div>
                     {version.id === shownId ? (
