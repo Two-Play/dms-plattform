@@ -63,7 +63,7 @@ Given: `validFrom` is a core field required from review on (ADR 0019); versions 
 - No new version can be started while an approved version waits for its date (it would be based on the old valid version).
 - Overlapping scopes (`DE` and `AT|DE`) are still not detected (ADR 0021).
 - The editorial path is the same for all classes; custom definitions cannot use the `DocumentOwner` lane yet (role validation in `WorkflowApi`).
-- A failing publication job ends dead after its attempts; nobody is notified yet.
+- A failing publication job ends dead after its attempts; nobody is notified yet. (Correction: solved by DMS-142, ADR 0058, which also adds a retry.)
 - Migration V12 lands before DMS-44 (migration V13), so the order of migrations matches the order of merges.
 
 ## Follow-ups

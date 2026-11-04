@@ -48,6 +48,7 @@ import { formatDate, formatDateTime } from '@/i18n/format'
 import { toast } from '@/lib/toast'
 import { HoldError, MAX_NAME, ReasonField, SearchPreview } from './hold-forms'
 import type { LegalHoldsPageSearch } from './legal-holds-params'
+import { PublicationFailuresPanel } from '@/components/documents/publication-failures'
 import { RenditionFailuresPanel } from '@/components/documents/rendition-failures-panel'
 
 const th = 'py-2 pr-4 font-medium'
@@ -1005,8 +1006,9 @@ export function LegalHoldsPage() {
       ) : (
         <>
           <HoldList search={search} />
-          {/* Records management also watches the archive PDFs of versions in approval (DMS-93). */}
+          {/* Records management also watches archive PDFs and publications (DMS-93, DMS-142). */}
           <RenditionFailuresPanel />
+          <PublicationFailuresPanel />
         </>
       )}
       <CreateHoldDialog

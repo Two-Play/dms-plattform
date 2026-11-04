@@ -29,7 +29,8 @@ object ArchiveStandard:
   * @param authenticatedAt
   *   the approver's sign-in at the vote (`auth_time`), stored with the approval
   * @param recipients
-  *   who is notified if the rendering fails: the document owner, otherwise the author
+  *   the document owner, otherwise the author, when the version was approved; recorded with failed attempts.
+  *   Who is notified of a dead job is decided when it dies (DMS-142)
   * @param onBehalfOf
   *   the approver the deputy `approver` stood in for (DMS-49), shown in the approval note
   */
@@ -52,8 +53,15 @@ object RenditionRequest:
 
 /** Outbox event types of rendering (ADR 0010). */
 object RenditionEvents:
-  /** The rendition of a version could not be produced; the version stays in approval (DMS-44). Payload:
-    * `documentId`, `versionId`, `caseId`, `reason`, `attempt`, `maxAttempts`, `final` (no retry follows) and
-    * `recipients` (user ids).
+  /** An attempt to produce the rendition of a version failed; the version stays in approval (DMS-44).
+    * Payload: `documentId`, `versionId`, `caseId`, `reason`, `attempt`, `maxAttempts`, `final` (no retry
+    * follows) and `recipients` (user ids). Nobody is notified of it: people are told by [[Dead]].
     */
   val Failed: String = "document.rendition-failed"
+
+  /** The rendering job of a version is dead: every attempt failed (DMS-142, ADR 0058). Written by the
+    * database when the job's status changes (migration V40), so also for a worker that crashed on its last
+    * attempt. Payload: `documentId`, `versionId`, `jobId`, `attempts` and `reason` (the failure code, if
+    * there is one).
+    */
+  val Dead: String = "document.rendition-dead"

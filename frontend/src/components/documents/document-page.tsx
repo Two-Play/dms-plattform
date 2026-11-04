@@ -22,6 +22,7 @@ import { LanguageSelect } from './document-workspace'
 import { DocumentEditor } from './new-document-page'
 import { LegalHoldBadge } from '@/components/legal-holds/legal-hold-badge'
 import { StatusBadge } from './status-badge'
+import { PublicationStatusNotice } from './publication-failures'
 import { WorkflowPanel } from './workflow-panel'
 import { AcknowledgementPanel } from './acknowledgement-panel'
 import { AcknowledgementOverviewPanel } from './acknowledgement-overview-panel'
@@ -241,6 +242,13 @@ export function DocumentPage({
           )}
           {!showingOther && asksForAcknowledgement(shown) && (
             <AcknowledgementOverviewPanel documentId={document.data.id} />
+          )}
+          {shown.status === 'Approved' && (
+            <PublicationStatusNotice
+              key={`publication-${shown.id}`}
+              documentId={document.data.id}
+              versionId={shown.id}
+            />
           )}
           <WorkflowPanel
             documentId={document.data.id}

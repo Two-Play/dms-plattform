@@ -6,10 +6,11 @@ Archive renditions of approved versions (DMS-44, ADR 0008, ADR 0025): HTML → P
 Layout: `api` holds public types and interfaces, `core` the implementation. Other modules may only depend on `api`.
 
 - `api`: `ArchiveStandard`, `RenditionRequest` (job payload, job kind `document.render-rendition`), `RenditionEvents`
-  (outbox event `document.rendition-failed`).
+  (outbox events `document.rendition-failed` per failed attempt and `document.rendition-dead`, written by the database
+  when the job is dead, which is what people are notified of: DMS-142, ADR 0058).
 - `core`:
   - `RenditionJobs`: the job handler (load page → render → validate → store → attach and complete the approval) and
-    `enqueue`; failure notification through audit and outbox. A failed job's error starts with the failure's code
+    `enqueue`; failed attempts go to audit and outbox. A failed job's error starts with the failure's code
     (`[unavailable] …`, `RenderingError.code`, read back with `RenditionJobs.parseJobError`) so the rendition status can
     explain it; the completion records renderer, worker image and build fingerprint and validator in
     `dms.rendition_provenance` (DMS-93, ADR 0055). Status, retry and the list of failures: `dms.app.RenditionStatusApi`.

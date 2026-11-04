@@ -128,6 +128,8 @@ function renderAt(path: string) {
               ),
         )
       case '/api/v1/workflow/tasks':
+      case '/api/v1/renditions/failures':
+      case '/api/v1/publications/failures':
         return ok([])
       case '/api/v1/users/search':
         return ok(searchPeople((init?.params?.query?.q as string | undefined) ?? ''))
@@ -324,6 +326,14 @@ describe('admin: access groups (DMS-105)', () => {
     expect(
       await screen.findByText('Only tenant administrators can use the administration.'),
     ).toBeInTheDocument()
+  })
+})
+
+describe('failed archive PDFs and publications (DMS-142)', () => {
+  it('opens from the link of a notification', async () => {
+    renderAt('/admin?tab=renditions')
+    expect(await screen.findByRole('heading', { name: 'Failed archive PDFs' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Failed publications' })).toBeInTheDocument()
   })
 })
 

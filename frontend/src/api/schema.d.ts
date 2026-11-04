@@ -1413,6 +1413,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/versions/{versionId}/publication/status': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The state of the publication job of an approved version: Pending, Retrying (with the next attempt), Failed (every attempt failed) or None, with the last error and whether the caller may retry. Requires ReadDocument on the version. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidPublicationStatus']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/publication/retry': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Requeues the publication job of an approved version whose publication failed (Failed: starts over with all attempts) or waits for its next attempt (Retrying: runs now). 409 publication_not_failed in any other state. Requires RetryPublication: the document's owner (without owner: its author), records managers and tenant administrators. Audited. */
+    post: operations['postApiV1DocumentsIdVersionsVersionidPublicationRetry']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/publications/failures': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Approved versions whose publication failed (Failed) or is being retried (Retrying), most recent first, at most 200. Requires RetryPublication on the tenant (records managers, tenant administrators); the title is left out where the caller may not retry (e.g. not cleared for the document's confidentiality). */
+    get: operations['getApiV1PublicationsFailures']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/{id}/versions/{versionId}/html': {
     parameters: {
       query?: never
@@ -4561,6 +4612,45 @@ export interface components {
     RenditionErrorView: {
       code?: string
       message: string
+    }
+    /** PublicationStatusView */
+    PublicationStatusView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      version: string
+      state: string
+      /** Format: int32 */
+      attempts: number
+      /** Format: int32 */
+      maxAttempts: number
+      /** Format: date-time */
+      nextAttemptAt?: string
+      /** Format: date-time */
+      failedAt?: string
+      lastError?: components['schemas']['RenditionErrorView']
+      canRetry: boolean
+    }
+    /** PublicationFailureView */
+    PublicationFailureView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      version: string
+      title?: string
+      state: string
+      /** Format: int32 */
+      attempts: number
+      /** Format: int32 */
+      maxAttempts: number
+      /** Format: date-time */
+      nextAttemptAt?: string
+      /** Format: date-time */
+      failedAt?: string
+      lastError?: components['schemas']['RenditionErrorView']
+      canRetry: boolean
     }
     /** RenditionFailureView */
     RenditionFailureView: {
@@ -9535,6 +9625,97 @@ export interface operations {
         }
         content: {
           'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1DocumentsIdVersionsVersionidPublicationStatus: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PublicationStatusView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1DocumentsIdVersionsVersionidPublicationRetry: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PublicationStatusView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1PublicationsFailures: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PublicationFailureView'][]
         }
       }
       default: {

@@ -31,6 +31,9 @@ enum NotificationCategory(val key: String, val emailByDefault: Boolean):
   /** Documents the user owns became valid. */
   case Publication extends NotificationCategory("publication", true)
 
+  /** Archive PDFs and publications that failed for good and need a retry (DMS-142). */
+  case ProcessingFailure extends NotificationCategory("processing-failure", true)
+
   /** Legal holds set or released (records managers). */
   case LegalHold extends NotificationCategory("legal-hold", false)
 
@@ -90,6 +93,16 @@ trait NotificationDocuments:
     * does not exist (any more). Runs inside `Db.transact(tenant)`.
     */
   def visibleTo(tenant: TenantId, user: UserId, document: DocumentRef): IO[String, Option[DocumentFacts]]
+
+  /** Like [[visibleTo]] for notices of a failed job: also the facts for someone who may not read the version
+    * but may retry the job, as the failure lists show them (ADR 0055; DMS-142). Records managers cannot read
+    * a version in approval, yet they are told which one failed. Runs inside `Db.transact(tenant)`.
+    */
+  def visibleForRetry(
+      tenant: TenantId,
+      user: UserId,
+      document: DocumentRef
+  ): IO[String, Option[DocumentFacts]] = visibleTo(tenant, user, document)
 
 /** A person as the user directory knows them (ADR 0037). */
 final case class Person(displayName: Option[String], email: Option[String])

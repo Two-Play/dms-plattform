@@ -99,6 +99,9 @@ object NotificationJobsSpec extends ZIOSpecDefault:
           readers.get.map(r =>
             Option.when(r.contains(user))(DocumentFacts("Travel policy", Some("2.0"), Some("POL-7")))
           )
+        // Someone who may retry but not read sees what the failure lists show them.
+        override def visibleForRetry(t: TenantId, user: UserId, ref: DocumentRef) =
+          ZIO.some(DocumentFacts("Travel policy", Some("2.0"), None))
       directory = new RecipientDirectory:
         def people(t: TenantId, users: Set[UserId]) =
           directoryUp.get.flatMap(up =>
@@ -246,6 +249,22 @@ object NotificationJobsSpec extends ZIOSpecDefault:
         !benN.head.body.contains("Travel policy"),
         benN.head.body.contains("Bitte lesen Sie ein Dokument"),
         benMail.exists(m => !m.text.contains("Travel policy") && !m.subject.contains("Travel policy"))
+      )
+    },
+    test("failure notices use the retry check: a recipient who may not read still learns the title") {
+      for
+        e       <- ZIO.service[Env]
+        _       <- e.readers.set(Set.empty)
+        failure <- event(e, List(ben), "failure.rendition")
+        other   <- event(e, List(UserId("dora")), "acknowledgement.requested")
+        _       <- e.jobs.deliver(failure) *> e.jobs.deliver(other)
+        _       <- runJobs(e)
+        _       <- e.readers.set(Set(anna, ben))
+        benPage <- tx(e)(NotificationStore.page(ben, unreadOnly = false, 0, 50))
+        claras  <- tx(e)(NotificationStore.page(UserId("dora"), unreadOnly = false, 0, 50))
+      yield assertTrue(
+        benPage.exists(n => n.kind == "failure.rendition" && n.subject.contains("Travel policy")),
+        claras.exists(n => n.kind == "acknowledgement.requested" && !n.subject.contains("Travel policy"))
       )
     },
     test("preferences: email off for a category records no email; the chosen language is used") {

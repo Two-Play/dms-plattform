@@ -26,6 +26,7 @@ export const notifications = {
     acknowledgement: 'Read confirmations',
     deputyship: 'Deputies',
     publication: 'Publications of my documents',
+    'processing-failure': 'Failed archive PDFs and publications',
     'legal-hold': 'Legal holds',
   },
   page: {
@@ -74,6 +75,8 @@ export const notifications = {
       acknowledgement: 'Documents you have to read and reminders of open read confirmations.',
       deputyship: 'Deputies set for you or by you, their start and end.',
       publication: 'A document you own became valid.',
+      'processing-failure':
+        'An archive PDF or a publication failed for good and needs a retry (owners and records managers).',
       'legal-hold': 'Legal holds set or released (records managers).',
     },
   },

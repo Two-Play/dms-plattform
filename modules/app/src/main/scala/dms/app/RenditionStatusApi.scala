@@ -249,14 +249,14 @@ object RenditionStatusApi:
   /** Audit action of a retry. */
   val RetryRequested: String = "document.rendition-retry-requested"
 
-  private val Done        = "Done"
-  private val Pending     = "Pending"
-  private val Retrying    = "Retrying"
-  private val Failed      = "Failed"
-  private val NoRendition = "None"
+  private[app] val Done        = "Done"
+  private[app] val Pending     = "Pending"
+  private[app] val Retrying    = "Retrying"
+  private[app] val Failed      = "Failed"
+  private[app] val NoRendition = "None"
 
-  /** The rendering job of a version as stored in `dms.job`. */
-  private final case class JobRow(
+  /** A job of a version as stored in `dms.job`. */
+  private[app] final case class JobRow(
       status: String,
       attempts: Int,
       maxAttempts: Int,
@@ -268,10 +268,10 @@ object RenditionStatusApi:
 
   private final case class FailedJob(documentId: UUID, versionId: UUID, row: JobRow)
 
-  private type Row =
+  private[app] type Row =
     (String, Int, Int, OffsetDateTime, Option[String], OffsetDateTime, Option[OffsetDateTime])
 
-  private def row(r: Row): JobRow =
+  private[app] def row(r: Row): JobRow =
     val (status, attempts, max, runAt, error, created, finished) = r
     JobRow(status, attempts, max, runAt.toInstant, error, created.toInstant, finished.map(_.toInstant))
 
@@ -329,16 +329,16 @@ object RenditionStatusApi:
         }
     ).mapError((e: DbError) => DocumentError.Database(e))
 
-  private def stateOf(job: JobRow): String = job.status match
+  private[app] def stateOf(job: JobRow): String = job.status match
     case "dead"                       => Failed
     case "queued" if job.attempts > 0 => Retrying
     case "done"                       => Done
     case _                            => Pending
 
-  private def nextAttempt(job: JobRow): Option[Instant] =
+  private[app] def nextAttempt(job: JobRow): Option[Instant] =
     Option.when(job.status == "queued")(job.runAt)
 
-  private def errorView(text: String): RenditionErrorView =
+  private[app] def errorView(text: String): RenditionErrorView =
     val (code, message) = RenditionJobs.parseJobError(text)
     RenditionErrorView(code, message)
 

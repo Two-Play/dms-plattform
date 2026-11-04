@@ -141,8 +141,14 @@ final class NotificationJobs(
               NotificationStore.skip(d.id, "no SMTP server is configured").as(None)
             else
               for
-                facts <- ZIO.foreach(d.document)(documents.visibleTo(tenant, d.recipient, _)).map(_.flatten)
-                zone  <- NotificationStore.tenantZone
+                facts <- ZIO
+                  .foreach(d.document)(ref =>
+                    if NotificationTemplates.FailureKinds.contains(d.kind) then
+                      documents.visibleForRetry(tenant, d.recipient, ref)
+                    else documents.visibleTo(tenant, d.recipient, ref)
+                  )
+                  .map(_.flatten)
+                zone <- NotificationStore.tenantZone
               yield Some(Prepared(d, preferences, facts, zone))
         yield prepared
     }

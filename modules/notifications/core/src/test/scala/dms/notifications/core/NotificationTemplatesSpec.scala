@@ -175,6 +175,44 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
         hold.link.contains("/legal-holds")
       )
     },
+    test("failure notices name document, version and reason and lead each audience to a retry it can reach") {
+      val version = UUID.fromString("00000000-0000-0000-0000-000000000009")
+      val ref     = doc.copy(versionId = Some(version))
+      def render(kind: String, language: Language, facts: Option[DocumentFacts], params: (String, String)*) =
+        NotificationTemplates.render(kind, language, params.toMap, Some(ref), ctx(facts))
+      val owner   = "audience" -> NotificationTemplates.Audience.Owner
+      val records = "audience" -> NotificationTemplates.Audience.Records
+      val admin   = "audience" -> NotificationTemplates.Audience.Admin
+      val de      = render("failure.rendition", Language.De, Some(facts), owner, "reason" -> "not_archivable")
+      val en      = render("failure.publication", Language.En, Some(facts), owner, "reason" -> "legal_hold")
+      val noRetry = render("failure.rendition", Language.En, Some(facts), owner, "canRetry" -> "false")
+      val listed  = render("failure.publication", Language.De, Some(facts), records, "reason" -> "timeout")
+      val inAdmin = render("failure.rendition", Language.En, Some(facts), admin)
+      val blind   = render("failure.rendition", Language.De, None, records, "reason" -> "unavailable")
+      assertTrue(
+        de.subject == "Archiv-PDF fehlgeschlagen: Reiserichtlinie (2.0)",
+        de.body.contains("„Reiserichtlinie“ (Version 2.0)"),
+        de.body.contains("besteht die Prüfung gegen den Archivstandard nicht"),
+        de.body.contains("auf der Dokumentseite erneut versuchen"),
+        de.link.contains(s"/documents/${doc.documentId.value}?version=$version"),
+        en.subject == "Publication failed: Reiserichtlinie (2.0)",
+        en.body.contains("“Reiserichtlinie” (version 2.0)"),
+        en.body.contains("a legal hold is active"),
+        en.body.contains("has not become valid"),
+        noRetry.body.contains("records management can retry it"),
+        noRetry.body.contains("The reason is not known."),
+        !noRetry.body.contains("You can retry"),
+        listed.link.contains("/legal-holds"),
+        listed.body.contains("unter Legal Holds erneut versuchen"),
+        listed.body.contains("nicht rechtzeitig fertig"),
+        inAdmin.link.contains("/admin?tab=renditions"),
+        inAdmin.body.contains("in the administration under Archive PDFs"),
+        // not cleared for the document: still told that something failed, without title
+        blind.subject == "Archiv-PDF fehlgeschlagen: Dokument",
+        blind.body.contains("von einem Dokument"),
+        !blind.body.contains("Reiserichtlinie")
+      )
+    },
     test("the email adds greeting, absolute link and the settings page") {
       val rendered        = Rendered("Gültig: X", "Text.", Some("/documents/1"))
       val (subject, text) =

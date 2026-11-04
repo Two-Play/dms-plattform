@@ -5,12 +5,19 @@ import dms.archive.core.LegalHoldService
 import dms.authz.{Action, Authorizer, Groups, Policy, Role, RoleAssignments, Subject}
 import dms.db.Db
 import dms.db.queue.OutboxEvent
-import dms.documents.DocumentStatus
+import dms.documents.{DocumentStatus, Publication}
 import dms.documents.core.{DocumentError, DocumentService}
 import dms.identity.{TenantOrganizations, UserDirectory}
 import dms.kernel.{DocumentId, TenantId, UserId}
 import dms.notifications.*
-import dms.notifications.core.{DeliverySettings, NotificationJobs, SmtpConfig, SmtpMailSender}
+import dms.notifications.core.{
+  DeliverySettings,
+  NotificationJobs,
+  NotificationTemplates,
+  SmtpConfig,
+  SmtpMailSender
+}
+import dms.rendering.RenditionEvents
 import dms.workflow.core.ApprovalWorkflow
 import zio.*
 import zio.json.*
@@ -36,6 +43,10 @@ import scala.util.Try
   *   - `workflow.deputyship-*`: principal and deputy
   *   - `document.status-changed` Approved → Published: the owner
   *   - `legal-hold.created`, `legal-hold.released`: tenant-wide records managers
+  *   - `document.rendition-dead`, `document.publication-dead` (DMS-142, ADR 0058): the document's owner
+  *     (without owner: the version's author) and the tenant-wide records managers, or the tenant
+  *     administrators if there are none. Each audience gets the link it can reach; nothing is sent if the
+  *     version does not wait any more (rejected, withdrawn, published in the meantime)
   */
 final class PlatformNotificationEvents(
     documents: DocumentService,
@@ -227,6 +238,8 @@ final class PlatformNotificationEvents(
               Map("name" -> name.getOrElse("?"), "documents" -> count.toString)
             )
           )
+        case RenditionEvents.Dead | Publication.DeadEvent =>
+          ZIO.foreach(document)(failureNotices(event, _, text("reason"))).map(_.toList.flatten)
         case _ => ZIO.succeed(Nil)
     }
 
@@ -250,6 +263,67 @@ final class PlatformNotificationEvents(
           base + ("actingFor" -> principal)
         )
       )
+
+  /** Who is told that the rendering or publication job of a version is dead, if the version still waits for
+    * it. Recipients are looked up now, not when the job was enqueued: the owner may have changed.
+    */
+  private def failureNotices(
+      event: OutboxEvent,
+      ref: DocumentRef,
+      reason: Option[String]
+  ): IO[String, List[Notice]] =
+    val rendition = event.eventType == RenditionEvents.Dead
+    val kind      = if rendition then "failure.rendition" else "failure.publication"
+    val retry     = if rendition then Action.RetryRendition else Action.RetryPublication
+    details(ref).flatMap { found =>
+      val waiting = found.filterNot(_.discarded).flatMap { d =>
+        d.versions
+          .find(v => ref.versionId.contains(v.id))
+          .filter(v =>
+            if rendition then v.status == DocumentStatus.InApproval && v.rendition.isEmpty
+            else v.status == DocumentStatus.Approved
+          )
+          .map(d -> _)
+      }
+      ZIO
+        .foreach(waiting) { (d, v) =>
+          val responsible = d.document.ownerId.getOrElse(v.createdBy)
+          def notice(recipients: List[UserId], extra: (String, String)*) =
+            Notice(
+              kind,
+              NotificationCategory.ProcessingFailure,
+              recipients,
+              Some(ref),
+              Map("version" -> v.label) ++ reason.map("reason" -> _) ++ extra
+            )
+          for
+            managers <- recordsManagers
+            admins   <- if managers.isEmpty then tenantAdministrators else ZIO.succeed(Nil)
+            held     <- roles.forUser(responsible).mapError(_.toString)
+            now      <- Clock.instant
+            // The named owner is not always able to retry (holding the owner role is required), so the text
+            // must not promise it. Owner and author pass confidentiality whatever their groups are.
+            mayRetry = Policy
+              .decide(
+                Subject(responsible, event.tenant, held),
+                retry,
+                DocumentApi.resource(event.tenant, d, v),
+                now
+              )
+              .isPermitted
+          yield List(
+            // Someone in two audiences gets the link of the list, which needs no reading permission.
+            notice(managers, "audience" -> NotificationTemplates.Audience.Records),
+            notice(admins, "audience"   -> NotificationTemplates.Audience.Admin),
+            notice(
+              List(responsible).diff(managers ++ admins),
+              "audience" -> NotificationTemplates.Audience.Owner,
+              "canRetry" -> mayRetry.toString
+            )
+          ).filter(_.recipients.nonEmpty)
+        }
+        .map(_.toList.flatten)
+    }
 
   /** The `deputies` of a workflow event: deputy and the principal they stand in for. */
   private def deputiesOf(payload: Json.Obj): List[(UserId, String)] =
@@ -298,6 +372,15 @@ final class PlatformNotificationEvents(
       case (user, a) if a.isActiveAt(now) && a.organizationalUnit.isEmpty && a.documentClass.isEmpty => user
     }.distinct
 
+  /** Tenant administrators: told of failures when no records manager can be. */
+  private def tenantAdministrators: IO[String, List[UserId]] =
+    for
+      now     <- Clock.instant
+      holders <- roles.holders(Role.TenantAdmin).mapError(_.toString)
+    yield holders.collect {
+      case (user, a) if a.isActiveAt(now) && a.organizationalUnit.isEmpty && a.documentClass.isEmpty => user
+    }.distinct
+
 object PlatformNotificationEvents:
   val Types: Set[String] = Set(
     "workflow.task-assigned",
@@ -319,7 +402,9 @@ object PlatformNotificationEvents:
     "workflow.deputyship-ended-by-period",
     "document.status-changed",
     "legal-hold.created",
-    "legal-hold.released"
+    "legal-hold.released",
+    RenditionEvents.Dead,
+    Publication.DeadEvent
   )
 
 /** The read check at delivery time (DMS-130): the recipient's current role assignments and access group
@@ -336,6 +421,21 @@ final class PolicyNotificationDocuments(
 ) extends NotificationDocuments:
 
   def visibleTo(tenant: TenantId, user: UserId, ref: DocumentRef): IO[String, Option[DocumentFacts]] =
+    factsFor(tenant, user, ref, Set(Action.ReadDocument))
+
+  override def visibleForRetry(
+      tenant: TenantId,
+      user: UserId,
+      ref: DocumentRef
+  ): IO[String, Option[DocumentFacts]] =
+    factsFor(tenant, user, ref, Set(Action.ReadDocument, Action.RetryRendition, Action.RetryPublication))
+
+  private def factsFor(
+      tenant: TenantId,
+      user: UserId,
+      ref: DocumentRef,
+      actions: Set[Action]
+  ): IO[String, Option[DocumentFacts]] =
     documents
       .get(ref.documentId)
       .map(Some(_))
@@ -355,16 +455,10 @@ final class PolicyNotificationDocuments(
             now <- Clock.instant
             participants = DocumentApi.participantsOf(cases)
             candidates   = details.versions.filter(v => ref.versionId.forall(_ == v.id))
-            readable     = candidates.filter(v =>
-              Policy
-                .decide(
-                  actor,
-                  Action.ReadDocument,
-                  DocumentApi.resource(tenant, details, v, participants),
-                  now
-                )
-                .isPermitted
-            )
+            readable     = candidates.filter { v =>
+              val resource = DocumentApi.resource(tenant, details, v, participants)
+              actions.exists(Policy.decide(actor, _, resource, now).isPermitted)
+            }
           yield readable.lastOption.map(v =>
             DocumentFacts(DocumentRenditions.title(details, v), Some(v.label), details.document.number)
           )

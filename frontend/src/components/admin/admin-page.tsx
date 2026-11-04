@@ -9,6 +9,7 @@ import { hasRole, useMe } from '@/api/me'
 import { DeputyshipForm } from '@/components/deputies/deputyship-form'
 import { DeputyshipTable } from '@/components/deputies/deputyship-table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { PublicationFailuresPanel } from '@/components/documents/publication-failures'
 import { RenditionFailuresPanel } from '@/components/documents/rendition-failures-panel'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DeadlinesPanel } from './deadlines-panel'
@@ -57,9 +58,10 @@ function DeputyshipsPanel() {
 /**
  * Administration for tenant administrators: access groups for confidential documents (DMS-105),
  * number ranges (DMS-113), who must confirm documents per class (DMS-100), the deputyships of everyone (DMS-99), webhooks for connected
- * systems (DMS-107) and failed archive PDFs (DMS-93). The API enforces the permissions.
+ * systems (DMS-107) and failed archive PDFs and publications (DMS-93, DMS-142). The API enforces the
+ * permissions. `tab` opens a tab directly, for links from notifications.
  */
-export function AdminPage() {
+export function AdminPage({ tab }: { tab?: string }) {
   const me = useMe()
   if (me.isPending) return <LoadingState label={t('admin.loading')} rows={4} />
   if (!hasRole(me.data, 'TenantAdmin')) {
@@ -75,7 +77,7 @@ export function AdminPage() {
   return (
     <div className="space-y-6">
       <PageHeader title={t('admin.title')} description={t('admin.description')} />
-      <Tabs defaultValue="groups">
+      <Tabs defaultValue={tab ?? 'groups'}>
         <TabsList>
           <TabsTrigger value="groups">{t('admin.tabGroups')}</TabsTrigger>
           <TabsTrigger value="number-ranges">{t('admin.tabNumberRanges')}</TabsTrigger>
@@ -104,8 +106,9 @@ export function AdminPage() {
         <TabsContent value="webhooks" className="pt-4">
           <WebhooksPanel />
         </TabsContent>
-        <TabsContent value="renditions" className="pt-4">
+        <TabsContent value="renditions" className="space-y-6 pt-4">
           <RenditionFailuresPanel />
+          <PublicationFailuresPanel />
         </TabsContent>
         <TabsContent value="system" className="max-w-xl pt-4">
           <SystemStatusCard />

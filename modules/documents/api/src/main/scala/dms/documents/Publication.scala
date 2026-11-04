@@ -13,6 +13,12 @@ import java.time.{Instant, LocalDate, ZoneId}
   */
 object Publication:
 
+  /** Outbox event: the publication job of a version is dead, every attempt failed (DMS-142, ADR 0058).
+    * Written by the database when the job's status changes (migration V40). Payload: `documentId`,
+    * `versionId`, `jobId`, `attempts` and `reason` (the failure code, if there is one).
+    */
+  val DeadEvent: String = "document.publication-dead"
+
   /** The core field holding the valid-from date. */
   val ValidFromField = "validFrom"
 
