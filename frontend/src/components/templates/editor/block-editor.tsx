@@ -1,5 +1,6 @@
 import { Plus, Trash2 } from 'lucide-react'
 import { useId, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { cn } from 'cn'
 import type { ContentIssue } from '@/api/template-admin'
 import { Button } from '@/components/ui/button'
@@ -219,10 +220,13 @@ export function BlockList({
                 onSplit={(before, after) => {
                   if (block.type !== 'Heading' && block.type !== 'Paragraph') return
                   const next: EditorBlock = { uid: newUid(), type: 'Paragraph', content: after }
-                  onChange(
-                    insertAt(replaceAt(blocks, i, { ...block, content: before }), i + 1, next),
-                  )
-                  env.focus(focusTargetOf(next))
+                  // Rendered and focused at once: keys typed right after Enter belong in the new paragraph.
+                  flushSync(() => {
+                    onChange(
+                      insertAt(replaceAt(blocks, i, { ...block, content: before }), i + 1, next),
+                    )
+                  })
+                  document.getElementById(focusTargetOf(next))?.focus()
                 }}
               />
             </li>
