@@ -139,7 +139,7 @@ else
     set +a
     export DMS_HTTP_PORT="$PORT"
     # Notification emails go to Mailpit from compose.yaml (DMS-130); links point at the dev server.
-    export DMS_SMTP_HOST="${DMS_SMTP_HOST:-localhost}" DMS_SMTP_PORT="${DMS_SMTP_PORT:-1025}"
+    export DMS_SMTP_HOST="${DMS_SMTP_HOST:-localhost}" DMS_SMTP_PORT="${DMS_SMTP_PORT:-${DMS_MAILPIT_SMTP_PORT:-1026}}"
     export DMS_SMTP_SECURITY="${DMS_SMTP_SECURITY:-none}"
     export DMS_NOTIFICATIONS_APP_BASE_URL="${DMS_NOTIFICATIONS_APP_BASE_URL:-http://localhost:$FRONTEND_PORT}"
     cd "$ROOT"
@@ -168,7 +168,7 @@ step "Frontend configuration (frontend/.env.local)"
   "DMS_BACKEND_URL=http://localhost:$PORT"
 echo "Wrote $ROOT/frontend/.env.local"
 
-backend_cmd="set -a && . .local/zitadel/dms.env && set +a && DMS_HTTP_PORT=$PORT DMS_SMTP_HOST=localhost DMS_SMTP_PORT=1025 DMS_SMTP_SECURITY=none $STAGE/bin/app"
+backend_cmd="set -a && . .local/zitadel/dms.env && set +a && DMS_HTTP_PORT=$PORT DMS_SMTP_HOST=localhost DMS_SMTP_PORT=${DMS_MAILPIT_SMTP_PORT:-1026} DMS_SMTP_SECURITY=none $STAGE/bin/app"
 frontend_cmd="cd frontend && npm ci && npm run dev"
 
 if ! $START; then
@@ -203,4 +203,4 @@ echo "  Demo users: admin, designer, designer2, author, reviewer, approver, read
 echo "  Passwords:  $LOCAL/dev-users.env"
 echo "  Partner master: built-in demo partners (dms.partners.directory = demo)"
 echo "  Search index:   OpenSearch on http://localhost:9200 (rebuild: scripts/dev_setup.py search-rebuild --api URL)"
-echo "  Emails:         Mailpit on http://localhost:8025 (SMTP localhost:1025; notifications, DMS-130)"
+echo "  Emails:         Mailpit on http://localhost:${DMS_MAILPIT_WEB_PORT:-8026} (SMTP localhost:${DMS_MAILPIT_SMTP_PORT:-1026}; notifications, DMS-130)"

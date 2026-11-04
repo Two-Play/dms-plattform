@@ -204,6 +204,18 @@ describe('retention rule in the metadata panel (DMS-133)', () => {
     })
   })
 
+  it('shows the rule of the class on a draft that has not taken it over yet (DMS-134)', async () => {
+    setLocale('de')
+    const { client } = retentionClient({ ...fromClass, rule: undefined, source: 'None' })
+    renderRow(client)
+    const cell = await screen.findByTestId('retention')
+    await waitFor(() => {
+      expect(cell).toHaveTextContent('Richtlinien – 10 Jahre ab Ende der Gültigkeit')
+    })
+    expect(cell).toHaveTextContent('aus der Dokumentenklasse')
+    expect(cell).not.toHaveTextContent('keine Aufbewahrungsregel')
+  })
+
   it('tells on a draft whose class has no rule to inform records management', async () => {
     setLocale('de')
     const { client } = retentionClient({

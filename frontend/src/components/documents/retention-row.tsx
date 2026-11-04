@@ -43,7 +43,10 @@ export function RetentionRow({
   })
 
   const data = retention.data
-  const source = SOURCES.find((s) => s === data?.source)
+  // A draft saved before its class got a rule takes the class's rule over on its next save or submission.
+  const pending = !data?.rule && version.status === 'Draft' ? data?.classRule : undefined
+  const rule = data?.rule ?? pending
+  const source = pending ? 'Class' : SOURCES.find((s) => s === data?.source)
 
   return (
     <div className="contents">
@@ -53,9 +56,9 @@ export function RetentionRow({
           <span className="text-muted-foreground">{t('docs.meta.retentionLoading')}</span>
         ) : retention.isError ? (
           <InlineError error={retention.error} />
-        ) : data?.rule ? (
+        ) : rule ? (
           <>
-            <span>{ruleText(data.rule)}</span>
+            <span>{ruleText(rule)}</span>
             {source && (
               <span className="block text-xs text-muted-foreground">
                 {t(`docs.meta.retentionFrom.${source}`)}
@@ -69,7 +72,7 @@ export function RetentionRow({
         ) : (
           <span className="text-muted-foreground">{t('docs.meta.retentionNoneReleased')}</span>
         )}
-        {data?.documentRule && data.documentRule.key !== data.rule?.key && (
+        {data?.documentRule && data.documentRule.key !== rule?.key && (
           <span className="block text-xs text-muted-foreground">
             {t('docs.meta.retentionDocumentRule', { rule: ruleText(data.documentRule) })}
           </span>
