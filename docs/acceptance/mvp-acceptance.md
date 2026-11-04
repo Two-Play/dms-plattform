@@ -141,6 +141,8 @@ The first production stage covers policies and guidelines; contracts follow in s
 - Backup and restore rehearsed against the targets of 15 minutes data loss and 4 hours downtime (`docs/operations/production.md`). Only dump and restore of the database have been exercised.
 - `docs/operations/production.md` worked through for the environment, and the load test repeated there with production sizing.
 
+All of this is tracked in DMS-139. The load test added DMS-136 (tenant quotas), DMS-137 (background jobs at full volume) and DMS-138 (approver's inbox, index migrations); they are not in the table of follow-ups above.
+
 ### Decisions needed
 
 - Do policies use validity scopes that can overlap (`DE` and `AT|DE`)? If so DMS-81 blocks; otherwise an operating rule is enough.

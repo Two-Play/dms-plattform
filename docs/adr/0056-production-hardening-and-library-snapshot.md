@@ -107,12 +107,12 @@ Flyway V38. No new dependency.
 
 ## Follow-ups
 
-- Must be done: tenant quotas and throttling (section 14.2): queue fairness between tenants and rate limits are missing; the bulk worker is shared by all tenants.
-- Must be done: the hourly reminder check still reads all acknowledgements of valid versions of a tenant, in one transaction. At full volume it needs paging or a query per version.
-- Must be done: rendition throughput is one job at a time per instance; measure with production documents and allow several in parallel if needed.
-- Should: the approver's inbox loads one document per task (450 ms at 240 open tasks); batch it like the document list.
-- Must be done: expose the depth of the rendering queue as a metric (chapter 13).
-- Should: V38 creates its indexes without `concurrently`, which is right on an empty production; on a database with data, use a non-transactional migration.
+- Must be done: tenant quotas and throttling (section 14.2): queue fairness between tenants and rate limits are missing; the bulk worker is shared by all tenants (DMS-136).
+- Must be done: the hourly reminder check still reads all acknowledgements of valid versions of a tenant, in one transaction. At full volume it needs paging or a query per version (DMS-137).
+- Must be done: rendition throughput is one job at a time per instance; measure with production documents and allow several in parallel if needed (DMS-137).
+- Should: the approver's inbox loads one document per task (450 ms at 240 open tasks); batch it like the document list (DMS-138).
+- Must be done: expose the depth of the rendering queue as a metric (chapter 13, DMS-137).
+- Should: V38 creates its indexes without `concurrently`, which is right on an empty production; on a database with data, use a non-transactional migration (DMS-138).
 - Should: per-tenant limits on on-demand PDFs (DMS-118) if the workers become a bottleneck.
 - Ruled out: caching per user; authorization stays per request.
 
