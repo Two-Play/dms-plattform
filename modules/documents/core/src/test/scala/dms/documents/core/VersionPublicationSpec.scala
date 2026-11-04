@@ -738,13 +738,16 @@ object VersionPublicationSpec extends ZIOSpecDefault:
         withdrawn <- withdraw(f, approved.id)
         current   <- as(f.tenant)(_.currentlyValid)
         noSummary <- as(f.tenant)(_.newVersion(doc.id, ChangeKind.Major, None, author)).either
+        minor     <- as(f.tenant)(_.newVersion(doc.id, ChangeKind.Minor, Some("Corrected"), author)).either
         next      <- as(f.tenant)(_.newVersion(doc.id, ChangeKind.Major, Some("Corrected"), author))
       yield assertTrue(
         withdrawn.id == v1.id,
         !current.exists(_.document.id == doc.id),
         noSummary.isLeft,
+        minor.isLeft,
         next.label == "2.0-draft.1",
-        next.content == withdrawn.content
+        next.content == withdrawn.content,
+        next.withdrawal.isEmpty
       )
     },
     test("the switch follows the tenant's time zone") {

@@ -78,9 +78,11 @@ object VersioningSpec extends ZIOSpecDefault:
       val stopped      = version(2, Withdrawn, withdrawn = true)
       val outOfForce   = version(1, Withdrawn)
       val stoppedAgain = version(3, Withdrawn, withdrawn = true)
+      val destroyed    = version(4, Destroyed, withdrawn = true)
       assertTrue(
         Versioning.startingPoint(List(valid, stopped)).contains(valid),
         Versioning.startingPoint(List(stopped, stoppedAgain)).contains(stoppedAgain),
+        Versioning.startingPoint(List(stopped, destroyed)).contains(stopped),
         Versioning.startingPoint(List(outOfForce)).isEmpty,
         Versioning.startingPoint(Nil).isEmpty
       )

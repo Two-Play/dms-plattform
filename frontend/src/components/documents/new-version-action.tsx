@@ -90,9 +90,19 @@ function NewVersionForm({
   const error = attempted ? problem : undefined
   const summaryId = `${id}-summary`
   const hintId = `${id}-summary-hint`
+  // Without a valid version nothing may first take effect on the owner's confirmation alone (ADR 0059).
+  const neverValid = document.current.status === 'Withdrawn'
   const options: { value: ChangeKind; label: string; hint: string }[] = [
     { value: 'Major', label: t('newVersion.major'), hint: t('newVersion.majorHint') },
-    { value: 'Minor', label: t('newVersion.minor'), hint: t('newVersion.minorHint') },
+    ...(neverValid
+      ? []
+      : [
+          {
+            value: 'Minor' as const,
+            label: t('newVersion.minor'),
+            hint: t('newVersion.minorHint'),
+          },
+        ]),
   ]
 
   return (

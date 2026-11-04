@@ -221,10 +221,10 @@ object NotificationTemplates:
         r(de = s"Zurückgezogen: $docShort", en = s"Withdrawn: $docShort")(
           bodyDe =
             s"${person("withdrawnBy")} hat $doc vor dem Gültigkeitsdatum${validFromDe} zurückgezogen. " +
-              "Die Version wird nicht veröffentlicht; die bisher gültige Version bleibt gültig." +
+              "Die Version wird nicht veröffentlicht; was bisher galt, gilt weiter." +
               reason.fold("")(t => s" Begründung: $t"),
           bodyEn = s"${person("withdrawnBy")} withdrew $doc before its valid-from date${validFromEn}. " +
-            "The version will not be published; the version valid so far stays valid." +
+            "The version will not be published; what applied so far still applies." +
             reason.fold("")(t => s" Reason: $t")
         )(docLink)
       case "legal-hold.created" =>

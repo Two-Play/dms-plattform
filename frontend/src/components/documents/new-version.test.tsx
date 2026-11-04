@@ -214,6 +214,16 @@ describe('New version on the document page (DMS-103)', () => {
     expect(button).toHaveAccessibleDescription(/waits for its valid-from date/)
   })
 
+  it('offers no editorial correction when no version was ever valid (DMS-143)', async () => {
+    const stopped = version('v2', '1.0', 'Withdrawn')
+    state.document = documentWith(stopped, { canStartVersion: true })
+    const { user } = renderAt(page)
+    await user.click(await screen.findByRole('button', { name: /New version/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Start a new version' })
+    expect(within(dialog).getByRole('radio', { name: /Change of content/ })).toBeChecked()
+    expect(within(dialog).queryByRole('radio', { name: /Editorial correction/ })).toBeNull()
+  })
+
   it('starts an editorial version with its required change summary and opens the new draft', async () => {
     const { router, post, user } = renderAt(`${page}?version=v1`)
     await user.click(await screen.findByRole('button', { name: /New version/ }))

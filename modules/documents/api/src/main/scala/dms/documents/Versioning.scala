@@ -44,7 +44,11 @@ object Versioning:
     versions
       .filter(v => isValid(v.status))
       .maxByOption(_.number)
-      .orElse(versions.filter(_.withdrawal.isDefined).maxByOption(_.number))
+      .orElse(
+        versions
+          .filter(v => v.withdrawal.isDefined && v.status != DocumentStatus.Destroyed)
+          .maxByOption(_.number)
+      )
 
   /** The number of the first version of a document. */
   val first: VersionNo = VersionNo.Initial

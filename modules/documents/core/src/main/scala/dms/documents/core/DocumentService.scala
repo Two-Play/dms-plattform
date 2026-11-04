@@ -1125,6 +1125,10 @@ final class DocumentService(
       base <- ZIO
         .fromOption(Versioning.startingPoint(versions))
         .orElseFail(DocumentError.Conflict("only a document with a valid version can get a new version"))
+      // A minor version needs only the owner's confirmation: nothing may first take effect that way (ADR 0059).
+      _ <- ZIO.when(kind == ChangeKind.Minor && !Versioning.isValid(base.status))(
+        ZIO.fail(DocumentError.Conflict("without a valid version, only a major version can be started"))
+      )
       number = Versioning.next(versions.filter(_.releasedAt.isDefined).map(_.number).maxOption, kind)
       changeReason <- checkChangeReason(kind, number, reason)
       workingState <- sql(DocumentStore.workingStates(id, number)).map(Versioning.nextWorkingState)
@@ -1163,6 +1167,7 @@ final class DocumentService(
         deviations = DeviationReport.compare(template.content, base.content, carried.map(_.request)),
         validFrom = None,
         supersededBy = None,
+        withdrawal = None,
         requiresAcknowledgement = requiresAcknowledgement.getOrElse(
           kind == ChangeKind.Major || settings.minorVersionsRequireAcknowledgement
         ),

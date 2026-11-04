@@ -106,10 +106,10 @@ final case class SuccessorView(
 ) derives JsonCodec,
       Schema
 
-/** The automatic comparison of an editorial (minor) version with the version it is based on (DMS-46). */
 /** The withdrawal of an approved version before it took effect (DMS-143, ADR 0059). */
 final case class WithdrawalView(at: Instant, by: String, reason: String) derives JsonCodec, Schema
 
+/** The automatic comparison of an editorial (minor) version with the version it is based on (DMS-46). */
 final case class EditorialCheckView(
     /** The released version compared with. */
     basedOn: String,
