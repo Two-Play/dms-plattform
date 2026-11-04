@@ -66,7 +66,7 @@ final case class PreviewTemplate(
         f.definition.description,
         f.definition.fieldType,
         f.definition.multiple,
-        f.isRequiredIn(ProfileSchema.RequiredFor),
+        ProfileSchema.isRequired(f),
         used.contains(f.key.value),
         TemplateContent
           .referenceOf(compiled.content, f.key.value)

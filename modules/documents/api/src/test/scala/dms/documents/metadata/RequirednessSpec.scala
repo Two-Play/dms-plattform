@@ -1,5 +1,6 @@
 package dms.documents.metadata
 
+import dms.documents.DocumentStatus
 import dms.documents.DocumentStatus.*
 import dms.documents.{LifecycleError, LifecycleEvent}
 import zio.test.*
@@ -114,6 +115,53 @@ object RequirednessSpec extends ZIOSpecDefault:
           )
       )
     },
+    suite("submission (DMS-147)")({
+      def requiring(statuses: Set[DocumentStatus]) = resolveOrFail(
+        contract,
+        serviceContract.copy(
+          version = 2,
+          fields = FieldBinding(contractValue.key, 1, statuses) :: serviceContract.fields
+        )
+      )
+      val filled = reviewReady + ("serviceLevel" -> MetadataValue.Number(99))
+      def blockedBy(p: MetadataProfile, values: Map[String, MetadataValue]) =
+        Validation.checkSubmission(p, values, Draft) match
+          case Left(TransitionBlocked.Incomplete(InReview, issues)) => issues.map(i => (i.field, i.kind))
+          case _                                                    => Nil
+      List(
+        test("a field required only in a later status blocks it and names that status") {
+          assertTrue(
+            blockedBy(requiring(Set(Published)), filled) ==
+              List("contractValue" -> IssueKind.MissingRequired(Published)),
+            blockedBy(profile, reviewReady) ==
+              List("serviceLevel" -> IssueKind.MissingRequired(InApproval)),
+            blockedBy(requiring(Set(Superseded)), filled) ==
+              List("contractValue" -> IssueKind.MissingRequired(Superseded))
+          )
+        },
+        test("a field required now and later is reported once, for now") {
+          val issues = blockedBy(requiring(Requiredness.from(InReview)), filled)
+          assertTrue(issues == List("contractValue" -> IssueKind.MissingRequired(InReview)))
+        },
+        test("fields the platform adds later and statuses outside the regular path do not block it") {
+          assertTrue(
+            Validation.checkSubmission(profile, filled, Draft) == Right(InReview),
+            Validation.checkSubmission(requiring(Set(Withdrawn)), filled, Draft) == Right(InReview)
+          )
+        },
+        test("what the caller adds is reported with the rest, once per field") {
+          val extra = FieldIssue("contractPartner", "Partner", IssueKind.MissingRequired(Approved))
+          val other = FieldIssue("termMonths", "Term", IssueKind.MissingRequired(Approved))
+          val found =
+            Validation.checkSubmission(profile, reviewReady - "contractPartner", Draft, List(extra, other))
+          assertTrue(found match
+            case Left(TransitionBlocked.Incomplete(_, issues)) =>
+              issues.map(_.field).toSet == Set("contractPartner", "serviceLevel", "termMonths") &&
+              issues.count(_.field == "contractPartner") == 1
+            case _ => false)
+        }
+      )
+    }*),
     test("a child class can add requiredness for an inherited field") {
       val strict = serviceContract.copy(
         version = 2,

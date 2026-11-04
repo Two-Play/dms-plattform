@@ -107,6 +107,32 @@ object Validation:
       Either.cond(issues.isEmpty, target, TransitionBlocked.Incomplete(target, issues))
     }
 
+  /** Applies a submission: on top of [[checkTransition]], every field an author must fill in for a later
+    * status of the regular path needs its value now, because values freeze at submission and the version
+    * could otherwise never get there (DMS-147, ADR 0062). `also` adds what only the caller can know, so the
+    * author sees everything at once.
+    */
+  def checkSubmission(
+      profile: MetadataProfile,
+      values: Map[String, MetadataValue],
+      from: DocumentStatus,
+      also: List[FieldIssue] = Nil
+  ): Either[TransitionBlocked, DocumentStatus] =
+    Lifecycle.transition(from, LifecycleEvent.Submit).left.map(TransitionBlocked.NotAllowed(_)).flatMap {
+      target =>
+        val all = (validate(profile, values, target) ++ missingAfterReview(profile, values) ++ also)
+          .distinctBy(_.field)
+        Either.cond(all.isEmpty, target, TransitionBlocked.Incomplete(target, all))
+    }
+
+  /** Empty fields an author must fill in for a status after the review, each naming the first such status. */
+  def missingAfterReview(profile: MetadataProfile, values: Map[String, MetadataValue]): List[FieldIssue] =
+    profile.fields.filter(_.definition.editable).filter(f => isEmpty(values.get(f.key.value))).flatMap { f =>
+      Requiredness.afterReview
+        .find(s => f.isRequiredIn(s) || CoreFields.requiredByValues(values, s).contains(f.key.value))
+        .map(s => FieldIssue(f.key.value, f.definition.label, IssueKind.MissingRequired(s)))
+    }
+
   /** Checks the given values against their field definitions: type, rules, options and unknown fields. Fields
     * without a value are not reported here.
     */

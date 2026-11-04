@@ -812,7 +812,9 @@ final class DocumentService(
       )
     yield next
 
-  /** Submits the open draft for review. Blocked while fields required in review are missing. */
+  /** Submits the open draft for review. Blocked while fields required in review or later are missing: the
+    * values freeze here, so this is the last moment the author can add them (ADR 0062).
+    */
   def submit(id: DocumentId, actor: UserId): IO[DocumentError, DocumentVersion] =
     for
       document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
@@ -1787,7 +1789,9 @@ final class DocumentService(
       profile <- profile(document.classId, current.classVersion)
       values = statusMetadata(current)
       computedInputs <- ZIO
-        .when(event == LifecycleEvent.Approve)(missingComputedInputs(profile, current))
+        .when(event == LifecycleEvent.Approve || event == LifecycleEvent.Submit)(
+          missingComputedInputs(profile, current)
+        )
         .someOrElse(Nil)
       target <- ZIO
         .fromEither(event match
@@ -1801,6 +1805,8 @@ final class DocumentService(
                 val all    = issues ++ computedInputs.filterNot(i => issues.exists(_.field == i.field))
                 Either.cond(all.isEmpty, target, TransitionBlocked.Incomplete(target, all))
               }
+          case LifecycleEvent.Submit =>
+            Validation.checkSubmission(profile, values, current.status, computedInputs)
           // Stopping an approved version never depends on its values: they are frozen, and a class can name
           // `Withdrawn` among the statuses a field is required in. It would be the way out that fails.
           case LifecycleEvent.Withdraw if withdrawalReason.isDefined =>

@@ -1,6 +1,7 @@
 package dms.templates.core
 
-import dms.documents.metadata.MetadataValue
+import dms.documents.DocumentStatus
+import dms.documents.metadata.{FieldDefinition, FieldKey, FieldOrigin, FieldType, MetadataValue, ProfileField}
 import dms.templates.*
 import zio.*
 import zio.test.*
@@ -150,6 +151,26 @@ object PreviewSpec extends ZIOSpecDefault:
         !keys.contains("renditionChecksum"),
         fields.find(_.key == "clientName").exists(f => f.required && f.label == "Client name"),
         fields.find(_.key == "services").exists(_.multiple)
+      )
+    },
+    test("a field an author must fill in for a later status counts as required, as submission checks it") {
+      def required(origin: FieldOrigin, statuses: DocumentStatus*) =
+        val definition =
+          FieldDefinition(
+            FieldKey.unsafe("legalBasis"),
+            1,
+            "Legal basis",
+            None,
+            FieldType.Text(),
+            origin = origin
+          )
+        ProfileSchema.isRequired(ProfileField(definition, statuses.toSet, None))
+      assertTrue(
+        required(FieldOrigin.Tenant, DocumentStatus.Published),
+        required(FieldOrigin.Tenant, DocumentStatus.Superseded),
+        !required(FieldOrigin.Tenant, DocumentStatus.Withdrawn),
+        !required(FieldOrigin.Tenant),
+        !required(FieldOrigin.System, DocumentStatus.Published)
       )
     },
     test("the 12-page contract template resolves and renders well within 2 seconds (p95)") {

@@ -6,6 +6,8 @@
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 
+Refined by ADR 0062: fields an author fills in that are required after the review are already checked at submission.
+
 ## Context
 
 The business concept (3.1, 3.2) requires hierarchical document classes that inherit metadata profiles, central and typed field definitions (text, number, amount with currency, date, selection, person, document reference) that classes reference instead of copying, status-dependent requiredness, versioned selection lists whose removed values stay readable, and profile versions: a schema change must never silently change existing documents. Tenant administrators define classes and fields at runtime, without a deployment. Fields must be filterable later (search via OpenSearch, ADR 0009) and tenants are isolated with row-level security (ADR 0014).

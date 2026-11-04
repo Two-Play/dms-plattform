@@ -74,3 +74,4 @@ This directory documents the architecture decisions of the DMS platform. Each AD
 | [0059](0059-withdrawing-approved-versions.md) | Withdrawing an approved version before it takes effect: the row lock decides the race with the publication, the version stays a record | Proposed | medium |
 | [0060](0060-purpose-and-reason-in-the-request-body.md) | Purpose and reason for viewing named people travel in the request body of a POST, not in the URL | Proposed | high |
 | [0061](0061-reopened-review-tasks-and-a-way-out-for-stuck-versions.md) | A review task whose revision never took effect opens again as a new row; a version whose publication job is dead can be withdrawn after its date | Proposed | medium |
+| [0062](0062-required-fields-of-later-statuses-at-submission.md) | Fields needed in a later status are checked at submission, where the author can still add them; the form marks them as required | Proposed | high |

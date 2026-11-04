@@ -15,13 +15,19 @@ object ProfileSchema:
   /** A field is required for templates if a document cannot be approved without it. */
   val RequiredFor: DocumentStatus = DocumentStatus.Approved
 
+  /** Whether a template and the form mark the field as required: a field needed later counts too, because it
+    * has to be filled in before submission (ADR 0062).
+    */
+  def isRequired(field: ProfileField): Boolean =
+    field.isRequiredIn(RequiredFor) || field.isRequiredAfterReview
+
   def from(profile: MetadataProfile): TemplateSchema =
     TemplateSchema(profile.fields.map { f =>
       val element = valueType(f.definition.fieldType)
       Variable(
         f.key.value,
         if f.definition.multiple then ValueType.ListOf(element) else element,
-        f.isRequiredIn(RequiredFor),
+        isRequired(f),
         Some(f.definition.label)
       )
     })
