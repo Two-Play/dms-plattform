@@ -321,13 +321,18 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
   private def overview(user: UserId, v: DocumentVersion) =
     get(user, s"/api/v1/documents/${v.documentId.value}/acknowledgement-overview")
 
-  private def recipients(user: UserId, v: DocumentVersion, query: String) =
-    get(user, s"/api/v1/documents/${v.documentId.value}/versions/${v.id}/acknowledgement-recipients$query")
+  private def recipients(user: UserId, v: DocumentVersion, body: String, query: String = "") =
+    call(
+      user,
+      "POST",
+      s"/api/v1/documents/${v.documentId.value}/versions/${v.id}/acknowledgement-recipients$query",
+      Some(body)
+    )
 
   private def remind(user: UserId, v: DocumentVersion) =
     call(user, "POST", s"/api/v1/documents/${v.documentId.value}/versions/${v.id}/acknowledgement-reminders")
 
-  private val purpose = "?purpose=reminder&reason=Policy%20rollout"
+  private val purpose = """{"purpose":"reminder","reason":"Policy rollout"}"""
 
   private def auditCount(action: String) =
     system(sql"select count(*) from dms.audit_event where action = $action".query[Long].run().head)
@@ -466,13 +471,14 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
       for
         f        <- fixture
         before   <- auditCount(ComplianceApi.PersonsViewed)
-        none     <- recipients(ownerA, f.hrPolicy, "")
+        none     <- recipients(ownerA, f.hrPolicy, "{}")
         all      <- recipients(ownerA, f.hrPolicy, purpose)
-        open     <- recipients(ownerA, f.hrPolicy, s"$purpose&status=open")
-        done     <- recipients(ownerA, f.hrPolicy, s"$purpose&status=done")
+        open     <- recipients(ownerA, f.hrPolicy, purpose, "?status=open")
+        done     <- recipients(ownerA, f.hrPolicy, purpose, "?status=done")
         reader   <- recipients(hr2, f.hrPolicy, purpose)
         foreign  <- recipients(ownerB, f.hrPolicy, purpose)
-        badState <- recipients(ownerA, f.hrPolicy, s"$purpose&status=late")
+        badState <- recipients(ownerA, f.hrPolicy, purpose, "?status=late")
+        inQuery  <- recipients(ownerA, f.hrPolicy, "{}", "?purpose=reminder&reason=Policy%20rollout")
         after    <- auditCount(ComplianceApi.PersonsViewed)
       yield assertTrue(
         none._1 == Status.Forbidden,
@@ -494,6 +500,9 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
         !reader._2.contains("Hanna"),
         !foreign._2.contains(hr1.value),
         badState._1 == Status.BadRequest,
+        // the old query parameters are ignored: without a body field the purpose is missing
+        inQuery._1 == Status.Forbidden,
+        code(inQuery) == Some("purpose_required"),
         // three successful accesses, each audited; denied ones are not
         after == before + 3
       )

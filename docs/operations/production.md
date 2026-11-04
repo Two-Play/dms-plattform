@@ -38,6 +38,7 @@ Set `DMS_PROFILE=production`. The application then refuses to start with the set
 ### Network and front end
 
 - [ ] A reverse proxy terminates TLS, sends `Strict-Transport-Security` and limits request rates per client. The application adds the other security headers itself.
+- [ ] The reverse proxy's access log holds method, path and status, but no request bodies and no query strings of `/api` requests: the stated purpose and reason for viewing named people travel in a request body (ADR 0060), and filters in query strings may name organizational units.
 - [ ] The web application is served with its own Content Security Policy; the API's headers only cover the API.
 - [ ] `/docs` and `/docs/*` (Swagger UI) are not reachable from outside, unless wanted. `/health` and `/ready` need no sign-in and say nothing beyond the names of the dependencies.
 - [ ] The rendering and conversion workers are only reachable from the application; their images are pinned by digest (`DMS_RENDERING_IMAGE`, `DMS_CONVERSION_IMAGE`, ADR 0055).

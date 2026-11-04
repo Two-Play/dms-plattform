@@ -23,7 +23,7 @@ import dms.templates.core.{TemplateDraft, TemplateService}
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import zio.*
-import zio.http.{Header, Headers, Request, Status, URL}
+import zio.http.{Body, Header, Headers, MediaType, Request, Status, URL}
 import zio.json.*
 import zio.test.*
 
@@ -304,6 +304,14 @@ object ComplianceApiSpec extends ZIOSpecDefault:
       Request.get(URL.decode(path).toOption.get).addHeaders(Headers(Header.Authorization.Bearer(token(user))))
     ZIO.scoped(routes.runZIO(request)).flatMap(r => r.body.asString.map(b => (r.status, b)).orDie)
 
+  private def post(user: UserId, path: String, body: String) =
+    val request = Request
+      .post(URL.decode(path).toOption.get, Body.fromString(body))
+      .addHeaders(
+        Headers(Header.Authorization.Bearer(token(user)), Header.ContentType(MediaType.application.json))
+      )
+    ZIO.scoped(routes.runZIO(request)).flatMap(r => r.body.asString.map(b => (r.status, b)).orDie)
+
   private def as[A: JsonDecoder](response: (Status, String)): A =
     response._2.fromJson[A].fold(e => throw AssertionError(s"$e: ${response._1} ${response._2}"), identity)
 
@@ -312,10 +320,13 @@ object ComplianceApiSpec extends ZIOSpecDefault:
 
   private def fixture = setup.await.map(_.fixture)
 
-  private def open(user: UserId, v: DocumentVersion, query: String) =
-    get(user, s"/api/v1/compliance/acknowledgements/${v.documentId.value}/${v.id}/open$query")
+  private def openAt(user: UserId, documentId: UUID, versionId: UUID, body: String) =
+    post(user, s"/api/v1/compliance/acknowledgements/$documentId/$versionId/open", body)
 
-  private val purpose = "?purpose=escalation&reason=Rate%20below%20target"
+  private def open(user: UserId, v: DocumentVersion, body: String) =
+    openAt(user, v.documentId.value, v.id, body)
+
+  private val purpose = """{"purpose":"escalation","reason":"Rate below target"}"""
 
   /** Audit entries of the person lists: actor, reason and details. */
   private def personAudit: ZIO[Any, DbError, List[(String, Option[String], String)]] =
@@ -433,9 +444,9 @@ object ComplianceApiSpec extends ZIOSpecDefault:
       for
         f        <- fixture
         before   <- personAudit
-        none     <- open(officer, f.hrPolicy, "")
-        noReason <- open(officer, f.hrPolicy, "?purpose=escalation")
-        unknown  <- open(officer, f.hrPolicy, "?purpose=performance&reason=Check")
+        none     <- open(officer, f.hrPolicy, "{}")
+        noReason <- open(officer, f.hrPolicy, """{"purpose":"escalation"}""")
+        unknown  <- open(officer, f.hrPolicy, """{"purpose":"performance","reason":"Check"}""")
         allowed  <- open(officer, f.hrPolicy, purpose)
         after    <- personAudit
       yield assertTrue(
@@ -457,19 +468,36 @@ object ComplianceApiSpec extends ZIOSpecDefault:
         after.last._3.contains(f.hrPolicy.id.toString)
       )
     },
+    test("purpose and reason in the query string are no longer accepted (ADR 0060)") {
+      for
+        f      <- fixture
+        before <- personAudit
+        url = s"/api/v1/compliance/acknowledgements/${f.hrPolicy.documentId.value}/${f.hrPolicy.id}/open"
+        query   <- post(officer, s"$url?purpose=escalation&reason=Rate%20below%20target", "{}")
+        noBody  <- post(officer, s"$url?purpose=escalation&reason=Rate%20below%20target", "")
+        asGet   <- get(officer, s"$url?purpose=escalation&reason=Rate%20below%20target")
+        after   <- personAudit
+        omitted <- openAt(officer, f.hrPolicy.documentId.value, f.hrPolicy.id, """{"purpose":"escalation"}""")
+      yield assertTrue(
+        query._1 == Status.Forbidden,
+        code(query) == Some("purpose_required"),
+        noBody._1 != Status.Ok,
+        asGet._1 != Status.Ok,
+        omitted._1 == Status.Forbidden,
+        // none of them showed names or left an audit entry
+        before.size == after.size
+      )
+    },
     test("the owner sees names for their own documents only; others and superseded versions are denied") {
       for
         f          <- fixture
-        own        <- open(ownerA, f.hrPolicy, "?purpose=reminder&reason=Remind%20the%20team")
+        own        <- open(ownerA, f.hrPolicy, """{"purpose":"reminder","reason":"Remind the team"}""")
         foreign    <- open(ownerB, f.hrPolicy, purpose)
         reader     <- open(readerAll, f.hrPolicy, purpose)
         otherUnit  <- open(officerHr, f.financeV2, purpose)
         superseded <- open(officer, f.financeV1, purpose)
         secret     <- open(officer, f.secret, purpose)
-        missing    <- get(
-          officer,
-          s"/api/v1/compliance/acknowledgements/${UUID.randomUUID()}/${UUID.randomUUID()}/open$purpose"
-        )
+        missing    <- openAt(officer, UUID.randomUUID(), UUID.randomUUID(), purpose)
       yield assertTrue(
         own._1 == Status.Ok,
         as[OpenAcknowledgementsView](own).purpose == "Reminder",

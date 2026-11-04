@@ -96,9 +96,10 @@ export async function fetchOpenAcknowledgements(
   purpose: AcknowledgementPurpose,
   reason: string,
 ): Promise<OpenAcknowledgements> {
-  const { data, error, response } = await client.GET(
+  // POST with a body: purpose and reason must not travel in the URL (access logs, ADR 0060).
+  const { data, error, response } = await client.POST(
     '/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open',
-    { params: { path: { documentId, versionId }, query: { purpose, reason } } },
+    { params: { path: { documentId, versionId } }, body: { purpose, reason } },
   )
   if (!response.ok || !data) {
     throw requestError(

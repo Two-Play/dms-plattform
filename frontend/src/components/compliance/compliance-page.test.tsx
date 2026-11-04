@@ -92,8 +92,14 @@ function renderAt(path: string) {
         return ok(init?.params?.query?.unit === 'Finance' ? [] : overdue)
       case '/api/v1/compliance/acknowledgements':
         return ok(rates)
+      default:
+        return failed(404, { code: 'not_found', message: `unexpected ${p}` })
+    }
+  })
+  const post = vi.fn((p: string, init?: { body?: { reason?: string } }) => {
+    switch (p) {
       case '/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open':
-        return init?.params?.query?.reason
+        return init?.body?.reason
           ? ok({
               documentId: 'd1',
               versionId: 'v1',
@@ -109,7 +115,7 @@ function renderAt(path: string) {
         return failed(404, { code: 'not_found', message: `unexpected ${p}` })
     }
   })
-  const client = { GET: get } as unknown as ApiClient
+  const client = { GET: get, POST: post } as unknown as ApiClient
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const router = createAppRouter(queryClient, createMemoryHistory({ initialEntries: [path] }))
   render(
@@ -119,7 +125,7 @@ function renderAt(path: string) {
       </ApiClientProvider>
     </QueryClientProvider>,
   )
-  return { router, get, user: userEvent.setup() }
+  return { router, get, post, user: userEvent.setup() }
 }
 
 describe('compliance cockpit', () => {
@@ -190,7 +196,7 @@ describe('compliance cockpit', () => {
   })
 
   it('asks for purpose and reason before it shows who has not acknowledged', async () => {
-    const { get, user } = renderAt('/compliance?view=acknowledgements')
+    const { post, user } = renderAt('/compliance?view=acknowledgements')
 
     const list = await screen.findByRole('table', { name: 'Acknowledgement rate per version' })
     expect(within(list).getByText('1 of 7')).toBeInTheDocument()
@@ -201,10 +207,7 @@ describe('compliance cockpit', () => {
     const dialog = await screen.findByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: 'Show names' }))
     expect(within(dialog).getByRole('alert')).toHaveTextContent('State why you need the names.')
-    expect(get).not.toHaveBeenCalledWith(
-      '/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open',
-      expect.anything(),
-    )
+    expect(post).not.toHaveBeenCalled()
 
     await user.click(within(dialog).getByRole('radio', { name: 'Reminder to the readers' }))
     await user.type(within(dialog).getByLabelText('Reason *'), 'Rate below target')
@@ -218,13 +221,12 @@ describe('compliance cockpit', () => {
         .getAllByRole('listitem')
         .map((li) => li.textContent),
     ).toEqual(['reader-hr-2', 'reader-all'])
-    expect(get).toHaveBeenCalledWith(
+    // Purpose and reason travel in the body, never in the URL (ADR 0060).
+    expect(post).toHaveBeenCalledWith(
       '/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open',
       {
-        params: {
-          path: { documentId: 'd1', versionId: 'v1' },
-          query: { purpose: 'reminder', reason: 'Rate below target' },
-        },
+        params: { path: { documentId: 'd1', versionId: 'v1' } },
+        body: { purpose: 'reminder', reason: 'Rate below target' },
       },
     )
   })
