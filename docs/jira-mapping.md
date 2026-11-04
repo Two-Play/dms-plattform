@@ -187,3 +187,4 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | – | DMS-143 | Task | Sprint 14 | – | DMS-92: withdraw an approved version before its valid-from date |
 | – | DMS-144 | Task | Sprint 14 | – | DMS-108: purpose and reason in the request body |
 | – | DMS-145 | Task | Backlog (MVP) | – | DMS-143: follow-ups of withdrawn versions |
+| – | DMS-146 | Task | Backlog (MVP) | – | DMS-142: scoped records managers, deputies, reminder and audit of dead jobs |
