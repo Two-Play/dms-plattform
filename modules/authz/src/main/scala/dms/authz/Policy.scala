@@ -214,21 +214,23 @@ object Policy:
           )
         )
 
-      case RetryRendition =>
+      case RetryRendition | RetryPublication =>
+        val (status, what) =
+          if action == RetryRendition then (InApproval, "rendition") else (Approved, "publication")
         if resource.isDocument then
-          requireStatus(InApproval)(
+          requireStatus(status)(
             grantIf(
               has(TenantAdmin) || has(RecordsManager) ||
                 (has(Owner) && resource.ownerId.contains(subject.userId)) ||
                 ((has(Author) || has(Owner)) && resource.ownerId.isEmpty && isAuthor),
-              "retrying a rendition requires being the document's owner (or, without owner, its author), " +
+              s"retrying a $what requires being the document's owner (or, without owner, its author), " +
                 "the records manager or the tenant administrator role"
             )
           )
         else
           grantIf(
             resource.configurationArea.isEmpty && (has(TenantAdmin) || has(RecordsManager)),
-            "the failed renditions of the tenant are visible to records managers and tenant administrators"
+            s"the failed ${what}s of the tenant are visible to records managers and tenant administrators"
           )
 
       case SearchUsers =>

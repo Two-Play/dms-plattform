@@ -74,11 +74,12 @@ final case class RenditionResult(
   * complete the approval, with an audit entry of renderer and validation (own transaction). Nothing changes
   * the version before the last step, so a failure leaves it in approval.
   *
-  * Failures are retried by the job queue with backoff (ADR 0010). The owner is notified with the outbox event
-  * [[RenditionEvents.Failed]] on the first failed attempt and again when no retry follows. The job's error
-  * starts with the failure's code in brackets (`[unavailable] …`, see [[RenderingError.code]]), so the status
-  * of a rendition can explain it (DMS-93). Every step is idempotent: rendering is deterministic, storing
-  * reuses an equal stored version, and an approved version is left alone.
+  * Failures are retried by the job queue with backoff (ADR 0010). The outbox event [[RenditionEvents.Failed]]
+  * is written on the first failed attempt and again when no retry follows; people are only notified when the
+  * job is dead ([[RenditionEvents.Dead]], DMS-142). The job's error starts with the failure's code in
+  * brackets (`[unavailable] …`, see [[RenderingError.code]]), so the status of a rendition can explain it
+  * (DMS-93). Every step is idempotent: rendering is deterministic, storing reuses an equal stored version,
+  * and an approved version is left alone.
   *
   * The last step also records what produced the PDF in `dms.rendition_provenance` (renderer versions, worker
   * image and build fingerprint, validator; DMS-93, ADR 0055) for the evidence report.
@@ -211,8 +212,8 @@ final class RenditionJobs(
     ).mapError(RenderingError.Database(_))
       .unit
 
-  /** Records the failure in the audit trail and, on the first attempt and when no retry follows, notifies the
-    * recipients through the outbox. Runs in its own transaction.
+  /** Records the failure in the audit trail and, on the first attempt and when no retry follows, in the
+    * outbox. Runs in its own transaction.
     */
   private def notifyFailure(
       tenant: TenantId,

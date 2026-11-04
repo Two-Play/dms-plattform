@@ -2,6 +2,7 @@ package dms.documents.core
 
 import dms.db.queue.{ClaimedJob, JobQueue}
 import dms.db.{Db, DbError, Jsonb}
+import dms.documents.LifecycleError
 import dms.kernel.TenantId
 import zio.*
 import zio.json.*
@@ -24,6 +25,10 @@ final case class PublicationScheduleConfig(checkInterval: Duration = 1.minute)
   * the old one finds the version not due and does nothing. The job publishes the version and supersedes the
   * valid one of the same scope in one transaction ([[DocumentService.publishScheduled]]); it is idempotent,
   * so at-least-once delivery is safe.
+  *
+  * A failed job is retried with backoff. Its error starts with a failure code in brackets (like renditions,
+  * ADR 0055), so its status and notices can explain it. Once it is dead, [[tick]] does not bring it back (its
+  * key exists): the version stays approved until someone retries it (DMS-142, ADR 0058).
   */
 final class PublicationJobs(db: Db, service: DocumentService, config: PublicationScheduleConfig):
   import PublicationJobs.*
@@ -64,14 +69,23 @@ final class PublicationJobs(db: Db, service: DocumentService, config: Publicatio
     for
       tenant  <- ZIO.fromOption(job.tenant).orElseFail(s"job ${job.id} ($PublishKind) has no tenant")
       version <- ZIO.fromEither(versionOf(job.payload))
-      _       <- db.transact(tenant)(service.publishScheduled(version)).mapError {
-        case e: DocumentError => e.describe
-        case e: DbError       => e.toString
-      }
+      _       <- db.transact(tenant)(service.publishScheduled(version)).mapError(jobError)
     yield ()
 
 object PublicationJobs:
   val PublishKind = "document.publish"
+
+  /** The error text of a failed job: a stable failure code in brackets, then the description. */
+  def jobError(error: DbError | DocumentError): String = error match
+    case e: DbError       => s"[database] $e"
+    case e: DocumentError =>
+      val code = e match
+        case DocumentError.Lifecycle(LifecycleError.LegalHoldActive) => "legal_hold"
+        case _: DocumentError.Lifecycle | _: DocumentError.Conflict  => "conflict"
+        case _: DocumentError.Database                               => "database"
+        case _: DocumentError.NotFound                               => "not_found"
+        case _                                                       => "invalid"
+      s"[$code] ${e.describe}"
 
   private def versionOf(payload: Jsonb): Either[String, UUID] =
     payload.value

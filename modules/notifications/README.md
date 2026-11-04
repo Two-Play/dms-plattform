@@ -6,11 +6,12 @@ Layout: `api` holds public types and the ports, `core` the implementation. Other
 
 ## `api` (package `dms.notifications`)
 
-- `NotificationCategory`: `workflow`, `deadline` (DMS-87), `acknowledgement`, `deputyship`, `publication`, `legal-hold`, each with an email default (all on except legal holds). `Channel`: `in-app`, `email`. `Language`: `de`, `en`.
+- `NotificationCategory`: `workflow`, `deadline` (DMS-87), `acknowledgement`, `deputyship`, `publication`, `processing-failure` (DMS-142), `legal-hold`, each with an email default (all on except legal holds). `Channel`: `in-app`, `email`. `Language`: `de`, `en`.
 - `Notice(kind, category, recipients, document, params)`: what an outbox event means for whom. `params` never hold document titles.
 - Ports implemented by `app`:
   - `NotificationEvents` (`concerns`, `describe`): outbox event → notices (`PlatformNotificationEvents`).
   - `NotificationDocuments.visibleTo(tenant, user, document)`: title, version label and number if the user may read the document now, else `None` (`PolicyNotificationDocuments`, the policy's `ReadDocument` with current roles, groups, workflow participation and deputies).
+  - `NotificationDocuments.visibleForRetry(tenant, user, document)`: the same for failure notices, also for someone who may only retry (DMS-142, ADR 0058); defaults to `visibleTo`.
   - `RecipientDirectory.people(tenant, users)`: display names and email addresses (`DirectoryRecipients` over the user directory, ADR 0037).
   - `MailSender.send(mail)`: `SmtpMailSender` in `core`.
 - Views: `Notification`, `NotificationPage`, `NotificationPreferences`.
@@ -22,7 +23,7 @@ Layout: `api` holds public types and the ports, `core` the implementation. Other
   - Job `notifications.deliver`: preference check again (email off → `skipped`), read check (`NotificationDocuments`), rendering in the recipient's language (their choice, else the tenant's), then in-app: insert into `dms.notification` (id = delivery id, exactly once); email: address from the directory (none → `skipped`), send; failure → `retrying` and the job runner's backoff, after `maxAttempts` → `dead`.
   - `redeliver(id)`: a dead delivery back to `pending` with a new job.
   - Job `notifications.purge` (daily per tenant, `tick`/`schedule`): deletes read notifications and delivered/skipped deliveries older than the retention.
-- `NotificationTemplates`: German and English subject, text and link per kind; `email` adds greeting, absolute link and footer. Kinds: `workflow.task-assigned`, `workflow.changes-requested`, `workflow.rejected`, `workflow.approved`, `workflow.participant-missing`, `workflow.task-due-soon`, `workflow.task-overdue`, `workflow.task-escalated`, `review.task-created`, `review.task-due-soon`, `review.task-overdue`, `review.task-escalated`, `acknowledgement.requested`, `acknowledgement.reminder`, `deputyship.created|started|ended|ended-by-period`, `publication.published`, `legal-hold.created|released`. Without read permission the text names "a document" and no title.
+- `NotificationTemplates`: German and English subject, text and link per kind; `email` adds greeting, absolute link and footer. Kinds: `workflow.task-assigned`, `workflow.changes-requested`, `workflow.rejected`, `workflow.approved`, `workflow.participant-missing`, `workflow.task-due-soon`, `workflow.task-overdue`, `workflow.task-escalated`, `review.task-created`, `review.task-due-soon`, `review.task-overdue`, `review.task-escalated`, `acknowledgement.requested`, `acknowledgement.reminder`, `deputyship.created|started|ended|ended-by-period`, `publication.published`, `failure.rendition`, `failure.publication`, `legal-hold.created|released`. Without read permission the text names "a document" and no title.
 - `NotificationInbox`: the caller's page, unread count, mark read, mark all read, preferences.
 - `NotificationStore`: SQL for deliveries, notifications, preferences, the tenant's language and time zone.
 - `SmtpMailSender(SmtpConfig)`: Jakarta Mail (Eclipse Angus), plain-text UTF-8, `Message-ID` from the delivery id, `Content-Language`, `Auto-Submitted: auto-generated`; security `starttls` (default), `tls` or `none`.
@@ -47,6 +48,9 @@ Layout: `api` holds public types and the ports, `core` the implementation. Other
 | `workflow.deputyship-created`, `-started`, `-ended`, `-ended-by-period` | `deputyship.*` | principal and deputy (different texts) | deputyship |
 | `document.status-changed` Approved → Published | `publication.published` | the owner | publication |
 | `legal-hold.created`, `legal-hold.released` | `legal-hold.*` | tenant-wide records managers | legal-hold |
+| `document.rendition-dead`, `document.publication-dead` (DMS-142) | `failure.rendition`, `failure.publication` | the owner (without owner: the version's author) and tenant-wide records managers, or tenant administrators if there are none; none if the version no longer waits | processing-failure |
+
+Dead-job events are written by a trigger on `dms.job` (V40), so they also cover a timeout and a crash on the last attempt; single retries write nothing. The link depends on who may reach the retry (`Audience` in `NotificationTemplates`): the document page for the owner, the legal holds page for records managers, the administration tab for tenant administrators. The reason is a text per failure code; the technical error stays with the job (ADR 0058).
 
 Acknowledgement requests (DMS-100 follow-up): `AcknowledgementReminderJobs` records per version and recipient when they were first asked (`dms.acknowledgement_request`) and publishes `document.acknowledgement-requested`; a publication triggers the check at once. Reminder rounds count per recipient from their request (the first request of a version from publication), so people who become recipients later are not reminded right after joining. Versions valid before V34 are baselined silently.
 

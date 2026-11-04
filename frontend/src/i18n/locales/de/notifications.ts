@@ -26,6 +26,7 @@ export const notifications = {
     acknowledgement: 'Kenntnisnahmen',
     deputyship: 'Vertretungen',
     publication: 'Veröffentlichung meiner Dokumente',
+    'processing-failure': 'Fehlgeschlagene Archiv-PDFs und Veröffentlichungen',
     'legal-hold': 'Legal Holds',
   },
   page: {
@@ -78,6 +79,8 @@ export const notifications = {
         'Dokumente, die Sie zur Kenntnis nehmen sollen, und Erinnerungen an offene Kenntnisnahmen.',
       deputyship: 'Für Sie oder von Ihnen eingerichtete Vertretungen, ihr Beginn und Ende.',
       publication: 'Ein Dokument, dessen Eigentümer Sie sind, ist gültig geworden.',
+      'processing-failure':
+        'Ein Archiv-PDF oder eine Veröffentlichung ist endgültig fehlgeschlagen und muss erneut versucht werden (Eigentümer und Records Manager).',
       'legal-hold': 'Gesetzte oder aufgehobene Legal Holds (Records Manager).',
     },
   },

@@ -48,6 +48,7 @@ object PolicySpec extends ZIOSpecDefault:
     case SearchUsers                => Resource(tenant)
     case DiscardDraft               => document(Draft)
     case RetryRendition             => document(InApproval).copy(ownerId = Some(other))
+    case RetryPublication           => document(Approved).copy(ownerId = Some(other))
 
   /** The condition that turns a ◐ cell of the matrix into a permission. */
   private def favorable(action: Action, role: Role): Resource =
@@ -63,6 +64,8 @@ object PolicySpec extends ZIOSpecDefault:
       case (DiscardDraft, _)               => r.copy(authorId = Some(user))
       case (RetryRendition, Owner)         => r.copy(ownerId = Some(user))
       case (RetryRendition, _)             => r.copy(ownerId = None, authorId = Some(user))
+      case (RetryPublication, Owner)       => r.copy(ownerId = Some(user))
+      case (RetryPublication, _)           => r.copy(ownerId = None, authorId = Some(user))
       case (Publish, Approver)             => r.copy(approvedBy = Set(user))
       case (ViewHistory, Author)           => r.copy(authorId = Some(user))
       case (ViewHistory, Reviewer)         => r.copy(assignedParticipants = Set(user))
@@ -112,7 +115,9 @@ object PolicySpec extends ZIOSpecDefault:
     DiscardDraft -> List(Never, Partial, Partial, Never, Never, Never, Never, Never, Full, Never),
     // Retrying a failed rendition (DMS-93, ADR 0055): the document's owner (without owner: its author), records
     // managers and tenant administrators.
-    RetryRendition -> List(Never, Partial, Partial, Never, Never, Never, Full, Never, Full, Never)
+    RetryRendition -> List(Never, Partial, Partial, Never, Never, Never, Full, Never, Full, Never),
+    // Retrying a dead publication job (DMS-142, ADR 0058): the same people as for a rendition.
+    RetryPublication -> List(Never, Partial, Partial, Never, Never, Never, Full, Never, Full, Never)
   )
 
   private def permitted(roles: Seq[Role], action: Action, resource: Resource): Boolean =
@@ -339,6 +344,24 @@ object PolicySpec extends ZIOSpecDefault:
           Seq(TenantAdmin),
           RetryRendition,
           document(InApproval).copy(confidentiality = Confidentiality.Confidential)
+        )
+      )
+    },
+    test("a publication is retried only while the version is approved (DMS-142)") {
+      val owned = document(Approved).copy(ownerId = Some(user))
+      assertTrue(
+        permitted(Seq(Owner), RetryPublication, owned),
+        !permitted(Seq(Author), RetryPublication, owned),
+        !permitted(Seq(Owner), RetryPublication, owned.copy(status = Some(Published))),
+        !permitted(Seq(Owner), RetryPublication, owned.copy(status = Some(InApproval))),
+        permitted(Seq(RecordsManager), RetryPublication, document(Approved)),
+        permitted(Seq(RecordsManager), RetryPublication, Resource(tenant)),
+        permitted(Seq(TenantAdmin), RetryPublication, Resource(tenant)),
+        !permitted(Seq(Owner), RetryPublication, Resource(tenant)),
+        !permitted(
+          Seq(RecordsManager),
+          RetryPublication,
+          document(Approved).copy(confidentiality = Confidentiality.Confidential)
         )
       )
     },

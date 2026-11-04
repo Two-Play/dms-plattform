@@ -99,7 +99,7 @@ Flyway V36. No new dependency.
 - Must be done: switch to compliance after the legal confirmation of the retention rules.
 - Should be done (DMS-82, ADR 0054): destruction proposals may read `ObjectRetentions` / `dms.object_retention` to show locked objects up front; the object clean-up already keeps locked objects (`StorageError.Locked`) and retries at the end of the retention.
 - Later: contract-end triggers (ADR 0054 follow-up) extend the locks through the same job.
-- Should be done: notifications module delivers `document.rendition-failed` and a reminder for dead renditions (DMS-130).
+- Should be done: a reminder for dead renditions. The notice itself is done (DMS-142, ADR 0058), by a new event for the dead job rather than `document.rendition-failed`.
 - Later: golden-checksum regression test of the rendering image (ADR 0008 follow-up); a retention extension when a newer version references an older attachment file is already handled by the job.
 - Ruled out: locking objects at upload time; reading image digests through the Docker socket.
 

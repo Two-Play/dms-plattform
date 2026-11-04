@@ -457,5 +457,21 @@ object VersionPublicationSpec extends ZIOSpecDefault:
         check.head.details.value.contains("Typos"),
         minor.changeKind == ChangeKind.Minor
       )
+    },
+    test("a failed publication job's error starts with a code its status and notices can explain (DMS-142)") {
+      for
+        f      <- fixture()
+        runner <- jobs()
+        failed <- runner.handlers(PublicationJobs.PublishKind)(claimed(f.tenant, UUID.randomUUID())).flip
+      yield assertTrue(
+        failed.startsWith("[not_found] "),
+        PublicationJobs.jobError(DocumentError.Conflict("x")) == "[conflict] x",
+        PublicationJobs.jobError(DocumentError.Invalid(List("x"))) == "[invalid] x",
+        PublicationJobs.jobError(DocumentError.Lifecycle(LifecycleError.LegalHoldActive)) ==
+          "[legal_hold] a legal hold is active",
+        PublicationJobs
+          .jobError(DocumentError.Lifecycle(LifecycleError.TransitionNotAllowed(Draft, Publish)))
+          .startsWith("[conflict] ")
+      )
     }
   ).provideShared(env) @@ TestAspect.sequential

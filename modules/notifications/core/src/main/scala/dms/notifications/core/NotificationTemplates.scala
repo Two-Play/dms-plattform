@@ -39,6 +39,24 @@ object NotificationTemplates:
   val PersonParams: Set[String] =
     Set("returnedBy", "approvedBy", "principal", "deputy", "actingFor", "assignee")
 
+  /** Notices of jobs that failed for good (DMS-142, ADR 0058). Parameters: `reason` (the failure code),
+    * `audience` and `canRetry`.
+    */
+  val FailureKinds: Set[String] = Set("failure.rendition", "failure.publication")
+
+  /** Who a failure notice is for, which decides where it leads: only some people can reach each place. */
+  object Audience:
+    /** The document's owner or, without owner, its author: the retry is on the document page. */
+    val Owner = "owner"
+
+    /** Tenant-wide records managers: they cannot open a version in approval, the list is on the legal holds
+      * page.
+      */
+    val Records = "records"
+
+    /** Tenant administrators: no legal holds page either, the list is in the administration. */
+    val Admin = "admin"
+
   /** Kinds this module has texts for. */
   val Kinds: Set[String] = Set(
     "workflow.task-assigned",
@@ -60,6 +78,8 @@ object NotificationTemplates:
     "deputyship.ended",
     "deputyship.ended-by-period",
     "publication.published",
+    "failure.rendition",
+    "failure.publication",
     "legal-hold.created",
     "legal-hold.released"
   )
@@ -180,6 +200,20 @@ object NotificationTemplates:
           bodyDe = s"$docCapitalDe, dessen Eigentümer Sie sind, ist jetzt gültig${validFromDe}.",
           bodyEn = s"$docCapitalEn, which you own, is now valid${validFromEn}."
         )(docLink)
+      case "failure.rendition" =>
+        r(de = s"Archiv-PDF fehlgeschlagen: $docShort", en = s"Archive PDF failed: $docShort")(
+          bodyDe =
+            s"Das Archiv-PDF von $docDat konnte endgültig nicht erzeugt werden. $reasonDe Die Version bleibt in Freigabe, bis es vorliegt. $retryHintDe",
+          bodyEn =
+            s"The archive PDF of $doc could not be produced: every attempt failed. $reasonEn The version stays in approval until it exists. $retryHintEn"
+        )(failureLink)
+      case "failure.publication" =>
+        r(de = s"Veröffentlichung fehlgeschlagen: $docShort", en = s"Publication failed: $docShort")(
+          bodyDe =
+            s"Die Veröffentlichung von $docDat ist endgültig fehlgeschlagen. $reasonDe Die Version ist nicht gültig geworden. $retryHintDe",
+          bodyEn =
+            s"The publication of $doc failed: every attempt failed. $reasonEn The version has not become valid. $retryHintEn"
+        )(failureLink)
       case "legal-hold.created" =>
         r(de = s"Legal Hold gesetzt: ${p("name")}", en = s"Legal hold set: ${p("name")}")(
           bodyDe = s"Der Legal Hold „${p("name")}“ wurde gesetzt und umfasst ${p("documents")} Dokument(e).",
@@ -313,6 +347,61 @@ object NotificationTemplates:
 
     def docSuffixDe: String = if document.isEmpty then "" else s" zu $docDat"
     def docSuffixEn: String = if document.isEmpty then "" else s" about $doc"
+
+    /** Where a failure notice leads: the place with the retry that this audience can reach. */
+    def failureLink: Option[String] = params.get("audience") match
+      case Some(Audience.Records) => Some("/legal-holds")
+      case Some(Audience.Admin)   => Some("/admin?tab=renditions")
+      case _                      =>
+        document.map(d => s"/documents/${d.documentId.value}${d.versionId.fold("")(v => s"?version=$v")}")
+
+    private def retryHint(de: Boolean): String =
+      (params.get("audience"), params.get("canRetry")) match
+        case (Some(Audience.Records), _) =>
+          if de then "Sie können es unter Legal Holds erneut versuchen."
+          else "You can retry it on the legal holds page."
+        case (Some(Audience.Admin), _) =>
+          if de then "Sie können es in der Administration unter Archiv-PDFs erneut versuchen."
+          else "You can retry it in the administration under Archive PDFs."
+        case (_, Some("false")) =>
+          if de then
+            "Den Stand sehen Sie auf der Dokumentseite; erneut versuchen kann es das Records Management."
+          else "The document page shows the state; records management can retry it."
+        case _ =>
+          if de then "Sie können es auf der Dokumentseite erneut versuchen."
+          else "You can retry it on the document page."
+
+    def retryHintDe: String = retryHint(de = true)
+    def retryHintEn: String = retryHint(de = false)
+
+    /** The reason by failure code. The technical text stays with the job: it can quote document content. */
+    def reasonDe: String = params.get("reason") match
+      case Some("unavailable") =>
+        "Grund: Ein benötigter Dienst (Rendering, Konvertierung oder Objektspeicher) war nicht erreichbar."
+      case Some("rejected")       => "Grund: Der Rendering-Dienst hat den Inhalt abgelehnt."
+      case Some("not_archivable") => "Grund: Das PDF besteht die Prüfung gegen den Archivstandard nicht."
+      case Some("invalid")    => "Grund: Die Version lässt sich in ihrem jetzigen Zustand nicht verarbeiten."
+      case Some("integrity")  => "Grund: Eine gespeicherte Datei passt nicht zu ihrer Prüfsumme."
+      case Some("database")   => "Grund: Die Datenbank war nicht erreichbar."
+      case Some("timeout")    => "Grund: Die Verarbeitung wurde nicht rechtzeitig fertig."
+      case Some("conflict")   => "Grund: Der Stand des Dokuments lässt den Schritt nicht zu."
+      case Some("legal_hold") => "Grund: Auf dem Dokument liegt ein Legal Hold."
+      case Some("not_found")  => "Grund: Die Version wurde nicht gefunden."
+      case _                  => "Der Grund ist nicht bekannt."
+
+    def reasonEn: String = params.get("reason") match
+      case Some("unavailable") =>
+        "Reason: a required service (rendering, conversion or object storage) could not be reached."
+      case Some("rejected")       => "Reason: the rendering service refused the content."
+      case Some("not_archivable") => "Reason: the PDF does not pass the check against the archive standard."
+      case Some("invalid")        => "Reason: the version cannot be processed in its current state."
+      case Some("integrity")      => "Reason: a stored file does not match its checksum."
+      case Some("database")       => "Reason: the database could not be reached."
+      case Some("timeout")        => "Reason: the processing did not finish in time."
+      case Some("conflict")       => "Reason: the state of the document does not allow this step."
+      case Some("legal_hold")     => "Reason: a legal hold is active on the document."
+      case Some("not_found")      => "Reason: the version was not found."
+      case _                      => "The reason is not known."
 
     def actingForDe: String =
       params.get("actingFor").fold("")(_ => s" Sie handeln als Vertretung von ${person("actingFor")}.")

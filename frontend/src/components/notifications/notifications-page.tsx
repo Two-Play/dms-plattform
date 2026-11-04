@@ -160,7 +160,13 @@ export function NotificationsPage() {
 }
 
 type CategoryKey =
-  'workflow' | 'deadline' | 'acknowledgement' | 'deputyship' | 'publication' | 'legal-hold'
+  | 'workflow'
+  | 'deadline'
+  | 'acknowledgement'
+  | 'deputyship'
+  | 'publication'
+  | 'processing-failure'
+  | 'legal-hold'
 
 function categoryKey(category: string): CategoryKey {
   switch (category) {
@@ -169,6 +175,7 @@ function categoryKey(category: string): CategoryKey {
     case 'acknowledgement':
     case 'deputyship':
     case 'publication':
+    case 'processing-failure':
     case 'legal-hold':
       return category
     default:

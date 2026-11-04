@@ -56,6 +56,9 @@ enum Role:
   * notice instead), records managers and tenant administrators; on the tenant (the list of failed renditions)
   * records managers and tenant administrators. A retry changes nothing but the job's schedule, so it needs no
   * reading permission; confidentiality still applies.
+  *
+  * `RetryPublication` is the same for the publication job of an approved version (DMS-142, ADR 0058): the
+  * same people, on a version in status `Approved`, and on the tenant for the list.
   */
 enum Action:
   case ReadPublished, ReadDocument, CreateFromTemplate, EditDraft, CommentInReview, Review, Approve, Publish,
@@ -63,7 +66,7 @@ enum Action:
     EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
     ManageRetention, Destroy, ViewHistory, Configure,
     MonitorCompliance, ViewAcknowledgementPersons, GenerateEvidenceReport, AssignDocumentNumber, SearchUsers,
-    DiscardDraft, RetryRendition
+    DiscardDraft, RetryRendition, RetryPublication
 
 /** Areas of tenant configuration (matrix row "Configuration"). `Search` is the operation of the tenant's
   * search index, e.g. rebuilding it (DMS-51, ADR 0029). `Groups` is the administration of access groups and
