@@ -4517,6 +4517,45 @@ export interface components {
       versionIds?: string[]
       reason?: string
     }
+    /** PublicationFailureView */
+    PublicationFailureView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      version: string
+      title?: string
+      state: string
+      /** Format: int32 */
+      attempts: number
+      /** Format: int32 */
+      maxAttempts: number
+      /** Format: date-time */
+      nextAttemptAt?: string
+      /** Format: date-time */
+      failedAt?: string
+      lastError?: components['schemas']['RenditionErrorView']
+      canRetry: boolean
+    }
+    /** PublicationStatusView */
+    PublicationStatusView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      version: string
+      state: string
+      /** Format: int32 */
+      attempts: number
+      /** Format: int32 */
+      maxAttempts: number
+      /** Format: date-time */
+      nextAttemptAt?: string
+      /** Format: date-time */
+      failedAt?: string
+      lastError?: components['schemas']['RenditionErrorView']
+      canRetry: boolean
+    }
     /** RateView */
     RateView: {
       /** Format: int32 */
@@ -4632,45 +4671,6 @@ export interface components {
     RenditionErrorView: {
       code?: string
       message: string
-    }
-    /** PublicationStatusView */
-    PublicationStatusView: {
-      /** Format: uuid */
-      documentId: string
-      /** Format: uuid */
-      versionId: string
-      version: string
-      state: string
-      /** Format: int32 */
-      attempts: number
-      /** Format: int32 */
-      maxAttempts: number
-      /** Format: date-time */
-      nextAttemptAt?: string
-      /** Format: date-time */
-      failedAt?: string
-      lastError?: components['schemas']['RenditionErrorView']
-      canRetry: boolean
-    }
-    /** PublicationFailureView */
-    PublicationFailureView: {
-      /** Format: uuid */
-      documentId: string
-      /** Format: uuid */
-      versionId: string
-      version: string
-      title?: string
-      state: string
-      /** Format: int32 */
-      attempts: number
-      /** Format: int32 */
-      maxAttempts: number
-      /** Format: date-time */
-      nextAttemptAt?: string
-      /** Format: date-time */
-      failedAt?: string
-      lastError?: components['schemas']['RenditionErrorView']
-      canRetry: boolean
     }
     /** RenditionFailureView */
     RenditionFailureView: {
@@ -9718,6 +9718,33 @@ export interface operations {
       }
     }
   }
+  getApiV1RenditionsFailures: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RenditionFailureView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   getApiV1DocumentsIdVersionsVersionidPublicationStatus: {
     parameters: {
       query?: never
@@ -9738,6 +9765,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['PublicationStatusView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
         }
       }
       default: {
@@ -9772,6 +9808,15 @@ export interface operations {
           'application/json': components['schemas']['PublicationStatusView']
         }
       }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
       default: {
         headers: {
           [name: string]: unknown
@@ -9797,33 +9842,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['PublicationFailureView'][]
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  getApiV1RenditionsFailures: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['RenditionFailureView'][]
         }
       }
       default: {

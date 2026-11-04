@@ -213,4 +213,6 @@ Run on 2026-11-04 on this branch.
 | `scripts/dependency_audit.py` | 220 libraries checked. One finding: `spring-core` 7.0.3, GHSA-659m-px2c-25wj (low), brought along by Flowable |
 | `npm audit --omit=dev` | 6 findings (2 low, 4 moderate). The ones looked at come from `ts-morph` and `minimatch` through the `shadcn` package; the offered fix is a breaking change of it. Not assessed one by one (DMS-139) |
 
-Not run for this report: browser walkthroughs, backup and restore, the production profile in a real environment.
+After the four blockers, on all of them together: 1,079 backend and 405 frontend tests passed. On the running local stack: withdrawing a version in the browser as an approver (status, reason, 409 on a second try, absent from library and search, mail to the owner), purpose and reason in the body (403 without them, 405 for the old GET), and a stopped rendering service with the job set to dead by hand (mail to owner and records manager, retry through the API, version approved). Review task notifications ran in tests only, not on the local stack.
+
+Not run for this report: other browser walkthroughs, backup and restore, the production profile in a real environment.
