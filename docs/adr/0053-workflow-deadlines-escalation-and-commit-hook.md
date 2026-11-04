@@ -70,6 +70,7 @@ Given: Flowable only routes, our tables hold the business truth (ADR 0024); peri
 - Should: a holiday calendar per tenant (or region) for working days.
 - Should: deadline fields in a workflow configuration UI per class (today: API, JSON definition).
 - Later: repeated reminders for long-overdue tasks; reassignment as an escalation option; Flowable timers if BPMN-level timing becomes necessary (the commit hook is ready).
+- Done (DMS-141, ADR 0057): review tasks of the periodic review run in the same check as a `DeadlineSource`.
 - Ruled out: business deadlines inside Flowable while the business truth lives in our tables.
 
 ## Reversibility

@@ -124,6 +124,39 @@ final class ReviewService(audit: AuditTrail, documents: DocumentService, classes
           ).asSome
     yield closed
 
+  /** Open tasks of valid versions with a review date up to `until` and the deadline notices published for
+    * them, for the deadline check (DMS-141, ADR 0057).
+    */
+  def openForDeadlines(until: LocalDate): IO[DocumentError, List[(ReviewTask, Set[String])]] =
+    sql {
+      val notices = ReviewStore.noticesOfOpenTasks().groupMap(_._1)(_._2)
+      ReviewStore.openUntil(until).map(t => t -> notices.getOrElse(t.id, Nil).toSet)
+    }
+
+  /** Locks a task for a deadline notice, which excludes a decision at the same time: the task with the
+    * notices published so far, `None` if it was decided or its version is not valid any more.
+    */
+  def lockForDeadline(id: UUID): IO[DocumentError, Option[(ReviewTask, Set[String])]] =
+    sql {
+      ReviewStore
+        .lockTask(id)
+        .filter(t => t.isOpen && ReviewStore.versionStatus(t.versionId).exists(Versioning.isValid))
+        .map(t => t -> ReviewStore.deadlineNotices(t.id))
+    }
+
+  /** Publishes a deadline notice of a task locked with [[lockForDeadline]] once: records `kind` in
+    * `dms.document_review_deadline_notice` in the same transaction as the audit entry and the outbox event
+    * `action`. `false` if it was published before.
+    */
+  def noticeDeadline(
+      task: ReviewTask,
+      kind: String,
+      action: String,
+      details: Json.Obj
+  ): IO[DocumentError, Boolean] =
+    sql(ReviewStore.insertDeadlineNotice(task.id, kind))
+      .tap(inserted => ZIO.when(inserted)(recorded(ReviewActor, action, task, details)))
+
   def task(id: UUID): IO[DocumentError, ReviewTask] =
     sql(ReviewStore.task(id)).someOrFail(taskNotFound(id))
 

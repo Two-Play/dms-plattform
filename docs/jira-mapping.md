@@ -146,6 +146,7 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | S-09.a | DMS-102 | Task | Backlog (MVP) | – | DMS-51/52: clause/PDF/OCR text in the index, production OpenSearch, outbox subscribers |
 | US-05.1 | DMS-103 | Task | Backlog (MVP) | – | DMS-54: start new versions and edit the change summary in the UI |
 | US-07.1 | DMS-104 | Task | Backlog (MVP) | – | DMS-55: review notifications, inherited class settings, recompute review dates |
+| US-07.1 | DMS-141 | Task | Backlog (MVP) | – | DMS-104: review notifications and escalation (release blocker) |
 | F-06.2 | DMS-105 | Task | Backlog (MVP) | – | DMS-101: access group administration UI, automatic task re-resolution |
 | US-08.1 | DMS-106 | Task | Backlog (MVP) | – | DMS-56: legal hold UI, badge, exact search confirmation |
 | US-14.1 | DMS-107 | Task | Backlog (MVP) | – | DMS-58: webhook admin UI, test ping, secret encryption, document number as stable key |

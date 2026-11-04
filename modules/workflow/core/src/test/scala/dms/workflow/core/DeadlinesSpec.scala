@@ -43,6 +43,30 @@ object DeadlinesSpec extends ZIOSpecDefault:
         Deadlines.dueOn(deadline.get.dueAt, berlin) == java.time.LocalDate.parse("2026-11-03")
       )
     },
+    test("something due on a date: end of that day, reminder and escalation around it (DMS-141)") {
+      val friday  = java.time.LocalDate.parse("2026-11-06")
+      val created = at("2026-09-07T01:00:00")
+      val policy  = DeadlinePolicy(0, 2, 3)
+      val weekend = Deadlines.onDate(policy, java.time.LocalDate.parse("2026-11-07"), created, berlin)
+      val late    = Deadlines.onDate(policy, friday, at("2026-11-05T12:00:00"), berlin)
+      assertTrue(
+        // independent of dueWorkingDays
+        Deadlines.onDate(policy, friday, created, berlin) ==
+          TaskDeadline(
+            at("2026-11-06T23:59:59"),
+            Some(at("2026-11-04T23:59:59")),
+            Some(at("2026-11-11T23:59:59"))
+          ),
+        // a review date on a Saturday stays; the days around it are working days
+        weekend.dueAt == at("2026-11-07T23:59:59"),
+        weekend.remindAt.contains(at("2026-11-05T23:59:59")),
+        weekend.escalateAt.contains(at("2026-11-11T23:59:59")),
+        // created inside the reminder window: the notice of the new task is the reminder
+        late.remindAt.isEmpty,
+        Deadlines.onDate(DeadlinePolicy(0, 0, 0), friday, created, berlin) ==
+          TaskDeadline(at("2026-11-06T23:59:59"), None, None)
+      )
+    },
     test("no deadline with 0 days; no reminder before creation; no escalation with 0 days") {
       val created = at("2026-10-29T14:30:00")
       assertTrue(

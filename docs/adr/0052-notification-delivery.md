@@ -83,7 +83,8 @@ Given: the outbox relay hands every event to subscribers (search index, webhooks
 - Must be done: SMTP relay, sender address and `DMS_NOTIFICATIONS_APP_BASE_URL` per environment; credentials in the secret store (`DMS_SMTP_USERNAME`, `DMS_SMTP_PASSWORD`), never in the repository; SPF/DKIM for the sender domain.
 - Should: admin UI for dead deliveries and the tenant language; digest emails (daily summary) for high-volume users; push to the bell (SSE) instead of polling.
 - Should: escalate open acknowledgements to the unit's management after the last automatic round (ADR 0048 follow-up).
-- Later: further sources (comments, review tasks of the periodic review, rendition failures for the owner), per-document muting.
+- Done (DMS-141, ADR 0057): review tasks of the periodic review as a source.
+- Later: further sources (comments, rendition failures for the owner), per-document muting.
 - Ruled out: titles or other document content in outbox payloads; sending from inside business transactions.
 
 ## Reversibility

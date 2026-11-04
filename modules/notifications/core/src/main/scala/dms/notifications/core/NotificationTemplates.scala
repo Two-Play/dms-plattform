@@ -49,6 +49,10 @@ object NotificationTemplates:
     "workflow.task-due-soon",
     "workflow.task-overdue",
     "workflow.task-escalated",
+    "review.task-created",
+    "review.task-due-soon",
+    "review.task-overdue",
+    "review.task-escalated",
     "acknowledgement.requested",
     "acknowledgement.reminder",
     "deputyship.created",
@@ -129,6 +133,32 @@ object NotificationTemplates:
             s"Der Schritt „${p("step")}“ von $docDat ist seit ${date("dueOn")} überfällig. Bitte kümmern Sie sich darum oder sprechen Sie die Zuständigen an.",
           bodyEn =
             s"Step “${p("step")}” of $doc has been overdue since ${date("dueOn")}. Please take care of it or contact the participants."
+        )(docLink)
+      case "review.task-created" =>
+        r(de = s"Überprüfung steht an: $docShort", en = s"Review coming up: $docShort")(
+          bodyDe =
+            s"Die regelmäßige Überprüfung von $docDat steht an. Bitte entscheiden Sie bis ${date("dueOn")}: bestätigen, überarbeiten oder außer Kraft setzen.",
+          bodyEn =
+            s"The periodic review of $doc is coming up. Please decide by ${date("dueOn")}: recertify, revise or withdraw."
+        )(tasks)
+      case "review.task-due-soon" =>
+        r(de = s"Überprüfung bald fällig: $docShort", en = s"Review due soon: $docShort")(
+          bodyDe = s"Die Überprüfung von $docDat ist bis ${date("dueOn")} zu entscheiden.",
+          bodyEn = s"The review of $doc is due by ${date("dueOn")}."
+        )(tasks)
+      case "review.task-overdue" =>
+        r(de = s"Überprüfung überfällig: $docShort", en = s"Review overdue: $docShort")(
+          bodyDe =
+            s"Die Überprüfung von $docDat war bis ${date("dueOn")} zu entscheiden und ist noch offen. Das Dokument bleibt gültig.$ownerDeputyDe",
+          bodyEn =
+            s"The review of $doc was due by ${date("dueOn")} and is still open. The document stays valid.$ownerDeputyEn"
+        )(if params.contains("actingFor") then docLink else tasks)
+      case "review.task-escalated" =>
+        r(de = s"Eskalation Überprüfung: $docShort", en = s"Review escalated: $docShort")(
+          bodyDe =
+            s"Die Überprüfung von $docDat ist seit ${date("dueOn")} überfällig. Bitte kümmern Sie sich darum oder sprechen Sie den Eigentümer an.$ownerDeputyDe",
+          bodyEn =
+            s"The review of $doc has been overdue since ${date("dueOn")}. Please take care of it or contact the owner.$ownerDeputyEn"
         )(docLink)
       case "acknowledgement.requested" =>
         r(de = s"Kenntnisnahme erforderlich: $docShort", en = s"Acknowledgement required: $docShort")(
@@ -288,6 +318,18 @@ object NotificationTemplates:
       params.get("actingFor").fold("")(_ => s" Sie handeln als Vertretung von ${person("actingFor")}.")
     def actingForEn: String =
       params.get("actingFor").fold("")(_ => s" You act as deputy of ${person("actingFor")}.")
+
+    /** Owner decisions are not forwarded (ADR 0030): a deputy is only told. */
+    def ownerDeputyDe: String =
+      params
+        .get("actingFor")
+        .fold("")(_ =>
+          s" Sie erhalten dies als Vertretung von ${person("actingFor")}; entscheiden kann nur der Eigentümer."
+        )
+    def ownerDeputyEn: String =
+      params
+        .get("actingFor")
+        .fold("")(_ => s" You receive this as deputy of ${person("actingFor")}; only the owner can decide.")
 
     def validFromDe: String =
       params.get("validFrom").flatMap(localDate).fold("")(d => s" (ab ${d.format(GermanDate)})")

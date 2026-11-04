@@ -510,14 +510,8 @@ final class ApprovalWorkflow(
               .step(task.stepKey)
               .getOrElse(Step(task.stepKey, task.stepKey, StepKind.Review, Nil))
             policy = Deadlines.policyFor(step, definition, tenantPolicy, config.deadlines)
-            people <- ZIO.foreach(policy.escalateTo) {
-              case DeadlinePolicy.Owner             => ZIO.succeed(subject.owner.toList)
-              case DeadlinePolicy.ComplianceOfficer =>
-                directory.holders(DeadlinePolicy.ComplianceOfficer, subject)
-              case DeadlinePolicy.TenantAdmin => directory.tenantAdmins
-              case _                          => ZIO.succeed(Nil)
-            }
-          yield people.flatten.distinct
+            people <- escalationTargets(policy.escalateTo, subject)
+          yield people
       dueAt   = task.dueAt.map(_.toInstant)
       payload = Json.Obj(
         "caseId"     -> Json.Str(row.id.toString),
@@ -544,6 +538,68 @@ final class ApprovalWorkflow(
         .mapError(WorkflowError.Database(_))
       _ <- record(DeadlineActor, stage.auditAction, target(subject), payload, None, technical = true)
     yield ()
+
+  private def escalationTargets(targets: List[String], subject: ReviewSubject) =
+    ZIO
+      .foreach(targets) {
+        case DeadlinePolicy.Owner             => ZIO.succeed(subject.owner.toList)
+        case DeadlinePolicy.ComplianceOfficer =>
+          directory.holders(DeadlinePolicy.ComplianceOfficer, subject)
+        case DeadlinePolicy.TenantAdmin => directory.tenantAdmins
+        case _                          => ZIO.succeed(Nil)
+      }
+      .map(_.flatten.distinct)
+
+  /** The policy for deadlines that belong to no workflow definition (review tasks, DMS-141): the tenant's
+    * default, else the installation's.
+    */
+  def defaultDeadlines: IO[WorkflowError, DeadlinePolicy] =
+    sql(WorkflowStore.deadlineSettings).map(_.fold(config.deadlines)(_._1))
+
+  /** Who hears of a deadline of the document's owner at `stage` (DMS-141, ADR 0057), by the stages of
+    * workflow tasks: the owner; from the deadline on also the owner's active deputies, for information; when
+    * escalated also the targets of `policy`. The owner is the one who was late, so an escalation that would
+    * reach nobody else goes to the compliance officers in scope, without any to the tenant administrators.
+    */
+  def ownerDeadlineAudience(
+      document: DocumentId,
+      version: UUID,
+      stage: DeadlineStage,
+      policy: DeadlinePolicy
+  ): IO[WorkflowError, DeadlineAudience] =
+    for
+      subject  <- documents.subject(document, version)
+      deputies <- if stage == DeadlineStage.Reminder then ZIO.succeed(Nil) else ownerDeputies(subject)
+      others = (people: List[UserId]) => people.filterNot(subject.owner.contains)
+      targets <-
+        if stage != DeadlineStage.Escalated then ZIO.succeed(Nil)
+        else
+          escalationTargets(policy.escalateTo, subject).map(others).flatMap {
+            case Nil =>
+              directory
+                .holders(DeadlinePolicy.ComplianceOfficer, subject)
+                .map(others)
+                .flatMap(officers =>
+                  if officers.nonEmpty then ZIO.succeed(officers) else directory.tenantAdmins.map(others)
+                )
+            case people => ZIO.succeed(people)
+          }
+    yield DeadlineAudience(subject.owner.toList, deputies, targets)
+
+  private def ownerDeputies(subject: ReviewSubject): IO[WorkflowError, List[TaskDeputy]] =
+    subject.owner.fold(ZIO.succeed(List.empty[TaskDeputy])) { owner =>
+      for
+        now         <- Clock.instant
+        deputyships <- sql(DeputyStore.activeForPrincipals(List(owner), now))
+        // A deputy who may not see a confidential version holds no role for it (DMS-101).
+        cleared     <- directory.cleared(deputyships.map(_.deputy).toSet, subject)
+        deputyRoles <- ZIO
+          .foreach(deputyships.map(_.deputy).distinct.filter(cleared.contains))(d =>
+            directory.heldRoles(d).map(held => d -> held.filter(_.isActiveAt(now)).map(_.role).toSet)
+          )
+          .map(_.toMap)
+      yield Rules.ownerDeputies(owner, subject.classPath, deputyships, deputyRoles, now)
+    }
 
   /** The deadline of a task as stored when it was created. */
   private def deadlineOfRow(t: TaskRow): Option[TaskDeadline] =

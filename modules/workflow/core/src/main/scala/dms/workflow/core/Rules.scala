@@ -150,6 +150,32 @@ object Rules:
         .map(d => TaskDeputy(d.deputy, d.principal))
         .distinctBy(_.deputy)
 
+  /** The deputies to inform about a deadline of the document owner (DMS-141, ADR 0057): like [[taskDeputies]]
+    * an active deputyship for `Owner` and the document's class, and the deputy still holds the role. They are
+    * only told: owner decisions are not forwarded (ADR 0028, 0030). One entry per deputy.
+    */
+  def ownerDeputies(
+      owner: UserId,
+      classPath: List[String],
+      deputyships: List[Deputyship],
+      deputyRoles: Map[UserId, Set[String]],
+      now: Instant
+  ): List[TaskDeputy] =
+    deputyships
+      .filter(d =>
+        d.isActiveAt(now) &&
+          d.principal == owner &&
+          d.deputy != owner &&
+          d.roles.contains(OwnerRole) &&
+          d.documentClass.forall(classPath.contains) &&
+          deputyRoles.getOrElse(d.deputy, Set.empty).contains(OwnerRole)
+      )
+      .sortBy(_.deputy.value)
+      .map(d => TaskDeputy(d.deputy, d.principal))
+      .distinctBy(_.deputy)
+
+  private val OwnerRole = "Owner"
+
   /** BPMN element id of the user task of a lane. */
   def taskKey(step: String, lane: String): String = s"task.$step.$lane"
 
