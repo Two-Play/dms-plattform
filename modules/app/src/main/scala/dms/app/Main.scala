@@ -226,6 +226,8 @@ object Main extends ZIOAppDefault:
           WordTemplateService.layer,
           EvidenceReportApi.auditEvidence(cfg.audit),
           EvidenceReportStore.layer,
+          ZLayer.succeed(cfg.library),
+          LibrarySnapshots.layer,
           ZLayer.succeed(cfg.notifications.settings),
           ZLayer.succeed(cfg.notifications.smtp),
           PlatformNotifications.layer

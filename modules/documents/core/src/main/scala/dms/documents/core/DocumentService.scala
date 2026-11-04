@@ -262,7 +262,7 @@ final case class CurrentVersion(
 ):
   def label: String = Versioning.label(number, status, 1)
 
-  def metadata: Map[String, MetadataValue] = values.map((k, e) => k -> e.value)
+  lazy val metadata: Map[String, MetadataValue] = values.map((k, e) => k -> e.value)
 
 /** An approved version waiting for its publication at `dueAt` (00:00 of its valid-from date in the tenant's
   * time zone).
@@ -558,15 +558,25 @@ final class DocumentService(
 
   /** The most recently changed documents with all their versions; the caller filters what may be read. */
   def recent(limit: Int): IO[DocumentError, List[DocumentDetails]] =
+    sql(DocumentStore.recentDocuments(limit)).flatMap(detailsOf)
+
+  /** Several documents with all versions, by id; unknown ones are left out. */
+  def getAll(ids: List[DocumentId]): IO[DocumentError, Map[DocumentId, DocumentDetails]] =
+    sql(DocumentStore.documents(ids)).flatMap(detailsOf).map(_.map(d => d.document.id -> d).toMap)
+
+  /** The details of documents with a fixed number of queries, however many there are (DMS-60). */
+  private def detailsOf(documents: List[Document]): IO[DocumentError, List[DocumentDetails]] =
     for
-      documents <- sql(DocumentStore.recentDocuments(limit))
-      details   <- ZIO.foreach(documents)(d =>
-        for
-          versions <- sql(DocumentStore.versions(d.id, templates))
-          profile  <- profile(d.classId, d.classVersion)
-        yield DocumentDetails(d, versions, profile)
-      )
-    yield details
+      versions <- sql(DocumentStore.versionsOf(documents.map(_.id), templates))
+      profiles <- ZIO
+        .foreach(documents.map(d => (d.classId, d.classVersion)).distinct)((id, version) =>
+          profile(id, version).map((id, version) -> _)
+        )
+        .map(_.toMap)
+      zone <- sql(DocumentStore.tenantZone)
+    yield documents.map(d =>
+      DocumentDetails(d, versions.getOrElse(d.id, Nil), profiles((d.classId, d.classVersion)), zone)
+    )
 
   /** The time zone of the tenant; validity switches at 00:00 there (DMS-45). */
   def tenantZone: IO[DocumentError, ZoneId] = sql(DocumentStore.tenantZone)
@@ -633,6 +643,9 @@ final class DocumentService(
     * it asks for acknowledgement (compliance cockpit, DMS-59; library, DMS-119). The caller decides which of
     * them may be seen.
     */
+  def validityStamp: IO[DocumentError, Option[Instant]] =
+    sql(DocumentStore.validityStamp).map(_.map(_.toInstant))
+
   def currentlyValid: IO[DocumentError, List[CurrentVersion]] =
     for
       rows  <- sql(DocumentStore.currentlyValid)

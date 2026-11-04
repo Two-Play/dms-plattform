@@ -355,7 +355,8 @@ final case class AppConfig(
     users: UserDirectoryConfig,
     attachments: AttachmentsConfig,
     retention: RetentionConfig,
-    notifications: NotificationsConfig
+    notifications: NotificationsConfig,
+    library: LibraryConfig
 )
 
 object AppConfig:

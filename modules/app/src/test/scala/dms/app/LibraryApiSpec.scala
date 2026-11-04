@@ -278,7 +278,9 @@ object LibraryApiSpec extends ZIOSpecDefault:
       WorkflowExtraReview.layer,
       ZLayer.succeed(WorkflowConfig.default),
       WorkflowRendition.layer,
-      ApprovalWorkflow.layer
+      ApprovalWorkflow.layer,
+      ZLayer.succeed(LibraryConfig()),
+      LibrarySnapshots.layer
     )
 
   private def token(user: UserId): String =

@@ -1,0 +1,102 @@
+# Services of the load test (DMS-60): a compose project of its own with its own ports and volumes, so a run never
+# touches the development stack of compose.yaml. Identity is not part of it: scripts/loadtest/loadtest.py serves its
+# own signing keys and mints tokens, so no ZITADEL is needed. Development only: all credentials are test values.
+name: dms-loadtest
+
+services:
+  db:
+    image: postgres:17
+    # pg_stat_statements: `loadtest.py queries` lists what a run spent its database time on.
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "max_connections=200",
+              "-c", "shared_buffers=1GB", "-c", "work_mem=32MB", "-c", "maintenance_work_mem=512MB"]
+    environment:
+      POSTGRES_DB: dms
+      POSTGRES_USER: dms
+      POSTGRES_PASSWORD: dms-lokal
+    ports:
+      - "15433:5432"
+    volumes:
+      - db:/var/lib/postgresql/data
+      - ../../docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    shm_size: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dms -d dms"]
+      interval: 3s
+      retries: 20
+
+  objectstore:
+    image: chrislusf/seaweedfs:4.51@sha256:f7a49e3f3972ebed5be2ed4befa4a0c68eb7bdddba6e692d42729ceb545134b8
+    command: ["mini", "-dir=/data"]
+    environment:
+      AWS_ACCESS_KEY_ID: dms-local
+      AWS_SECRET_ACCESS_KEY: dms-local-secret
+    ports:
+      - "19100:8333"
+    volumes:
+      - objectstore:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8333/healthz"]
+      interval: 3s
+      retries: 30
+
+  objectstore-init:
+    image: amazon/aws-cli:2.39.0@sha256:6014c77975a4ae237395924cc821333f20bf87c91964a45dd4ed5f3b13b424f5
+    depends_on:
+      objectstore:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: dms-local
+      AWS_SECRET_ACCESS_KEY: dms-local-secret
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        aws --endpoint-url http://objectstore:8333 s3api head-bucket --bucket dms 2>/dev/null ||
+        aws --endpoint-url http://objectstore:8333 s3api create-bucket --bucket dms --object-lock-enabled-for-bucket
+    restart: "no"
+
+  rendering:
+    build: ../../workers/rendering
+    image: dms-rendering-worker:local
+    environment:
+      DMS_WORKER_IMAGE: dms-rendering-worker:local
+    ports:
+      - "19280:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 512m
+
+  conversion:
+    build: ../../workers/conversion
+    image: dms-conversion-worker:local
+    environment:
+      DMS_WORKER_IMAGE: dms-conversion-worker:local
+    ports:
+      - "19281:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 1g
+
+  opensearch:
+    image: opensearchproject/opensearch:3.8.0@sha256:fafe3fc3587088674669235575aa166228c48bdb940294a8cdbbc1da75236a40
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms1g -Xmx1g"
+    ports:
+      - "19201:9200"
+    volumes:
+      - search:/usr/share/opensearch/data
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' > /dev/null"]
+      interval: 5s
+      retries: 40
+
+volumes:
+  db:
+  objectstore:
+  search:

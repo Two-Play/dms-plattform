@@ -38,13 +38,14 @@ private[core] object VersionFileStore:
   // The column list is repeated in each query: Magnum binds parameters only for literal sql"" fragments.
 
   /** The files of all versions of a document, by version. */
-  def ofDocument(document: DocumentId)(using DbTx): Map[UUID, VersionFile] =
+  def ofDocuments(documents: List[DocumentId])(using DbTx): Map[UUID, VersionFile] =
+    val ids = documents.distinct.map(_.value.toString).toArray
     sql"""select l.version_id, l.file_id, l.name, f.content_type, f.size_bytes, f.sha256, f.object_key,
                  f.object_version, f.scan_status, f.scanner, l.set_by, l.set_at, l.based_on, l.word_fields,
                  l.word_values
           from dms.document_version_file l
           join dms.document_attachment_file f on f.id = l.file_id
-          where f.document_id = ${document.value}"""
+          where f.document_id = any(cast($ids as uuid[]))"""
       .query[Row]
       .run()
       .map(toFile)

@@ -11,6 +11,7 @@ import zio.json.*
 
 import java.time.{Instant, LocalDate, OffsetDateTime, ZoneId, ZoneOffset}
 import java.util.UUID
+import scala.annotation.tailrec
 
 /** Reads and writes the structured content and the deviation report in the stored formats of the templates
   * module.
@@ -95,17 +96,53 @@ private[core] object DocumentStore:
 
   /** The documents of the tenant, the most recently changed first (by their latest version). Documents whose
     * versions were all discarded (DMS-129) or destroyed (DMS-82) are left out.
+    *
+    * Reads the latest changes of documents and of versions from their `updated_at` indexes rather than
+    * sorting every document of the tenant (DMS-60), so the cost does not grow with the tenant. A document
+    * outside both windows changed at the end of the windows at the latest; the windows widen until the
+    * documents found are newer than that.
     */
   def recentDocuments(limit: Int)(using DbTx): List[Document] =
-    sql"""select d.id, d.class_id, d.class_version, d.title, d.owner_id, d.author_id, d.template_id,
-                 d.template_version, d.created_at, d.document_number, d.kind
+    @tailrec def within(window: Int): List[UUID] =
+      val documents =
+        sql"""select id, updated_at from dms.document order by updated_at desc limit $window"""
+          .query[(UUID, OffsetDateTime)]
+          .run()
+          .toList
+      val versions =
+        sql"""select document_id, updated_at from dms.document_version order by updated_at desc limit $window"""
+          .query[(UUID, OffsetDateTime)]
+          .run()
+          .toList
+      val found = latestChanges((documents ++ versions).map(_._1).distinct, limit)
+      // Only a full window can leave anything out; everything else was seen.
+      val outside = List(documents, versions).filter(_.size == window).flatMap(_.lastOption).map(_._2)
+      val complete = outside.isEmpty || found.size == limit && outside.forall(found.last._2.isAfter)
+      if complete then found.map(_._1) else within(window * 4)
+    val ids = within(limit * 4)
+    val byId = documents(ids.map(DocumentId(_))).map(d => d.id.value -> d).toMap
+    ids.flatMap(byId.get)
+
+  /** Of the given documents the `limit` changed last, with that time, leaving out documents without a
+    * remaining version.
+    */
+  private def latestChanges(documents: List[UUID], limit: Int)(using DbTx): List[(UUID, OffsetDateTime)] =
+    val ids = documents.map(_.toString).toArray
+    sql"""select d.id, greatest(d.updated_at, (select max(v.updated_at) from dms.document_version v
+                                               where v.document_id = d.id)) as changed
           from dms.document d
-          where exists (select 1 from dms.document_version v
+          where d.id = any(cast($ids as uuid[]))
+            and exists (select 1 from dms.document_version v
                         where v.document_id = d.id and v.status not in ('Discarded', 'Destroyed'))
-          order by greatest(d.updated_at,
-                            (select max(v.updated_at) from dms.document_version v where v.document_id = d.id))
-                   desc, d.id
-          limit $limit""".query[DocumentRow].run().map(toDocument).toList
+          order by changed desc, d.id
+          limit $limit""".query[(UUID, OffsetDateTime)].run().toList
+
+  /** The given documents; unknown ones are left out. */
+  def documents(ids: List[DocumentId])(using DbTx): List[Document] =
+    val array = ids.distinct.map(_.value.toString).toArray
+    sql"""select id, class_id, class_version, title, owner_id, author_id, template_id, template_version,
+                 created_at, document_number, kind
+          from dms.document where id = any(cast($array as uuid[]))""".query[DocumentRow].run().map(toDocument).toList
 
   /** Ids of the documents changed at or after `since`: the document row or one of its versions (DMS-51, for
     * the search index); without `since` every document that has a released version.
@@ -216,21 +253,33 @@ private[core] object DocumentStore:
 
   /** All versions of a document, by number and creation. */
   def versions(id: DocumentId, codec: ContentCodec)(using DbTx): List[DocumentVersion] =
+    versionsOf(List(id), codec).getOrElse(id, Nil)
+
+  /** All versions of several documents, by number and creation per document: a fixed number of queries,
+    * however many documents a list shows (DMS-60).
+    */
+  def versionsOf(ids: List[DocumentId], codec: ContentCodec)(using
+      DbTx
+  ): Map[DocumentId, List[DocumentVersion]] =
+    val array = ids.distinct.map(_.value.toString).toArray
     sql"""select id, document_id, major, minor, working_state, status, change_kind, change_reason, scope,
                  class_version, template_id, template_version, content, field_values, metadata_snapshot,
                  rendition_key, rendition_version, rendition_sha256, created_by, created_at, updated_at,
                  released_by, released_at, deviation_report, valid_from, superseded_by, requires_acknowledgement,
                  published_at
-          from dms.document_version where document_id = ${id.value} order by major, minor, created_at"""
+          from dms.document_version where document_id = any(cast($array as uuid[]))
+          order by major, minor, created_at"""
       .query[VersionRow]
       .run()
       .map(toVersion(_, codec))
       .toList match
-      case Nil      => Nil
+      case Nil      => Map.empty
       case versions =>
-        val attachments = AttachmentStore.ofDocument(id)
-        val files       = VersionFileStore.ofDocument(id)
-        versions.map(v => v.copy(attachments = attachments.getOrElse(v.id, Nil), file = files.get(v.id)))
+        val attachments = AttachmentStore.ofDocuments(ids)
+        val files       = VersionFileStore.ofDocuments(ids)
+        versions
+          .map(v => v.copy(attachments = attachments.getOrElse(v.id, Nil), file = files.get(v.id)))
+          .groupBy(_.documentId)
 
   /** A version, locked for a change. */
   def lockVersion(id: UUID, codec: ContentCodec)(using DbTx): Option[DocumentVersion] =
@@ -471,6 +520,17 @@ private[core] object DocumentStore:
       firstPublishedAt: Option[OffsetDateTime]
   ) derives DbCodec
 
+  /** Changes whenever a version becomes or stops being valid: the latest status change of the versions that
+    * are or were valid. Read from an index, whatever the number of documents (DMS-60).
+    */
+  def validityStamp(using DbTx): Option[OffsetDateTime] =
+    sql"""select max(status_changed_at) from dms.document_version
+          where status in ('Published', 'ReviewDue', 'Superseded', 'Withdrawn', 'Archived', 'Destroyed')"""
+      .query[Option[OffsetDateTime]]
+      .run()
+      .headOption
+      .flatten
+
   /** Every version of the tenant valid now, by title, with the first publication of any version of its
     * document (library, DMS-119).
     */
@@ -478,10 +538,11 @@ private[core] object DocumentStore:
     sql"""select d.id, d.class_id, d.class_version, d.title, d.owner_id, d.author_id, d.template_id,
                  d.template_version, d.created_at, v.id, v.major, v.minor, v.status, v.field_values, v.created_by,
                  v.released_by, v.valid_from, v.published_at, v.review_due_on, v.requires_acknowledgement,
-                 v.scope, d.document_number,
-                 (select min(p.published_at) from dms.document_version p where p.document_id = d.id)
+                 v.scope, d.document_number, f.first_published_at
           from dms.document_version v
           join dms.document d on d.id = v.document_id
+          left join (select document_id, min(published_at) as first_published_at
+                     from dms.document_version group by document_id) f on f.document_id = d.id
           where v.status in ('Published', 'ReviewDue')
           order by d.title, d.id, v.major, v.minor"""
       .query[CurrentRow]

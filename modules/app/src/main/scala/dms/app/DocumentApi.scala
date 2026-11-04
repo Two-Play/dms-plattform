@@ -448,7 +448,7 @@ object DocumentApi:
                   DocumentError.Invalid(List(s"limit must be between 1 and $MaxListSize"))
                 )
               recent   <- ctx.service.recent(size)
-              readable <- ZIO.foreach(recent)(details => ctx.visible(details).map(details -> _))
+              readable <- ctx.visibleAll(recent)
               held     <- LegalHoldStore
                 .heldAmong(readable.collect { case (d, _ :: _) => d.document.id }.toSet)
                 .mapError(DocumentError.Database(_))
@@ -830,6 +830,10 @@ object DocumentApi:
     def allowed(action: Action, resource: Resource): UIO[Boolean] =
       Clock.instant.map(now => Policy.decide(subject, action, resource, now).isPermitted)
 
+    /** The decision for `action`, for filtering a long list at one moment in time. */
+    def allows(action: Action): UIO[Resource => Boolean] =
+      Clock.instant.map(now => r => Policy.decide(subject, action, r, now).isPermitted)
+
     /** Whether the caller must acknowledge the valid version `v`: they may read it (`ReadPublished`) and pass
       * the recipient filter its class set at publication (DMS-100, ADR 0048).
       */
@@ -851,6 +855,18 @@ object DocumentApi:
     /** The versions the caller may read, possibly none. */
     def visible(details: DocumentDetails): IO[WorkflowError, List[DocumentVersion]] =
       visibleWith(details).map(_._1)
+
+    /** [[visible]] for a whole list, reading the workflow cases of all its documents at once (DMS-60). */
+    def visibleAll(
+        all: List[DocumentDetails]
+    ): IO[WorkflowError, List[(DocumentDetails, List[DocumentVersion])]] =
+      workflow
+        .casesOf(all.map(_.document.id))
+        .flatMap(cases =>
+          ZIO.foreach(all)(details =>
+            visibleIn(details, cases.getOrElse(details.document.id, Nil)).map(r => details -> r._1)
+          )
+        )
 
     /** The versions the caller may read; denied (and logged) if there is none. A document whose versions were
       * all discarded (DMS-129) is not found.
@@ -875,9 +891,14 @@ object DocumentApi:
     private def visibleWith(
         details: DocumentDetails
     ): IO[WorkflowError, (List[DocumentVersion], Map[UUID, Set[UserId]], Subject)] =
+      workflow.cases(details.document.id).flatMap(visibleIn(details, _))
+
+    private def visibleIn(
+        details: DocumentDetails,
+        cases: List[CaseDetails]
+    ): IO[WorkflowError, (List[DocumentVersion], Map[UUID, Set[UserId]], Subject)] =
+      val participants = participantsOf(cases)
       for
-        cases <- workflow.cases(details.document.id)
-        participants = participantsOf(cases)
         actor <- Delegation.subject(authz, subject, cases.flatMap(_.tasks))
         now   <- Clock.instant
       yield (

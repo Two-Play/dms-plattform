@@ -449,9 +449,23 @@ object LegalHoldStore extends LegalHoldLookup:
       sql"select dms.document_under_legal_hold(${document.value})".query[Boolean].run().head
     )
 
+  /** Up to this many documents are looked up by id, more are compared with all held documents (few, compared
+    * with a library of valid versions).
+    */
+  private val HeldAmongLimit = 1000
+
   def heldAmong(documents: Set[DocumentId]): IO[DbError, Set[DocumentId]] =
     if documents.isEmpty then ZIO.succeed(Set.empty)
-    else Db.sql(heldDocuments.filter(documents.contains).toSet)
+    else if documents.size > HeldAmongLimit then Db.sql(heldDocuments.filter(documents.contains).toSet)
+    else
+      val ids = documents.toArray.map(_.value.toString)
+      Db.sql(
+        sql"""select distinct m.document_id
+              from dms.legal_hold_document m
+              join dms.legal_hold h on h.id = m.hold_id
+              where h.released_at is null and m.removed_at is null
+                and m.document_id = any(cast($ids as uuid[]))""".query[UUID].run().toList.map(DocumentId(_)).toSet
+      )
 
   def activeHolds(document: DocumentId): IO[DbError, List[LegalHold]] =
     Db.sql(holds(active = Some(true), document = Some(document.value), current = true).reverse)
