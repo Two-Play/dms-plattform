@@ -467,13 +467,16 @@ def volume() -> dict:
 
 
 class Metrics:
-    def __init__(self) -> None:
+    def __init__(self, warm_up_until: float = 0) -> None:
+        self.warm_up_until = warm_up_until
         self.lock = threading.Lock()
         self.samples: dict[str, list[float]] = defaultdict(list)
         self.statuses: dict[str, dict[int, int]] = defaultdict(lambda: defaultdict(int))
         self.failures: dict[str, list[str]] = defaultdict(list)
 
     def record(self, name: str, seconds: float, status: int, ok: bool, body: str | None = None) -> None:
+        if time.time() < self.warm_up_until:
+            return
         with self.lock:
             self.samples[name].append(seconds)
             self.statuses[name][status if ok else -status] += 1
@@ -529,9 +532,12 @@ class Client:
 
 
 class Run:
-    def __init__(self, duration: float, think: float, reader_users: list[str]):
-        self.metrics = Metrics()
-        self.stop_at = time.time() + duration
+    def __init__(self, duration: float, think: float, reader_users: list[str], publication_interval: float,
+                 warm_up: float):
+        self.metrics = Metrics(time.time() + warm_up)
+        self.publication_interval = publication_interval
+        self.next_publication = 0.0
+        self.stop_at = time.time() + warm_up + duration
         self.think = think
         self.reader_users = reader_users
         admin = ds.Api(API, mint("lt-designer")["access_token"])
@@ -541,6 +547,17 @@ class Run:
         self.docx = ds.word_template_docx()
         self.pending_render: list[tuple[str, str, float]] = []
         self.lock = threading.Lock()
+
+    def may_publish(self) -> bool:
+        """Approvals are paced: each one publishes to every reader, which happens a few times a day (14.2 names one
+        policy in 48 hours as the peak), not every few seconds. 0: as fast as the approvers can vote."""
+        if not self.publication_interval:
+            return True
+        with self.lock:
+            if time.time() < self.next_publication:
+                return False
+            self.next_publication = time.time() + self.publication_interval
+            return True
 
     def pause(self, rnd: random.Random) -> None:
         time.sleep(rnd.uniform(0.5, 1.5) * self.think)
@@ -588,6 +605,7 @@ class Run:
         spec = ds.INSTRUCTIONS[seed % len(ds.INSTRUCTIONS)]
         word_spec = ds.INSTRUCTIONS[(seed + 1) % len(ds.INSTRUCTIONS)]
         today = datetime.date.today()
+        preview = f"/api/v1/templates/{self.instruction['templateId']}/versions/{self.instruction['version']}/preview"
         round_no = 0
         while self.active():
             round_no += 1
@@ -600,9 +618,12 @@ class Run:
             if not doc:
                 continue
             for _ in range(3):
+                c.call("draft.preview", "POST", preview, {"values": values})
                 c.call("draft.save", "PUT", f"/api/v1/documents/{doc['id']}/draft",
                        {"title": title, "values": values, "content": spec["content"]})
                 self.pause(rnd)
+            c.call("pdf.draft", "GET", f"/api/v1/documents/{doc['id']}/versions/{doc['current']['id']}/draft.pdf")
+            self.pause(rnd)
             attachment = ds.multipart_file("file", f"anlage-{round_no}.txt", "text/plain",
                                            os.urandom(100_000).hex().encode())
             c.call("upload.attachment", "POST", f"/api/v1/documents/{doc['id']}/attachments", raw=attachment)
@@ -619,7 +640,6 @@ class Run:
                 self.pause(rnd)
                 version = word["current"]["id"]
                 c.call("pdf.preview", "GET", f"/api/v1/documents/{word['id']}/versions/{version}/preview.pdf")
-                c.call("pdf.draft", "GET", f"/api/v1/documents/{doc['id']}/versions/{doc['current']['id']}/draft.pdf")
             self.pause(rnd)
 
     def approver(self, user: str, seed: int) -> None:
@@ -631,9 +651,11 @@ class Run:
             while self.active() and time.time() < refresh:
                 _, tasks = c.call("workflow.inbox", "GET", "/api/v1/workflow/tasks")
                 for task in [t for t in tasks or [] if t["status"] == "Open"][:3]:
-                    # 409: the other approver was faster, the expected end of a race for the same task.
+                    if not self.may_publish():
+                        break
+                    # 403, 409: the other approver was faster, the expected end of a race for the same task.
                     status, _ = c.call("workflow.approve", "POST", f"/api/v1/workflow/tasks/{task['id']}/votes",
-                                       {"decision": "Approve"}, step_up=True, expect=(200, 201, 204, 409))
+                                       {"decision": "Approve"}, step_up=True, expect=(200, 201, 204, 403, 409))
                     if status in (200, 201):
                         with self.lock:
                             self.pending_render.append((task["documentId"], task["versionId"], time.time()))
@@ -701,7 +723,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     reader_users = rnd.sample([u for u in users if u.startswith("lt-reader")], readers)
     psql("create extension if not exists pg_stat_statements; select pg_stat_statements_reset();")
     before = volume()
-    r = Run(args.duration, args.think, reader_users)
+    r = Run(args.duration, args.think, reader_users, args.publication_interval, args.warm_up)
     threads = [threading.Thread(target=r.reader, args=(u, i)) for i, u in enumerate(reader_users)]
     threads += [threading.Thread(target=r.author, args=(f"lt-writer-{i:03d}", 1000 + i)) for i in range(authors)]
     threads += [threading.Thread(target=r.approver, args=(f"lt-signer-{i:03d}", 2000 + i)) for i in range(approvers)]
@@ -715,7 +737,7 @@ def cmd_run(args: argparse.Namespace) -> None:
     watcher.start()
     for t in threads:
         t.join()
-    elapsed = time.time() - began
+    elapsed = time.time() - began - args.warm_up
     watcher.join()
     rows = report(r.metrics, elapsed)
     requests = sum(row["count"] for name, row in rows.items() if name != "publication.latency")
@@ -758,7 +780,11 @@ def main() -> None:
     parser.add_argument("--reindex", action="store_true", help="seed: rebuild the search index afterwards")
     parser.add_argument("--duration", type=float, default=180, help="run: seconds")
     parser.add_argument("--ramp", type=float, default=20, help="run: seconds until all virtual users are started")
+    parser.add_argument("--warm-up", type=float, default=60,
+                        help="run: seconds at the start that are not measured (the JVM compiles the hot paths)")
     parser.add_argument("--think", type=float, default=1.0, help="run: mean think time between steps in s")
+    parser.add_argument("--publication-interval", type=float, default=30,
+                        help="run: seconds between approvals, each publishing to all readers; 0: no limit (stress)")
     parser.add_argument("--sessions", type=int, help="run: virtual users instead of the factor's")
     parser.add_argument("--authors", type=int, help="run: authors among them (default 16 %%)")
     parser.add_argument("--approvers", type=int, help="run: approvers among them (default 4 %%)")

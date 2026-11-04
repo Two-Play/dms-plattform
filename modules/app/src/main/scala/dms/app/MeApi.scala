@@ -104,6 +104,8 @@ object SecuredApi:
         StatusCode.Unauthorized,
         ApiError("reauthentication_required", "Sign in again to confirm this action.")
       )
+    case AuthError.Unavailable =>
+      (StatusCode.ServiceUnavailable, ApiError("unavailable", "The service is busy, please try again."))
 
   /** Explains a failed step-up from what became of the ID token the request carried. */
   def reauthenticationMessage(principal: Principal): String = principal.idToken match

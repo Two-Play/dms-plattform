@@ -647,8 +647,14 @@ final class DocumentService(
     sql(DocumentStore.validityStamp).map(_.map(_.toInstant))
 
   def currentlyValid: IO[DocumentError, List[CurrentVersion]] =
+    sql(DocumentStore.currentlyValid()).flatMap(currentVersions)
+
+  /** [[currentlyValid]] of one version: empty if it is not valid (any more). */
+  def validVersion(id: UUID): IO[DocumentError, List[CurrentVersion]] =
+    sql(DocumentStore.currentlyValid(Some(id))).flatMap(currentVersions)
+
+  private def currentVersions(rows: List[DocumentStore.CurrentRow]): IO[DocumentError, List[CurrentVersion]] =
     for
-      rows  <- sql(DocumentStore.currentlyValid)
       paths <- ZIO.foreach(rows.map(r => (r.classId, r.classVersion)).distinct)((id, version) =>
         profile(DocumentClassId(id), version).map(p => (id, version) -> p.classPath.map(_.value))
       )

@@ -558,10 +558,12 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
     },
     test("automatic reminders are due per interval and sent once per reader and round") {
       for
-        f      <- fixture
-        jobs   <- reminderJobs
-        now    <- Clock.instant
-        early  <- jobs.check(tenantId, now.plusSeconds(6 * 86400L))
+        f     <- fixture
+        jobs  <- reminderJobs
+        now   <- Clock.instant
+        early <- jobs.check(tenantId, now.plusSeconds(6 * 86400L))
+        // The check after a publication looks at that version only.
+        other  <- jobs.check(tenantId, now.plusSeconds(8 * 86400L), Some(UUID.randomUUID()))
         round1 <- jobs.check(tenantId, now.plusSeconds(8 * 86400L))
         again  <- jobs.check(tenantId, now.plusSeconds(8 * 86400L))
         round2 <- jobs.check(tenantId, now.plusSeconds(15 * 86400L))
@@ -575,6 +577,7 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
         )
       yield assertTrue(
         early == 0,
+        other == 0,
         // hr policy (every 7 days): hr2 and the board member; the general policy (14 days) is not due yet
         round1 == 2,
         again == 0,

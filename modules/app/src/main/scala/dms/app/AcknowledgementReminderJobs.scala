@@ -2,7 +2,7 @@ package dms.app
 
 import dms.authz.{Audience, Groups, Population, RoleAssignments}
 import dms.db.queue.{ClaimedJob, JobQueue, OutboxEvent}
-import dms.db.{Db, DbError}
+import dms.db.{Db, DbError, Jsonb}
 import dms.documents.AcknowledgementReminders
 import dms.documents.core.{
   AcknowledgementError,
@@ -17,6 +17,7 @@ import zio.json.*
 import zio.json.ast.Json
 
 import java.time.Instant
+import java.util.UUID
 
 /** @param defaultDays
   *   the reminder interval where neither the class nor the tenant sets one; 0: no automatic reminders
@@ -74,23 +75,24 @@ final class AcknowledgementReminderJobs(
     yield added.flatten.size
 
   /** Outbox subscriber (DMS-130): a version that requires acknowledgement became valid, so its recipients are
-    * asked by a check of the tenant right away instead of at the next interval.
+    * asked right away instead of at the next interval, by a check of that version: reading every
+    * acknowledgement of the tenant per publication does not scale (DMS-60).
     */
   def deliver(event: OutboxEvent): IO[String, Unit] =
-    val published = event.eventType == "document.status-changed" &&
-      event.payload.value
-        .fromJson[Json.Obj]
-        .toOption
-        .exists(p =>
-          p.get("status").contains(Json.Str("Published")) && p
-            .get("requiresAcknowledgement")
-            .contains(Json.Bool(true))
-        )
+    val published = Option
+      .when(event.eventType == "document.status-changed")(event.payload.value.fromJson[Json.Obj].toOption)
+      .flatten
+      .filter(p =>
+        p.get("status").contains(Json.Str("Published")) && p
+          .get("requiresAcknowledgement")
+          .contains(Json.Bool(true))
+      )
     ZIO
-      .when(published)(
+      .foreach(published)(p =>
         db.transact(event.tenant)(
           JobQueue.enqueue(
             CheckKind,
+            payload = Jsonb(Json.Obj(p.fields.filter(_._1 == VersionKey)).toJson),
             idempotencyKey = Some(s"$CheckKind:${event.tenant.value}:event:${event.id}"),
             maxAttempts = 5
           )
@@ -103,17 +105,21 @@ final class AcknowledgementReminderJobs(
     (tick.catchAll(e => ZIO.logWarning(s"Scheduling the acknowledgement reminder check failed: $e").as(0)) *>
       ZIO.sleep(config.checkInterval)).forever
 
-  /** The reminder check of one tenant at `now`: returns the number of readers reminded. */
-  def check(tenant: TenantId, now: Instant): IO[String, Int] =
-    db.transact(tenant)(remind(tenant, now)).mapError {
+  /** The reminder check of one tenant at `now`, or of one of its versions: returns the number of readers
+    * reminded.
+    */
+  def check(tenant: TenantId, now: Instant, only: Option[UUID] = None): IO[String, Int] =
+    db.transact(tenant)(remind(tenant, now, only)).mapError {
       case e: DocumentError        => e.toString
       case e: AcknowledgementError => e.describe
       case e: DbError              => e.toString
     }
 
-  private def remind(tenant: TenantId, now: Instant) =
+  private def remind(tenant: TenantId, now: Instant, only: Option[UUID]) =
     for
-      valid     <- documents.currentlyValid.map(_.filter(_.requiresAcknowledgement))
+      valid <- only
+        .fold(documents.currentlyValid)(documents.validVersion)
+        .map(_.filter(_.requiresAcknowledgement))
       audiences <- acks.audiencesOfValid
       sent      <-
         if valid.isEmpty then ZIO.succeed(Nil)
@@ -121,9 +127,11 @@ final class AcknowledgementReminderJobs(
           for
             assignments  <- roles.activeAt(now)
             memberships  <- groups.currentMemberships
-            acknowledged <- acks.acknowledgersOfValid
-            requested    <- acks.requests(valid.map(_.versionId).toSet)
-            baselines    <- acks.requestBaselines
+            acknowledged <- only.fold(acks.acknowledgersOfValid)(v =>
+              acks.acknowledgersOf(v).map(r => Map(v -> r))
+            )
+            requested <- acks.requests(valid.map(_.versionId).toSet)
+            baselines <- acks.requestBaselines
             readers = Audience(Population(tenant, assignments, memberships), now)
             sent <- ZIO.foreach(valid) { v =>
               val audience = audiences.get(v.versionId)
@@ -167,8 +175,17 @@ final class AcknowledgementReminderJobs(
     for
       tenant <- ZIO.fromOption(job.tenant).orElseFail(s"job ${job.id} ($CheckKind) has no tenant")
       now    <- Clock.instant
-      _      <- check(tenant, now)
+      only = job.payload.value
+        .fromJson[Json.Obj]
+        .toOption
+        .flatMap(_.get(VersionKey))
+        .flatMap(_.asString)
+        .flatMap(id => scala.util.Try(UUID.fromString(id)).toOption)
+      _ <- check(tenant, now, only)
     yield ()
 
 object AcknowledgementReminderJobs:
   val CheckKind = "documents.acknowledgement-reminder-check"
+
+  /** Key of the version in the payloads of the outbox event and of the check. */
+  private val VersionKey = "versionId"

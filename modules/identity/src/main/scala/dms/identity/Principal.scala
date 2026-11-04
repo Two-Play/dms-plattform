@@ -50,3 +50,6 @@ enum AuthError:
 
   /** A sensitive action needs a sign-in more recent than the token's `auth_time` (step-up). */
   case ReauthenticationRequired
+
+  /** The tenant could not be looked up: the database is overloaded or down. */
+  case Unavailable

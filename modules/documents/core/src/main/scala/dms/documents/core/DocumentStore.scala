@@ -538,7 +538,7 @@ private[core] object DocumentStore:
   /** Every version of the tenant valid now, by title, with the first publication of any version of its
     * document (library, DMS-119).
     */
-  def currentlyValid(using DbTx): List[CurrentRow] =
+  def currentlyValid(only: Option[UUID] = None)(using DbTx): List[CurrentRow] =
     sql"""select d.id, d.class_id, d.class_version, d.title, d.owner_id, d.author_id, d.template_id,
                  d.template_version, d.created_at, v.id, v.major, v.minor, v.status, v.field_values, v.created_by,
                  v.released_by, v.valid_from, v.published_at, v.review_due_on, v.requires_acknowledgement,
@@ -548,6 +548,7 @@ private[core] object DocumentStore:
           left join (select document_id, min(published_at) as first_published_at
                      from dms.document_version group by document_id) f on f.document_id = d.id
           where v.status in ('Published', 'ReviewDue')
+            and (cast($only as uuid) is null or v.id = cast($only as uuid))
           order by d.title, d.id, v.major, v.minor"""
       .query[CurrentRow]
       .run()

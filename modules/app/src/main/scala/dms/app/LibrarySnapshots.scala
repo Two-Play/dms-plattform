@@ -44,7 +44,8 @@ final case class LibrarySnapshot(
   * Holds only what is the same for every reader of the tenant. Permissions, acknowledgements and legal holds
   * are decided per request on top of it. A copy is used while the tenant's validity stamp is unchanged, which
   * one index lookup tells, so a published or withdrawn version shows up at once, on every instance. Only one
-  * request per tenant reads a new copy; the others wait for it without holding a database connection.
+  * request per tenant reads a new copy and gets it; requests arriving meanwhile, for about a second, still
+  * get the previous one.
   */
 final class LibrarySnapshots(
     db: Db,
@@ -61,10 +62,16 @@ final class LibrarySnapshots(
       current(tenant).flatMap {
         case Some(snapshot) => ZIO.succeed(snapshot)
         case None           =>
-          gate(tenant).flatMap(
-            _.withPermit(current(tenant).someOrElseZIO(load(tenant).tap(keep(tenant, _))))
+          gate(tenant).flatMap(gate =>
+            gate
+              .tryWithPermit(reload(tenant))
+              // Another request is reading the new copy: the old one serves until it is there, if there is one.
+              .someOrElseZIO(copies.get.map(_.get(tenant)).someOrElseZIO(gate.withPermit(reload(tenant))))
           )
       }
+
+  private def reload(tenant: TenantId): IO[DocumentError | DbError, LibrarySnapshot] =
+    current(tenant).someOrElseZIO(load(tenant).tap(keep(tenant, _)))
 
   /** The kept copy, if it is still the tenant's current state. */
   private def current(tenant: TenantId): IO[DocumentError | DbError, Option[LibrarySnapshot]] =

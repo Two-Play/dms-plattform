@@ -1,13 +1,13 @@
 {
   "label": "03-after",
-  "started": "2026-11-04T14:29:50",
+  "started": "2026-11-04T14:57:29",
   "factor": 100,
   "duration_s": 309,
   "sessions": 50,
   "think_s": 1.0,
-  "requests": 19138,
-  "errors": 183,
-  "throughput_rps": 61.9,
+  "requests": 18092,
+  "errors": 243,
+  "throughput_rps": 58.6,
   "volume_before": {
     "documents": 20006,
     "versions": 98006,
@@ -18,313 +18,327 @@
     "roleAssignments": 1101
   },
   "volume_after": {
-    "documents": 20482,
-    "versions": 98482,
-    "validVersions": 19015,
-    "workflowCases": 95242,
-    "workflowTasks": 95242,
-    "acknowledgements": 971618,
+    "documents": 20422,
+    "versions": 98422,
+    "validVersions": 19014,
+    "workflowCases": 95212,
+    "workflowTasks": 95212,
+    "acknowledgements": 971558,
     "roleAssignments": 1101
   },
   "operations": {
     "acknowledgement.confirm": {
-      "count": 1618,
+      "count": 1558,
       "errors": 0,
-      "rps": 5.23,
-      "p50_ms": 14,
-      "p95_ms": 41,
-      "p99_ms": 79,
-      "max_ms": 181,
-      "mean_ms": 18,
+      "rps": 5.05,
+      "p50_ms": 15,
+      "p95_ms": 71,
+      "p99_ms": 503,
+      "max_ms": 678,
+      "mean_ms": 29,
       "statuses": {
-        "201": 1618
+        "201": 1558
       },
       "sample_failures": []
     },
     "acknowledgement.opened": {
-      "count": 1618,
+      "count": 1558,
       "errors": 0,
-      "rps": 5.23,
-      "p50_ms": 13,
-      "p95_ms": 46,
-      "p99_ms": 94,
-      "max_ms": 214,
-      "mean_ms": 18,
+      "rps": 5.05,
+      "p50_ms": 14,
+      "p95_ms": 83,
+      "p99_ms": 555,
+      "max_ms": 8301,
+      "mean_ms": 67,
       "statuses": {
-        "204": 1618
+        "204": 1558
       },
       "sample_failures": []
     },
     "acknowledgements.open": {
-      "count": 1618,
+      "count": 1558,
       "errors": 0,
-      "rps": 5.23,
-      "p50_ms": 23,
-      "p95_ms": 89,
-      "p99_ms": 111,
-      "max_ms": 181,
-      "mean_ms": 33,
+      "rps": 5.05,
+      "p50_ms": 30,
+      "p95_ms": 106,
+      "p99_ms": 299,
+      "max_ms": 7747,
+      "mean_ms": 85,
       "statuses": {
-        "200": 1618
+        "200": 1558
       },
       "sample_failures": []
     },
     "document.html": {
-      "count": 1618,
-      "errors": 0,
-      "rps": 5.23,
-      "p50_ms": 10,
-      "p95_ms": 24,
-      "p99_ms": 43,
-      "max_ms": 96,
-      "mean_ms": 12,
+      "count": 1558,
+      "errors": 81,
+      "rps": 5.05,
+      "p50_ms": 11,
+      "p95_ms": 40,
+      "p99_ms": 152,
+      "max_ms": 792,
+      "mean_ms": 18,
       "statuses": {
-        "200": 1618
+        "200": 1477,
+        "-404": 81
       },
-      "sample_failures": []
+      "sample_failures": [
+        "404: {\"code\":\"not_found\",\"message\":\"document 6b459bfb-72fd-4235-aa96-89f289b84383 does not exist\"}",
+        "404: {\"code\":\"not_found\",\"message\":\"document 6cdc5d02-3983-40ad-af0b-f9d1792829b7 does not exist\"}",
+        "404: {\"code\":\"not_found\",\"message\":\"document 3273eb7e-3bd5-4feb-8259-bf46524483ad does not exist\"}",
+        "404: {\"code\":\"not_found\",\"message\":\"document a8e82a87-3abe-43fd-a4fc-58e90b57bf20 does not exist\"}",
+        "404: {\"code\":\"not_found\",\"message\":\"document 49b0473c-1c9b-44b0-92dc-25238c1cadac does not exist\"}"
+      ]
     },
     "document.submit": {
-      "count": 238,
+      "count": 208,
       "errors": 0,
-      "rps": 0.77,
-      "p50_ms": 51,
-      "p95_ms": 137,
-      "p99_ms": 232,
-      "max_ms": 260,
-      "mean_ms": 64,
+      "rps": 0.67,
+      "p50_ms": 56,
+      "p95_ms": 221,
+      "p99_ms": 391,
+      "max_ms": 855,
+      "mean_ms": 83,
       "statuses": {
-        "200": 238
+        "200": 208
       },
       "sample_failures": []
     },
     "document.view": {
-      "count": 1618,
-      "errors": 0,
-      "rps": 5.23,
-      "p50_ms": 8,
-      "p95_ms": 22,
-      "p99_ms": 42,
-      "max_ms": 120,
-      "mean_ms": 11,
+      "count": 1558,
+      "errors": 81,
+      "rps": 5.05,
+      "p50_ms": 9,
+      "p95_ms": 39,
+      "p99_ms": 152,
+      "max_ms": 7535,
+      "mean_ms": 42,
       "statuses": {
-        "200": 1618
+        "200": 1477,
+        "-404": 81
       },
-      "sample_failures": []
+      "sample_failures": [
+        "404: {\"code\":\"not_found\",\"message\":\"document 6b459bfb-72fd-4235-aa96-89f289b84383 does not exist\"}",
+        "404: {\"code\":\"not_found\",\"message\":\"document 6cdc5d02-3983-40ad-af0b-f9d1792829b7 does not exist\"}",
+        "404: {\"code\":\"not_found\",\"message\":\"document 3273eb7e-3bd5-4feb-8259-bf46524483ad does not exist\"}",
+        "404: {\"code\":\"not_found\",\"message\":\"document a8e82a87-3abe-43fd-a4fc-58e90b57bf20 does not exist\"}",
+        "404: {\"code\":\"not_found\",\"message\":\"document 49b0473c-1c9b-44b0-92dc-25238c1cadac does not exist\"}"
+      ]
     },
     "documents.list": {
-      "count": 1618,
+      "count": 1558,
       "errors": 0,
-      "rps": 5.23,
-      "p50_ms": 22,
-      "p95_ms": 119,
-      "p99_ms": 156,
-      "max_ms": 236,
-      "mean_ms": 40,
+      "rps": 5.05,
+      "p50_ms": 30,
+      "p95_ms": 160,
+      "p99_ms": 280,
+      "max_ms": 7496,
+      "mean_ms": 69,
       "statuses": {
-        "200": 1618
+        "200": 1558
       },
       "sample_failures": []
     },
     "draft.create": {
-      "count": 238,
+      "count": 208,
       "errors": 0,
-      "rps": 0.77,
+      "rps": 0.67,
       "p50_ms": 17,
-      "p95_ms": 66,
-      "p99_ms": 117,
-      "max_ms": 146,
-      "mean_ms": 24,
+      "p95_ms": 164,
+      "p99_ms": 7682,
+      "max_ms": 7839,
+      "mean_ms": 314,
       "statuses": {
-        "201": 238
+        "201": 208
       },
       "sample_failures": []
     },
     "draft.save": {
-      "count": 714,
+      "count": 624,
       "errors": 0,
-      "rps": 2.31,
-      "p50_ms": 19,
-      "p95_ms": 46,
-      "p99_ms": 119,
-      "max_ms": 305,
-      "mean_ms": 24,
+      "rps": 2.02,
+      "p50_ms": 20,
+      "p95_ms": 80,
+      "p99_ms": 180,
+      "max_ms": 416,
+      "mean_ms": 30,
       "statuses": {
-        "200": 714
+        "200": 624
       },
       "sample_failures": []
     },
     "library": {
-      "count": 1618,
+      "count": 1558,
       "errors": 0,
-      "rps": 5.23,
-      "p50_ms": 52,
-      "p95_ms": 729,
-      "p99_ms": 1655,
-      "max_ms": 1964,
-      "mean_ms": 127,
+      "rps": 5.05,
+      "p50_ms": 58,
+      "p95_ms": 1002,
+      "p99_ms": 1963,
+      "max_ms": 2426,
+      "mean_ms": 161,
       "statuses": {
-        "200": 1618
+        "200": 1558
       },
       "sample_failures": []
     },
     "library.filtered": {
-      "count": 1618,
+      "count": 1558,
       "errors": 0,
-      "rps": 5.23,
-      "p50_ms": 48,
-      "p95_ms": 96,
-      "p99_ms": 1691,
-      "max_ms": 2114,
-      "mean_ms": 111,
+      "rps": 5.05,
+      "p50_ms": 56,
+      "p95_ms": 236,
+      "p99_ms": 2015,
+      "max_ms": 7992,
+      "mean_ms": 150,
       "statuses": {
-        "200": 1618
+        "200": 1558
       },
       "sample_failures": []
     },
     "pdf.draft": {
-      "count": 238,
+      "count": 208,
       "errors": 0,
-      "rps": 0.77,
-      "p50_ms": 187,
-      "p95_ms": 262,
-      "p99_ms": 366,
-      "max_ms": 426,
-      "mean_ms": 194,
+      "rps": 0.67,
+      "p50_ms": 226,
+      "p95_ms": 432,
+      "p99_ms": 533,
+      "max_ms": 642,
+      "mean_ms": 250,
       "statuses": {
-        "200": 238
+        "200": 208
       },
       "sample_failures": []
     },
     "pdf.preview": {
-      "count": 238,
+      "count": 208,
       "errors": 0,
-      "rps": 0.77,
-      "p50_ms": 1221,
-      "p95_ms": 2619,
-      "p99_ms": 5637,
-      "max_ms": 6169,
-      "mean_ms": 1445,
+      "rps": 0.67,
+      "p50_ms": 1198,
+      "p95_ms": 2674,
+      "p99_ms": 6357,
+      "max_ms": 7822,
+      "mean_ms": 1490,
       "statuses": {
-        "200": 238
+        "200": 208
       },
       "sample_failures": []
     },
     "pdf.rendition": {
-      "count": 1618,
-      "errors": 0,
-      "rps": 5.23,
-      "p50_ms": 11,
-      "p95_ms": 26,
-      "p99_ms": 44,
-      "max_ms": 120,
-      "mean_ms": 14,
+      "count": 1558,
+      "errors": 81,
+      "rps": 5.05,
+      "p50_ms": 12,
+      "p95_ms": 46,
+      "p99_ms": 145,
+      "max_ms": 7199,
+      "mean_ms": 27,
       "statuses": {
-        "200": 1618
+        "200": 1477,
+        "-404": 81
+      },
+      "sample_failures": [
+        "404: {\"code\":\"not_found\",\"message\":\"document 6b459bfb-72fd-4235-aa96-89f289b84383 does not exist\"}",
+        "404: {\"code\":\"not_found\",\"message\":\"document 6cdc5d02-3983-40ad-af0b-f9d1792829b7 does not exist\"}",
+        "404: {\"code\":\"not_found\",\"message\":\"document 3273eb7e-3bd5-4feb-8259-bf46524483ad does not exist\"}",
+        "404: {\"code\":\"not_found\",\"message\":\"document a8e82a87-3abe-43fd-a4fc-58e90b57bf20 does not exist\"}",
+        "404: {\"code\":\"not_found\",\"message\":\"document 49b0473c-1c9b-44b0-92dc-25238c1cadac does not exist\"}"
+      ]
+    },
+    "publication.latency": {
+      "count": 10,
+      "errors": 0,
+      "rps": 0.03,
+      "p50_ms": 5761,
+      "p95_ms": 8337,
+      "p99_ms": 8337,
+      "max_ms": 8337,
+      "mean_ms": 5910,
+      "statuses": {
+        "200": 10
       },
       "sample_failures": []
     },
-    "publication.latency": {
-      "count": 183,
-      "errors": 183,
-      "rps": 0.59,
-      "p50_ms": 120585,
-      "p95_ms": 121088,
-      "p99_ms": 121127,
-      "max_ms": 121128,
-      "mean_ms": 120610,
-      "statuses": {
-        "-504": 183
-      },
-      "sample_failures": [
-        "504: InApproval",
-        "504: InApproval",
-        "504: InApproval",
-        "504: InApproval",
-        "504: InApproval"
-      ]
-    },
     "search": {
-      "count": 1618,
+      "count": 1558,
       "errors": 0,
-      "rps": 5.23,
-      "p50_ms": 10,
-      "p95_ms": 34,
-      "p99_ms": 50,
-      "max_ms": 62,
-      "mean_ms": 14,
+      "rps": 5.05,
+      "p50_ms": 11,
+      "p95_ms": 46,
+      "p99_ms": 198,
+      "max_ms": 7548,
+      "mean_ms": 52,
       "statuses": {
-        "200": 1618
+        "200": 1558
       },
       "sample_failures": []
     },
     "upload.attachment": {
-      "count": 238,
+      "count": 208,
       "errors": 0,
-      "rps": 0.77,
-      "p50_ms": 34,
-      "p95_ms": 93,
-      "p99_ms": 136,
-      "max_ms": 156,
-      "mean_ms": 41,
+      "rps": 0.67,
+      "p50_ms": 36,
+      "p95_ms": 108,
+      "p99_ms": 370,
+      "max_ms": 431,
+      "mean_ms": 50,
       "statuses": {
-        "201": 238
+        "201": 208
       },
       "sample_failures": []
     },
     "upload.word": {
-      "count": 238,
+      "count": 208,
       "errors": 0,
-      "rps": 0.77,
-      "p50_ms": 24,
-      "p95_ms": 63,
-      "p99_ms": 138,
-      "max_ms": 161,
-      "mean_ms": 30,
+      "rps": 0.67,
+      "p50_ms": 26,
+      "p95_ms": 107,
+      "p99_ms": 333,
+      "max_ms": 866,
+      "mean_ms": 44,
       "statuses": {
-        "200": 238
+        "200": 208
       },
       "sample_failures": []
     },
     "word.create": {
-      "count": 238,
+      "count": 208,
       "errors": 0,
-      "rps": 0.77,
-      "p50_ms": 39,
-      "p95_ms": 113,
-      "p99_ms": 167,
-      "max_ms": 189,
-      "mean_ms": 48,
+      "rps": 0.67,
+      "p50_ms": 43,
+      "p95_ms": 212,
+      "p99_ms": 829,
+      "max_ms": 937,
+      "mean_ms": 71,
       "statuses": {
-        "201": 238
+        "201": 208
       },
       "sample_failures": []
     },
     "workflow.approve": {
-      "count": 310,
+      "count": 10,
       "errors": 0,
-      "rps": 1.0,
-      "p50_ms": 38,
-      "p95_ms": 91,
-      "p99_ms": 185,
-      "max_ms": 220,
-      "mean_ms": 42,
+      "rps": 0.03,
+      "p50_ms": 63,
+      "p95_ms": 413,
+      "p99_ms": 413,
+      "max_ms": 413,
+      "mean_ms": 105,
       "statuses": {
-        "200": 234,
-        "409": 76
+        "200": 10
       },
       "sample_failures": []
     },
     "workflow.inbox": {
-      "count": 268,
+      "count": 422,
       "errors": 0,
-      "rps": 0.87,
-      "p50_ms": 8,
-      "p95_ms": 29,
-      "p99_ms": 61,
-      "max_ms": 72,
-      "mean_ms": 10,
+      "rps": 1.37,
+      "p50_ms": 299,
+      "p95_ms": 706,
+      "p99_ms": 1031,
+      "max_ms": 6552,
+      "mean_ms": 365,
       "statuses": {
-        "200": 268
+        "200": 422
       },
       "sample_failures": []
     }
