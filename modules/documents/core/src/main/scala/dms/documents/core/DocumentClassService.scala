@@ -3,7 +3,7 @@ package dms.documents.core
 import com.augustnagro.magnum.DbTx
 import dms.audit.*
 import dms.db.{Db, DbError, Jsonb}
-import dms.documents.{DocumentStatus, ReviewPolicy}
+import dms.documents.{ClassRetention, DocumentStatus, ReviewPolicy}
 import dms.documents.metadata.*
 import dms.documents.core.MetadataJson.given
 import dms.kernel.UserId
@@ -166,6 +166,59 @@ final class DocumentClassService(audit: AuditTrail):
   /** The periodic review settings of a class: those of its latest version (US-07.1). */
   def reviewPolicy(id: DocumentClassId): IO[MetadataError, ReviewPolicy] =
     sql(MetadataStore.latestClassVersion(id)).someOrFail(classNotFound(id)).map(_.review)
+
+  /** The retention rule of every class, own and effective (inherited from the nearest ancestor), in key order
+    * (DMS-133).
+    */
+  def retentionRules: IO[MetadataError, List[ClassRetention]] =
+    sql {
+      val classes  = MetadataStore.latestClasses()
+      val assigned = MetadataStore
+        .retentionAssignments()
+        .map((id, rule, by, at) => DocumentClassId(id) -> (rule, UserId(by), at))
+        .toMap
+      ClassRetention.resolve(classes.map(c => (c.classId, c.key, c.label, c.parent.map(_.id))), assigned)
+    }
+
+  /** The retention rule documents of a class get: its own or the nearest ancestor's (DMS-133). */
+  def effectiveRetentionRule(id: DocumentClassId): IO[MetadataError, Option[String]] =
+    sql(MetadataStore.effectiveRetentionRule(id))
+
+  /** Assigns a retention rule to a class (`None`: removes its own assignment, so it inherits again). The rule
+    * must exist (422). Audited as `document-class.retention-rule-changed` with before and after; an unchanged
+    * assignment records nothing. Authorization (records managers) is the caller's job.
+    */
+  def assignRetentionRule(
+      id: DocumentClassId,
+      rule: Option[String],
+      actor: UserId
+  ): IO[MetadataError, ClassRetention] =
+    for
+      cls <- sql(MetadataStore.latestClassVersion(id)).someOrFail(classNotFound(id))
+      key = rule.map(_.trim).filter(_.nonEmpty)
+      _ <- ZIO.foreachDiscard(key)(k =>
+        sql(MetadataStore.retentionRuleExists(k)).filterOrFail(identity)(
+          MetadataError.Invalid(List(s"retention rule '$k' does not exist"))
+        )
+      )
+      before <- sql(
+        key.fold(MetadataStore.removeRetentionRule(id))(MetadataStore.assignRetentionRule(id, _, actor.value))
+      )
+      _ <- ZIO.when(before != key)(
+        record(
+          actor,
+          "document-class.retention-rule-changed",
+          AuditObject("document-class", Some(cls.classId.value), None),
+          Json.Obj(
+            "key"    -> Json.Str(cls.key.value),
+            "before" -> before.fold(Json.Null)(Json.Str(_)),
+            "after"  -> key.fold(Json.Null)(Json.Str(_))
+          )
+        )
+      )
+      all    <- retentionRules
+      result <- ZIO.fromOption(all.find(_.classId == id)).orElseFail(classNotFound(id))
+    yield result
 
   /** The effective profile of a class version (default: latest), including inherited and core fields. */
   def profile(id: DocumentClassId, version: Option[Int] = None): IO[MetadataError, MetadataProfile] =

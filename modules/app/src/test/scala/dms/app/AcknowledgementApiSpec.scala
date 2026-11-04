@@ -114,6 +114,7 @@ object AcknowledgementApiSpec extends ZIOSpecDefault:
             _   <- RoleAssignments.Postgres.grant(approver, RoleAssignment(Role.Approver), admin)
             _   <- RoleAssignments.Postgres.grant(reader, RoleAssignment(Role.Reader), admin)
             cls <- classes.createClass("policy", None, ClassDraft("Policy", None, Nil), admin)
+            _   <- RetentionFixtures.assign(classes, cls.classId, "policy-10y")
             draft = TemplateDraft("Code of conduct", None, cls.classId.value, 1, content(words))
             t <- templates.create(draft, designer)
             _ <- templates.changeStatus(t.templateId, 1, TemplateStatus.Testing, designer)

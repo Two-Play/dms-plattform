@@ -167,6 +167,37 @@ export const retention = {
       done: 'Rule {key} saved.',
     },
   },
+  classRules: {
+    caption: 'Retention rules of the document classes',
+    description:
+      'Documents get the rule of their class; a subclass without its own rule inherits the rule of its parent. New drafts and versions get the rule at once, open drafts on their next save or submission. Changes are recorded in the audit trail.',
+    loading: 'Loading the document classes',
+    empty: 'No document classes yet.',
+    colClass: 'Document class',
+    colRule: 'Own rule',
+    colEffective: 'Documents get',
+    inherit: 'None (inherit)',
+    inheritedFrom: 'inherited from {class}',
+    none: 'No rule',
+    noneHint: 'Drafts of this class cannot be submitted.',
+    ruleLabel: 'Retention rule of {class}',
+    save: 'Save',
+    saveLabel: 'Save the retention rule of {class}',
+    done: 'Retention rule of {class} saved.',
+    noRules: 'Create a retention rule first.',
+  },
+  rule: {
+    years: plural({ one: '{count} year', other: '{count} years' }),
+    months: plural({ one: '{count} month', other: '{count} months' }),
+    from: {
+      EndOfValidity: 'from the end of validity',
+      Approval: 'from approval',
+      Creation: 'from the creation of the document',
+    },
+    yearEnd: ', counted from the end of that year',
+    text: '{name} – {period} {from}{yearEnd}',
+    unknown: '{key} (unknown rule)',
+  },
   cleanup: {
     description:
       'Finds objects in object storage no version references any more (older renditions of drafts, removed attachments, replaced originals, files of discarded drafts) and removes them. Objects under legal hold or Object Lock and recent objects are kept.',

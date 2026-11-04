@@ -236,3 +236,110 @@ export function filterCandidates(
         (c.documentNumber ?? '').toLowerCase().includes(text)),
   )
 }
+
+// Retention rules of document classes and documents (DMS-133)
+
+export type ClassRetention = components['schemas']['ClassRetentionView']
+export type DocumentRetention = components['schemas']['DocumentRetentionView']
+export type RetentionRuleSummary = components['schemas']['RetentionRuleSummaryView']
+
+export function classRetentionQuery(client: ApiClient) {
+  return queryOptions({
+    queryKey: ['retention', 'class-rules'],
+    queryFn: async (): Promise<ClassRetention[]> => {
+      const { data, error, response } = await client.GET('/api/v1/retention/class-rules')
+      if (!response.ok || !data) {
+        throw requestError(
+          response,
+          error,
+          `Loading the retention rules of the classes failed with HTTP ${response.status}`,
+        )
+      }
+      return data
+    },
+  })
+}
+
+/** Assigns `rule` to the class; `undefined` removes its own rule, so that it inherits again. */
+export async function saveClassRetention(
+  client: ApiClient,
+  classKey: string,
+  rule: string | undefined,
+): Promise<ClassRetention> {
+  const { data, error, response } = await client.PUT('/api/v1/retention/class-rules/{classKey}', {
+    params: { path: { classKey } },
+    body: { rule },
+  })
+  if (!response.ok || !data) {
+    throw requestError(
+      response,
+      error,
+      `Saving the retention rule of the class failed with HTTP ${response.status}`,
+    )
+  }
+  return data
+}
+
+export function documentRetentionQuery(client: ApiClient, documentId: string, versionId: string) {
+  return queryOptions({
+    queryKey: ['documents', documentId, 'retention', versionId],
+    queryFn: async (): Promise<DocumentRetention> => {
+      const { data, error, response } = await client.GET('/api/v1/documents/{id}/retention', {
+        params: { path: { id: documentId }, query: { version: versionId } },
+      })
+      if (!response.ok || !data) {
+        throw requestError(
+          response,
+          error,
+          `Loading the retention rule failed with HTTP ${response.status}`,
+        )
+      }
+      return data
+    },
+  })
+}
+
+/** Sets the rule of the open draft as records manager; `undefined` returns to the rule of the class. */
+export async function setDocumentRetention(
+  client: ApiClient,
+  documentId: string,
+  rule: string | undefined,
+): Promise<DocumentRetention> {
+  const { data, error, response } = await client.PUT('/api/v1/documents/{id}/retention', {
+    params: { path: { id: documentId } },
+    body: { rule },
+  })
+  if (!response.ok || !data) {
+    throw requestError(
+      response,
+      error,
+      `Saving the retention rule failed with HTTP ${response.status}`,
+    )
+  }
+  return data
+}
+
+/**
+ * The classes in tree order (parents before their subclasses, siblings by label) with their depth,
+ * for an indented table.
+ */
+export function classTree(
+  classes: readonly ClassRetention[],
+): { cls: ClassRetention; depth: number }[] {
+  const ids = new Set(classes.map((c) => c.classId))
+  const children = new Map<string | undefined, ClassRetention[]>()
+  for (const c of classes) {
+    const parent = c.parentId && ids.has(c.parentId) ? c.parentId : undefined
+    children.set(parent, [...(children.get(parent) ?? []), c])
+  }
+  const result: { cls: ClassRetention; depth: number }[] = []
+  const visit = (parent: string | undefined, depth: number) => {
+    const level = [...(children.get(parent) ?? [])].sort((a, b) => a.label.localeCompare(b.label))
+    for (const c of level) {
+      result.push({ cls: c, depth })
+      visit(c.classId, depth + 1)
+    }
+  }
+  visit(undefined, 0)
+  return result
+}

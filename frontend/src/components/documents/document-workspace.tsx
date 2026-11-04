@@ -92,7 +92,10 @@ type SaveState =
   | { kind: 'saving' }
   | { kind: 'submitting' }
   | { kind: 'saved'; label: string; warning?: string }
-  | { kind: 'failed'; message: string; missing?: FieldIssue[] }
+  | { kind: 'failed'; message: string; missing?: FieldIssue[]; hint?: string }
+
+/** Issue code of a required retention rule whose document class has none (DMS-133). */
+const NO_RETENTION_RULE = 'no_retention_rule'
 
 /** A backend issue for a field, shown while the field still has the value that was sent. */
 interface Rejected {
@@ -331,11 +334,18 @@ export function DocumentWorkspace({
       onSubmitted?.(documentId, submitted)
     } catch (e) {
       if (e instanceof ApiRequestError && e.code === 'incomplete') {
-        reject(e.issues, values)
+        // A missing retention rule is not entered by authors: the class has none (DMS-133).
+        const noRule = e.issues.some((i) => i.code === NO_RETENTION_RULE)
+        const missing = e.issues.filter((i) => i.code !== NO_RETENTION_RULE)
+        reject(missing, values)
         setSaveState({
           kind: 'failed',
-          message: t('docs.workspace.incomplete'),
-          missing: e.issues,
+          message:
+            missing.length > 0
+              ? t('docs.workspace.incomplete')
+              : t('docs.workspace.noRetentionRule'),
+          missing,
+          hint: noRule && missing.length > 0 ? t('docs.workspace.noRetentionRule') : undefined,
         })
       } else if (e instanceof ApiRequestError && e.issues.length > 0) {
         reject(e.issues, values)
@@ -432,6 +442,7 @@ export function DocumentWorkspace({
             {saveState.kind === 'failed' && (
               <div role="alert" className="text-destructive">
                 <p>{saveState.message}</p>
+                {saveState.hint && <p className="mt-1">{saveState.hint}</p>}
                 {saveState.missing && saveState.missing.length > 0 && (
                   <ul className="mt-1 list-disc pl-4">
                     {saveState.missing.map((issue) => (

@@ -281,3 +281,14 @@ Backfill (DMS-116, ADR 0040 addendum): `NumberRangeService.backfillScope(classId
 | POST | `/api/v1/documents/{id}/draft/discard` | Discard the open draft `{reason?}` → `DiscardedDraftView`; 404 for a discarded document, 409 for a submitted version or without a draft | `DiscardDraft` (author, document owner, tenant administrator) |
 
 `DocumentView.canDiscardDraft` tells the UI whether the caller may discard now. Nobody reads a discarded version (`ReadDocument`); a document whose versions are all discarded answers 404.
+
+## Retention rule from the class (DMS-133, ADR 0054 addendum)
+
+The core field `retentionRule` names a rule of `dms.retention_rule` (module `archive`) and is set by the platform, not by authors.
+
+- `DocumentClassService.retentionRules`, `effectiveRetentionRule`, `assignRetentionRule`: the rule a class assigns (`dms.class_retention_rule`), inherited by subclasses without their own; changes are audited (`document-class.retention-rule-changed`).
+- `DocumentService`: creation, every draft save, new versions and submission set the value: the document's own rule (`dms.document_retention_rule`, origin `system:records-management`), otherwise the class's (origin `system:dms`), otherwise a value entered by hand before DMS-133. Another entered value is rejected (`not_editable`); a missing rule on submission is the issue `no_retention_rule`. `setRetentionRule` (records managers, audited as `document.retention-rule-changed`) sets or removes the document's rule; the open draft follows at once.
+- Migration V37: both tables with RLS on `dms.current_tenant()` and grants to `dms_app`.
+- API (`dms.app.RetentionApi`): `GET /api/v1/retention/class-rules`, `PUT /api/v1/retention/class-rules/{classKey}`, `GET` and `PUT /api/v1/documents/{id}/retention`.
+
+Tests: `DocumentServiceSpec` (rule on creation, new version and submission of older drafts, inheritance, author cannot enter another rule, the document's rule sticks and is audited, message without rule); `EvidenceReportApiSpec` (endpoints and permissions); in the frontend `class-retention.test.tsx`, `document-pages.test.tsx`.

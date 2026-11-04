@@ -86,7 +86,7 @@ Given: the status `Destroyed` and the transition `Archived → Destroyed` exist 
 ## Follow-ups
 
 - Must be done: user confirms this ADR (status → Accepted).
-- Should be done: retention rules from the document class and per jurisdiction (DMS-81, F-08.1), contract-end triggers, a simulation of a rule change before activating it.
+- Should be done: retention rules per jurisdiction (DMS-81, F-08.1), contract-end triggers, a simulation of a rule change before activating it. Retention rules from the document class: done in DMS-133 (addendum below).
 - Should be done: remove personal data from audit details of draft edits (store only field keys, or crypto-shredding of audit payloads) so destruction also covers them.
 - Should be done: destruction or content removal of withdrawn drafts after a grace period, like discarded drafts.
 - Could be done: paged listing / S3 inventory for the orphan clean-up of large tenants; an export of the destruction protocol as PDF/A.
@@ -96,3 +96,53 @@ Given: the status `Destroyed` and the transition `Archived → Destroyed` exist 
 ## Reversibility
 
 **medium**: Proposals, rules and clean-up runs are additive tables and can be dropped with their endpoints. The relaxed guards (content removal, deletion of working states, links and files of destroyed versions) can be tightened again by a migration. Destroyed content, compacted working states and removed objects cannot be restored; that is the purpose.
+
+## Addendum (DMS-133, 2026-10-30): the retention rule comes from the document class
+
+Status of this addendum: Proposed (implemented in DMS-133).
+
+### Context
+
+The core field `retentionRule` is a system field, required from review on, described as "set from the class; only records managers change it", but nothing set it: authors could not see it in the form (system fields are hidden), so drafts created in the UI could not be submitted ("Retention rule" missing); only the demo script entered keys through the API. Since this ADR and ADR 0055 the field decides the destruction list and the Object Lock retention, so a value typed by an author decides how long a record is kept.
+
+### Decision
+
+1. **Assignment per class, inherited** (`dms.class_retention_rule`, V37): records managers assign a rule (`dms.retention_rule` key, foreign key, rules are never deleted) to a document class; a subclass without its own assignment gets the rule of the nearest ancestor; removing the assignment deletes the row so the class inherits again. Tenant-wide records managers (`ManageRetention`, as for rules) maintain it on the retention page (`GET /api/v1/retention/class-rules`, `PUT /api/v1/retention/class-rules/{classKey}`); each change is audited (`document-class.retention-rule-changed` with before and after; an unchanged assignment records nothing).
+2. **The platform sets the value** (origin platform `system:dms`) on creation (structured, file and Word documents, the upload flow and the seed all go through `DocumentService.create`), on every draft save, on new versions and, for drafts saved before this change or before their class had a rule, on submission (a working state recorded as a draft change). Authors cannot enter another value (422 `not_editable`); sending the value the version has is accepted, so API clients and the demo script that sent it keep working.
+3. **Records managers decide per document** (`dms.document_retention_rule`, V37; `PUT /api/v1/documents/{id}/retention`, records manager for the tenant and `ManageRetention` on the document): the rule is stored with the document, not only in a version, because records managers usually cannot read drafts and set it from the valid version. The open draft gets it at once (a working state), every later version gets it (origin `system:records-management`, protected like a business system's value: authors cannot replace it); versions in review or approved keep theirs. Audited as `document.retention-rule-changed` with before and after. **It sticks** even when the class rule changes, because it is a decision about this record; records managers return to the class rule by sending no rule (the open draft follows at once). A class rule change reaches documents that follow the class (origin platform) with their next draft save, submission or version; approved versions keep the rule of their frozen snapshot (the destruction list and Object Lock read the snapshot).
+4. **Values from before**: a value entered by hand before DMS-133 (origin manual) is replaced by the class rule as soon as the class has one; without a class rule it stays (shown as "entered before the class had a rule").
+5. **Missing rule**: submitting a draft whose class has no rule fails with the issue code `no_retention_rule` ("The document class has no retention rule; please inform records management.") instead of a missing field; the UI shows "Für die Dokumentenklasse ist keine Aufbewahrungsregel hinterlegt – bitte das Records Management informieren." on submission and as a hint in the metadata panel of the draft.
+6. **Display**: `GET /api/v1/documents/{id}/retention?version=` (whoever may read the version) returns the rule of the version with name, period and trigger, its source, the class's rule and the document's rule; the metadata panel of the document page shows e.g. "Richtlinien – 10 Jahre ab Ende der Gültigkeit" with its source and, for records managers, a choice of rule for the document.
+
+### Alternatives considered
+
+| Criterion | Chosen: setting table next to the class (like acknowledgement settings, ADR 0048) | Column on the class version (`document_class_version`) | Field default in the class profile (requiredness/default value) |
+|---|---|---|---|
+| Who changes it | Records managers, without touching the class | Class administrators: every change is a new profile version | Class administrators |
+| History | Audit trail (before/after) | Profile versions (insert-only) | Profile versions |
+| Effect of a change | Next save/version of drafts following the class | Only documents created with the new class version (documents pin their class version) | Same as class version |
+| Inheritance | Nearest ancestor with an assignment (recursive query on `parent_id`) | Through pinned parent versions | Through profile resolution |
+| Effort | One table, two endpoints | Migration of the class version, admin form, version bump per change | A new concept (default values) for one field |
+
+| Criterion (per-document value) | Chosen: rule stored with the document, sticks for later versions | Value only in the open draft's field (origin records management) | Class rule always wins on a new version |
+|---|---|---|---|
+| Reachable for records managers | Yes, from any readable version (they rarely may read drafts) | Only with an open draft they may read | Same as the open draft variant |
+| A record kept longer (e.g. litigation risk) | Stays on every version | Carried over through the field | Must be set again on each version |
+| A class change reaching that document | Only after reset by records management | Only after reset | Automatic |
+| Effort | One more table | None | None |
+
+### Consequences
+
+- Positive: drafts from the UI can be submitted once the class has a rule; authors no longer decide retention; the rule is visible on the document page; a class without a rule is named as the cause.
+- Negative: a class rule change does not reach approved versions (their snapshot is frozen), versions in review, nor documents with their own rule; there is no bulk re-assignment of existing versions and no simulation of a change. Drafts of a class without a rule are blocked until records management assigns one. The retention view of a draft is not readable for records managers who may not read the draft (the change endpoint answers with it).
+- Tests that entered `retentionRule` by hand now assign the rule to their class (`RetentionFixtures`).
+
+### Follow-ups
+
+- Must be done: user confirms this addendum.
+- Should be done: changing the rule of an approved version (needs a privileged path like destruction, since the snapshot is frozen) and a simulation of a class rule change before applying it.
+- Could be done: a tenant default rule (like the tenant default of acknowledgement settings), rules per jurisdiction (DMS-81).
+
+### Reversibility
+
+**high**: the two tables and endpoints can be dropped; values already set stay valid keys in the field. Making the field enterable again is a change in `DocumentService.prepare`.

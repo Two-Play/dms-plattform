@@ -189,9 +189,11 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
             _       <- Groups.Postgres.create("board", "Board", admin)
             _       <- Groups.Postgres.addMember("board", boardMember, admin)
             policy  <- classes.createClass("policy", None, ClassDraft("Policy", None, Nil), admin)
+            _       <- RetentionFixtures.assign(classes, policy.classId, "policy-10y")
             hrClass <- classes
               .createClass("hr-policy", Some(policy.classId), ClassDraft("HR policy", None, Nil), admin)
             general <- classes.createClass("general", None, ClassDraft("General", None, Nil), admin)
+            _       <- RetentionFixtures.assign(classes, general.classId, "policy-10y")
             _       <- acks.changeSettings(
               Some(policy.classId.value),
               AcknowledgementSettings(

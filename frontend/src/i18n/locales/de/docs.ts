@@ -65,6 +65,8 @@ export const docs: Translation<typeof en.docs> = {
     submitted: 'Zur Prüfung eingereicht',
     incomplete:
       'Der Entwurf wurde gespeichert, kann aber noch nicht eingereicht werden. Zuerst diese Werte ausfüllen:',
+    noRetentionRule:
+      'Für die Dokumentenklasse ist keine Aufbewahrungsregel hinterlegt – bitte das Records Management informieren. Der Entwurf wurde gespeichert.',
     invalid:
       'Der Entwurf wurde gespeichert, kann aber nicht eingereicht werden: {message} Änderungen an gesperrten Abschnitten erfordern einen genehmigten Abweichungsantrag.',
     submitFailed: 'Einreichen fehlgeschlagen: {message}',
@@ -154,6 +156,25 @@ export const docs: Translation<typeof en.docs> = {
     templateValue: '{name}, Version {version}',
     notSet: 'nicht festgelegt',
     more: 'Weitere Angaben',
+    retention: 'Aufbewahrung',
+    retentionLoading: 'Aufbewahrungsregel wird geladen',
+    retentionFrom: {
+      Class: 'aus der Dokumentenklasse',
+      RecordsManagement: 'vom Records Management für dieses Dokument festgelegt',
+      Entered: 'erfasst, bevor die Klasse eine Regel hatte',
+    },
+    retentionNone:
+      'Für die Dokumentenklasse ist keine Aufbewahrungsregel hinterlegt – bitte das Records Management informieren. Ohne Regel kann der Entwurf nicht eingereicht werden.',
+    retentionNoneReleased: 'Keine Aufbewahrungsregel',
+    retentionDocumentRule: 'Für dieses Dokument: {rule} (offener Entwurf und spätere Versionen)',
+    retentionChange: 'Ändern',
+    retentionChangeLabel: 'Aufbewahrungsregel dieses Dokuments ändern',
+    retentionSelect: 'Aufbewahrungsregel für dieses Dokument',
+    retentionClassOption: 'Regel der Dokumentenklasse ({rule})',
+    retentionClassNone: 'Regel der Dokumentenklasse (keine)',
+    retentionSave: 'Regel speichern',
+    retentionCancel: 'Abbrechen',
+    retentionSaved: 'Aufbewahrungsregel gespeichert.',
     levels: {
       Public: 'Öffentlich',
       Internal: 'Intern',

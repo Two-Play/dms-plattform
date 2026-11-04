@@ -19,6 +19,11 @@ enum IssueKind:
   /** The field is set by the platform or taken over from a business system and cannot be entered. */
   case NotEditable
 
+  /** The retention rule is required but the document class has none (DMS-133); records management assigns
+    * one.
+    */
+  case NoRetentionRule
+
   def code: String = this match
     case MissingRequired(_) => "missing_required"
     case UnknownField       => "unknown_field"
@@ -29,6 +34,7 @@ enum IssueKind:
     case RetiredOption(_)   => "retired_option"
     case UnknownCurrency(_) => "unknown_currency"
     case NotEditable        => "not_editable"
+    case NoRetentionRule    => "no_retention_rule"
 
   def message: String = this match
     case MissingRequired(status)     => s"The field is required in status $status."
@@ -41,6 +47,7 @@ enum IssueKind:
     case UnknownCurrency(currency)   => s"'$currency' is not an allowed currency."
     case NotEditable                 =>
       "The field is set by the platform or taken over from a business system and cannot be entered."
+    case NoRetentionRule => "The document class has no retention rule; please inform records management."
 
 /** A problem with one field, addressable by its stable key. */
 final case class FieldIssue(field: String, label: String, kind: IssueKind)

@@ -157,6 +157,7 @@ object AcknowledgementServiceSpec extends ZIOSpecDefault:
       cls <- e.app.transact(tenant)(
         classes.createClass("policy", None, ClassDraft("Policy", None, Nil), admin)
       )
+      _ <- e.app.transact(tenant)(RetentionFixtures.assign(classes, cls.classId, "policy-10y"))
       stored = Jsonb(Templates.encode(content))
       _ <- e.owner.transactSystem(Db.sql {
         val _ = sql"""insert into dms.template (id, tenant_id, created_by)

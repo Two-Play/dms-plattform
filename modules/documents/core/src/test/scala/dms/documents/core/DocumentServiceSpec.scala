@@ -241,6 +241,7 @@ object DocumentServiceSpec extends ZIOSpecDefault:
             admin
           )
       )
+      _ <- e.app.transact(tenant)(RetentionFixtures.assign(classes, cls.classId, "contract-10y"))
       stored        = Jsonb(Templates.encode(content))
       storedPartner = Jsonb(Templates.encode(partnerContent))
       _ <- e.owner.transactSystem(Db.sql {
@@ -336,6 +337,12 @@ object DocumentServiceSpec extends ZIOSpecDefault:
             .toList
         )
       )
+    )
+
+  /** Runs `f` with the document classes of the fixture's tenant in a transaction. */
+  private def classesIn[A](f: Fixture)(g: DocumentClassService => IO[MetadataError, A]): ZIO[Env, Any, A] =
+    ZIO.serviceWithZIO[Env](e =>
+      e.app.transact(f.tenant)(g(DocumentClassService(RecordingAuditTrail(e.audit))))
     )
 
   /** Brings a new document through review and approval to publication. */
@@ -693,7 +700,6 @@ object DocumentServiceSpec extends ZIOSpecDefault:
             "validFrom",
             "confidentiality",
             "language",
-            "retentionRule",
             "containsPersonalData",
             "contractPartner"
           )
@@ -966,6 +972,150 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         beforeFour.openVersions.head.documentId == onThree._1.id,
         beforeFour.openVersions.head.authorId == approver,
         foreign == TemplateUsage(f.templateId, 4, 0, Nil, Nil, Nil)
+      )
+    },
+    test(
+      "drafts and new versions get the retention rule of the class (DMS-133); subclasses inherit it; authors " +
+        "cannot enter another one"
+    ) {
+      for
+        f       <- fixture
+        created <- create(f)
+        (doc, draft) = created
+        other <- create(f, initialValues ++ manual("retentionRule" -> MetadataValue.Text("short-1y"))).either
+        same  <- create(f, initialValues ++ manual("retentionRule" -> MetadataValue.Text("contract-10y")))
+        sub   <- classesIn(f)(c =>
+          c.createClass("framework", Some(f.classId), ClassDraft("Framework contract", None, Nil), admin)
+        )
+        inherited <- classesIn(f)(_.effectiveRetentionRule(sub.classId))
+        listed    <- classesIn(f)(_.retentionRules)
+        published <- published(f)
+        // The class gets another rule: the next version takes it, the approved one keeps its rule.
+        _       <- classesIn(f)(c => RetentionFixtures.assign(c, f.classId, "contract-7y"))
+        v2      <- as(f.tenant)(_.newVersion(published, ChangeKind.Major, Some("Content revised"), author))
+        details <- as(f.tenant)(_.get(published))
+      yield assertTrue(
+        draft.values("retentionRule") == FieldEntry(MetadataValue.Text("contract-10y"), ValueOrigin.Platform),
+        doc.classId == f.classId,
+        other.left.exists {
+          case DocumentError.InvalidValues(issues) =>
+            issues.exists(i => i.field == "retentionRule" && i.kind == IssueKind.NotEditable)
+          case _ => false
+        },
+        same._2.values("retentionRule").origin == ValueOrigin.Platform,
+        inherited.contains("contract-10y"),
+        listed.exists(c =>
+          c.classKey.value == "framework" && c.ruleKey.isEmpty && c.effectiveRule.contains("contract-10y") &&
+            c.inheritedFrom.exists(_.value == "contract")
+        ),
+        listed.exists(c => c.classKey.value == "contract" && c.ruleKey.contains("contract-10y")),
+        v2.values("retentionRule") == FieldEntry(MetadataValue.Text("contract-7y"), ValueOrigin.Platform),
+        details.versions.head.metadataSnapshot.exists(
+          _.values.get("retentionRule").contains(MetadataValue.Text("contract-10y"))
+        )
+      )
+    },
+    test("records managers set the rule of a document; it stays for later versions and is audited") {
+      for
+        f       <- fixture
+        _       <- classesIn(f)(_ => RetentionFixtures.rule("contract-7y"))
+        created <- create(f, reviewValues)
+        (doc, v1) = created
+        rm        = RetentionFixtures.RecordsManager
+        set       <- as(f.tenant)(_.setRetentionRule(doc.id, Some("contract-7y"), rm))
+        afterSet  <- as(f.tenant)(_.get(doc.id)).map(_.versions.head)
+        again     <- as(f.tenant)(_.setRetentionRule(doc.id, Some("contract-7y"), rm))
+        unchanged <- as(f.tenant)(_.get(doc.id)).map(_.versions.head)
+        // An author cannot replace it; saving without it keeps it.
+        replace <- as(f.tenant)(_.updateDraft(doc.id, DraftChange(None, reviewValues, None), author)).either
+        saved   <- as(f.tenant)(
+          _.updateDraft(doc.id, DraftChange(None, reviewValues - "retentionRule", None), author)
+        )
+        _  <- as(f.tenant)(_.submit(doc.id, author))
+        _  <- as(f.tenant)(_.changeStatus(v1.id, ReviewPassed, UserId("reviewer-1")))
+        _  <- as(f.tenant)(_.attachRendition(v1.id, Rendition("renditions/1.pdf", None, "a" * 64), author))
+        _  <- as(f.tenant)(_.changeStatus(v1.id, Approve, approver))
+        _  <- as(f.tenant)(_.changeStatus(v1.id, Publish, approver))
+        v2 <- as(f.tenant)(_.newVersion(doc.id, ChangeKind.Major, Some("Content revised"), author))
+        // Back to the class rule: the open draft follows at once.
+        reset   <- as(f.tenant)(_.setRetentionRule(doc.id, None, rm))
+        details <- as(f.tenant)(_.get(doc.id))
+        own     <- as(f.tenant)(_.documentRetentionRule(doc.id))
+        audit   <- ZIO.serviceWithZIO[Env](_.audit.get)
+        changes = audit.filter(e =>
+          e.action == "document.retention-rule-changed" && e.target.id.contains(doc.id.value)
+        )
+      yield assertTrue(
+        set.contains("contract-7y"),
+        afterSet.values("retentionRule") ==
+          FieldEntry(MetadataValue.Text("contract-7y"), ValueOrigin.RecordsManagement),
+        afterSet.workingState == v1.workingState + 1,
+        again.contains("contract-7y"),
+        unchanged.workingState == afterSet.workingState,
+        replace.left.exists {
+          case DocumentError.InvalidValues(issues) => issues.exists(_.field == "retentionRule")
+          case _                                   => false
+        },
+        saved.values("retentionRule").origin == ValueOrigin.RecordsManagement,
+        v2.values("retentionRule") ==
+          FieldEntry(MetadataValue.Text("contract-7y"), ValueOrigin.RecordsManagement),
+        reset.isEmpty,
+        own.isEmpty,
+        details.versions
+          .find(_.id == v2.id)
+          .exists(
+            _.values("retentionRule") == FieldEntry(MetadataValue.Text("contract-10y"), ValueOrigin.Platform)
+          ),
+        // The approved version keeps the rule it was approved with.
+        details.versions
+          .find(_.id == v1.id)
+          .exists(
+            _.metadataSnapshot
+              .exists(_.values.get("retentionRule").contains(MetadataValue.Text("contract-7y")))
+          ),
+        changes.size == 2,
+        changes.head.actor.id == rm.value,
+        changes.head.details.value.contains(""""before":null,"after":"contract-7y""""),
+        changes.last.details.value.contains(""""before":"contract-7y","after":null""")
+      )
+    },
+    test(
+      "without a class rule submission names the missing retention rule; drafts saved before get the rule on " +
+        "submission; class assignments are audited"
+    ) {
+      for
+        f       <- fixture
+        removed <- classesIn(f)(_.assignRetentionRule(f.classId, None, RetentionFixtures.RecordsManager))
+        created <- create(f, reviewValues - "retentionRule")
+        (doc, draft) = created
+        blocked   <- as(f.tenant)(_.submit(doc.id, author)).either
+        unknown   <- classesIn(f)(_.assignRetentionRule(f.classId, Some("nothing"), admin)).either
+        _         <- classesIn(f)(c => RetentionFixtures.assign(c, f.classId, "contract-10y"))
+        unchanged <- classesIn(f)(_.assignRetentionRule(f.classId, Some("contract-10y"), admin))
+        submitted <- as(f.tenant)(_.submit(doc.id, author))
+        audit     <- ZIO.serviceWithZIO[Env](_.audit.get)
+        assigned = audit.filter(e =>
+          e.action == "document-class.retention-rule-changed" && e.target.id.contains(f.classId.value)
+        )
+      yield assertTrue(
+        removed.ruleKey.isEmpty,
+        removed.effectiveRule.isEmpty,
+        !draft.values.contains("retentionRule"),
+        blocked.left.exists {
+          case DocumentError.Incomplete(InReview, issues) =>
+            issues.exists(i => i.field == "retentionRule" && i.kind == IssueKind.NoRetentionRule) &&
+            IssueKind.NoRetentionRule.message.contains("no retention rule")
+          case _ => false
+        },
+        unknown.left.exists(_.isInstanceOf[MetadataError.Invalid]),
+        unchanged.ruleKey.contains("contract-10y"),
+        submitted.status == InReview,
+        submitted.workingState == draft.workingState + 1,
+        submitted.values("retentionRule") ==
+          FieldEntry(MetadataValue.Text("contract-10y"), ValueOrigin.Platform),
+        // fixture assigns, the test removes, then assigns again; the unchanged assignment records nothing.
+        assigned.size == 3,
+        assigned.last.details.value.contains(""""before":null,"after":"contract-10y"""")
       )
     },
     test("tenants only see their own documents") {

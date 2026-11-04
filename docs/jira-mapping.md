@@ -165,3 +165,13 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | – | DMS-121 | Task | Backlog (MVP) | – | DMS-115: file documents in comparison and search, preview cache, Word export button |
 | – | DMS-122 | Task | Backlog (MVP) | – | DMS-115: more Word field types, repeating sections, Excel/PowerPoint |
 | – | DMS-123 | Bug | Backlog (MVP) | – | Frontend tests time out under load |
+| – | DMS-124 | Task | Backlog (MVP) | – | DMS-122: rows in the comparison, typed Excel cells, Excel/PowerPoint templates |
+| – | DMS-125 | Task | Backlog (MVP) | – | DMS-111: fuzzy people search, paging, hide people already chosen |
+| – | DMS-126 | Task | Sprint 11 | – | DMS-103: change summary required for every new version |
+| – | DMS-127 | Story | Sprint 11 | – | Upload flow: as document or as template, field keys kept in Word files |
+| – | DMS-128 | Story | Sprint 11 | – | Visual editor for structured template content |
+| – | DMS-129 | Story | Sprint 11 | – | Discard drafts |
+| – | DMS-130 | Task | Sprint 12 | – | DMS-100: deliver notifications in the app and by email |
+| – | DMS-131 | Bug | Sprint 12 | – | DMS-127: title of the fields step not taken into the metadata form |
+| – | DMS-132 | Task | Backlog (MVP) | – | DMS-82: retention simulation, withdrawn drafts, personal data in the audit trail |
+| – | DMS-133 | Bug | Sprint 12 | – | Retention rule never set from the class; UI documents could not be submitted |

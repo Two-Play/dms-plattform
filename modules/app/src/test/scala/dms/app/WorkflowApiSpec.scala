@@ -141,6 +141,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
               ClassDraft("Contract", None, List(FieldBinding(FieldKey.unsafe("contractPartner"), 1))),
               admin
             )
+            _ <- RetentionFixtures.assign(classes, cls.classId, "contract-10y")
             draft = TemplateDraft("Service contract", None, cls.classId.value, 1, content)
             t <- templates.create(draft, designer)
             _ <- templates.changeStatus(t.templateId, 1, TemplateStatus.Testing, designer)
