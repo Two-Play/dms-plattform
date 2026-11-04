@@ -39,7 +39,10 @@ final class Authenticator(verifier: TokenVerifier, tenants: TenantDirectory):
       verified <- verifier.verify(token)
       tenant   <- tenants
         .tenantFor(verified.organizationId)
-        .orDieWith(e => RuntimeException(s"tenant lookup failed: $e"))
+        .catchAll {
+          case DbError.Unavailable(_) => ZIO.fail(AuthError.Unavailable)
+          case e                      => ZIO.die(RuntimeException(s"tenant lookup failed: $e"))
+        }
         .someOrFail(AuthError.UnknownOrganization(verified.organizationId))
       check <- idToken.filter(_.nonEmpty) match
         case None     => ZIO.succeed(IdTokenCheck.NotSent)

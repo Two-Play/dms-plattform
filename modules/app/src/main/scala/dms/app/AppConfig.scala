@@ -13,7 +13,13 @@ import zio.Config
 import zio.config.magnolia.{DeriveConfig, deriveConfig}
 import dms.archive.core.{MaintenanceConfig, OrphanCleanupConfig}
 
-final case class HttpConfig(port: Int)
+/** @param shutdownGraceSeconds
+  *   on shutdown requests in progress get this long to finish
+  * @param drainSeconds
+  *   on shutdown `/ready` answers `draining` this long before the server stops accepting requests; set it to
+  *   the interval of the load balancer's check
+  */
+final case class HttpConfig(port: Int, shutdownGraceSeconds: Int = 20, drainSeconds: Int = 0)
 
 /** Credentials of the schema owner, used only by [[Migrate]]. */
 final case class MigrationConfig(user: String, password: String)
@@ -22,12 +28,15 @@ final case class MigrationConfig(user: String, password: String)
   *
   * @param tsaTrustedCertificates
   *   PEM files of the TSA's CA; without them daily RFC 3161 anchoring is disabled and only checkpoints run
+  * @param allowUnanchoredInProduction
+  *   lets the profile `production` start without anchoring (explicit opt-out, warned about at start)
   */
 final case class AuditConfig(
     checkpointIntervalSeconds: Int,
     anchorHourUtc: Int,
     tsaUrl: String,
-    tsaTrustedCertificates: List[String]
+    tsaTrustedCertificates: List[String],
+    allowUnanchoredInProduction: Boolean = false
 )
 
 /** @param name
@@ -355,7 +364,8 @@ final case class AppConfig(
     users: UserDirectoryConfig,
     attachments: AttachmentsConfig,
     retention: RetentionConfig,
-    notifications: NotificationsConfig
+    notifications: NotificationsConfig,
+    library: LibraryConfig
 )
 
 object AppConfig:

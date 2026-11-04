@@ -8,7 +8,19 @@ import zio.*
 import java.sql.Connection
 import javax.sql.DataSource
 
-final case class DbConfig(url: String, user: String, password: String, poolSize: Int = 10)
+/** @param statementTimeoutSeconds
+  *   a statement running longer is cancelled, so a slow query cannot hold a connection for good; 0: no limit
+  * @param connectionTimeoutSeconds
+  *   how long a transaction waits for a free connection before it fails with [[DbError.Unavailable]]
+  */
+final case class DbConfig(
+    url: String,
+    user: String,
+    password: String,
+    poolSize: Int = 10,
+    statementTimeoutSeconds: Int = 60,
+    connectionTimeoutSeconds: Int = 10
+)
 
 /** Owns database transactions (ADR 0012).
   *
@@ -130,6 +142,10 @@ object Db:
       hikari.setMaximumPoolSize(config.poolSize)
       hikari.setAutoCommit(true)
       hikari.setPoolName("dms")
+      hikari.setConnectionTimeout(config.connectionTimeoutSeconds.max(1) * 1000L)
+      hikari.setConnectionInitSql(s"set statement_timeout = ${config.statementTimeoutSeconds.max(0) * 1000}")
+      // Server messages then leave out the DETAIL line, which quotes row values: they end up in logs.
+      hikari.addDataSourceProperty("logServerErrorDetail", "false")
       HikariDataSource(hikari)
     }))
 

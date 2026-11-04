@@ -195,13 +195,13 @@ object AcknowledgementApi:
       audiences <- acks.audiences(pending.map(_._2).toSet)
       byDoc     <- documents(ctx, pending.map(_._1))
       items     <- ZIO.foreach(pending) { (doc, versionId) =>
-        val details = byDoc(doc)
         ZIO
-          .foreach(details.versions.find(_.id == versionId))(v =>
-            ctx
-              .isRecipient(details, v, Recipients.filterOf(audiences.get(v.id)))
-              .map(Option.when(_)(item(details, v, opened.get(v.id), None)))
-          )
+          .foreach(byDoc.get(doc).flatMap(d => d.versions.find(_.id == versionId).map(d -> _))) {
+            (details, v) =>
+              ctx
+                .isRecipient(details, v, Recipients.filterOf(audiences.get(v.id)))
+                .map(Option.when(_)(item(details, v, opened.get(v.id), None)))
+          }
           .map(_.flatten)
       }
     yield items.flatten
@@ -211,16 +211,18 @@ object AcknowledgementApi:
       acknowledged <- acks.acknowledgementsOf(p.userId)
       byDoc        <- documents(ctx, acknowledged.map(_.documentId))
     yield acknowledged.flatMap(a =>
-      val details = byDoc(a.documentId)
-      details.versions
-        .find(_.id == a.versionId)
-        .map(v =>
-          item(details, v, Some(a.openedAt), Some(a.acknowledgedAt)).copy(versionLabel = a.versionLabel)
+      byDoc
+        .get(a.documentId)
+        .flatMap(details =>
+          details.versions
+            .find(_.id == a.versionId)
+            .map(v =>
+              item(details, v, Some(a.openedAt), Some(a.acknowledgedAt)).copy(versionLabel = a.versionLabel)
+            )
         )
     )
 
-  private def documents(ctx: DocumentApi.Context, ids: List[DocumentId]) =
-    ZIO.foreach(ids.distinct)(id => ctx.service.get(id).map(id -> _)).map(_.toMap)
+  private def documents(ctx: DocumentApi.Context, ids: List[DocumentId]) = ctx.service.getAll(ids)
 
   private def item(
       details: DocumentDetails,

@@ -62,12 +62,13 @@ private[core] object AttachmentStore:
   // The column list is repeated in each query: Magnum binds parameters only for literal sql"" fragments.
 
   /** The attachments of all versions of a document, by version, each in the order they were added. */
-  def ofDocument(document: DocumentId)(using DbTx): Map[UUID, List[VersionAttachment]] =
+  def ofDocuments(documents: List[DocumentId])(using DbTx): Map[UUID, List[VersionAttachment]] =
+    val ids = documents.distinct.map(_.value.toString).toArray
     sql"""select a.id, a.version_id, a.file_id, a.name, f.content_type, f.size_bytes, f.sha256, f.object_key,
                  f.object_version, f.scan_status, f.scanner, a.added_by, a.added_at, a.based_on
           from dms.document_version_attachment a
           join dms.document_attachment_file f on f.id = a.file_id
-          where f.document_id = ${document.value}
+          where f.document_id = any(cast($ids as uuid[]))
           order by a.added_at, a.id"""
       .query[LinkRow]
       .run()

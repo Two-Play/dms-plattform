@@ -9,6 +9,7 @@ ThisBuild / scalaVersion := Versions.scala
 
 lazy val commonSettings = Seq(
   libraryDependencies ++= Dependencies.zio ++ Dependencies.zioTest,
+  dependencyOverrides ++= Dependencies.securityOverrides,
   Test / fork := true
 )
 

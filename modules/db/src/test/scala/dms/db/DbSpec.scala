@@ -179,8 +179,38 @@ object DbSpec extends ZIOSpecDefault:
         )
       yield assertTrue(found == Some(id.value), missing.isEmpty)
     },
+    test("a statement beyond the statement timeout fails as unavailable and frees the connection") {
+      ZIO.scoped(
+        for
+          c  <- ZIO.service[PostgreSQLContainer]
+          db <- dataSource(
+            DbConfig(c.jdbcUrl, c.username, c.password, poolSize = 1, statementTimeoutSeconds = 1)
+          )
+            .map(Db(_))
+          slow  <- db.transactSystem(Db.sql(sql"select pg_sleep(5)".query[String].run())).either
+          after <- db.transactSystem(Db.sql(sql"select 1".query[Int].run().head))
+        yield assertTrue(slow.left.exists(_.isInstanceOf[DbError.Unavailable]), after == 1)
+      )
+    },
+    test("a transaction that gets no connection in time fails as unavailable") {
+      ZIO.scoped(
+        for
+          c  <- ZIO.service[PostgreSQLContainer]
+          db <- dataSource(
+            DbConfig(c.jdbcUrl, c.username, c.password, poolSize = 1, connectionTimeoutSeconds = 1)
+          )
+            .map(Db(_))
+          taken   <- Promise.make[Nothing, Unit]
+          release <- Promise.make[Nothing, Unit]
+          holder  <- db.transactSystem(taken.succeed(()) *> release.await).fork
+          _       <- taken.await
+          second  <- db.transactSystem(Db.sql(sql"select 1".query[Int].run().head)).either
+          _       <- release.succeed(()) *> holder.join
+        yield assertTrue(second.left.exists(_.isInstanceOf[DbError.Unavailable]))
+      )
+    },
     test("database code outside a transaction fails with NoTransaction") {
       for result <- Db.sql(sql"select 1".query[Int].run()).either
       yield assertTrue(result == Left(DbError.NoTransaction))
     }
-  ).provideShared(container >>> databases) @@ TestAspect.sequential @@ TestAspect.withLiveClock
+  ).provideShared(container >+> databases) @@ TestAspect.sequential @@ TestAspect.withLiveClock

@@ -131,14 +131,18 @@ private[core] object WorkflowStore:
       .run()
       .headOption
 
-  def casesOfDocument(documentId: DocumentId)(using DbTx): List[CaseRow] =
-    sql"""select id, document_id, version_id, class_key, definition_version, definition, four_eyes,
-                 process_definition_id, process_instance_id, round, status, current_step, returned_step,
-                 content_sha256, author_id, started_by, started_at, updated_at
-          from dms.workflow_case where document_id = ${documentId.value} order by started_at"""
-      .query[CaseRow]
-      .run()
-      .toList
+  /** The cases of the given documents, oldest first: one query for a whole list (DMS-60). */
+  def casesOfDocuments(documents: List[DocumentId])(using DbTx): List[CaseRow] =
+    if documents.isEmpty then Nil
+    else
+      val ids = documents.distinct.map(_.value.toString).toArray
+      sql"""select id, document_id, version_id, class_key, definition_version, definition, four_eyes,
+                   process_definition_id, process_instance_id, round, status, current_step, returned_step,
+                   content_sha256, author_id, started_by, started_at, updated_at
+            from dms.workflow_case where document_id = any(cast($ids as uuid[])) order by started_at"""
+        .query[CaseRow]
+        .run()
+        .toList
 
   def insertCase(c: CaseRow)(using DbTx): Unit =
     val _ = sql"""insert into dms.workflow_case
@@ -183,6 +187,18 @@ private[core] object WorkflowStore:
       .query[TaskRow]
       .run()
       .toList
+
+  /** The tasks of the given cases, in the order of [[tasksOfCase]]. */
+  def tasksOfCases(cases: List[UUID])(using DbTx): List[TaskRow] =
+    if cases.isEmpty then Nil
+    else
+      val ids = cases.distinct.map(_.toString).toArray
+      sql"""select id, case_id, round, step_key, step_kind, lane_key, role, candidates, status, created_at,
+                   completed_at, completed_by, due_at, remind_at, escalate_at
+            from dms.workflow_task where case_id = any(cast($ids as uuid[])) order by created_at, id"""
+        .query[TaskRow]
+        .run()
+        .toList
 
   def task(id: String)(using DbTx): Option[TaskRow] =
     sql"""select id, case_id, round, step_key, step_kind, lane_key, role, candidates, status, created_at,
@@ -369,6 +385,19 @@ private[core] object WorkflowStore:
       .toList
       .map(_.toVote)
 
+  /** The votes of the given cases, in the order of [[votesOfCase]]. */
+  def votesOfCases(cases: List[UUID])(using DbTx): List[Vote] =
+    if cases.isEmpty then Nil
+    else
+      val ids = cases.distinct.map(_.toString).toArray
+      sql"""select id, case_id, task_id, version_id, round, step_key, lane_key, voter, decision, reason,
+                   content_sha256, authenticated_at, voted_at, invalidated_at, acting_for
+            from dms.workflow_vote where case_id = any(cast($ids as uuid[])) order by voted_at, id"""
+        .query[VoteRow]
+        .run()
+        .toList
+        .map(_.toVote)
+
   /** Invalidates the valid votes of a case that were cast on other content. Returns their number. */
   def invalidateVotes(caseId: UUID, currentChecksum: String, reason: String)(using DbTx): Int =
     sql"""update dms.workflow_vote set invalidated_at = now(), invalidation_reason = $reason
@@ -396,6 +425,19 @@ private[core] object WorkflowStore:
       .run()
       .headOption
       .map(toApproval)
+
+  /** The approvals of the given cases; cases without one are missing. */
+  def approvalsOfCases(cases: List[UUID])(using DbTx): List[Approval] =
+    if cases.isEmpty then Nil
+    else
+      val ids = cases.distinct.map(_.toString).toArray
+      sql"""select id, case_id, version_id, version_label, content_sha256, approved_by, authenticated_at,
+                   approved_at, acting_for
+            from dms.workflow_approval where case_id = any(cast($ids as uuid[]))"""
+        .query[ApprovalRow]
+        .run()
+        .map(toApproval)
+        .toList
 
   /** The approvals of the given versions; versions without one are missing. */
   def approvalsOfVersions(versionIds: List[UUID])(using DbTx): List[Approval] =

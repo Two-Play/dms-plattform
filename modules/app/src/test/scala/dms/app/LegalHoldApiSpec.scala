@@ -171,6 +171,8 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
       ZLayer.succeed(WorkflowConfig.default),
       WorkflowRendition.layer,
       ApprovalWorkflow.layer,
+      ZLayer.succeed(LibraryConfig()),
+      LibrarySnapshots.layer,
       DocumentRenditions.layer,
       OpenSearchContainer.layer("dms-legal-hold-test"),
       ZLayer.succeed(SearchSettings()),

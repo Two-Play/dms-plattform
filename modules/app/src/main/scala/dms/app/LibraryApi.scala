@@ -1,11 +1,11 @@
 package dms.app
 
 import dms.archive.core.LegalHoldStore
-import dms.authz.{AccessDenied, Action, Authorizer, DocumentResource}
+import dms.authz.{AccessDenied, Action, Authorizer}
 import dms.db.{Db, DbError}
-import dms.documents.Validity
 import dms.documents.core.*
 import dms.identity.{Authenticator, Principal}
+import dms.kernel.DocumentId
 import dms.workflow.core.{ApprovalWorkflow, WorkflowError}
 import sttp.model.StatusCode
 import sttp.tapir.Schema
@@ -108,7 +108,7 @@ final case class LibraryView(
   */
 object LibraryApi:
   type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow & AcknowledgementService &
-    DocumentClassService
+    DocumentClassService & LibrarySnapshots
 
   /** Largest page. */
   val MaxSize = 200
@@ -220,78 +220,53 @@ object LibraryApi:
   private type Failure = DocumentError | AccessDenied | WorkflowError | AcknowledgementError | DbError
 
   /** The readable valid versions as library items, the class labels by key, the reference date and the
-    * tenant's time zone.
+    * tenant's time zone. The versions come from the tenant's copy (ADR 0056); what a caller may read, must
+    * acknowledge and whether a hold covers a document is decided here, for every request.
     */
   private def load(p: Principal, since: Option[LocalDate]) =
-    inTransaction(p) { (ctx, acks, classes) =>
-      for
-        now      <- Clock.instant
-        zone     <- ctx.service.tenantZone
-        valid    <- ctx.service.currentlyValid
-        readable <- ZIO.filter(valid)(v =>
-          ctx.allowed(
-            Action.ReadDocument,
-            DocumentApi.versionResource(
-              p.tenantId,
-              v.classPath,
-              v.document.ownerId,
-              v.status,
-              v.createdBy,
-              v.metadata,
-              v.releasedBy
-            )
+    ZIO
+      .serviceWithZIO[LibrarySnapshots](_.of(p.tenantId))
+      .mapError(toResponse)
+      .flatMap(snapshot =>
+        inTransaction(p) { (ctx, acks, classes) =>
+          for
+            now     <- Clock.instant
+            allowed <- ctx.allows(Action.ReadDocument)
+            readable = snapshot.entries.filter(e => allowed(e.resource))
+            acknowledged <- acks.acknowledgementsOf(p.userId).map(_.map(_.versionId).toSet)
+            audiences    <- acks.audiencesOfValid
+            // Versions the caller must acknowledge: those whose recipients they belong to (DMS-100, ADR 0048).
+            recipientOf <- ZIO
+              .filter(readable.filter(_.item.requiresAcknowledgement))(e =>
+                ctx.passes(Recipients.filterOf(audiences.get(e.item.versionId)))
+              )
+              .map(_.map(_.item.versionId).toSet)
+            held   <- LegalHoldStore.heldAmong(readable.map(e => DocumentId(e.item.documentId)).toSet)
+            labels <- classes.listClasses
+              .mapError(DocumentService.metadataError)
+              .map(_.map(c => c.key.value -> c.label).toMap)
+            zone      = snapshot.zone
+            reference = since
+              .getOrElse(LocalDate.ofInstant(now, zone).minusDays(Library.DefaultChangeWindowDays))
+            boundary = Library.changeBoundary(reference, zone)
+          yield (
+            readable.map { e =>
+              val i = e.item
+              i.copy(
+                classLabel = labels.getOrElse(i.classLabel, i.classLabel),
+                isNew = Library.isNew(e.firstPublished, boundary),
+                changed = Library.isChanged(e.firstPublished, i.validSince, boundary),
+                acknowledgementPending =
+                  recipientOf.contains(i.versionId) && !acknowledged.contains(i.versionId),
+                legalHold = held.contains(DocumentId(i.documentId))
+              )
+            },
+            labels,
+            reference,
+            zone
           )
-        )
-        acknowledged <- acks.acknowledgementsOf(p.userId).map(_.map(_.versionId).toSet)
-        audiences    <- acks.audiencesOfValid
-        // Versions the caller must acknowledge: those whose recipients they belong to (DMS-100, ADR 0048).
-        recipientOf <- ZIO
-          .filter(readable.filter(_.requiresAcknowledgement))(v =>
-            ctx.passes(Recipients.filterOf(audiences.get(v.versionId)))
-          )
-          .map(_.map(_.versionId).toSet)
-        held   <- LegalHoldStore.heldAmong(readable.map(_.document.id).toSet)
-        labels <- classes.listClasses
-          .mapError(DocumentService.metadataError)
-          .map(_.map(c => c.key.value -> c.label).toMap)
-        reference = since.getOrElse(LocalDate.ofInstant(now, zone).minusDays(Library.DefaultChangeWindowDays))
-        boundary  = Library.changeBoundary(reference, zone)
-      yield (
-        readable.map { v =>
-          val published = v.publishedAt.getOrElse(v.document.createdAt)
-          val first     = v.firstPublishedAt.getOrElse(published)
-          val since     = Validity.effectiveStart(v.validFrom, published, zone)
-          val values    = v.metadata
-          val classKey  = v.classPath.lastOption.getOrElse("")
-          LibraryItem(
-            v.document.id.value,
-            v.versionId,
-            Library.title(values).getOrElse(v.document.title),
-            v.document.number,
-            v.label,
-            v.status.toString,
-            v.classPath,
-            labels.getOrElse(classKey, classKey),
-            DocumentResource.organizationalUnit(values),
-            DocumentResource.confidentiality(values).toString,
-            Library.tags(values),
-            v.scope,
-            Library.summary(values),
-            v.validFrom,
-            since,
-            published,
-            Library.isNew(first, boundary),
-            Library.isChanged(first, since, boundary),
-            v.requiresAcknowledgement,
-            recipientOf.contains(v.versionId) && !acknowledged.contains(v.versionId),
-            held.contains(v.document.id)
-          )
-        },
-        labels,
-        reference,
-        zone
+        }
       )
-    }
 
   private def view(i: LibraryItem) =
     LibraryItemView(
@@ -344,10 +319,11 @@ object LibraryApi:
           .subject(principal)
           .flatMap(subject => f(DocumentApi.Context(service, workflow, authz, subject), acks, classes))
       )
-    yield result).mapError {
-      case e: WorkflowError        => WorkflowApi.toResponse(e)
-      case e: AccessDenied         => DocumentApi.toResponse(e)
-      case e: DbError              => DocumentApi.toResponse(e)
-      case e: DocumentError        => DocumentApi.toResponse(e)
-      case e: AcknowledgementError => AcknowledgementApi.toResponse(e)
-    }
+    yield result).mapError(toResponse)
+
+  private def toResponse(failure: Failure): (StatusCode, ApiError) = failure match
+    case e: WorkflowError        => WorkflowApi.toResponse(e)
+    case e: AccessDenied         => DocumentApi.toResponse(e)
+    case e: DbError              => DocumentApi.toResponse(e)
+    case e: DocumentError        => DocumentApi.toResponse(e)
+    case e: AcknowledgementError => AcknowledgementApi.toResponse(e)

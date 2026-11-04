@@ -416,11 +416,7 @@ object DocumentClassApi:
     case MetadataError.Database(e)       => databaseError(e)
     case e: DbError                      => databaseError(e)
 
-  private def databaseError(error: DbError): (StatusCode, ApiError) =
-    (
-      StatusCode.InternalServerError,
-      ApiError("database_error", s"The request could not be completed ($error).")
-    )
+  private def databaseError(error: DbError): (StatusCode, ApiError) = HttpHardening.databaseError(error)
 
   private def bindings(views: List[FieldBindingView]): IO[(StatusCode, ApiError), List[FieldBinding]] =
     ZIO

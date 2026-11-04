@@ -22,9 +22,19 @@ object Versions {
   val veraPdf       = "1.30.2" // PDF/A validation, same release as the CLI of spike DMS-23 (ADR 0008, 0025)
   val pdfbox        = "3.0.8"  // on-demand PDFs of file documents (stamp, merge); text extraction in tests
   val angusMail     = "2.0.4"  // SMTP for notification emails (ADR 0052)
+  // Above what Flowable brings along: fixes for known vulnerabilities (scripts/dependency_audit.py, DMS-60).
+  val jackson2 = "2.21.8"
+  val jackson3 = "3.1.8"
 }
 
 object Dependencies {
+  val securityOverrides = Seq(
+    "com.fasterxml.jackson.core" % "jackson-core"     % Versions.jackson2,
+    "com.fasterxml.jackson.core" % "jackson-databind" % Versions.jackson2,
+    "tools.jackson.core"         % "jackson-core"     % Versions.jackson3,
+    "tools.jackson.core"         % "jackson-databind" % Versions.jackson3
+  )
+
   val zio = Seq(
     "dev.zio" %% "zio"         % Versions.zio,
     "dev.zio" %% "zio-streams" % Versions.zio

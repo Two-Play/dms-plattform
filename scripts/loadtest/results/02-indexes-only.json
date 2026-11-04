@@ -1,0 +1,317 @@
+{
+  "label": "02-indexes-only",
+  "started": "2026-11-04T14:25:48",
+  "factor": 100,
+  "duration_s": 135,
+  "sessions": 50,
+  "think_s": 1.0,
+  "requests": 1685,
+  "errors": 4,
+  "throughput_rps": 12.4,
+  "volume_before": {
+    "documents": 20006,
+    "versions": 98006,
+    "validVersions": 19004,
+    "workflowCases": 95004,
+    "workflowTasks": 95004,
+    "acknowledgements": 970000,
+    "roleAssignments": 1101
+  },
+  "volume_after": {
+    "documents": 20056,
+    "versions": 98056,
+    "validVersions": 19004,
+    "workflowCases": 95029,
+    "workflowTasks": 95029,
+    "acknowledgements": 970140,
+    "roleAssignments": 1101
+  },
+  "operations": {
+    "acknowledgement.confirm": {
+      "count": 140,
+      "errors": 0,
+      "rps": 1.03,
+      "p50_ms": 126,
+      "p95_ms": 4720,
+      "p99_ms": 5674,
+      "max_ms": 7738,
+      "mean_ms": 982,
+      "statuses": {
+        "201": 140
+      },
+      "sample_failures": []
+    },
+    "acknowledgement.opened": {
+      "count": 140,
+      "errors": 0,
+      "rps": 1.03,
+      "p50_ms": 116,
+      "p95_ms": 4335,
+      "p99_ms": 7394,
+      "max_ms": 7435,
+      "mean_ms": 1152,
+      "statuses": {
+        "204": 140
+      },
+      "sample_failures": []
+    },
+    "acknowledgements.open": {
+      "count": 140,
+      "errors": 0,
+      "rps": 1.03,
+      "p50_ms": 331,
+      "p95_ms": 7401,
+      "p99_ms": 9730,
+      "max_ms": 9825,
+      "mean_ms": 1610,
+      "statuses": {
+        "200": 140
+      },
+      "sample_failures": []
+    },
+    "document.html": {
+      "count": 140,
+      "errors": 0,
+      "rps": 1.03,
+      "p50_ms": 389,
+      "p95_ms": 5502,
+      "p99_ms": 7619,
+      "max_ms": 9881,
+      "mean_ms": 1295,
+      "statuses": {
+        "200": 140
+      },
+      "sample_failures": []
+    },
+    "document.submit": {
+      "count": 25,
+      "errors": 0,
+      "rps": 0.18,
+      "p50_ms": 426,
+      "p95_ms": 6049,
+      "p99_ms": 7092,
+      "max_ms": 7092,
+      "mean_ms": 1693,
+      "statuses": {
+        "200": 25
+      },
+      "sample_failures": []
+    },
+    "document.view": {
+      "count": 140,
+      "errors": 0,
+      "rps": 1.03,
+      "p50_ms": 557,
+      "p95_ms": 4436,
+      "p99_ms": 6625,
+      "max_ms": 6954,
+      "mean_ms": 1148,
+      "statuses": {
+        "200": 140
+      },
+      "sample_failures": []
+    },
+    "documents.list": {
+      "count": 140,
+      "errors": 0,
+      "rps": 1.03,
+      "p50_ms": 3890,
+      "p95_ms": 11332,
+      "p99_ms": 15470,
+      "max_ms": 15764,
+      "mean_ms": 4366,
+      "statuses": {
+        "200": 140
+      },
+      "sample_failures": []
+    },
+    "draft.create": {
+      "count": 25,
+      "errors": 0,
+      "rps": 0.18,
+      "p50_ms": 4241,
+      "p95_ms": 13030,
+      "p99_ms": 16637,
+      "max_ms": 16637,
+      "mean_ms": 6169,
+      "statuses": {
+        "201": 25
+      },
+      "sample_failures": []
+    },
+    "draft.save": {
+      "count": 75,
+      "errors": 0,
+      "rps": 0.55,
+      "p50_ms": 2073,
+      "p95_ms": 7525,
+      "p99_ms": 9960,
+      "max_ms": 9960,
+      "mean_ms": 2566,
+      "statuses": {
+        "200": 75
+      },
+      "sample_failures": []
+    },
+    "library": {
+      "count": 140,
+      "errors": 0,
+      "rps": 1.03,
+      "p50_ms": 5761,
+      "p95_ms": 12288,
+      "p99_ms": 13949,
+      "max_ms": 17568,
+      "mean_ms": 6371,
+      "statuses": {
+        "200": 140
+      },
+      "sample_failures": []
+    },
+    "library.filtered": {
+      "count": 140,
+      "errors": 0,
+      "rps": 1.03,
+      "p50_ms": 6940,
+      "p95_ms": 13906,
+      "p99_ms": 14747,
+      "max_ms": 16340,
+      "mean_ms": 7822,
+      "statuses": {
+        "200": 140
+      },
+      "sample_failures": []
+    },
+    "pdf.preview": {
+      "count": 25,
+      "errors": 0,
+      "rps": 0.18,
+      "p50_ms": 5716,
+      "p95_ms": 9661,
+      "p99_ms": 12567,
+      "max_ms": 12567,
+      "mean_ms": 5149,
+      "statuses": {
+        "200": 25
+      },
+      "sample_failures": []
+    },
+    "pdf.rendition": {
+      "count": 140,
+      "errors": 0,
+      "rps": 1.03,
+      "p50_ms": 128,
+      "p95_ms": 5503,
+      "p99_ms": 6866,
+      "max_ms": 10696,
+      "mean_ms": 1226,
+      "statuses": {
+        "200": 140
+      },
+      "sample_failures": []
+    },
+    "publication.latency": {
+      "count": 4,
+      "errors": 4,
+      "rps": 0.03,
+      "p50_ms": 120117,
+      "p95_ms": 120975,
+      "p99_ms": 120975,
+      "max_ms": 120975,
+      "mean_ms": 120431,
+      "statuses": {
+        "-504": 4
+      },
+      "sample_failures": [
+        "504: InApproval",
+        "504: InApproval",
+        "504: InApproval",
+        "504: InApproval"
+      ]
+    },
+    "search": {
+      "count": 140,
+      "errors": 0,
+      "rps": 1.03,
+      "p50_ms": 2273,
+      "p95_ms": 6502,
+      "p99_ms": 8804,
+      "max_ms": 8918,
+      "mean_ms": 2582,
+      "statuses": {
+        "200": 140
+      },
+      "sample_failures": []
+    },
+    "upload.attachment": {
+      "count": 25,
+      "errors": 0,
+      "rps": 0.18,
+      "p50_ms": 2144,
+      "p95_ms": 7381,
+      "p99_ms": 7482,
+      "max_ms": 7482,
+      "mean_ms": 2366,
+      "statuses": {
+        "201": 25
+      },
+      "sample_failures": []
+    },
+    "upload.word": {
+      "count": 25,
+      "errors": 0,
+      "rps": 0.18,
+      "p50_ms": 1405,
+      "p95_ms": 8063,
+      "p99_ms": 8741,
+      "max_ms": 8741,
+      "mean_ms": 2925,
+      "statuses": {
+        "200": 25
+      },
+      "sample_failures": []
+    },
+    "word.create": {
+      "count": 25,
+      "errors": 0,
+      "rps": 0.18,
+      "p50_ms": 2909,
+      "p95_ms": 13591,
+      "p99_ms": 13873,
+      "max_ms": 13873,
+      "mean_ms": 4232,
+      "statuses": {
+        "201": 25
+      },
+      "sample_failures": []
+    },
+    "workflow.approve": {
+      "count": 36,
+      "errors": 0,
+      "rps": 0.27,
+      "p50_ms": 2584,
+      "p95_ms": 6726,
+      "p99_ms": 7489,
+      "max_ms": 7489,
+      "mean_ms": 2727,
+      "statuses": {
+        "200": 21,
+        "409": 15
+      },
+      "sample_failures": []
+    },
+    "workflow.inbox": {
+      "count": 24,
+      "errors": 0,
+      "rps": 0.18,
+      "p50_ms": 1798,
+      "p95_ms": 11387,
+      "p99_ms": 15684,
+      "max_ms": 15684,
+      "mean_ms": 3100,
+      "statuses": {
+        "200": 24
+      },
+      "sample_failures": []
+    }
+  }
+}

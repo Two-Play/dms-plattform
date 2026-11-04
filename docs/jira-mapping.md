@@ -175,3 +175,9 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | – | DMS-131 | Bug | Sprint 12 | – | DMS-127: title of the fields step not taken into the metadata form |
 | – | DMS-132 | Task | Backlog (MVP) | – | DMS-82: retention simulation, withdrawn drafts, personal data in the audit trail |
 | – | DMS-133 | Bug | Sprint 12 | – | Retention rule never set from the class; UI documents could not be submitted |
+| – | DMS-134 | Bug | Sprint 12 | – | Own Mailpit ports; drafts show the rule of their class |
+| – | DMS-135 | Bug | Sprint 13 | – | Seed carried open versions of demo documents through to publication |
+| – | DMS-136 | Task | Backlog (MVP) | – | DMS-60: tenant quotas and throttling |
+| – | DMS-137 | Task | Backlog (MVP) | – | DMS-60: background jobs at full volume, rendering queue metric |
+| – | DMS-138 | Task | Backlog (MVP) | – | DMS-60: approver's inbox batched, index migrations on filled databases |
+| – | DMS-139 | Task | Backlog (MVP) | – | DMS-60: build the production environment and rehearse operations |

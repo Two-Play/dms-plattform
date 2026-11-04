@@ -1,6 +1,6 @@
 package dms.db
 
-import java.sql.SQLException
+import java.sql.{SQLException, SQLTransientConnectionException}
 
 /** Typed database errors, mapped from the SQLSTATE of the first SQLException in the cause chain. */
 enum DbError:
@@ -15,6 +15,11 @@ enum DbError:
 
   /** Unique constraint violation (23505). */
   case UniqueViolation(constraint: String, message: String)
+
+  /** No free connection in time, or a statement ran into the statement timeout: the database is overloaded,
+    * trying again later may work.
+    */
+  case Unavailable(message: String)
 
   /** Database code was called outside [[Db.transact]]. */
   case NoTransaction
@@ -31,7 +36,9 @@ object DbError:
           case "P0001" => AppendOnlyViolation(e.getMessage)
           case "42501" => PermissionDenied(e.getMessage)
           case "23505" => UniqueViolation(constraintName(e).getOrElse(""), e.getMessage)
-          case state   => Other(Option(state).getOrElse(""), e.getMessage)
+          case "57014" => Unavailable("the statement timeout was reached")
+          case _ if e.isInstanceOf[SQLTransientConnectionException] => Unavailable(e.getMessage)
+          case state => Other(Option(state).getOrElse(""), e.getMessage)
       case None => Unexpected(t)
 
   private def constraintName(e: SQLException): Option[String] = e match

@@ -344,7 +344,24 @@ final class ApprovalWorkflow(
 
   /** The cases of all versions of a document, oldest first. */
   def cases(documentId: DocumentId): IO[WorkflowError, List[CaseDetails]] =
-    sql(WorkflowStore.casesOfDocument(documentId)).flatMap(rows => ZIO.foreach(rows)(r => details(r.id)))
+    casesOf(List(documentId)).map(_.getOrElse(documentId, Nil))
+
+  /** The cases of the versions of several documents, oldest first per document: a fixed number of queries,
+    * however many documents and versions a list shows (DMS-60).
+    */
+  def casesOf(documents: List[DocumentId]): IO[WorkflowError, Map[DocumentId, List[CaseDetails]]] =
+    for
+      rows <- sql(WorkflowStore.casesOfDocuments(documents))
+      ids = rows.map(_.id)
+      tasks     <- sql(WorkflowStore.tasksOfCases(ids)).map(_.groupBy(_.caseId))
+      votes     <- sql(WorkflowStore.votesOfCases(ids)).map(_.groupBy(_.caseId))
+      approvals <- sql(WorkflowStore.approvalsOfCases(ids)).map(_.map(a => a.caseId -> a).toMap)
+      cases     <- ZIO.foreach(rows)(row =>
+        views(row, tasks.getOrElse(row.id, Nil)).map(taskViews =>
+          CaseDetails(row.toCase, taskViews, votes.getOrElse(row.id, Nil), approvals.get(row.id))
+        )
+      )
+    yield cases.groupBy(_.workflowCase.documentId)
 
   /** The case of a version, if it was submitted. */
   def caseOfVersion(versionId: UUID): IO[WorkflowError, Option[CaseDetails]] =
