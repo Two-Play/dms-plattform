@@ -64,7 +64,7 @@ Acknowledgement requests (DMS-100 follow-up): `AcknowledgementReminderJobs` reco
 | `smtp.from` | `DMS_SMTP_FROM` | `DMS <dms@localhost>` | Sender |
 | `smtp.timeoutMillis` | `DMS_SMTP_TIMEOUT_MILLIS` | 10000 | Connect, read and write timeout |
 
-Local development: `docker compose up -d mailpit` starts Mailpit (SMTP `localhost:1025`, web UI http://localhost:8025); `scripts/dev-setup.sh` starts the backend with `DMS_SMTP_HOST=localhost DMS_SMTP_PORT=1025 DMS_SMTP_SECURITY=none`.
+Local development: `docker compose up -d mailpit` starts Mailpit (SMTP `localhost:1026`, web UI http://localhost:8026; change them with `DMS_MAILPIT_SMTP_PORT` and `DMS_MAILPIT_WEB_PORT`); `scripts/dev-setup.sh` starts the backend with `DMS_SMTP_HOST=localhost DMS_SMTP_PORT=1026 DMS_SMTP_SECURITY=none`.
 
 Production: the company's mail relay with `starttls` on 587 (or `tls` on 465), a sender address of a domain with SPF/DKIM for the relay, credentials only from the secret store, `DMS_NOTIFICATIONS_APP_BASE_URL` set to the public address of the web app. Recipients need an email address in ZITADEL and the user directory token (ADR 0037); without it only in-app notifications are delivered.
 
