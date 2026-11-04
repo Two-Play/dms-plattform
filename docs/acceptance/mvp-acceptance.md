@@ -1,0 +1,165 @@
+# MVP acceptance report
+
+As of 2026-11-04 · Jira DMS-60 (T-00.13) · Code state: `main` at 46347af plus branch `DMS-60-mvp-acceptance`.
+
+**This report prepares the acceptance; it is not the acceptance.** The sign-off is the product owner's. Nobody has walked through the stories as a business user for this report.
+
+## Result
+
+- **Scope:** 44 planned MVP items (`docs/backlog.md`, DMS-17 to DMS-60). 39 are done, 4 partly done, and T-00.13 is completed by this branch once it is merged.
+- **Jira:** every planned MVP story and task except DMS-60 is Done. 14 follow-up issues are still open. None of them can be closed as written; see [Open follow-ups](#open-follow-ups).
+- **Load test:** carried out at 1:100 of the volumes of section 14.2, with the result in [Load test](#load-test). It found a total outage under load, which is fixed.
+- **High-priority defects:** Jira has no open bug. The defects the load test found are fixed on this branch.
+- **Release:** four small features block the first production stage, and a set of operational tasks must be done before going live; see [What blocks an MVP release](#what-blocks-an-mvp-release).
+
+## How the status was decided
+
+Each story was compared with its acceptance criteria (`docs/backlog.md`, and chapter 12 of the [business concept](../fachkonzept.html) for stories marked FK) by reading the code and the automated tests.
+
+| Status | Meaning |
+|---|---|
+| done | Every acceptance criterion is met by code with an automated test or a usable UI path |
+| partly | At least one criterion is not met; the gap is named |
+| open | Nothing usable exists |
+
+The automated tests ran for this report (see [Checks](#checks)). Browser walkthroughs were not repeated for it. Follow-ups that go beyond a story's acceptance criteria do not lower its status; they are listed separately.
+
+## Stories and tasks
+
+PR numbers refer to GitHub pull requests; early items without a number were committed before pull requests were in use.
+
+### Foundation
+
+| ID | Jira | Title | Status | Evidence | Remaining gap |
+|---|---|---|---|---|---|
+| T-00.1 | DMS-17 | Project scaffold | done | Module rule in `build.sbt`; `GET /health`, `/docs` | |
+| T-00.2 | DMS-18 | ADRs | done | `docs/adr/`, index in its README | |
+| T-00.3 | DMS-19 | Local environment | done | `compose.yaml`, `scripts/dev-setup.sh` | |
+| T-00.4 | DMS-20 | CI pipeline | done | #1, `.github/workflows/ci.yml` | |
+| T-00.5 | DMS-21 | Spike database access | done | #3, ADR 0012 | |
+| T-00.6 | DMS-22 | Spike Flowable | done | #2, ADR 0006 | |
+| T-00.7 | DMS-23 | Spike PDF/A rendering | done | #9, ADR 0008 | |
+| T-00.8 | DMS-24 | ZITADEL license | done | #5, ADR 0005 | |
+| T-00.9 | DMS-25 | Database foundation, RLS | done | #4, ADR 0014, `DbSpec` | |
+| T-00.10 | DMS-27 | Frontend scaffold | done | #7, ADR 0015 | |
+| T-00.11 | DMS-30 | Object storage with Object Lock | done | #12, ADR 0016, `ObjectStoreSpec` | |
+| T-00.12 | DMS-31 | Outbox and job queue | done | #15, ADR 0010, `WorkersSpec` | |
+| T-00.13 | DMS-60 | Hardening, load test, acceptance | done with this branch | ADR 0056, `scripts/loadtest/`, this report | Sign-off |
+
+### Identity, permissions, audit
+
+| ID | Jira | Title | Status | Evidence | Remaining gap |
+|---|---|---|---|---|---|
+| S-11.a | DMS-26 | Login with tenant resolution | done | #8, `AuthenticatorSpec` | |
+| S-11.b | DMS-28 | RBAC and ABAC | done | #10, ADR 0018, `PolicySpec`, `AuthorizerSpec` | |
+| S-12.a | DMS-29 | Audit trail with hash chain | done | #11, #13, #14, #16, ADR 0017, `AuditCheckpointsSpec` | Production needs a bound TSA; the profile refuses to start without it |
+
+### Templates, metadata, documents
+
+| ID | Jira | Title | Status | Evidence | Remaining gap |
+|---|---|---|---|---|---|
+| S-02.a | DMS-32 | Classes and field definitions | done | #17, ADR 0019 | |
+| US-02.1 | DMS-33 | Status-dependent mandatory fields | done | #17, `RequirednessSpec` | |
+| S-01.a | DMS-34 | Templates with placeholders and CEL | done | #18, ADR 0020 | Hints for missing inputs in test mode: DMS-85 |
+| S-01.b | DMS-35 | Template lifecycle, four eyes | done | #18, `TemplateApiSpec` | |
+| US-01.1 | DMS-36 | Locked and editable sections | **partly** | #20, #25, #26, ADR 0022, `DocumentApiSpec` | Requesting a deviation and reading the report work through the API only. In the UI authors cannot change locked sections at all, which is safe, but there is no way to ask for a deviation (DMS-84) |
+| US-01.2 | DMS-50 | Impact analysis | done | #39, `TemplateImpactApiSpec` | |
+| S-03.a | DMS-37 | Document from template | done | #23, `DocumentApiSpec` | |
+| S-05.a | DMS-38 | Frozen version packages | done | #23, ADR 0021, `DocumentVersionSchemaSpec` | |
+| US-03.2 | DMS-39 | Live preview | done | #22, ADR 0039; p95 from the load test | |
+| US-03.1 | DMS-43 | Partner master | **partly** | #29, ADR 0023, `PartnerApiSpec` | The criteria are met against the demo directory. The HTTP contract is an assumption and no real partner system is connected (DMS-89). Stage 2 |
+
+### Workflow and publication
+
+| ID | Jira | Title | Status | Evidence | Remaining gap |
+|---|---|---|---|---|---|
+| S-04.a | DMS-40 | Approval workflow | done | #28, ADR 0024, `WorkflowApiSpec` | Review modes and metadata conditions: DMS-88 |
+| US-04.1 | DMS-41 | Approval bound to a version | done | #28, `WorkflowApiSpec` | |
+| US-04.2 | DMS-42 | Four-eyes principle | **partly** | #28, `WorkflowApiSpec` | Enforced, also with a notice to the administrator when nobody is eligible. Configurable per class for review steps only: the final approval always keeps four eyes, which is stricter than the criterion (DMS-88) |
+| US-06.1 | DMS-44 | PDF/A rendition | **partly** | #33, #81, ADR 0025, 0055, `PdfRenditionSpec` | The status stays "In approval" on failure and the failure is visible with a retry, but the owner is not notified as the criterion demands (`document.rendition-failed` is audited only) |
+| US-06.3 | DMS-45 | Scheduled publication | done | #32, ADR 0026, `VersionPublicationSpec` | Failure notice and withdrawal: DMS-92 |
+| US-05.2 | DMS-46 | Editorial correction | done | #32, `PublicationApiSpec` | |
+| US-06.2 | DMS-47 | Acknowledgement | done | #41, ADR 0027, `AcknowledgementApiSpec` | |
+| S-10.a | DMS-48 | Central task inbox | done | #38, `task-inbox-page.test.tsx` | |
+| US-10.1 | DMS-49 | Delegation for approvers | done | #40, ADR 0028, `DeputyshipsSpec` | |
+
+### Search, review, archive, reports
+
+| ID | Jira | Title | Status | Evidence | Remaining gap |
+|---|---|---|---|---|---|
+| S-09.a | DMS-51 | Full-text indexing | done | #44, ADR 0029, `SearchIndexSpec` | Production operation: DMS-102 |
+| US-09.2 | DMS-52 | Permission-filtered search | done | #44, `AccessFilterSpec`, `SearchApiSpec` | |
+| US-09.1 | DMS-53 | "Valid on" search | done | #43, `ValidAtApiSpec` (with CSV export) | |
+| US-05.1 | DMS-54 | Compare versions | done | #45, ADR 0033, `VersionCompareApiSpec` | |
+| US-07.1 | DMS-55 | Review task and recertification | done | #47, ADR 0030, `ReviewApiSpec` | The task appears in the inbox, but nobody is notified or escalated to: see the blockers |
+| US-08.1 | DMS-56 | Legal hold | done | #48, ADR 0031, 0047, `LegalHoldApiSpec` | |
+| US-12.1 | DMS-57 | Evidence report | done | #51, ADR 0034, `EvidenceReportApiSpec` | |
+| US-14.1 | DMS-58 | Stable address | done | #52, ADR 0035, `CurrentDocumentApiSpec` | |
+| US-15.1 | DMS-59 | Compliance cockpit | done | #50, ADR 0036, `ComplianceApiSpec` | |
+
+## Open follow-ups
+
+The 14 follow-ups still open in Jira, each checked criterion by criterion against the code. Later work covered parts of them, but no issue is finished.
+
+| Issue | Covered by later work | Still open | For stage 1 |
+|---|---|---|---|
+| DMS-81 Version model | Owner confirmation of minor versions (#32), retention rule from the class (DMS-133, #82) | Language and overlapping scopes in the validity key | Defer languages; decide an operating rule for scopes (see below) |
+| DMS-84 Deviation UI | Hint text on refused submission | Everything else | Defer: not reachable from the UI |
+| DMS-85 Test mode hints | | Everything | Defer: the release block prevents wrong output |
+| DMS-88 Workflow extensions | My tasks, votes, workflow status in the UI (#38); deputyships instead of per-task delegation (DMS-49, 99, 105) | Review modes, metadata conditions, parent owner, per-task delegation, four-eyes switch for the approval, workflow configuration UI | Defer; configure the workflow of the class through the API |
+| DMS-89 Partner master | | Everything; the profile warns about `demo` | Defer to stage 2 |
+| DMS-91 Document page | Display names (#56), version history, rendered versions, votes on the page (#38, #57), no workflow query per document (this branch) | Paged list with filters (search and library cover finding documents), partner id, reload button on 409 | Defer; close the list point by decision |
+| DMS-92 Publication | | Notice on a dead publication job, withdrawing an approved version, time zone endpoint, editorial settings, overlapping scopes | **First two block**, the rest defer |
+| DMS-102 Search | Notifications as outbox subscriber (#79); Word text (#63); basic auth, https and replicas are configurable, the profile now requires them | Clause text, PDF and OCR text, a later subscriber misses earlier events, owner change and version time | Defer, except PDF text if policies are uploaded as PDFs |
+| DMS-104 Review | | Notification and escalation, inheritance, recalculation, backfill | **Notification and escalation block**, the rest defer |
+| DMS-108 Report and cockpit | Owner UI for the name list (#71), display names in the UI | Purpose in the request body, chain cache, report list and retention, cockpit export and actions, names in the PDF | **Purpose blocks**, the rest defer |
+| DMS-118 On-demand PDFs | | Limits and a plain variant | Defer: `draft.pdf` stayed fast in the load test |
+| DMS-124 Office fields | | Everything | Defer |
+| DMS-125 People picker | Service user described in ADR 0037 and `docs/operations/production.md` | Fuzzy search, paging, hiding chosen people | Defer |
+| DMS-132 Retention | Rules from the class (#82) | Jurisdiction and contract-end trigger, simulation, withdrawn drafts, personal data in the audit trail, orphans at scale | Defer; decide the audit data question with data protection |
+
+The check of these issues was done by reading the code, not by running each criterion; its main findings about the blockers were verified separately.
+
+## What blocks an MVP release
+
+The first production stage covers policies and guidelines; contracts follow in stage 2 (business concept 12.1). That decides what blocks.
+
+### Features
+
+| # | Issue | Why it blocks |
+|---|---|---|
+| 1 | DMS-104 | Nobody is notified of a review task or its overdue date. Periodic review is the core compliance promise for policies, and an owner who is told nothing misses it silently |
+| 2 | DMS-92, US-06.1 | A failed rendition or publication notifies nobody, so a policy may silently not take effect. The criterion of US-06.1 requires the notice |
+| 3 | DMS-92 | An approved version with a future valid-from date cannot be stopped: it will be published even if it was approved by mistake |
+| 4 | DMS-108 | The stated purpose for viewing named people travels as a query parameter and so ends up in access logs |
+
+### Before going live (operations)
+
+- Deployment: the production image and environment have not been built or tried. Everything so far ran locally.
+- OpenSearch with TLS, credentials and replicas; ClamAV; a bound TSA with its certificates; an SMTP relay; a user directory token per tenant organization. The production profile refuses or warns about each of them.
+- Multi-factor authentication for authors, approvers and administrators (business concept 14.1) is ZITADEL configuration and has to be set and verified.
+- Backup and restore rehearsed against the targets of 15 minutes data loss and 4 hours downtime (`docs/operations/production.md`). Only dump and restore of the database have been exercised.
+- `docs/operations/production.md` worked through for the environment, and the load test repeated there with production sizing.
+
+### Decisions needed
+
+- Do policies use validity scopes that can overlap (`DE` and `AT|DE`)? If so DMS-81 blocks; otherwise an operating rule is enough.
+- Are policies uploaded as PDFs? Their text is not searchable yet (DMS-102).
+- Personal data in audit entries: does data protection accept the current state for stage 1 (DMS-132)?
+- Is the first class configured once through the API, or is the workflow configuration UI needed (DMS-88)?
+
+## Load test
+
+<!-- LOADTEST-SUMMARY -->
+
+## Non-functional requirements
+
+Targets of chapter 13 of the business concept as far as this report can say something about them.
+
+<!-- NFR-TABLE -->
+
+Not assessed: availability, accessibility (WCAG 2.2 AA, accessible PDF), use on mobile devices, per-tenant encryption keys, export of all data per tenant, configuration export between environments, tenant quotas and throttling (14.2). Rate limiting per tenant does not exist; the production checklist asks for it at the reverse proxy per client.
+
+## Checks
+
+<!-- CHECKS -->

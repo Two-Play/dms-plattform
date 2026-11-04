@@ -94,3 +94,7 @@ Search for content stays on the search page (ADR 0029); the library is for brows
 | Effort | None | CoreFields, profiles of all tenants, migration of existing values, tests |
 
 Decision: keep the class field. It is not clearly better to make it a core field: the library already works with the conventional key, most document types other than instructions and policies do not need a description, and a core key would collide with the tenant fields that already use it. Reconsider if tenants ask for a description on every document type; then a migration has to move existing `summary` values into the core field.
+
+## Addendum DMS-60 (2026-11-04)
+
+Reading all valid versions per request did not hold at 19,000 versions (load test, ADR 0056). The decision stands, with one change: the library now works on a copy of the valid versions per tenant, which an index lookup checks against the database for every request. Permissions, acknowledgements and legal holds are still decided per request.
