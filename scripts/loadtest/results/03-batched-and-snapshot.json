@@ -1,0 +1,324 @@
+{
+  "label": "03-batched-and-snapshot",
+  "started": "2026-11-04T14:07:54",
+  "factor": 100,
+  "duration_s": 129,
+  "sessions": 50,
+  "think_s": 1.0,
+  "requests": 7424,
+  "errors": 58,
+  "throughput_rps": 57.7,
+  "volume_before": {
+    "documents": 20006,
+    "versions": 98006,
+    "validVersions": 19004,
+    "workflowCases": 95004,
+    "workflowTasks": 95004,
+    "acknowledgements": 970000,
+    "roleAssignments": 1101
+  },
+  "volume_after": {
+    "documents": 20190,
+    "versions": 98190,
+    "validVersions": 19004,
+    "workflowCases": 95096,
+    "workflowTasks": 95096,
+    "acknowledgements": 970638,
+    "roleAssignments": 1101
+  },
+  "operations": {
+    "acknowledgement.confirm": {
+      "count": 638,
+      "errors": 0,
+      "rps": 4.96,
+      "p50_ms": 15,
+      "p95_ms": 47,
+      "p99_ms": 89,
+      "max_ms": 169,
+      "mean_ms": 20,
+      "statuses": {
+        "201": 638
+      },
+      "sample_failures": []
+    },
+    "acknowledgement.opened": {
+      "count": 638,
+      "errors": 0,
+      "rps": 4.96,
+      "p50_ms": 15,
+      "p95_ms": 48,
+      "p99_ms": 94,
+      "max_ms": 186,
+      "mean_ms": 21,
+      "statuses": {
+        "204": 638
+      },
+      "sample_failures": []
+    },
+    "acknowledgements.open": {
+      "count": 638,
+      "errors": 0,
+      "rps": 4.96,
+      "p50_ms": 78,
+      "p95_ms": 176,
+      "p99_ms": 238,
+      "max_ms": 315,
+      "mean_ms": 91,
+      "statuses": {
+        "200": 638
+      },
+      "sample_failures": []
+    },
+    "document.html": {
+      "count": 638,
+      "errors": 0,
+      "rps": 4.96,
+      "p50_ms": 11,
+      "p95_ms": 29,
+      "p99_ms": 48,
+      "max_ms": 80,
+      "mean_ms": 14,
+      "statuses": {
+        "200": 638
+      },
+      "sample_failures": []
+    },
+    "document.submit": {
+      "count": 92,
+      "errors": 0,
+      "rps": 0.72,
+      "p50_ms": 67,
+      "p95_ms": 126,
+      "p99_ms": 228,
+      "max_ms": 228,
+      "mean_ms": 74,
+      "statuses": {
+        "200": 92
+      },
+      "sample_failures": []
+    },
+    "document.view": {
+      "count": 638,
+      "errors": 0,
+      "rps": 4.96,
+      "p50_ms": 10,
+      "p95_ms": 28,
+      "p99_ms": 54,
+      "max_ms": 110,
+      "mean_ms": 13,
+      "statuses": {
+        "200": 638
+      },
+      "sample_failures": []
+    },
+    "documents.list": {
+      "count": 638,
+      "errors": 0,
+      "rps": 4.96,
+      "p50_ms": 105,
+      "p95_ms": 313,
+      "p99_ms": 432,
+      "max_ms": 577,
+      "mean_ms": 139,
+      "statuses": {
+        "200": 638
+      },
+      "sample_failures": []
+    },
+    "draft.create": {
+      "count": 92,
+      "errors": 0,
+      "rps": 0.72,
+      "p50_ms": 19,
+      "p95_ms": 70,
+      "p99_ms": 111,
+      "max_ms": 111,
+      "mean_ms": 26,
+      "statuses": {
+        "201": 92
+      },
+      "sample_failures": []
+    },
+    "draft.save": {
+      "count": 276,
+      "errors": 0,
+      "rps": 2.15,
+      "p50_ms": 23,
+      "p95_ms": 82,
+      "p99_ms": 149,
+      "max_ms": 172,
+      "mean_ms": 31,
+      "statuses": {
+        "200": 276
+      },
+      "sample_failures": []
+    },
+    "library": {
+      "count": 638,
+      "errors": 0,
+      "rps": 4.96,
+      "p50_ms": 52,
+      "p95_ms": 595,
+      "p99_ms": 1661,
+      "max_ms": 2144,
+      "mean_ms": 121,
+      "statuses": {
+        "200": 638
+      },
+      "sample_failures": []
+    },
+    "library.filtered": {
+      "count": 638,
+      "errors": 0,
+      "rps": 4.96,
+      "p50_ms": 45,
+      "p95_ms": 103,
+      "p99_ms": 1757,
+      "max_ms": 2184,
+      "mean_ms": 97,
+      "statuses": {
+        "200": 638
+      },
+      "sample_failures": []
+    },
+    "pdf.preview": {
+      "count": 92,
+      "errors": 0,
+      "rps": 0.72,
+      "p50_ms": 1486,
+      "p95_ms": 4017,
+      "p99_ms": 5065,
+      "max_ms": 5065,
+      "mean_ms": 1758,
+      "statuses": {
+        "200": 92
+      },
+      "sample_failures": []
+    },
+    "pdf.rendition": {
+      "count": 638,
+      "errors": 0,
+      "rps": 4.96,
+      "p50_ms": 14,
+      "p95_ms": 34,
+      "p99_ms": 48,
+      "max_ms": 113,
+      "mean_ms": 17,
+      "statuses": {
+        "200": 638
+      },
+      "sample_failures": []
+    },
+    "publication.latency": {
+      "count": 38,
+      "errors": 38,
+      "rps": 0.3,
+      "p50_ms": 120599,
+      "p95_ms": 121214,
+      "p99_ms": 121295,
+      "max_ms": 121295,
+      "mean_ms": 120640,
+      "statuses": {
+        "-504": 38
+      },
+      "sample_failures": [
+        "504: None",
+        "504: None",
+        "504: None",
+        "504: None",
+        "504: None"
+      ]
+    },
+    "search": {
+      "count": 638,
+      "errors": 0,
+      "rps": 4.96,
+      "p50_ms": 12,
+      "p95_ms": 43,
+      "p99_ms": 79,
+      "max_ms": 260,
+      "mean_ms": 18,
+      "statuses": {
+        "200": 638
+      },
+      "sample_failures": []
+    },
+    "upload.attachment": {
+      "count": 92,
+      "errors": 0,
+      "rps": 0.72,
+      "p50_ms": 38,
+      "p95_ms": 95,
+      "p99_ms": 142,
+      "max_ms": 142,
+      "mean_ms": 46,
+      "statuses": {
+        "201": 92
+      },
+      "sample_failures": []
+    },
+    "upload.word": {
+      "count": 92,
+      "errors": 0,
+      "rps": 0.72,
+      "p50_ms": 31,
+      "p95_ms": 87,
+      "p99_ms": 136,
+      "max_ms": 136,
+      "mean_ms": 36,
+      "statuses": {
+        "200": 92
+      },
+      "sample_failures": []
+    },
+    "word.create": {
+      "count": 92,
+      "errors": 0,
+      "rps": 0.72,
+      "p50_ms": 48,
+      "p95_ms": 101,
+      "p99_ms": 142,
+      "max_ms": 142,
+      "mean_ms": 53,
+      "statuses": {
+        "201": 92
+      },
+      "sample_failures": []
+    },
+    "workflow.approve": {
+      "count": 108,
+      "errors": 20,
+      "rps": 0.84,
+      "p50_ms": 49,
+      "p95_ms": 148,
+      "p99_ms": 232,
+      "max_ms": 269,
+      "mean_ms": 57,
+      "statuses": {
+        "200": 88,
+        "-409": 20
+      },
+      "sample_failures": [
+        "409: {\"code\":\"conflict\",\"message\":\"task c7cb51e9-d850-11f1-8d40-2cf05d053250 is Completed\"}",
+        "409: {\"code\":\"conflict\",\"message\":\"task c7d38f5a-d850-11f1-8d40-2cf05d053250 is Completed\"}",
+        "409: {\"code\":\"conflict\",\"message\":\"task c92f00e1-d850-11f1-8d40-2cf05d053250 is Completed\"}",
+        "409: {\"code\":\"conflict\",\"message\":\"task d5eb0b63-d850-11f1-8d40-2cf05d053250 is Completed\"}",
+        "409: {\"code\":\"conflict\",\"message\":\"task db415081-d850-11f1-8d40-2cf05d053250 is Completed\"}"
+      ]
+    },
+    "workflow.inbox": {
+      "count": 108,
+      "errors": 0,
+      "rps": 0.84,
+      "p50_ms": 8,
+      "p95_ms": 38,
+      "p99_ms": 72,
+      "max_ms": 93,
+      "mean_ms": 13,
+      "statuses": {
+        "200": 108
+      },
+      "sample_failures": []
+    }
+  }
+}

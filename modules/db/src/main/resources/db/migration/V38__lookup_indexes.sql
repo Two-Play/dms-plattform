@@ -14,6 +14,14 @@ create index document_acknowledgement_document on dms.document_acknowledgement (
 
 create index document_review_document on dms.document_review (document_id);
 
+-- What a reader still has to acknowledge: the few valid versions that ask for it, the latest publication first.
+create index document_version_acknowledgement_due on dms.document_version (tenant_id, published_at desc)
+    where requires_acknowledgement and status in ('Published', 'ReviewDue');
+
+-- Workers claim the jobs of their kinds: without the kind in an index, the regular worker would walk past every queued
+-- bulk delivery of a publication.
+create index job_due_kind on dms.job (kind, run_at, id) where status in ('queued', 'running');
+
 -- The latest status change of the versions that are or were valid: tells the library whether its copy of the valid
 -- versions is current (ADR 0056).
 create index document_version_validity_stamp on dms.document_version (tenant_id, status_changed_at)

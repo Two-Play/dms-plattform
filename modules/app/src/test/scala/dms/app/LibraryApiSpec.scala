@@ -446,5 +446,32 @@ object LibraryApiSpec extends ZIOSpecDefault:
         size._1 == Status.UnprocessableEntity,
         page._1 == Status.UnprocessableEntity
       )
+    },
+    test("a version that became valid shows at once, although the valid versions are kept between requests") {
+      val security = (v: LibraryView) => v.items.find(_.title == "IT security policy").map(_.version)
+      for
+        f         <- setup.await
+        db        <- ZIO.service[Db]
+        documents <- ZIO.service[DocumentService]
+        before    <- library(readerAll)
+        again     <- library(readerAll)
+        doc = f.securityV2.documentId
+        _ <- db
+          .transact(tenantId)(
+            documents.newVersion(doc, ChangeKind.Major, Some("Revised again"), author) *>
+              documents.updateDraft(
+                doc,
+                DraftChange(Some("IT security policy"), values("Finance", today, List("security")), None),
+                author
+              ) *> publishOpen(documents, doc)
+          )
+          .mapError(e => RuntimeException(e.toString))
+          .orDie
+        after <- library(readerAll)
+      yield assertTrue(
+        security(before).contains("2.0"),
+        security(again).contains("2.0"),
+        security(after).contains("3.0")
+      )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

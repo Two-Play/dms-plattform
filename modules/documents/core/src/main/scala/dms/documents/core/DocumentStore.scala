@@ -116,10 +116,10 @@ private[core] object DocumentStore:
           .toList
       val found = latestChanges((documents ++ versions).map(_._1).distinct, limit)
       // Only a full window can leave anything out; everything else was seen.
-      val outside = List(documents, versions).filter(_.size == window).flatMap(_.lastOption).map(_._2)
+      val outside  = List(documents, versions).filter(_.size == window).flatMap(_.lastOption).map(_._2)
       val complete = outside.isEmpty || found.size == limit && outside.forall(found.last._2.isAfter)
       if complete then found.map(_._1) else within(window * 4)
-    val ids = within(limit * 4)
+    val ids  = within(limit * 4)
     val byId = documents(ids.map(DocumentId(_))).map(d => d.id.value -> d).toMap
     ids.flatMap(byId.get)
 
@@ -142,7 +142,11 @@ private[core] object DocumentStore:
     val array = ids.distinct.map(_.value.toString).toArray
     sql"""select id, class_id, class_version, title, owner_id, author_id, template_id, template_version,
                  created_at, document_number, kind
-          from dms.document where id = any(cast($array as uuid[]))""".query[DocumentRow].run().map(toDocument).toList
+          from dms.document where id = any(cast($array as uuid[]))"""
+      .query[DocumentRow]
+      .run()
+      .map(toDocument)
+      .toList
 
   /** Ids of the documents changed at or after `since`: the document row or one of its versions (DMS-51, for
     * the search index); without `since` every document that has a released version.

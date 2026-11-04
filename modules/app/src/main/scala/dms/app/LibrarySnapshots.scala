@@ -77,7 +77,8 @@ final class LibrarySnapshots(
         yield Option.when(snapshot.stamp == stamp && snapshot.loadedAt.plus(maxAge).isAfter(now))(snapshot)
     }
 
-  /** The stamp comes first: a change between the two reads makes the copy look older than it is, not newer. */
+  /** The stamp comes first: a change between the two reads makes the copy look older than it is, not newer.
+    */
   private def load(tenant: TenantId): IO[DocumentError | DbError, LibrarySnapshot] =
     db.transact(tenant)(
       for
@@ -123,7 +124,7 @@ object LibrarySnapshots:
 
   /** The entries of the valid versions, sorted by title (the library's default order). */
   private[app] def entries(tenant: TenantId, valid: List[CurrentVersion], zone: ZoneId): List[LibraryEntry] =
-    val all = valid.map(entry(tenant, _, zone))
+    val all       = valid.map(entry(tenant, _, zone))
     val byVersion = all.map(e => e.item.versionId -> e).toMap
     Library.sort(all.map(_.item), LibrarySort.Title, ascending = true, zone).map(i => byVersion(i.versionId))
 

@@ -1,8 +1,8 @@
 {
   "label": "01-baseline",
-  "started": "2026-11-04T13:47:20",
+  "started": "2026-11-04T14:20:09",
   "factor": 100,
-  "duration_s": 277,
+  "duration_s": 276,
   "sessions": 50,
   "think_s": 1.0,
   "requests": 240,
@@ -14,7 +14,7 @@
     "validVersions": 19004,
     "workflowCases": 95004,
     "workflowTasks": 95004,
-    "acknowledgements": 95000,
+    "acknowledgements": 970000,
     "roleAssignments": 1101
   },
   "volume_after": {
@@ -23,7 +23,7 @@
     "validVersions": 19004,
     "workflowCases": 95004,
     "workflowTasks": 95004,
-    "acknowledgements": 95000,
+    "acknowledgements": 970000,
     "roleAssignments": 1101
   },
   "operations": {
@@ -32,10 +32,10 @@
       "errors": 40,
       "rps": 0.14,
       "p50_ms": 30003,
-      "p95_ms": 30007,
-      "p99_ms": 30010,
-      "max_ms": 30010,
-      "mean_ms": 30004,
+      "p95_ms": 30004,
+      "p99_ms": 30006,
+      "max_ms": 30006,
+      "mean_ms": 30003,
       "statuses": {
         "-500": 40
       },
@@ -52,10 +52,10 @@
       "errors": 40,
       "rps": 0.14,
       "p50_ms": 30004,
-      "p95_ms": 30006,
-      "p99_ms": 30014,
-      "max_ms": 30014,
-      "mean_ms": 30005,
+      "p95_ms": 30005,
+      "p99_ms": 30009,
+      "max_ms": 30009,
+      "mean_ms": 30004,
       "statuses": {
         "-500": 40
       },
@@ -71,11 +71,11 @@
       "count": 32,
       "errors": 32,
       "rps": 0.12,
-      "p50_ms": 30005,
-      "p95_ms": 30012,
-      "p99_ms": 30015,
-      "max_ms": 30015,
-      "mean_ms": 30006,
+      "p50_ms": 30004,
+      "p95_ms": 30009,
+      "p99_ms": 30012,
+      "max_ms": 30012,
+      "mean_ms": 30004,
       "statuses": {
         "-500": 32
       },
@@ -91,20 +91,20 @@
       "count": 40,
       "errors": 40,
       "rps": 0.14,
-      "p50_ms": 30007,
-      "p95_ms": 31773,
-      "p99_ms": 32176,
-      "max_ms": 32176,
-      "mean_ms": 30327,
+      "p50_ms": 30005,
+      "p95_ms": 30008,
+      "p99_ms": 30023,
+      "max_ms": 30023,
+      "mean_ms": 30006,
       "statuses": {
         "-500": 40
       },
       "sample_failures": [
-        "500: {\"code\":\"database_error\",\"message\":\"The request could not be completed (Other(,dms - Connection is not available, request timed out after 30000ms (total=10, active=10, idle=0, waiting=39))).\"}",
-        "500: {\"code\":\"database_error\",\"message\":\"The request could not be completed (Other(,dms - Connection is not available, request timed out after 30000ms (total=10, active=10, idle=0, waiting=38))).\"}",
-        "500: {\"code\":\"database_error\",\"message\":\"The request could not be completed (Other(,dms - Connection is not available, request timed out after 30000ms (total=10, active=10, idle=0, waiting=32))).\"}",
-        "500: {\"code\":\"database_error\",\"message\":\"The request could not be completed (Other(,dms - Connection is not available, request timed out after 30001ms (total=10, active=10, idle=0, waiting=36))).\"}",
-        "500: {\"code\":\"database_error\",\"message\":\"The request could not be completed (Other(,dms - Connection is not available, request timed out after 30000ms (total=10, active=10, idle=0, waiting=41))).\"}"
+        "500: Internal server error",
+        "500: Internal server error",
+        "500: Internal server error",
+        "500: Internal server error",
+        "500: Internal server error"
       ]
     },
     "library.filtered": {
@@ -112,10 +112,10 @@
       "errors": 40,
       "rps": 0.14,
       "p50_ms": 30004,
-      "p95_ms": 30006,
-      "p99_ms": 30010,
-      "max_ms": 30010,
-      "mean_ms": 30005,
+      "p95_ms": 30005,
+      "p99_ms": 30008,
+      "max_ms": 30008,
+      "mean_ms": 30004,
       "statuses": {
         "-500": 40
       },
@@ -131,10 +131,10 @@
       "count": 40,
       "errors": 40,
       "rps": 0.14,
-      "p50_ms": 30004,
-      "p95_ms": 30008,
-      "p99_ms": 30009,
-      "max_ms": 30009,
+      "p50_ms": 30003,
+      "p95_ms": 30005,
+      "p99_ms": 30006,
+      "max_ms": 30006,
       "mean_ms": 30004,
       "statuses": {
         "-500": 40
@@ -152,10 +152,10 @@
       "errors": 8,
       "rps": 0.03,
       "p50_ms": 30004,
-      "p95_ms": 30007,
-      "p99_ms": 30007,
-      "max_ms": 30007,
-      "mean_ms": 30005,
+      "p95_ms": 30005,
+      "p99_ms": 30005,
+      "max_ms": 30005,
+      "mean_ms": 30004,
       "statuses": {
         "-500": 8
       },

@@ -230,8 +230,8 @@ object LibraryApi:
       .flatMap(snapshot =>
         inTransaction(p) { (ctx, acks, classes) =>
           for
-            now          <- Clock.instant
-            allowed      <- ctx.allows(Action.ReadDocument)
+            now     <- Clock.instant
+            allowed <- ctx.allows(Action.ReadDocument)
             readable = snapshot.entries.filter(e => allowed(e.resource))
             acknowledged <- acks.acknowledgementsOf(p.userId).map(_.map(_.versionId).toSet)
             audiences    <- acks.audiencesOfValid
@@ -241,13 +241,14 @@ object LibraryApi:
                 ctx.passes(Recipients.filterOf(audiences.get(e.item.versionId)))
               )
               .map(_.map(_.item.versionId).toSet)
-            held <- LegalHoldStore.heldAmong(readable.map(e => DocumentId(e.item.documentId)).toSet)
+            held   <- LegalHoldStore.heldAmong(readable.map(e => DocumentId(e.item.documentId)).toSet)
             labels <- classes.listClasses
               .mapError(DocumentService.metadataError)
               .map(_.map(c => c.key.value -> c.label).toMap)
             zone      = snapshot.zone
-            reference = since.getOrElse(LocalDate.ofInstant(now, zone).minusDays(Library.DefaultChangeWindowDays))
-            boundary  = Library.changeBoundary(reference, zone)
+            reference = since
+              .getOrElse(LocalDate.ofInstant(now, zone).minusDays(Library.DefaultChangeWindowDays))
+            boundary = Library.changeBoundary(reference, zone)
           yield (
             readable.map { e =>
               val i = e.item

@@ -1,0 +1,332 @@
+{
+  "label": "03-after",
+  "started": "2026-11-04T14:29:50",
+  "factor": 100,
+  "duration_s": 309,
+  "sessions": 50,
+  "think_s": 1.0,
+  "requests": 19138,
+  "errors": 183,
+  "throughput_rps": 61.9,
+  "volume_before": {
+    "documents": 20006,
+    "versions": 98006,
+    "validVersions": 19004,
+    "workflowCases": 95004,
+    "workflowTasks": 95004,
+    "acknowledgements": 970000,
+    "roleAssignments": 1101
+  },
+  "volume_after": {
+    "documents": 20482,
+    "versions": 98482,
+    "validVersions": 19015,
+    "workflowCases": 95242,
+    "workflowTasks": 95242,
+    "acknowledgements": 971618,
+    "roleAssignments": 1101
+  },
+  "operations": {
+    "acknowledgement.confirm": {
+      "count": 1618,
+      "errors": 0,
+      "rps": 5.23,
+      "p50_ms": 14,
+      "p95_ms": 41,
+      "p99_ms": 79,
+      "max_ms": 181,
+      "mean_ms": 18,
+      "statuses": {
+        "201": 1618
+      },
+      "sample_failures": []
+    },
+    "acknowledgement.opened": {
+      "count": 1618,
+      "errors": 0,
+      "rps": 5.23,
+      "p50_ms": 13,
+      "p95_ms": 46,
+      "p99_ms": 94,
+      "max_ms": 214,
+      "mean_ms": 18,
+      "statuses": {
+        "204": 1618
+      },
+      "sample_failures": []
+    },
+    "acknowledgements.open": {
+      "count": 1618,
+      "errors": 0,
+      "rps": 5.23,
+      "p50_ms": 23,
+      "p95_ms": 89,
+      "p99_ms": 111,
+      "max_ms": 181,
+      "mean_ms": 33,
+      "statuses": {
+        "200": 1618
+      },
+      "sample_failures": []
+    },
+    "document.html": {
+      "count": 1618,
+      "errors": 0,
+      "rps": 5.23,
+      "p50_ms": 10,
+      "p95_ms": 24,
+      "p99_ms": 43,
+      "max_ms": 96,
+      "mean_ms": 12,
+      "statuses": {
+        "200": 1618
+      },
+      "sample_failures": []
+    },
+    "document.submit": {
+      "count": 238,
+      "errors": 0,
+      "rps": 0.77,
+      "p50_ms": 51,
+      "p95_ms": 137,
+      "p99_ms": 232,
+      "max_ms": 260,
+      "mean_ms": 64,
+      "statuses": {
+        "200": 238
+      },
+      "sample_failures": []
+    },
+    "document.view": {
+      "count": 1618,
+      "errors": 0,
+      "rps": 5.23,
+      "p50_ms": 8,
+      "p95_ms": 22,
+      "p99_ms": 42,
+      "max_ms": 120,
+      "mean_ms": 11,
+      "statuses": {
+        "200": 1618
+      },
+      "sample_failures": []
+    },
+    "documents.list": {
+      "count": 1618,
+      "errors": 0,
+      "rps": 5.23,
+      "p50_ms": 22,
+      "p95_ms": 119,
+      "p99_ms": 156,
+      "max_ms": 236,
+      "mean_ms": 40,
+      "statuses": {
+        "200": 1618
+      },
+      "sample_failures": []
+    },
+    "draft.create": {
+      "count": 238,
+      "errors": 0,
+      "rps": 0.77,
+      "p50_ms": 17,
+      "p95_ms": 66,
+      "p99_ms": 117,
+      "max_ms": 146,
+      "mean_ms": 24,
+      "statuses": {
+        "201": 238
+      },
+      "sample_failures": []
+    },
+    "draft.save": {
+      "count": 714,
+      "errors": 0,
+      "rps": 2.31,
+      "p50_ms": 19,
+      "p95_ms": 46,
+      "p99_ms": 119,
+      "max_ms": 305,
+      "mean_ms": 24,
+      "statuses": {
+        "200": 714
+      },
+      "sample_failures": []
+    },
+    "library": {
+      "count": 1618,
+      "errors": 0,
+      "rps": 5.23,
+      "p50_ms": 52,
+      "p95_ms": 729,
+      "p99_ms": 1655,
+      "max_ms": 1964,
+      "mean_ms": 127,
+      "statuses": {
+        "200": 1618
+      },
+      "sample_failures": []
+    },
+    "library.filtered": {
+      "count": 1618,
+      "errors": 0,
+      "rps": 5.23,
+      "p50_ms": 48,
+      "p95_ms": 96,
+      "p99_ms": 1691,
+      "max_ms": 2114,
+      "mean_ms": 111,
+      "statuses": {
+        "200": 1618
+      },
+      "sample_failures": []
+    },
+    "pdf.draft": {
+      "count": 238,
+      "errors": 0,
+      "rps": 0.77,
+      "p50_ms": 187,
+      "p95_ms": 262,
+      "p99_ms": 366,
+      "max_ms": 426,
+      "mean_ms": 194,
+      "statuses": {
+        "200": 238
+      },
+      "sample_failures": []
+    },
+    "pdf.preview": {
+      "count": 238,
+      "errors": 0,
+      "rps": 0.77,
+      "p50_ms": 1221,
+      "p95_ms": 2619,
+      "p99_ms": 5637,
+      "max_ms": 6169,
+      "mean_ms": 1445,
+      "statuses": {
+        "200": 238
+      },
+      "sample_failures": []
+    },
+    "pdf.rendition": {
+      "count": 1618,
+      "errors": 0,
+      "rps": 5.23,
+      "p50_ms": 11,
+      "p95_ms": 26,
+      "p99_ms": 44,
+      "max_ms": 120,
+      "mean_ms": 14,
+      "statuses": {
+        "200": 1618
+      },
+      "sample_failures": []
+    },
+    "publication.latency": {
+      "count": 183,
+      "errors": 183,
+      "rps": 0.59,
+      "p50_ms": 120585,
+      "p95_ms": 121088,
+      "p99_ms": 121127,
+      "max_ms": 121128,
+      "mean_ms": 120610,
+      "statuses": {
+        "-504": 183
+      },
+      "sample_failures": [
+        "504: InApproval",
+        "504: InApproval",
+        "504: InApproval",
+        "504: InApproval",
+        "504: InApproval"
+      ]
+    },
+    "search": {
+      "count": 1618,
+      "errors": 0,
+      "rps": 5.23,
+      "p50_ms": 10,
+      "p95_ms": 34,
+      "p99_ms": 50,
+      "max_ms": 62,
+      "mean_ms": 14,
+      "statuses": {
+        "200": 1618
+      },
+      "sample_failures": []
+    },
+    "upload.attachment": {
+      "count": 238,
+      "errors": 0,
+      "rps": 0.77,
+      "p50_ms": 34,
+      "p95_ms": 93,
+      "p99_ms": 136,
+      "max_ms": 156,
+      "mean_ms": 41,
+      "statuses": {
+        "201": 238
+      },
+      "sample_failures": []
+    },
+    "upload.word": {
+      "count": 238,
+      "errors": 0,
+      "rps": 0.77,
+      "p50_ms": 24,
+      "p95_ms": 63,
+      "p99_ms": 138,
+      "max_ms": 161,
+      "mean_ms": 30,
+      "statuses": {
+        "200": 238
+      },
+      "sample_failures": []
+    },
+    "word.create": {
+      "count": 238,
+      "errors": 0,
+      "rps": 0.77,
+      "p50_ms": 39,
+      "p95_ms": 113,
+      "p99_ms": 167,
+      "max_ms": 189,
+      "mean_ms": 48,
+      "statuses": {
+        "201": 238
+      },
+      "sample_failures": []
+    },
+    "workflow.approve": {
+      "count": 310,
+      "errors": 0,
+      "rps": 1.0,
+      "p50_ms": 38,
+      "p95_ms": 91,
+      "p99_ms": 185,
+      "max_ms": 220,
+      "mean_ms": 42,
+      "statuses": {
+        "200": 234,
+        "409": 76
+      },
+      "sample_failures": []
+    },
+    "workflow.inbox": {
+      "count": 268,
+      "errors": 0,
+      "rps": 0.87,
+      "p50_ms": 8,
+      "p95_ms": 29,
+      "p99_ms": 61,
+      "max_ms": 72,
+      "mean_ms": 10,
+      "statuses": {
+        "200": 268
+      },
+      "sample_failures": []
+    }
+  }
+}

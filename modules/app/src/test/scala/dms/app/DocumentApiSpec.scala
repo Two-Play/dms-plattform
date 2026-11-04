@@ -516,6 +516,33 @@ object DocumentApiSpec extends ZIOSpecDefault:
         frozenView.exists(v => v.status == "InReview" && v.requiresExtraReview && v.requests.size == 2)
       )
     },
+    test("the document list follows the latest changes, also beyond its first windows") {
+      def first(limit: Int) =
+        call(author, "GET", s"/api/v1/documents?limit=$limit").map(
+          _._2.fromJson[List[DocumentSummaryView]].toOption.getOrElse(Nil).map(_.id)
+        )
+      for
+        docs   <- ZIO.foreach(List.range(0, 6))(_ => createDocument())
+        newest <- first(2)
+        _      <- call(
+          author,
+          "PUT",
+          s"/api/v1/documents/${docs.head.id}/draft",
+          Some(s"""{"values":{$baseValues}}""")
+        )
+        changed <- first(2)
+        _       <- ZIO.foreachDiscard(docs.tail)(d =>
+          call(author, "POST", s"/api/v1/documents/${d.id}/draft/discard")
+        )
+        remained <- first(1)
+      yield assertTrue(
+        newest == List(docs(5).id, docs(4).id),
+        // A draft saved later comes first, though the document itself is the oldest of them.
+        changed == List(docs.head.id, docs(5).id),
+        // All documents of the first window are gone, so it has to widen.
+        remained == List(docs.head.id)
+      )
+    },
     test("the document, its audit entry and its outbox event commit or roll back together") {
       for
         s       <- setup.await

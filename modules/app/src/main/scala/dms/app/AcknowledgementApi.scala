@@ -196,10 +196,11 @@ object AcknowledgementApi:
       byDoc     <- documents(ctx, pending.map(_._1))
       items     <- ZIO.foreach(pending) { (doc, versionId) =>
         ZIO
-          .foreach(byDoc.get(doc).flatMap(d => d.versions.find(_.id == versionId).map(d -> _))) { (details, v) =>
-            ctx
-              .isRecipient(details, v, Recipients.filterOf(audiences.get(v.id)))
-              .map(Option.when(_)(item(details, v, opened.get(v.id), None)))
+          .foreach(byDoc.get(doc).flatMap(d => d.versions.find(_.id == versionId).map(d -> _))) {
+            (details, v) =>
+              ctx
+                .isRecipient(details, v, Recipients.filterOf(audiences.get(v.id)))
+                .map(Option.when(_)(item(details, v, opened.get(v.id), None)))
           }
           .map(_.flatten)
       }

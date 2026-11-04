@@ -321,7 +321,8 @@ select i, gen_random_uuid() as id,
        i % 20 = 3 as acknowledged,
        -- 85 %: last version valid; 10 %: valid and a newer draft; 5 %: never released.
        case when i % 20 = 0 then 'draft-only' when i % 10 = 1 then 'open' else 'valid' end as shape,
-       now() - (i % 700) * interval '1 day' as created
+       -- Old enough that the versions, 30 days apart, all lie in the past.
+       now() - (200 + i % 700) * interval '1 day' as created
 from generate_series(1, {documents}) as i;
 
 create table load.ver as
@@ -618,6 +619,7 @@ class Run:
                 self.pause(rnd)
                 version = word["current"]["id"]
                 c.call("pdf.preview", "GET", f"/api/v1/documents/{word['id']}/versions/{version}/preview.pdf")
+                c.call("pdf.draft", "GET", f"/api/v1/documents/{doc['id']}/versions/{doc['current']['id']}/draft.pdf")
             self.pause(rnd)
 
     def approver(self, user: str, seed: int) -> None:
@@ -629,8 +631,9 @@ class Run:
             while self.active() and time.time() < refresh:
                 _, tasks = c.call("workflow.inbox", "GET", "/api/v1/workflow/tasks")
                 for task in [t for t in tasks or [] if t["status"] == "Open"][:3]:
+                    # 409: the other approver was faster, the expected end of a race for the same task.
                     status, _ = c.call("workflow.approve", "POST", f"/api/v1/workflow/tasks/{task['id']}/votes",
-                                       {"decision": "Approve"}, step_up=True)
+                                       {"decision": "Approve"}, step_up=True, expect=(200, 201, 204, 409))
                     if status in (200, 201):
                         with self.lock:
                             self.pending_render.append((task["documentId"], task["versionId"], time.time()))
@@ -639,20 +642,22 @@ class Run:
 
     def publication_watch(self) -> None:
         """Asynchronous part of an approval: from the vote until the version has its PDF/A and is published."""
-        c = Client(Metrics(), mint("lt-admin"))
         deadline = self.stop_at + 60
         while time.time() < deadline and (self.active() or self.pending_render):
             with self.lock:
                 pending = list(self.pending_render)
-            for doc, version, voted in pending:
-                _, versions = c.call("watch", "GET", f"/api/v1/documents/{doc}/versions")
-                v = next((v for v in versions or [] if v["id"] == version), None)
-                done = v is not None and v["status"] in ("Published", "ReviewDue")
-                if done or time.time() - voted > 120:
-                    self.metrics.record("publication.latency", time.time() - voted, 200 if done else 504, done,
-                                        None if done else str(v and v["status"]))
-                    with self.lock:
-                        self.pending_render.remove((doc, version, voted))
+            if pending:
+                ids = ",".join(f"'{version}'" for _, version, _ in pending)
+                rows = psql(f"select id, status from dms.document_version where id in ({ids})").splitlines()
+                statuses = dict(row.split("|") for row in rows)
+                for entry in pending:
+                    _, version, voted = entry
+                    done = statuses.get(version) in ("Published", "ReviewDue")
+                    if done or time.time() - voted > 120:
+                        self.metrics.record("publication.latency", time.time() - voted, 200 if done else 504, done,
+                                            None if done else statuses.get(version))
+                        with self.lock:
+                            self.pending_render.remove(entry)
             time.sleep(1)
 
 

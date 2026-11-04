@@ -124,16 +124,16 @@ object Background:
         DeadlineScheduleConfig(config.workflow.deadlineCheckSeconds.max(1).seconds)
       )
       reminders = AcknowledgementReminderJobs(db, documents, acks, roles, groups, config.documents.reminders)
-      runner    = JobRunner(
-        db,
+      lanes     = jobLanes(
         jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers ++
           legalHolds.handlers ++ retention.handlers ++ fileCleanup.handlers ++ webhooks.handlers ++
           deputyJobs.handlers ++ reminders.handlers ++ objectCleanup.handlers ++ maintenance.handlers ++
           notices.handlers ++ deadlineJobs.handlers +
-          (RenditionRequest.JobKind -> rendering.handle),
-        WorkerConfig(s"${workerName(config)}-jobs")
+          (RenditionRequest.JobKind -> rendering.handle)
       )
-      relay = OutboxRelay(
+      runner     = JobRunner(db, lanes._1, WorkerConfig(s"${workerName(config)}-jobs"))
+      bulkRunner = JobRunner(db, lanes._2, WorkerConfig(s"${workerName(config)}-bulk"))
+      relay      = OutboxRelay(
         db,
         event =>
           searchJobs.deliver(event) *> webhooks.deliver(event) *> notices.deliver(event) *> reminders.deliver(
@@ -142,6 +142,7 @@ object Background:
         WorkerConfig(s"${workerName(config)}-outbox")
       )
       nothing <- runner.run
+        .raceFirst(bulkRunner.run)
         .raceFirst(relay.run)
         .raceFirst(jobs.schedule)
         .raceFirst(publications.schedule)
@@ -157,6 +158,17 @@ object Background:
   /** Encrypts plain-text webhook secrets and re-encrypts those of older keys with the active key (DMS-107). A
     * failure is logged and does not stop the instance: deliveries still read every configured key.
     */
+  /** Kinds that fan out to many recipients: one publication makes a delivery per reader. */
+  private[app] val BulkJobKinds: Set[String] = Set(NotificationJobs.DeliverKind, WebhookJobs.DeliverKind)
+
+  /** The handlers of the regular jobs and of the bulk jobs. Bulk jobs have a worker of their own, so
+    * thousands of deliveries never hold up a rendition or a publication behind them (business concept 14.2,
+    * ADR 0056).
+    */
+  private[app] def jobLanes[H](handlers: Map[String, H]): (Map[String, H], Map[String, H]) =
+    val (bulk, regular) = handlers.partition((kind, _) => BulkJobKinds(kind))
+    (regular, bulk)
+
   private def secureWebhookSecrets(db: Db, settings: WebhookSettings): UIO[Unit] =
     ZIO
       .logWarning(

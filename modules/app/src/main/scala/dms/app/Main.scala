@@ -41,7 +41,7 @@ object Main extends ZIOAppDefault:
       Runtime.setConfigProvider(TypesafeConfigProvider.fromResourcePath())
 
   private[app] type Env = DocumentClassApi.Env & TemplateApi.Env & DocumentApi.Env & WorkflowApi.Env &
-    PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env &
+    Readiness & PartnerApi.Env & RenditionApi.Env & MeApi.Env & DeputyshipApi.Env & AcknowledgementApi.Env &
     SearchApi.Env & GroupApi.Env & ReviewApi.Env & LegalHoldApi.Env & ComplianceApi.Env &
     EvidenceReportApi.Env & CurrentDocumentApi.Env & WebhookApi.Env & UserApi.Env & VersionViewApi.Env &
     NumberRangeApi.Env & AttachmentApi.Env & LibraryApi.Env & FileDocumentApi.Env & WordTemplateApi.Env &
@@ -49,7 +49,7 @@ object Main extends ZIOAppDefault:
     RenditionStatusApi.Env
 
   private[app] val apiEndpoints: List[ZServerEndpoint[Env, ZioStreams]] =
-    List(HealthApi.health.widen[Env], MeApi.me.widen[Env]) ++
+    List(HealthApi.health.widen[Env], ReadinessApi.ready.widen[Env], MeApi.me.widen[Env]) ++
       UserApi.endpoints.map(_.widen[Env]) ++
       DocumentClassApi.endpoints.map(_.widen[Env]) ++
       AcknowledgementSettingsApi.endpoints.map(_.widen[Env]) ++
@@ -93,6 +93,7 @@ object Main extends ZIOAppDefault:
   private val routes =
     (ZioHttpInterpreter().toHttp(apiEndpoints) ++ ZioHttpInterpreter().toHttp(docs))
       .transform(limitStreamedBodies)
+      .transform(HttpHardening.securityHeaders)
 
   /** Only attachment uploads and uploads of file documents' originals may send a body larger than
     * [[AggregatedBodyBytes]]: the server streams such bodies instead of aggregating them, and every other
@@ -140,6 +141,31 @@ object Main extends ZIOAppDefault:
           "Virus scanner: none; uploads are stored as NotScanned (development profile, ADR 0041)"
         )
 
+  /** Refuses the start with every problem at once and warns about the rest (ADR 0056). */
+  private def checkProduction(
+      cfg: AppConfig,
+      webhooks: dms.integration.webhooks.WebhookSettings
+  ): Task[Unit] =
+    val report = ProductionProfile.check(cfg, webhooks)
+    ZIO.foreachDiscard(report.warnings)(w => ZIO.logWarning(s"Production profile: $w")) *>
+      ZIO.when(report.refused.nonEmpty)(
+        ZIO.fail(
+          IllegalArgumentException(
+            report.refused.mkString("The production profile refuses this configuration:\n  - ", "\n  - ", "")
+          )
+        )
+      ) *> ZIO.logInfo("Production profile: configuration accepted")
+
+  /** First step of a shutdown: `/ready` turns away new traffic; requests in progress finish afterwards,
+    * within `dms.http.shutdownGraceSeconds`, when the server stops.
+    */
+  private def drain(cfg: AppConfig): URIO[Readiness, Unit] =
+    ZIO.serviceWithZIO[Readiness](_.drain) *>
+      ZIO.logInfo("Shutting down: no new requests, finishing those in progress") *>
+      ZIO.sleep(cfg.http.drainSeconds.max(0).seconds)
+
+  override def gracefulShutdownTimeout: Duration = 60.seconds
+
   override def run: ZIO[Any, Throwable, Unit] =
     for
       cfg     <- ZIO.config(AppConfig.config)
@@ -149,14 +175,20 @@ object Main extends ZIOAppDefault:
         .mapError(IllegalArgumentException(_))
       _         <- checkScanner(profile, scanner)
       webhooks  <- ZIO.fromEither(cfg.webhooks.settings).mapError(IllegalArgumentException(_))
+      _         <- ZIO.when(profile == Profile.Production)(checkProduction(cfg, webhooks))
       deadlines <- ZIO.fromEither(cfg.workflow.deadlines).mapError(IllegalArgumentException(_))
       _         <- ZIO.fromEither(cfg.retention.objectLock.policy).mapError(IllegalArgumentException(_))
       _         <- ZIO.logInfo(s"DMS platform ${AppBuildInfo.version} starting on port ${cfg.http.port}")
-      _         <- (Server.serve(routes) <&> Background.run(cfg))
+      _         <- (Server.serve(routes).onInterrupt(drain(cfg)) <&> Background.run(cfg))
         .provide(
           // Small bodies are aggregated as before; larger ones (attachment uploads) are streamed, so they are never
           // held in memory as a whole (DMS-114).
-          Server.defaultWith(_.port(cfg.http.port).hybridRequestStreaming(Main.AggregatedBodyBytes)),
+          Server.defaultWith(
+            _.port(cfg.http.port)
+              .hybridRequestStreaming(Main.AggregatedBodyBytes)
+              .gracefulShutdownTimeout(cfg.http.shutdownGraceSeconds.max(0).seconds)
+          ),
+          Readiness.live(cfg, scanner),
           ZLayer.succeed(cfg.auth),
           TokenVerifier.layer,
           Db.dataSource(cfg.database),

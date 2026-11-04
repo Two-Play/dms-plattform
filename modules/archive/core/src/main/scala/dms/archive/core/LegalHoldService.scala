@@ -464,7 +464,12 @@ object LegalHoldStore extends LegalHoldLookup:
               from dms.legal_hold_document m
               join dms.legal_hold h on h.id = m.hold_id
               where h.released_at is null and m.removed_at is null
-                and m.document_id = any(cast($ids as uuid[]))""".query[UUID].run().toList.map(DocumentId(_)).toSet
+                and m.document_id = any(cast($ids as uuid[]))"""
+          .query[UUID]
+          .run()
+          .toList
+          .map(DocumentId(_))
+          .toSet
       )
 
   def activeHolds(document: DocumentId): IO[DbError, List[LegalHold]] =

@@ -4,8 +4,19 @@
       <pattern>%d{HH:mm:ss.SSS} %-5level %logger{24} - %msg%n</pattern>
     </encoder>
   </appender>
+  <!-- DMS_LOG_APPENDER=JSON: one JSON object per line for log collectors (DMS-60, ADR 0056). -->
+  <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder class="ch.qos.logback.classic.encoder.JsonEncoder">
+      <withSequenceNumber>false</withSequenceNumber>
+      <withNanoseconds>false</withNanoseconds>
+      <withContext>false</withContext>
+      <withFormattedMessage>true</withFormattedMessage>
+      <withMessage>false</withMessage>
+      <withArguments>false</withArguments>
+    </encoder>
+  </appender>
   <logger name="org.flywaydb" level="INFO"/>
   <root level="INFO">
-    <appender-ref ref="STDOUT"/>
+    <appender-ref ref="${DMS_LOG_APPENDER:-STDOUT}"/>
   </root>
 </configuration>
