@@ -661,6 +661,43 @@ object ReviewApiSpec extends ZIOSpecDefault:
         mails.head.text.contains("http://app.test/tasks")
       )
     },
+    test("a task whose revision was discarded is back in the inbox, told to the owner, and goes overdue") {
+      for
+        sent    <- Ref.make(List.empty[Mail])
+        running <- instance("reopened", sent)
+        doc     <- validDocument(title = "Reopened policy")
+        _       <- runReviewCheck
+        first   <- taskOf(doc)
+        _       <- decide(owner, first, "revise", """{"reason":"New regulation"}""")
+        gone    <- tasks(owner).map(_.filter(_.documentId == doc.id))
+        _       <- call(owner, "POST", s"/api/v1/documents/${doc.id}/draft/discard", Some("{}"))
+        open    <- taskOf(doc)
+        decided <- tasks(owner, "done").map(_.filter(_.documentId == doc.id))
+        _       <- running.drain
+        stored  <- inApp(doc.id)
+        mails   <- mailsTo(sent, owner, "Überprüfung wieder offen: Reopened policy")
+        _       <- at(deadlineOf(open).dueAt)(instance("late", sent).flatMap(_.deadlines.check(tenantId)))
+        _       <- running.drain
+        late    <- notices(open.id)
+        overdue <- mailsTo(sent, owner, "Überprüfung überfällig: Reopened policy")
+        byOwner <- decide(owner, open, "recertify", "{}")
+      yield assertTrue(
+        gone.isEmpty,
+        open.id != first.id,
+        open.status == "Open",
+        open.dueOn == first.dueOn,
+        open.reopens.contains(first.id),
+        decided.map(t => (t.id, t.status)) == List((first.id, "Revised")),
+        stored.count(_._2 == "review.task-reopened") == 1,
+        stored.exists((_, kind, _, body, link) =>
+          kind == "review.task-reopened" && body.contains("verworfen") && link.contains("/tasks")
+        ),
+        mails.size == 1,
+        late == List("overdue"),
+        overdue.size == 1,
+        byOwner._1 == Status.Ok
+      )
+    },
     test("reminder, overdue notice and escalation go out once each across instances and restarts") {
       for
         sent <- Ref.make(List.empty[Mail])

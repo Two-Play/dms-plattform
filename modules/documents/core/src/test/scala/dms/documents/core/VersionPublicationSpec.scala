@@ -154,7 +154,14 @@ object VersionPublicationSpec extends ZIOSpecDefault:
       DocumentService(audit, DocumentClassService(audit), Templates, settings)
     )
 
-  private def fixture(zone: String = "Europe/Berlin"): ZIO[Env, Any, Fixture] =
+  /** @param requiredLater
+    *   the class has a field required in Published and Withdrawn only, so that an approved version can lack
+    *   it
+    */
+  private def fixture(
+      zone: String = "Europe/Berlin",
+      requiredLater: Boolean = false
+  ): ZIO[Env, Any, Fixture] =
     val tenant     = TenantId.random()
     val templateId = TemplateId.random()
     for
@@ -166,8 +173,13 @@ object VersionPublicationSpec extends ZIOSpecDefault:
         )
       )
       classes = DocumentClassService(RecordingAuditTrail(e.audit))
+      fields  = Option
+        .when(requiredLater)(FieldBinding(FieldKey.unsafe(LaterField), 1, Set(Published, Withdrawn)))
+        .toList
       cls <- e.app.transact(tenant)(
-        classes.createClass("policy", None, ClassDraft("Policy", None, Nil), admin)
+        ZIO.when(requiredLater)(
+          classes.createField(LaterField, FieldDraft("Legal basis", None, FieldType.Text()), admin)
+        ) *> classes.createClass("policy", None, ClassDraft("Policy", None, fields), admin)
       )
       _ <- e.app.transact(tenant)(RetentionFixtures.assign(classes, cls.classId, "policy-10y"))
       stored = Jsonb(Templates.encode(content))
@@ -251,6 +263,47 @@ object VersionPublicationSpec extends ZIOSpecDefault:
       _ <- as(f.tenant)(_.updateDraft(doc, DraftChange(None, values(validFrom), None), author))
       a <- approveOpen(f, doc)
     yield a
+
+  private val LaterField = "legalBasis"
+
+  /** Like [[valid]], with the field of `fixture(requiredLater = true)` filled in for version 1.0. */
+  private def validWithLaterField(f: Fixture): ZIO[Env, Any, (DocumentId, DocumentVersion)] =
+    val filled = values(LocalDate.of(2026, 1, 1)) +
+      (LaterField -> FieldEntry(MetadataValue.Text("Section 1"), ValueOrigin.Manual))
+    for
+      _       <- TestClock.setTime(Instant.parse("2026-01-02T12:00:00Z"))
+      created <- as(f.tenant)(_.create(NewDocument(f.templateId, 1, "Code of conduct", filled), author))
+      (doc, v1) = created
+      _         <- approveOpen(f, doc.id)
+      published <- as(f.tenant)(_.changeStatus(v1.id, Publish, approver))
+    yield (doc.id, published)
+
+  /** Sets the publication jobs of a version to what the queue leaves after the last failed attempt. */
+  private def markDead(version: UUID, error: String = "[invalid] a required field is empty") =
+    schemaOwner(
+      sql"""update dms.job set status = 'dead', attempts = max_attempts, last_error = $error,
+                               finished_at = now(), locked_by = null, locked_until = null
+            where kind = ${PublicationJobs.PublishKind} and payload ->> 'versionId' = ${version.toString}""".update
+        .run()
+    )
+
+  /** A retry as the API does it: the lock of the version first, then the job. */
+  private def retry(s: DocumentService, version: UUID) =
+    s.lockForPublicationRetry(version).tap { v =>
+      ZIO.when(v.status == Approved)(
+        Db.sql(
+          sql"""select dms.job_retry(${PublicationJobs.PublishKind}, idempotency_key) from dms.job
+                where kind = ${PublicationJobs.PublishKind} and payload ->> 'versionId' = ${version.toString}"""
+            .query[Option[String]]
+            .run()
+            .toList
+        ).mapError(DocumentError.Database(_))
+      )
+    }
+
+  private def refusal[A](result: Either[DocumentError | DbError, A]) = result.left.toOption.collect {
+    case DocumentError.WithdrawalRefused(r, _) => r
+  }
 
   private def jobs(settings: DocumentSettings = DocumentSettings.default) =
     for
@@ -572,9 +625,6 @@ object VersionPublicationSpec extends ZIOSpecDefault:
       )
     },
     test("a version cannot be withdrawn from its valid-from date on, twice, or before it is approved") {
-      def refusal[A](result: Either[DocumentError | DbError, A]) = result.left.toOption.collect {
-        case DocumentError.WithdrawalRefused(r, _) => r
-      }
       for
         f       <- fixture()
         created <- valid(f)
@@ -606,6 +656,159 @@ object VersionPublicationSpec extends ZIOSpecDefault:
         none.left.exists(_.isInstanceOf[DocumentError.NotFound]),
         v1.status == Published
       )
+    },
+    test("a version that can never be published is withdrawn after its date, and the document goes on") {
+      for
+        f       <- fixture(requiredLater = true)
+        created <- validWithLaterField(f)
+        (doc, v1) = created
+        // The field is required in Published and Withdrawn only: the draft leaves it empty, approval lets it pass.
+        v2        <- scheduled(f, doc, validFrom)
+        runner    <- jobs()
+        _         <- runner.enqueue(f.tenant)
+        _         <- TestClock.setTime(due)
+        failed    <- runner.handlers(PublicationJobs.PublishKind)(claimed(f.tenant, v2.id)).flip
+        retrying  <- withdraw(f, v2.id).either
+        blocked   <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Too early"), author)).either
+        _         <- markDead(v2.id, failed)
+        noReason  <- withdraw(f, v2.id, reason = "   ").either
+        withdrawn <- withdraw(f, v2.id, reason = "A required field is empty")
+        twice     <- withdraw(f, v2.id).either
+        stillDead <- jobStates(v2.id)
+        next      <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Field filled in"), author))
+        after     <- as(f.tenant)(_.get(doc))
+        trail     <- audited(doc, "document.withdrawn-before-valid")
+        notices   <- outbox(doc, "document.approved-version-withdrawn")
+      yield assertTrue(
+        failed.startsWith("[invalid] "),
+        refusal(retrying).contains(WithdrawalRefusal.Due),
+        blocked.left.exists(_.isInstanceOf[DocumentError.Conflict]),
+        noReason.left.exists(_.isInstanceOf[DocumentError.Invalid]),
+        withdrawn.status == Withdrawn,
+        withdrawn.withdrawal.map(_.reason).contains("A required field is empty"),
+        refusal(twice).contains(WithdrawalRefusal.AlreadyWithdrawn),
+        stillDead.map(_._1) == List("dead"),
+        next.label == "3.0-draft.1",
+        after.versions.map(v => (v.id, v.status)) == List(
+          (v1.id, Published),
+          (v2.id, Withdrawn),
+          (next.id, Draft)
+        ),
+        trail.size == 1,
+        trail.head.details.value.contains("\"publicationFailed\":true"),
+        notices.size == 1,
+        notices.head.contains("\"publicationFailed\": true")
+      )
+    },
+    test("the date rule stays for every version whose newest publication job is not dead") {
+      def setJob(version: UUID, status: String, attempts: Int) =
+        schemaOwner(
+          sql"""update dms.job set status = $status, attempts = $attempts, last_error = ${"[conflict] busy"},
+                                   locked_by = ${Option.when(status == "running")("worker")},
+                                   locked_until = ${Option.when(status == "running")(
+              java.time.OffsetDateTime.parse("2030-01-01T00:00:00Z")
+            )}
+                where kind = ${PublicationJobs.PublishKind}
+                  and payload ->> 'versionId' = ${version.toString}""".update.run()
+        )
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, _) = created
+        v2      <- scheduled(f, doc, validFrom)
+        runner  <- jobs()
+        _       <- TestClock.setTime(due)
+        noJob   <- withdraw(f, v2.id).either
+        _       <- runner.enqueue(f.tenant)
+        queued  <- withdraw(f, v2.id).either
+        _       <- setJob(v2.id, "queued", 1)
+        backoff <- withdraw(f, v2.id).either
+        _       <- setJob(v2.id, "running", 1)
+        running <- withdraw(f, v2.id).either
+        // A time zone change adds a job for the new moment: a dead job of the old moment does not count.
+        _ <- markDead(v2.id)
+        _ <- schemaOwner(
+          sql"update dms.tenant set time_zone = 'Asia/Tokyo' where id = ${f.tenant.value}".update.run()
+        )
+        _      <- runner.enqueue(f.tenant)
+        jobs   <- jobStates(v2.id)
+        newest <- withdraw(f, v2.id).either
+        still  <- as(f.tenant)(_.get(doc))
+      yield assertTrue(
+        refusal(noJob).contains(WithdrawalRefusal.Due),
+        refusal(queued).contains(WithdrawalRefusal.Due),
+        refusal(backoff).contains(WithdrawalRefusal.Due),
+        refusal(running).contains(WithdrawalRefusal.Due),
+        jobs.map(_._1).toSet == Set("dead", "queued"),
+        refusal(newest).contains(WithdrawalRefusal.Due),
+        still.versions.map(_.status) == List(Published, Approved)
+      )
+    },
+    test(
+      "race: the retry of a dead publication holds the version, the withdrawal waits and is told it lost"
+    ) {
+      for
+        e       <- ZIO.service[Env]
+        s       <- service(DocumentSettings.default)
+        runner  <- jobs()
+        f       <- fixture()
+        created <- valid(f)
+        (doc, _) = created
+        v2      <- scheduled(f, doc, validFrom)
+        _       <- runner.enqueue(f.tenant)
+        _       <- markDead(v2.id)
+        locked  <- Promise.make[Nothing, Unit]
+        release <- Promise.make[Nothing, Unit]
+        retried <- ZIO
+          .withClock(justAtOrAfter)(
+            e.app.transact(f.tenant)(retry(s, v2.id) <* locked.succeed(()) <* release.await)
+          )
+          .fork
+        _          <- locked.await
+        withdrawal <- ZIO.withClock(justAtOrAfter)(withdraw(f, v2.id)).either.fork
+        _          <- someoneWaitsForALock
+        _          <- release.succeed(())
+        _          <- retried.join
+        refused    <- withdrawal.join
+        after      <- as(f.tenant)(_.get(doc))
+        job        <- jobStates(v2.id)
+      yield assertTrue(
+        refusal(refused).contains(WithdrawalRefusal.Due),
+        after.versions.map(_.status) == List(Published, Approved),
+        job.map(_._1) == List("queued")
+      )
+    },
+    test(
+      "race: the withdrawal of a dead publication holds the version, the retry waits and finds it withdrawn"
+    ) {
+      for
+        e       <- ZIO.service[Env]
+        s       <- service(DocumentSettings.default)
+        runner  <- jobs()
+        f       <- fixture()
+        created <- valid(f)
+        (doc, _) = created
+        v2         <- scheduled(f, doc, validFrom)
+        _          <- runner.enqueue(f.tenant)
+        _          <- markDead(v2.id)
+        locked     <- Promise.make[Nothing, Unit]
+        release    <- Promise.make[Nothing, Unit]
+        withdrawal <- ZIO
+          .withClock(justAtOrAfter)(
+            e.app.transact(f.tenant)(
+              s.withdrawApproved(v2.id, "Cannot be published", Set(approver), ownerUser) <*
+                locked.succeed(()) <* release.await
+            )
+          )
+          .fork
+        _       <- locked.await
+        retried <- ZIO.withClock(justAtOrAfter)(e.app.transact(f.tenant)(retry(s, v2.id))).fork
+        _       <- someoneWaitsForALock
+        _       <- release.succeed(())
+        _       <- withdrawal.join
+        found   <- retried.join
+        job     <- jobStates(v2.id)
+      yield assertTrue(found.status == Withdrawn, job.map(_._1) == List("dead"))
     },
     test("race: the publication holds the version, the withdrawal waits and is told it lost") {
       for

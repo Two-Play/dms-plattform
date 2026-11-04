@@ -94,6 +94,7 @@ const withdrawable = {
   version: '2.0',
   validFrom: '2027-01-01',
   validVersion: '1.0',
+  publicationFailed: false,
 }
 
 type Reply = Promise<{ data: unknown; error: unknown; response: Response }>
@@ -235,6 +236,45 @@ describe('Withdraw an approved version on the document page (DMS-143)', () => {
     await user.click(await screen.findByRole('button', { name: 'Version 2.0 zurückziehen' }))
     const dialog = screen.getByRole('dialog', { name: 'Version 2.0 zurückziehen?' })
     expect(dialog).toHaveAccessibleDescription(/keine gültige Version/)
+  })
+
+  it('says the publication failed, not that the version would become valid, once its date has passed', async () => {
+    state.document = documentWith(scheduled, {
+      withdrawable: { ...withdrawable, publicationFailed: true },
+    })
+    const { user } = renderAt(page)
+    await user.click(await screen.findByRole('button', { name: 'Withdraw version 2.0' }))
+    const dialog = screen.getByRole('dialog', { name: 'Withdraw version 2.0?' })
+    expect(dialog).toHaveAccessibleDescription(/failed for good.*a new version can be started/)
+    expect(dialog).not.toHaveAccessibleDescription(/would become valid/)
+  })
+
+  it('says so in German too, also without a valid version', async () => {
+    setLocale('de')
+    state.document = documentWith(scheduled, {
+      withdrawable: { ...withdrawable, validVersion: undefined, publicationFailed: true },
+    })
+    const { user } = renderAt(page)
+    await user.click(await screen.findByRole('button', { name: 'Version 2.0 zurückziehen' }))
+    const dialog = screen.getByRole('dialog', { name: 'Version 2.0 zurückziehen?' })
+    expect(dialog).toHaveAccessibleDescription(/endgültig fehlgeschlagen.*keine gültige Version/)
+  })
+
+  it('says who won when a retry of the failed publication got there first', async () => {
+    state.document = documentWith(scheduled, {
+      withdrawable: { ...withdrawable, publicationFailed: true },
+    })
+    state.withdrawReply = () =>
+      failed(409, { code: 'version_due', message: 'version 2.0 became due' })
+    const { user } = renderAt(page)
+    await user.click(await screen.findByRole('button', { name: 'Withdraw version 2.0' }))
+    const dialog = screen.getByRole('dialog', { name: 'Withdraw version 2.0?' })
+    await user.type(within(dialog).getByLabelText('Reason'), 'A required field is empty')
+    await user.click(within(dialog).getByRole('button', { name: 'Withdraw version' }))
+    expect(await within(dialog).findByText(/it is being published/)).toHaveAttribute(
+      'role',
+      'alert',
+    )
   })
 
   it('marks a withdrawn version on its own page', async () => {

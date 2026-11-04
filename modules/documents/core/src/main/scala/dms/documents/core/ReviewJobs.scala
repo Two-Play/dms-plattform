@@ -14,15 +14,16 @@ import java.util.UUID
 final case class ReviewScheduleConfig(checkInterval: Duration = 1.hour)
 
 /** What one review check did. */
-final case class ReviewCheck(opened: Int, reviewDue: Int, closed: Int)
+final case class ReviewCheck(opened: Int, reviewDue: Int, closed: Int, reopened: Int = 0)
 
 /** Runs the periodic review (US-07.1, ADR 0030) through the job queue (ADR 0010).
   *
   * Every instance calls [[tick]]: it enqueues one job `document.review-check` per tenant and check interval
   * (idempotency key per tenant and interval, so one job cluster-wide). The job ([[check]]) creates the review
-  * tasks whose lead time is reached, moves published versions whose review date has come to ReviewDue and
-  * closes open tasks of versions that are not valid any more. Each item runs in its own transaction, so one
-  * failing version does not block the others; every step is idempotent, so at-least-once delivery is safe.
+  * tasks whose lead time is reached, moves published versions whose review date has come to ReviewDue, closes
+  * open tasks of versions that are not valid any more and opens tasks again whose revision never took effect
+  * (for those from before DMS-145, ADR 0061). Each item runs in its own transaction, so one failing version
+  * does not block the others; every step is idempotent, so at-least-once delivery is safe.
   */
 final class ReviewJobs(db: Db, service: ReviewService, config: ReviewScheduleConfig):
   import ReviewJobs.*
@@ -54,13 +55,14 @@ final class ReviewJobs(db: Db, service: ReviewService, config: ReviewScheduleCon
     */
   def check(tenant: TenantId): IO[String, ReviewCheck] =
     for
-      work   <- inTenant(tenant)(service.pendingWork)
-      closed <- each(tenant, work.obsolete)(service.closeObsolete)
-      opened <- each(tenant, work.toOpen)(service.openTask)
-      due    <- each(tenant, work.reviewDue)(service.markReviewDue)
-      failures = List(closed, opened, due).flatMap(_._2)
+      work     <- inTenant(tenant)(service.pendingWork)
+      closed   <- each(tenant, work.obsolete)(service.closeObsolete)
+      reopened <- each(tenant, work.toReopen)(service.reopen)
+      opened   <- each(tenant, work.toOpen)(service.openTask)
+      due      <- each(tenant, work.reviewDue)(service.markReviewDue)
+      failures = List(closed, reopened, opened, due).flatMap(_._2)
       _ <- ZIO.unless(failures.isEmpty)(ZIO.fail(failures.mkString("; ")))
-    yield ReviewCheck(opened._1, due._1, closed._1)
+    yield ReviewCheck(opened._1, due._1, closed._1, reopened._1)
 
   private def run(job: ClaimedJob): IO[String, Unit] =
     ZIO.fromOption(job.tenant).orElseFail(s"job ${job.id} ($CheckKind) has no tenant").flatMap(check).unit

@@ -108,7 +108,7 @@ object PublicationStatusApi:
       .description(
         "Requeues the publication job of an approved version whose publication failed (Failed: starts over " +
           "with all attempts) or waits for its next attempt (Retrying: runs now). 409 publication_not_failed in " +
-          "any other state. Requires RetryPublication: the document's owner (without owner: its author), " +
+          "any other state, also if a withdrawal got there first. Requires RetryPublication: the document's owner (without owner: its author), " +
           "records managers and tenant administrators. Audited."
       )
       .tag("Documents")
@@ -125,11 +125,14 @@ object PublicationStatusApi:
                   resource = DocumentApi.resource(p.tenantId, details, version)
                   _ <- ctx
                     .check(Action.RetryPublication, resource.copy(status = Some(DocumentStatus.Approved)))
+                  // The lock first, the job and the status after it: a withdrawal of the failed version does the
+                  // same, so that exactly one of the two wins (ADR 0061).
+                  locked <- ctx.service.lockForPublicationRetry(versionId)
                   before <- jobOf(versionId)
                   state = before.map((job, _) => RenditionStatusApi.stateOf(job))
                   outcome <- before match
                     case Some((job, key))
-                        if version.status == DocumentStatus.Approved &&
+                        if locked.status == DocumentStatus.Approved &&
                           state.exists(s => s == Failed || s == Retrying) =>
                       for
                         _ <- Db
@@ -161,12 +164,12 @@ object PublicationStatusApi:
                           )
                           .mapError(DocumentError.Database(_))
                         after <- jobOf(versionId)
-                      yield Right(statusView(id, version, after.map(_._1), canRetry = true))
+                      yield Right(statusView(id, locked, after.map(_._1), canRetry = true))
                     case _ =>
                       ZIO.succeed(
                         Left(
                           s"the publication of version ${version.label} is ${state.getOrElse(NoJob)} and the " +
-                            s"version is ${version.status}: only a failed publication of an approved version " +
+                            s"version is ${locked.status}: only a failed publication of an approved version " +
                             "can be retried"
                         )
                       )

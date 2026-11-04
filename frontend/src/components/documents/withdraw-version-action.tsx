@@ -123,11 +123,27 @@ function WithdrawForm({
   )
 }
 
+/** What withdrawing means for this version: its date may have passed if its publication failed (DMS-145). */
+function description(version: WithdrawableVersion): string {
+  const label = version.version
+  const valid = version.validVersion
+  if (version.publicationFailed) {
+    return valid
+      ? t('withdrawVersion.descriptionFailed', { label, valid })
+      : t('withdrawVersion.descriptionFailedNoValid', { label })
+  }
+  const validFrom = version.validFrom ? formatDate(version.validFrom) : ''
+  return valid
+    ? t('withdrawVersion.description', { label, validFrom, valid })
+    : t('withdrawVersion.descriptionNoValid', { label, validFrom })
+}
+
 /**
  * "Withdraw version" on the document page (DMS-143, ADR 0059): stops an approved version before its valid-from
- * date, for callers the backend names the version to (`withdrawable`: owner role or having approved it). A
- * confirmation dialog with a required reason. The backend decides again; if the publication got there first,
- * the dialog says so, and closing it reloads the document.
+ * date, or later if its publication failed for good (DMS-145, ADR 0061), for callers the backend names the
+ * version to (`withdrawable`: owner role or having approved it). A confirmation dialog with a required reason.
+ * The backend decides again; if the publication or a retry got there first, the dialog says so, and closing it
+ * reloads the document.
  */
 export function WithdrawVersionAction({ document }: { document: DocumentView }) {
   const queryClient = useQueryClient()
@@ -140,7 +156,6 @@ export function WithdrawVersionAction({ document }: { document: DocumentView }) 
     void queryClient.invalidateQueries({ queryKey: ['documents'] })
   }
 
-  const validFrom = version.validFrom ? formatDate(version.validFrom) : ''
   return (
     <>
       <Button
@@ -163,15 +178,7 @@ export function WithdrawVersionAction({ document }: { document: DocumentView }) 
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('withdrawVersion.title', { label: version.version })}</DialogTitle>
-            <DialogDescription>
-              {version.validVersion
-                ? t('withdrawVersion.description', {
-                    label: version.version,
-                    validFrom,
-                    valid: version.validVersion,
-                  })
-                : t('withdrawVersion.descriptionNoValid', { label: version.version, validFrom })}
-            </DialogDescription>
+            <DialogDescription>{description(version)}</DialogDescription>
           </DialogHeader>
           {open && (
             <WithdrawForm

@@ -417,6 +417,17 @@ describe('task inbox', () => {
     expect(screen.getByText('2 open, 1 overdue')).toBeInTheDocument()
   })
 
+  it('says why a periodic review is open again (DMS-145)', async () => {
+    state.tasks = []
+    state.reviews = [{ ...review, reopens: 'review-decided' }]
+    renderAt('/tasks')
+
+    const row = await within(await taskList()).findByRole('listitem', {
+      name: 'Periodic review: Handbook',
+    })
+    expect(within(row).getByText(/open again: the revision never took effect/)).toBeInTheDocument()
+  })
+
   it('recertifies with the default date of the class interval or a chosen one', async () => {
     state.tasks = []
     state.reviews = [review]

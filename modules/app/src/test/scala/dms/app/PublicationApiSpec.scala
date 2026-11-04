@@ -29,6 +29,7 @@ import dms.rendering.core.RenditionSource
 import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
+import sttp.tapir.ztapir.RichZServerEndpoint
 import zio.*
 import zio.http.{Body, Header, Headers, MediaType, Request, Status, URL}
 import zio.json.*
@@ -195,7 +196,10 @@ object PublicationApiSpec extends ZIOSpecDefault:
     jwt.serialize()
 
   private val routes =
-    ZioHttpInterpreter().toHttp(ValidAtApi.endpoints ++ DocumentApi.endpoints ++ WorkflowApi.endpoints)
+    ZioHttpInterpreter().toHttp(
+      ValidAtApi.endpoints.map(_.widen[Env]) ++ DocumentApi.endpoints.map(_.widen[Env]) ++
+        WorkflowApi.endpoints.map(_.widen[Env]) ++ PublicationStatusApi.endpoints.map(_.widen[Env])
+    )
 
   private def call(
       user: UserId,
@@ -350,6 +354,47 @@ object PublicationApiSpec extends ZIOSpecDefault:
       s"/api/v1/documents/$doc/versions/$version/withdraw",
       Some(WithdrawVersion(reason).toJson)
     )
+
+  private def retry(doc: UUID, version: UUID, user: UserId = owner) =
+    call(user, "POST", s"/api/v1/documents/$doc/versions/$version/publication/retry")
+
+  /** The newest publication job of a version: status and attempts. */
+  private def publishJob(version: UUID) =
+    setup.await.flatMap(
+      _.owner.transactSystem(
+        Db.sql(
+          sql"""select status from dms.job where kind = ${PublicationJobs.PublishKind}
+                and payload ->> 'versionId' = ${version.toString} order by id desc limit 1"""
+            .query[String]
+            .run()
+            .head
+        )
+      )
+    )
+
+  /** Version 2.0 of a document whose valid-from date has passed and whose publication failed for good. */
+  private def stuckVersion(ownerId: UserId): ZIO[Env, Any, (DocumentView, DocumentVersionView)] =
+    for
+      created <- scheduledVersion(ownerId)
+      (doc, v2) = created
+      s       <- setup.await
+      db      <- ZIO.service[Db]
+      service <- ZIO.service[DocumentService]
+      _       <- PublicationJobs(db, service, PublicationScheduleConfig()).enqueue(tenantId)
+      _       <- s.owner.transactSystem(
+        Db.sql {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          val _ =
+            sql"""update dms.document_version set valid_from = date '2026-01-01' where id = ${v2.id}""".update
+              .run()
+          val _ = sql"set local session_replication_role = origin".update.run()
+          sql"""update dms.job set status = 'dead', attempts = max_attempts,
+                                   last_error = ${"[invalid] a required field is empty"}, finished_at = now()
+                where kind = ${PublicationJobs.PublishKind}
+                  and payload ->> 'versionId' = ${v2.id.toString}""".update.run()
+        }
+      )
+    yield (doc, v2)
 
   def spec = suite("Publication and editorial versions")(
     test("API documentation contains the new-version endpoint") {
@@ -701,6 +746,116 @@ object PublicationApiSpec extends ZIOSpecDefault:
         error(published._2).exists(_.code == "version_published"),
         found.map(v => (v.version, v.status)) == List(("1.0", "Superseded"), ("2.0", "Published"))
       )
+    },
+    test(
+      "a version whose publication failed for good can be withdrawn after its date, and a new one started"
+    ) {
+      for
+        created <- stuckVersion(owner)
+        (doc, v2) = created
+        forOwner    <- document(doc.id, owner)
+        forApprover <- document(doc.id, approver)
+        forAuthor   <- document(doc.id, author)
+        byAuthor    <- withdraw(doc.id, v2.id, author)
+        noReason    <- withdraw(doc.id, v2.id, owner, reason = " ")
+        withdrawn   <- withdraw(doc.id, v2.id, owner, reason = "A required field is empty")
+        late        <- retry(doc.id, v2.id)
+        next        <- newVersion(doc.id, """{"changeKind":"Major","reason":"Field filled in"}""")
+        found       <- versions(doc.id, owner)
+        job         <- publishJob(v2.id)
+      yield assertTrue(
+        forOwner.withdrawable.map(w => (w.versionId, w.publicationFailed)).contains((v2.id, true)),
+        forApprover.withdrawable.exists(_.publicationFailed),
+        forAuthor.withdrawable.isEmpty,
+        byAuthor._1 == Status.Forbidden,
+        noReason._1 == Status.UnprocessableEntity,
+        withdrawn._1 == Status.Ok,
+        late._1 == Status.Conflict,
+        error(late._2).exists(_.code == "publication_not_failed"),
+        next._1 == Status.Created,
+        found.map(v => (v.version, v.status)).take(2) == List(("1.0", "Published"), ("2.0", "Withdrawn")),
+        job == "dead"
+      )
+    },
+    test("after a retry the date rule is back: the withdrawal is refused and the dialog is not offered") {
+      for
+        created <- stuckVersion(owner)
+        (doc, v2) = created
+        retried  <- retry(doc.id, v2.id)
+        forOwner <- document(doc.id, owner)
+        refused  <- withdraw(doc.id, v2.id, owner)
+        ran      <- runPublicationJobs.repeatUntil(_ == 0)
+        found    <- versions(doc.id, owner)
+      yield assertTrue(
+        retried._1 == Status.Ok,
+        forOwner.withdrawable.isEmpty,
+        refused._1 == Status.Conflict,
+        error(refused._2).exists(_.code == "version_due"),
+        ran == 0,
+        found.map(_.status) == List("Superseded", "Published")
+      )
+    },
+    test("race: the withdrawal holds the failed version, the retry waits and is told it lost") {
+      for
+        created <- stuckVersion(owner)
+        (doc, v2) = created
+        s       <- setup.await
+        db      <- ZIO.service[Db]
+        service <- ZIO.service[DocumentService]
+        locked  <- Promise.make[Nothing, Unit]
+        release <- Promise.make[Nothing, Unit]
+        holding <- db
+          .transact(tenantId)(
+            service.withdrawApproved(v2.id, "Cannot be published", Set.empty, owner) <*
+              locked.succeed(()) <* release.await
+          )
+          .fork
+        _       <- locked.await
+        retried <- retry(doc.id, v2.id).fork
+        _       <- s.owner
+          .transactSystem(
+            Db.sql(
+              sql"select count(*) from pg_stat_activity where wait_event_type = 'Lock' and state = 'active'"
+                .query[Long]
+                .run()
+                .head
+            )
+          )
+          .repeatUntil(_ >= 1L)
+        _     <- release.succeed(())
+        _     <- holding.join
+        lost  <- retried.join
+        job   <- publishJob(v2.id)
+        found <- versions(doc.id, owner)
+      yield assertTrue(
+        lost._1 == Status.Conflict,
+        error(lost._2).exists(_.code == "publication_not_failed"),
+        job == "dead",
+        found.map(_.status) == List("Published", "Withdrawn")
+      )
+    },
+    test("race: run at the same moment, exactly one of withdrawal and retry of a failed version wins") {
+      def round =
+        for
+          created <- stuckVersion(owner)
+          (doc, v2) = created
+          result <- withdraw(doc.id, v2.id, owner).zipWithPar(retry(doc.id, v2.id))((w, r) => (w, r))
+          (withdrawal, retried) = result
+          job   <- publishJob(v2.id)
+          _     <- runPublicationJobs.repeatUntil(_ == 0)
+          found <- versions(doc.id, owner)
+        yield
+          val withdrawn = withdrawal._1 == Status.Ok
+          val requeued  = retried._1 == Status.Ok
+          (withdrawn != requeued) &&
+          (if withdrawn then
+             job == "dead" && found.map(_.status) == List("Published", "Withdrawn") &&
+             error(retried._2).exists(_.code == "publication_not_failed")
+           else
+             job == "queued" && found.map(_.status) == List("Superseded", "Published") &&
+             error(withdrawal._2).exists(_.code == "version_due"))
+      for rounds <- ZIO.foreach((1 to 5).toList)(_ => round)
+      yield assertTrue(rounds.forall(identity))
     },
     test("a version valid from a future date waits for it; readers of the valid version see the coming one") {
       val future = LocalDate.of(2099, 1, 1)

@@ -25,7 +25,7 @@ Given: `Withdrawn` exists as "out of force" for valid versions (US-07.1, ADR 003
 1. **Same status, new transition.** `Lifecycle` and the guard (migration V41) get `Approved → Withdrawn`. `DocumentService.withdrawApproved` is the only way there: `changeStatus` refuses it, and the guard refuses it without a reason, so that no caller can take the short way.
 2. **The withdrawal is part of the version row.** V41 adds `withdrawn_by` and `withdrawal_reason` next to `withdrawn_at`. Status, actor and reason are one `UPDATE`, so a half-withdrawn version cannot exist. A set reason means "approved, never in force" (`DocumentVersion.withdrawal`); versions withdrawn while valid keep their reason in the review task and have neither column set. The guard allows the columns to change only on this transition.
 3. **Who may withdraw (ADR 0018).** `Withdraw` on an approved version: holders of the owner role, and holders of the approver role who approved this version (any approving vote of an approval step of its case, or the final approval). This mirrors `Publish`: whoever could put the version into force may stop it. Authors, reviewers, records managers and tenant administrators may not. Scope and confidentiality apply as to every action. An author who holds the owner role may withdraw: stopping a version gives nothing into force, so segregation of duties (which protects approval) does not apply. No step-up sign-in: withdrawing a valid version has none either, and a step-up would slow down the one action that prevents harm.
-4. **Until when.** Strictly before 00:00 of the valid-from date in the tenant's time zone (`Publication.isDue`). From then on the publication job has the version, and a withdrawal gets 409 `version_due`. A version without a valid-from date is due at once and cannot be withdrawn.
+4. **Until when.** Strictly before 00:00 of the valid-from date in the tenant's time zone (`Publication.isDue`). From then on the publication job has the version, and a withdrawal gets 409 `version_due`. A version without a valid-from date is due at once and cannot be withdrawn. (Since DMS-145, ADR 0061: unless its publication job is dead.)
 5. **The race is decided by the row lock of the version.** Both sides lock the row first and read the clock afterwards. Whoever gets the lock changes the version and commits; the other waits and then finds the result. A withdrawal that loses gets 409 `version_published`, a second withdrawal 409 `version_withdrawn`, a version that was never approved 409 `version_not_approved`, all with the code in the API error so the dialog can say what happened. A publication job that loses does nothing and ends successfully.
 6. **The job does not run afterwards.** `dms.job_cancel` sets the queued `document.publish` jobs of the version to the new status `cancelled` in the withdrawing transaction, with who withdrew it as `last_error`. A job already claimed cannot be cancelled: it waits for the lock and finds the version withdrawn. `PublicationJobs.tick` only looks at approved versions, and the idempotency key stays taken.
 7. **What happens to the data.**
@@ -88,19 +88,19 @@ Given: `Withdrawn` exists as "out of force" for valid versions (US-07.1, ADR 003
 
 ### Negative / Cost
 
-- After 00:00 of the valid-from date a version can only be withdrawn as a valid version, through a review task. If the publication job is dead, a due version stays approved and cannot be withdrawn until the job runs again.
+- After 00:00 of the valid-from date a version can only be withdrawn as a valid version, through a review task. (Solved for a dead publication job in DMS-145, ADR 0061.)
 - A withdrawn version keeps its objects for the whole retention. Object Lock leaves no other way anyway.
 - The withdrawal is final. Correcting the mistake needs a new version and, for a valid document, its approval.
 - Version numbers get gaps: 2.0 was approved but never valid, and a minor correction of 1.0 afterwards is called 2.1. Reusing the number would give two approved packages the same label.
 - When a valid version exists, the next version starts from it, so changes made in the withdrawn version have to be made again. The comparison with the withdrawn version helps.
-- A review task decided as "revise" points to the new version. If that version is withdrawn, the task stays decided, and the valid version has no open review task for its review date. Discarded drafts have the same gap (ADR 0050).
+- A review task decided as "revise" points to the new version. If that version is withdrawn, the task stays decided. (Since DMS-145, ADR 0061, a new task opens for the valid version and its review date; the same for discarded drafts.)
 - The workflow case stays `Approved`: it says what happened in the workflow, the version says what happened since.
 - On-demand copies and filled Word documents name the status "Withdrawn"/"Außer Kraft" like for a version taken out of force.
 
 ## Follow-ups
 
-- Must be done (DMS-145): a review task whose revision was withdrawn or discarded opens again for the valid version.
-- Must be done (DMS-145): a way out for a due version whose publication can never succeed, for example because a field required from `Published` is empty in the frozen values: it can neither be withdrawn nor replaced, and a retry fails the same way (DMS-142 tells the owner about the failure).
+- Done (DMS-145, ADR 0061): a review task whose revision was withdrawn or discarded opens again for the valid version.
+- Done (DMS-145, ADR 0061): a way out for a due version whose publication can never succeed, for example because a field required from `Published` is empty in the frozen values: a version whose publication job is dead can be withdrawn after its date, too, and the document can get a new version. Preventing such a version stays open (ADR 0061, decision 13).
 - Should (DMS-145): decide rights on the valid version, not on the latest one, in `RetentionApi`, `LegalHoldApi` and `EvidenceReportApi`. A never-valid version with wrong metadata stays the latest one, which can lock out records managers scoped to the valid version.
 - Should: tell the author as well; the story names approvers and owner, but the author was told about the approval.
 - Should: the withdrawal in the evidence report's version section (it is in the report's audit trail today).

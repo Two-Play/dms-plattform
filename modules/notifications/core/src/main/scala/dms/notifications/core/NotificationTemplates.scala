@@ -68,6 +68,7 @@ object NotificationTemplates:
     "workflow.task-overdue",
     "workflow.task-escalated",
     "review.task-created",
+    "review.task-reopened",
     "review.task-due-soon",
     "review.task-overdue",
     "review.task-escalated",
@@ -162,6 +163,19 @@ object NotificationTemplates:
           bodyEn =
             s"The periodic review of $doc is coming up. Please decide by ${date("dueOn")}: recertify, revise or withdraw."
         )(tasks)
+      case "review.task-reopened" =>
+        val discarded = p("revisionStatus") == "Discarded"
+        r(de = s"Überprüfung wieder offen: $docShort", en = s"Review open again: $docShort")(
+          bodyDe = s"Die Überarbeitung von $docDat wurde " +
+            s"${
+                if discarded then "verworfen" else "zurückgezogen"
+              } und ist nie gültig geworden. Die Überprüfung ist " +
+            s"deshalb wieder offen. Bitte entscheiden Sie bis ${date("dueOn")}: bestätigen, überarbeiten oder außer " +
+            "Kraft setzen.",
+          bodyEn =
+            s"The revision of $doc was ${if discarded then "discarded" else "withdrawn"} and never took " +
+              s"effect, so the review is open again. Please decide by ${date("dueOn")}: recertify, revise or withdraw."
+        )(tasks)
       case "review.task-due-soon" =>
         r(de = s"Überprüfung bald fällig: $docShort", en = s"Review due soon: $docShort")(
           bodyDe = s"Die Überprüfung von $docDat ist bis ${date("dueOn")} zu entscheiden.",
@@ -211,19 +225,25 @@ object NotificationTemplates:
       case "failure.publication" =>
         r(de = s"Veröffentlichung fehlgeschlagen: $docShort", en = s"Publication failed: $docShort")(
           bodyDe =
-            s"Die Veröffentlichung von $docDat ist endgültig fehlgeschlagen. $reasonDe Die Version ist nicht gültig geworden. $retryHintDe",
+            s"Die Veröffentlichung von $docDat ist endgültig fehlgeschlagen. $reasonDe Die Version ist nicht gültig geworden. $retryHintDe $withdrawHintDe",
           bodyEn =
-            s"The publication of $doc failed: every attempt failed. $reasonEn The version has not become valid. $retryHintEn"
+            s"The publication of $doc failed: every attempt failed. $reasonEn The version has not become valid. $retryHintEn $withdrawHintEn"
         )(failureLink)
       case "publication.withdrawn" =>
         // The reason may say what the document is about: like the title, only for those who may read it.
         val reason = Option.when(ctx.document.isDefined)(p("reason"))
+        // After a publication that failed for good the date may have passed (ADR 0061).
+        val failed = params.get("publicationFailed").contains("true")
         r(de = s"Zurückgezogen: $docShort", en = s"Withdrawn: $docShort")(
-          bodyDe =
-            s"${person("withdrawnBy")} hat $doc vor dem Gültigkeitsdatum${validFromDe} zurückgezogen. " +
-              "Die Version wird nicht veröffentlicht; was bisher galt, gilt weiter." +
-              reason.fold("")(t => s" Begründung: $t"),
-          bodyEn = s"${person("withdrawnBy")} withdrew $doc before its valid-from date${validFromEn}. " +
+          bodyDe = s"${person("withdrawnBy")} hat $doc " +
+            (if failed then
+               s"zurückgezogen, weil die Veröffentlichung${validFromDe} endgültig fehlgeschlagen ist. "
+             else s"vor dem Gültigkeitsdatum${validFromDe} zurückgezogen. ") +
+            "Die Version wird nicht veröffentlicht; was bisher galt, gilt weiter." +
+            reason.fold("")(t => s" Begründung: $t"),
+          bodyEn = s"${person("withdrawnBy")} withdrew $doc " +
+            (if failed then s"after its publication${validFromEn} failed for good. "
+             else s"before its valid-from date${validFromEn}. ") +
             "The version will not be published; what applied so far still applies." +
             reason.fold("")(t => s" Reason: $t")
         )(docLink)
@@ -386,6 +406,23 @@ object NotificationTemplates:
 
     def retryHintDe: String = retryHint(de = true)
     def retryHintEn: String = retryHint(de = false)
+
+    /** The way out if a retry cannot help (DMS-145, ADR 0061): withdrawing needs the owner role or having
+      * approved the version, so records managers and administrators are told who has it.
+      */
+    private def withdrawHint(de: Boolean): String =
+      if params.get("canWithdraw").contains("true") then
+        if de then
+          "Hilft das nicht, können Sie die Version auf der Dokumentseite zurückziehen und danach eine neue Version beginnen."
+        else
+          "If that does not help, you can withdraw the version on the document page and then start a new one."
+      else if de then
+        "Hilft das nicht, können Inhaber der Eigentümerrolle oder die Freigebenden die Version auf der Dokumentseite zurückziehen; danach lässt sich eine neue Version beginnen."
+      else
+        "If that does not help, holders of the owner role or those who approved the version can withdraw it on the document page; a new version can then be started."
+
+    def withdrawHintDe: String = withdrawHint(de = true)
+    def withdrawHintEn: String = withdrawHint(de = false)
 
     /** The reason by failure code. The technical text stays with the job: it can quote document content. */
     def reasonDe: String = params.get("reason") match

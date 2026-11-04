@@ -28,6 +28,7 @@ export const tasks = {
   assignedTo: 'assigned to',
   reviewDateReached: 'review date reached',
   reviewAhead: 'valid, review ahead',
+  reviewReopened: 'open again: the revision never took effect',
   validFrom: 'valid from {date}',
   onBehalfOf: 'On behalf of',
   vote: 'Vote…',

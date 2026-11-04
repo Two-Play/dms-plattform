@@ -26,7 +26,8 @@ private[core] object ReviewStore:
       decidedBy: Option[String],
       nextDueOn: Option[LocalDate],
       newVersionId: Option[UUID],
-      comment: Option[String]
+      comment: Option[String],
+      reopens: Option[UUID]
   ) derives DbCodec:
     def toTask: ReviewTask =
       ReviewTask(
@@ -40,7 +41,8 @@ private[core] object ReviewStore:
         decidedBy.map(UserId(_)),
         nextDueOn,
         newVersionId,
-        comment
+        comment,
+        reopens
       )
 
   /** A valid version due for its review task or review date, with the lead time of its class. */
@@ -100,6 +102,22 @@ private[core] object ReviewStore:
       .run()
       .toList
 
+  /** Tasks decided as revised whose revision never took effect, while their version is valid with the same
+    * review date and nothing reopened them yet (DMS-145, ADR 0061). With `revision`, those of that version.
+    */
+  def lostToRevision(revision: Option[UUID])(using DbTx): List[ReviewTask] =
+    sql"""select r.id, r.document_id, r.version_id, r.due_on, r.created_at, r.status, r.decided_at,
+                 r.decided_by, r.next_due_on, r.new_version_id, r.comment, r.reopens_id
+          from dms.document_review r
+          join dms.document_version n on n.id = r.new_version_id
+          join dms.document_version v on v.id = r.version_id
+          where r.status = 'Revised'
+            and n.status in ('Withdrawn', 'Discarded') and n.published_at is null
+            and v.status in ('Published', 'ReviewDue') and v.review_due_on = r.due_on
+            and ($revision::uuid is null or r.new_version_id = $revision::uuid)
+            and not exists (select 1 from dms.document_review s where s.reopens_id = r.id)
+          order by r.decided_at, r.id""".query[TaskRow].run().map(_.toTask).toList
+
   /** Creates the open task of a version and review date; `false` if it exists already (idempotent). */
   def insertTask(id: UUID, document: DocumentId, version: UUID, dueOn: LocalDate, at: Instant)(using
       DbTx
@@ -108,14 +126,22 @@ private[core] object ReviewStore:
           values ($id, dms.current_tenant(), ${document.value}, $version, $dueOn, ${utc(at)})
           on conflict do nothing""".update.run() == 1
 
+  /** Opens `decided` again for its version and review date; `false` if that was done before (idempotent). */
+  def insertReopened(id: UUID, decided: ReviewTask, at: Instant)(using DbTx): Boolean =
+    sql"""insert into dms.document_review
+            (id, tenant_id, document_id, version_id, due_on, created_at, reopens_id)
+          values ($id, dms.current_tenant(), ${decided.documentId.value}, ${decided.versionId}, ${decided.dueOn},
+                  ${utc(at)}, ${decided.id})
+          on conflict do nothing""".update.run() == 1
+
   def task(id: UUID)(using DbTx): Option[ReviewTask] =
     sql"""select id, document_id, version_id, due_on, created_at, status, decided_at, decided_by, next_due_on,
-                 new_version_id, comment
+                 new_version_id, comment, reopens_id
           from dms.document_review where id = $id""".query[TaskRow].run().headOption.map(_.toTask)
 
   def lockTask(id: UUID)(using DbTx): Option[ReviewTask] =
     sql"""select id, document_id, version_id, due_on, created_at, status, decided_at, decided_by, next_due_on,
-                 new_version_id, comment
+                 new_version_id, comment, reopens_id
           from dms.document_review where id = $id for update""".query[TaskRow].run().headOption.map(_.toTask)
 
   /** Review tasks of the documents `owner` is the owner of: open ones (of valid versions) by review date, or
@@ -124,7 +150,7 @@ private[core] object ReviewStore:
   def tasksOfOwner(owner: UserId, open: Boolean, limit: Int)(using DbTx): List[ReviewTask] =
     (if open then
        sql"""select r.id, r.document_id, r.version_id, r.due_on, r.created_at, r.status, r.decided_at,
-                    r.decided_by, r.next_due_on, r.new_version_id, r.comment
+                    r.decided_by, r.next_due_on, r.new_version_id, r.comment, r.reopens_id
              from dms.document_review r
              join dms.document d on d.id = r.document_id
              join dms.document_version v on v.id = r.version_id
@@ -132,7 +158,7 @@ private[core] object ReviewStore:
              order by r.due_on, r.created_at, r.id
              limit $limit""".query[TaskRow].run()
      else sql"""select r.id, r.document_id, r.version_id, r.due_on, r.created_at, r.status, r.decided_at,
-                    r.decided_by, r.next_due_on, r.new_version_id, r.comment
+                    r.decided_by, r.next_due_on, r.new_version_id, r.comment, r.reopens_id
              from dms.document_review r
              join dms.document d on d.id = r.document_id
              where d.owner_id = ${owner.value} and r.status <> 'Open'
@@ -142,14 +168,14 @@ private[core] object ReviewStore:
   /** Every review task of a document, the earliest first (evidence reports, DMS-57). */
   def tasksOfDocument(document: DocumentId)(using DbTx): List[ReviewTask] =
     sql"""select id, document_id, version_id, due_on, created_at, status, decided_at, decided_by, next_due_on,
-                 new_version_id, comment
+                 new_version_id, comment, reopens_id
           from dms.document_review where document_id = ${document.value}
           order by created_at, id""".query[TaskRow].run().map(_.toTask).toList
 
   /** Open tasks of valid versions with a review date up to `until`, the earliest first (DMS-141). */
   def openUntil(until: LocalDate)(using DbTx): List[ReviewTask] =
     sql"""select r.id, r.document_id, r.version_id, r.due_on, r.created_at, r.status, r.decided_at,
-                 r.decided_by, r.next_due_on, r.new_version_id, r.comment
+                 r.decided_by, r.next_due_on, r.new_version_id, r.comment, r.reopens_id
           from dms.document_review r
           join dms.document_version v on v.id = r.version_id
           where r.status = 'Open' and v.status in ('Published', 'ReviewDue') and r.due_on <= $until

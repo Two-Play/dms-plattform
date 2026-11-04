@@ -84,6 +84,7 @@ function Context({ item }: { item: InboxItem }) {
         ? t('tasks.reviewDateReached')
         : t('tasks.reviewAhead'),
     )
+    if (item.review.reopens) parts.push(t('tasks.reviewReopened'))
   }
   if (item.kind === 'Acknowledgement' && item.acknowledgement.validFrom) {
     parts.push(t('tasks.validFrom', { date: formatPlainDate(item.acknowledgement.validFrom) }))

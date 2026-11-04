@@ -6,7 +6,7 @@ import dms.authz.{Action, Authorizer, Groups, Policy, Role, RoleAssignments, Sub
 import dms.db.Db
 import dms.db.queue.OutboxEvent
 import dms.documents.{DocumentStatus, Publication}
-import dms.documents.core.{DocumentError, DocumentService}
+import dms.documents.core.{DocumentError, DocumentService, ReviewService}
 import dms.identity.{TenantOrganizations, UserDirectory}
 import dms.kernel.{DocumentId, TenantId, UserId}
 import dms.notifications.*
@@ -34,6 +34,7 @@ import scala.util.Try
   *   - `workflow.task-due-soon`, `workflow.task-overdue`, `workflow.task-escalated` (DMS-87): the candidates,
   *     their deputies when overdue, the escalation targets when escalated
   *   - `document.review-task-created` (DMS-141): the document's owner
+  *   - `document.review-task-reopened` (DMS-145, ADR 0061): the document's owner
   *   - `document.review-task-due-soon`, `-overdue`, `-escalated` (DMS-141): the owner, the owner's deputies
   *     when overdue, the escalation targets when escalated
   *   - `workflow.returned`: author and owner (changes requested or rejected)
@@ -118,6 +119,22 @@ final class PlatformNotificationEvents(
                     List(o),
                     Some(ref),
                     params("taskId", "dueOn")
+                  )
+                )
+              )
+            )
+        case ReviewService.Reopened =>
+          ZIO
+            .foreach(document)(ref => owner(ref).map(ref -> _))
+            .map(
+              _.toList.flatMap((ref, owner) =>
+                owner.map(o =>
+                  Notice(
+                    "review.task-reopened",
+                    NotificationCategory.Workflow,
+                    List(o),
+                    Some(ref),
+                    params("taskId", "dueOn", "revisionStatus")
                   )
                 )
               )
@@ -228,7 +245,8 @@ final class PlatformNotificationEvents(
                 NotificationCategory.Publication,
                 users("recipients"),
                 document,
-                params("version", "validFrom", "withdrawnBy", "reason")
+                params("version", "validFrom", "withdrawnBy", "reason") ++
+                  payload.get("publicationFailed").map(_ => "publicationFailed" -> "true")
               )
             )
           )
@@ -325,14 +343,24 @@ final class PlatformNotificationEvents(
                 now
               )
               .isPermitted
+            // Withdrawing is the way out if a retry cannot help; only a publication has it (ADR 0061).
+            mayWithdraw = Policy
+              .decide(
+                Subject(responsible, event.tenant, held),
+                Action.Withdraw,
+                DocumentApi.resource(event.tenant, d, v),
+                now
+              )
+              .isPermitted
           yield List(
             // Someone in two audiences gets the link of the list, which needs no reading permission.
             notice(managers, "audience" -> NotificationTemplates.Audience.Records),
             notice(admins, "audience"   -> NotificationTemplates.Audience.Admin),
             notice(
               List(responsible).diff(managers ++ admins),
-              "audience" -> NotificationTemplates.Audience.Owner,
-              "canRetry" -> mayRetry.toString
+              "audience"    -> NotificationTemplates.Audience.Owner,
+              "canRetry"    -> mayRetry.toString,
+              "canWithdraw" -> mayWithdraw.toString
             )
           ).filter(_.recipients.nonEmpty)
         }
@@ -402,6 +430,7 @@ object PlatformNotificationEvents:
     "workflow.task-overdue",
     "workflow.task-escalated",
     "document.review-task-created",
+    ReviewService.Reopened,
     "document.review-task-due-soon",
     "document.review-task-overdue",
     "document.review-task-escalated",

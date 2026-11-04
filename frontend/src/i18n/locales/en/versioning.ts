@@ -28,7 +28,7 @@ export const newVersion = {
   blocked: {
     OpenVersion: 'A new version is already in progress; finish it first.',
     ScheduledVersion:
-      'An approved version waits for its valid-from date; start the next version once it is valid.',
+      'An approved version waits for its valid-from date; start the next version once it is valid. If its publication failed for good, it can be withdrawn first.',
   },
   blockedOther: 'A new version cannot be started right now.',
 } as const

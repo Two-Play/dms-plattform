@@ -4,6 +4,10 @@ export const publications = {
     'The publication of this version failed (attempt {attempt} of {max}). It is retried automatically, next on {date}.',
   failed:
     'This version could not be published: all {max} attempts failed. It stays approved and does not become valid until the publication is retried.',
+  withdrawHint:
+    'If a retry cannot help, you can withdraw this version and then start a new one: use “Withdraw version” above.',
+  withdrawHintOthers:
+    'If a retry cannot help, holders of the owner role or those who approved this version can withdraw it; a new version can then be started.',
   cause: 'Cause:',
   technicalDetail: 'Technical detail',
   causes: {
@@ -23,7 +27,7 @@ export const publications = {
   failures: {
     title: 'Failed publications',
     description:
-      'Approved versions whose publication failed or is being retried. They do not become valid until it succeeds.',
+      'Approved versions whose publication failed or is being retried. They do not become valid until it succeeds. If a retry cannot help, holders of the owner role or those who approved a version can withdraw it on its document page.',
     loading: 'Loading failed publications',
     empty: 'No publication has failed.',
     caption: 'Versions with failed publications',

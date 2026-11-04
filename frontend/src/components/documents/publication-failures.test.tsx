@@ -77,6 +77,27 @@ describe('Failed publication on the document page', () => {
     )
   })
 
+  it('names the way out if a retry cannot help, by who can take it (DMS-145)', async () => {
+    const { rerender } = renderWith(
+      <PublicationStatusNotice documentId={documentId} versionId={versionId} canWithdraw />,
+      () => ok(failed),
+    )
+    expect(await screen.findByText(/you can withdraw this version/)).toBeInTheDocument()
+    rerender(<div />)
+    renderWith(<PublicationStatusNotice documentId={documentId} versionId={versionId} />, () =>
+      ok(failed),
+    )
+    expect(await screen.findByText(/those who approved this version/)).toBeInTheDocument()
+  })
+
+  it('does not suggest withdrawing while attempts are left', async () => {
+    renderWith(<PublicationStatusNotice documentId={documentId} versionId={versionId} />, () =>
+      ok({ ...failed, state: 'Retrying', attempts: 2, nextAttemptAt: '2026-10-29T12:00:00Z' }),
+    )
+    expect(await screen.findByTestId('publication-status')).toBeInTheDocument()
+    expect(screen.queryByText(/withdraw/)).not.toBeInTheDocument()
+  })
+
   it('offers no retry to those who may not', async () => {
     renderWith(<PublicationStatusNotice documentId={documentId} versionId={versionId} />, () =>
       ok({ ...failed, canRetry: false }),

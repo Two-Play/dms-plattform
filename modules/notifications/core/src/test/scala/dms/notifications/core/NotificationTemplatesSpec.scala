@@ -119,6 +119,48 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
         !hidden.body.contains("Reiserichtlinie")
       )
     },
+    test("a version withdrawn after its publication failed: the notice does not say it was in time") {
+      val params = Map(
+        "withdrawnBy"       -> "ben",
+        "validFrom"         -> "2027-01-01",
+        "reason"            -> "Pflichtfeld fehlt",
+        "version"           -> "2.0",
+        "publicationFailed" -> "true"
+      )
+      def render(language: Language) =
+        NotificationTemplates.render("publication.withdrawn", language, params, Some(doc), ctx(Some(facts)))
+      val de = render(Language.De)
+      val en = render(Language.En)
+      assertTrue(
+        de.body.contains("endgültig fehlgeschlagen"),
+        !de.body.contains("vor dem Gültigkeitsdatum"),
+        de.body.contains("Begründung: Pflichtfeld fehlt"),
+        en.body.contains("failed for good"),
+        !en.body.contains("before its valid-from date")
+      )
+    },
+    test("a review task open again says why, by when, and leads to the inbox") {
+      def render(language: Language, status: String) =
+        NotificationTemplates.render(
+          "review.task-reopened",
+          language,
+          Map("dueOn" -> "2027-01-01", "revisionStatus" -> status),
+          Some(doc),
+          ctx(Some(facts))
+        )
+      val de        = render(Language.De, "Withdrawn")
+      val en        = render(Language.En, "Discarded")
+      val discarded = render(Language.De, "Discarded")
+      assertTrue(
+        de.subject == "Überprüfung wieder offen: Reiserichtlinie (2.0)",
+        de.body.contains("zurückgezogen"),
+        de.body.contains("01.01.2027"),
+        discarded.body.contains("verworfen"),
+        en.subject == "Review open again: Reiserichtlinie (2.0)",
+        en.body.contains("was discarded and never took effect"),
+        de.link.contains("/tasks")
+      )
+    },
     test("task assigned: review or approval, the step, deputies acting for someone, a link to the inbox") {
       val params = Map("step" -> "Rechtsprüfung", "stepKind" -> "Approval", "actingFor" -> "ben")
       val de     = NotificationTemplates.render(
@@ -211,6 +253,8 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
       val de      = render("failure.rendition", Language.De, Some(facts), owner, "reason" -> "not_archivable")
       val en      = render("failure.publication", Language.En, Some(facts), owner, "reason" -> "legal_hold")
       val noRetry = render("failure.rendition", Language.En, Some(facts), owner, "canRetry" -> "false")
+      val canWithdraw =
+        render("failure.publication", Language.En, Some(facts), owner, "canWithdraw" -> "true")
       val listed  = render("failure.publication", Language.De, Some(facts), records, "reason" -> "timeout")
       val inAdmin = render("failure.rendition", Language.En, Some(facts), admin)
       val blind   = render("failure.rendition", Language.De, None, records, "reason" -> "unavailable")
@@ -224,6 +268,11 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
         en.body.contains("“Reiserichtlinie” (version 2.0)"),
         en.body.contains("a legal hold is active"),
         en.body.contains("has not become valid"),
+        // a retry cannot help every time: the notice of a publication names the way out, and who has it
+        en.body.contains("those who approved the version can withdraw it on the document page"),
+        canWithdraw.body.contains("you can withdraw the version on the document page"),
+        listed.body.contains("die Version auf der Dokumentseite zurückziehen"),
+        !de.body.contains("zurückziehen"),
         noRetry.body.contains("records management can retry it"),
         noRetry.body.contains("The reason is not known."),
         !noRetry.body.contains("You can retry"),

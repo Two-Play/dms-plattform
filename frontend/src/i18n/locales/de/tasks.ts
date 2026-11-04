@@ -29,6 +29,7 @@ export const tasks: Translation<typeof en.tasks> = {
   assignedTo: 'zugewiesen an',
   reviewDateReached: 'Rezertifizierungsdatum erreicht',
   reviewAhead: 'gültig, Rezertifizierung steht an',
+  reviewReopened: 'wieder offen: die Überarbeitung ist nie gültig geworden',
   validFrom: 'gültig ab {date}',
   onBehalfOf: 'In Vertretung für',
   vote: 'Abstimmen …',
