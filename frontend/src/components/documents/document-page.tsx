@@ -39,6 +39,7 @@ import { NewVersionAction } from './new-version-action'
 import { DiscardDraftAction } from './discard-draft-action'
 import { WithdrawVersionAction } from './withdraw-version-action'
 import { ChangeSummaryPanel } from './change-summary-panel'
+import { DeviationsPanel } from './deviations-panel'
 
 /** Whether the page shows the acknowledgement card for a version: valid and requiring it. */
 function asksForAcknowledgement(version: DocumentVersionView): boolean {
@@ -240,6 +241,14 @@ export function DocumentPage({
               )}
               <VersionMetadata document={document.data} version={shown} />
             </div>
+          )}
+          {!fileDocument && (
+            <DeviationsPanel
+              key={`deviations-${shown.id}`}
+              documentId={document.data.id}
+              version={shown}
+              editable={editing}
+            />
           )}
           <AttachmentsPanel
             key={`attachments-${shown.id}`}

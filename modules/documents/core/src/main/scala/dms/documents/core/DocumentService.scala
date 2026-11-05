@@ -17,6 +17,7 @@ import dms.templates.{
   DeviationReport,
   DeviationRequest,
   EditRules,
+  EditViolation,
   MissingComputed,
   SectionId,
   TemplateContent,
@@ -50,11 +51,17 @@ enum WithdrawalRefusal(val code: String):
   /** The version was never approved. */
   case NotApproved extends WithdrawalRefusal("version_not_approved")
 
+/** A violation of the edit rules that blocks submission, with the title of the section it concerns. */
+final case class UnauthorizedDeviation(violation: EditViolation, sectionTitle: Option[String])
+
 enum DocumentError:
   case NotFound(message: String)
 
   /** The request is invalid, e.g. a content change that breaks the edit rules of the template. */
   case Invalid(problems: List[String])
+
+  /** Submission is blocked: the content breaks the edit rules of the template (US-01.1, ADR 0069). */
+  case UnauthorizedDeviations(deviations: List[UnauthorizedDeviation])
 
   /** Field values do not fit the class profile. */
   case InvalidValues(issues: List[FieldIssue])
@@ -75,6 +82,7 @@ enum DocumentError:
   def describe: String = this match
     case NotFound(m)                => m
     case Invalid(p)                 => p.mkString("; ")
+    case UnauthorizedDeviations(d)  => d.map(_.violation.reason).mkString("; ")
     case InvalidValues(i)           => i.map(i => s"${i.field}: ${i.kind.message}").mkString("; ")
     case Incomplete(target, issues) =>
       s"the document cannot move to $target: " + issues
@@ -1653,8 +1661,10 @@ final class DocumentService(
     for
       template <- templates.version(current.templateId, current.templateVersion)
       requests <- activeRequests(current.id)
-      violations = EditRules.check(template.content, current.content, requests).map(_.reason)
-      _ <- ZIO.unless(violations.isEmpty)(ZIO.fail(DocumentError.Invalid(violations)))
+      violations = EditRules.check(template.content, current.content, requests)
+      _ <- ZIO.unless(violations.isEmpty)(
+        ZIO.fail(DocumentError.UnauthorizedDeviations(unauthorized(template, current, violations)))
+      )
       report = DeviationReport.compare(template.content, current.content, requests)
       updated <-
         if report == current.deviations then ZIO.succeed(current)
@@ -1663,6 +1673,15 @@ final class DocumentService(
             .filterOrFail(identity)(changedConcurrently(current))
             .as(current.copy(deviations = report))
     yield updated
+
+  /** The violations with the title of their section; a removed section only has one in the template. */
+  private def unauthorized(
+      template: TemplateVersion,
+      current: DocumentVersion,
+      violations: List[EditViolation]
+  ): List[UnauthorizedDeviation] =
+    val sections = current.content.sections ++ template.content.sections
+    violations.map(v => UnauthorizedDeviation(v, sections.find(_.id == v.section).flatMap(_.title)))
 
   private def released(id: TemplateId, version: Int): IO[DocumentError, TemplateVersion] =
     templates

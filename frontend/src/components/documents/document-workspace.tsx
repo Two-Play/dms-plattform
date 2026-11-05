@@ -10,6 +10,7 @@ import {
   submitDocument,
   updateDraft,
 } from '@/api/documents'
+import { UNAUTHORIZED_DEVIATIONS } from '@/api/deviations'
 import { ApiRequestError, type FieldIssue } from '@/api/errors'
 import {
   partnerAttribute,
@@ -25,9 +26,10 @@ import {
 } from '@/api/templates'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { t } from '@/i18n'
+import { t, tOptional } from '@/i18n'
 import { useDebouncedValue } from '@/lib/use-debounced-value'
 import { CONFIDENTIALITY_FIELD, isRestrictedInput, withoutHiddenGroups } from './access-groups'
+import { lockedSectionId } from './deviation-labels'
 import { DocumentForm } from './document-form'
 import { DocumentPreview } from './document-preview'
 import { inputsFromDraft, partnerFromDraft } from './draft-values'
@@ -92,7 +94,14 @@ type SaveState =
   | { kind: 'saving' }
   | { kind: 'submitting' }
   | { kind: 'saved'; label: string; warning?: string }
-  | { kind: 'failed'; message: string; missing?: FieldIssue[]; hint?: string }
+  | {
+      kind: 'failed'
+      message: string
+      missing?: FieldIssue[]
+      hint?: string
+      /** Sections that break the edit rules of the template (ADR 0069): `field` is the section id. */
+      sections?: FieldIssue[]
+    }
 
 /** Issue code of a required retention rule whose document class has none (DMS-133). */
 const NO_RETENTION_RULE = 'no_retention_rule'
@@ -103,6 +112,11 @@ function issueMessage(issue: FieldIssue): string {
   return computed.length > 0
     ? t('docs.workspace.computedMissing', { fields: computed.join(', ') })
     : issue.message
+}
+
+/** Why a section blocks the submission, in the language of the UI. */
+function violationMessage(issue: FieldIssue): string {
+  return tOptional(`deviations.blocked.violation.${issue.code}`) ?? issue.message
 }
 
 /** A backend issue for a field, shown while the field still has the value that was sent. */
@@ -344,7 +358,16 @@ export function DocumentWorkspace({
       toast(t('docs.workspace.submitted'))
       onSubmitted?.(documentId, submitted)
     } catch (e) {
-      if (e instanceof ApiRequestError && e.code === 'incomplete') {
+      if (e instanceof ApiRequestError && e.code === UNAUTHORIZED_DEVIATIONS) {
+        setSaveState({
+          kind: 'failed',
+          message: t('deviations.blocked.message'),
+          sections: e.issues,
+          hint: t('deviations.blocked.hint'),
+        })
+        // Requests may have changed elsewhere; the panel below shows what the server refused.
+        void queryClient.invalidateQueries({ queryKey: ['documents', documentId] })
+      } else if (e instanceof ApiRequestError && e.code === 'incomplete') {
         // A missing retention rule is not entered by authors: the class has none (DMS-133).
         const noRule = e.issues.some((i) => i.code === NO_RETENTION_RULE)
         const missing = e.issues.filter((i) => i.code !== NO_RETENTION_RULE)
@@ -454,6 +477,28 @@ export function DocumentWorkspace({
               <div role="alert" className="text-destructive">
                 <p>{saveState.message}</p>
                 {saveState.hint && <p className="mt-1">{saveState.hint}</p>}
+                {saveState.sections && saveState.sections.length > 0 && (
+                  <ul className="mt-1 list-disc pl-4" data-testid="blocked-sections">
+                    {saveState.sections.map((issue) => (
+                      <li key={`${issue.field}:${issue.code}`}>
+                        {issue.code.startsWith('locked_section') ? (
+                          <button
+                            type="button"
+                            className="underline underline-offset-2"
+                            onClick={() => {
+                              document.getElementById(lockedSectionId(issue.field))?.focus()
+                            }}
+                          >
+                            {issue.label}
+                          </button>
+                        ) : (
+                          issue.label
+                        )}{' '}
+                        {violationMessage(issue)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {saveState.missing && saveState.missing.length > 0 && (
                   <ul className="mt-1 list-disc pl-4">
                     {saveState.missing.map((issue) => (

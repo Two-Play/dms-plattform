@@ -1,5 +1,5 @@
 import { AlertTriangle, Loader2 } from 'lucide-react'
-import type { MouseEvent } from 'react'
+import type { CSSProperties, MouseEvent } from 'react'
 import type { ConditionHint, MissingValue, Preview, PreviewIssue } from '@/api/templates'
 import { Badge } from '@/components/ui/badge'
 import { t } from '@/i18n'
@@ -138,7 +138,10 @@ export function DocumentPreview({ preview, updating, error, onFocusField }: Docu
             // A size container: the document stylesheet adapts to the width of the preview, not the screen.
             // overflow-x-clip instead of overflow-auto, so the draft watermark can stick while scrolling.
             <div
-              className="@container overflow-x-clip rounded-lg bg-muted p-2 md:p-4"
+              className="dms-locked-marks @container overflow-x-clip rounded-lg bg-muted p-2 md:p-4"
+              style={
+                { '--dms-locked-label': JSON.stringify(t('deviations.locked')) } as CSSProperties
+              }
               data-testid="document-preview"
               onClick={onClick}
               dangerouslySetInnerHTML={{ __html: preview.html }}
