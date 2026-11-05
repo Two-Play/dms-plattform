@@ -56,10 +56,11 @@ enum Role:
   * administrator included; users without any role assignment may not browse the directory.
   *
   * `RetryRendition` is requeueing the rendering job of a version whose archive rendition failed (DMS-93, ADR
-  * 0055): on a version in approval, the document's owner (without owner: the author, who gets the failure
-  * notice instead), records managers and tenant administrators; on the tenant (the list of failed renditions)
-  * records managers and tenant administrators. A retry changes nothing but the job's schedule, so it needs no
-  * reading permission; confidentiality still applies.
+  * 0055): on a version in approval, the person named owner (without owner: the author, who gets the failure
+  * notice instead) with any active role that covers the document, whichever it is (DMS-146, ADR 0064),
+  * records managers and tenant administrators; on the tenant (the list of failed renditions) records managers
+  * and tenant administrators for the whole tenant. A retry changes nothing but the job's schedule, so it
+  * needs no reading permission; confidentiality still applies.
   *
   * `RetryPublication` is the same for the publication job of an approved version (DMS-142, ADR 0058): the
   * same people, on a version in status `Approved`, and on the tenant for the list.

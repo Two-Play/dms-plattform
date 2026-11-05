@@ -170,5 +170,18 @@ object DeputyRulesSpec extends ZIOSpecDefault:
         val forDora = deputyship(principal = dora)
         assertTrue(deputies(List(forDora, forAnna)) == List(TaskDeputy(ben, anna)))
       }
+    ),
+    suite("who answers for a version (DMS-146)")(
+      test("the deputy of the role the principal answers in, who still holds it, for the document's class") {
+        def deputies(d: Deputyship, role: String, held: Set[String] = Set("Author")) =
+          Rules.deputiesInRole(anna, role, List("contract"), List(d), Map(ben -> held), now)
+        val author = deputyship(roles = List("Author"))
+        assertTrue(
+          deputies(author, "Author") == List(TaskDeputy(ben, anna)),
+          deputies(author, "Owner").isEmpty,
+          deputies(author, "Author", held = Set("Reader")).isEmpty,
+          deputies(deputyship(roles = List("Author"), cls = Some("policy")), "Author").isEmpty
+        )
+      }
     )
   )

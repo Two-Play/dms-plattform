@@ -232,9 +232,10 @@ object Policy:
         if resource.isDocument then
           requireStatus(status)(
             grantIf(
-              has(TenantAdmin) || has(RecordsManager) ||
-                (has(Owner) && resource.ownerId.contains(subject.userId)) ||
-                ((has(Author) || has(Owner)) && resource.ownerId.isEmpty && isAuthor),
+              // Being named is enough (ADR 0064): the rule above has already asked for an active role that
+              // covers the document, and a retry changes nothing but the job's schedule.
+              has(TenantAdmin) || has(RecordsManager) || resource.ownerId.contains(subject.userId) ||
+                (resource.ownerId.isEmpty && isAuthor),
               s"retrying a $what requires being the document's owner (or, without owner, its author), " +
                 "the records manager or the tenant administrator role"
             )

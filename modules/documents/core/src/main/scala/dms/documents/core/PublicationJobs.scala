@@ -70,8 +70,8 @@ final class PublicationJobs(db: Db, service: DocumentService, config: Publicatio
 
   private def publish(job: ClaimedJob): IO[String, Unit] =
     for
-      tenant  <- ZIO.fromOption(job.tenant).orElseFail(s"job ${job.id} ($PublishKind) has no tenant")
-      version <- ZIO.fromEither(versionOf(job.payload))
+      tenant <- ZIO.fromOption(job.tenant).orElseFail(s"[invalid] job ${job.id} ($PublishKind) has no tenant")
+      version <- ZIO.fromEither(versionOf(job.payload)).mapError(e => s"[invalid] $e")
       _       <- db.transact(tenant)(service.publishScheduled(version)).mapError(jobError)
     yield ()
 

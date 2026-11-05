@@ -586,20 +586,35 @@ final class ApprovalWorkflow(
           }
     yield DeadlineAudience(subject.owner.toList, deputies, targets)
 
-  private def ownerDeputies(subject: ReviewSubject): IO[WorkflowError, List[TaskDeputy]] =
-    subject.owner.fold(ZIO.succeed(List.empty[TaskDeputy])) { owner =>
-      for
-        now         <- Clock.instant
-        deputyships <- sql(DeputyStore.activeForPrincipals(List(owner), now))
-        // A deputy who may not see a confidential version holds no role for it (DMS-101).
-        cleared     <- directory.cleared(deputyships.map(_.deputy).toSet, subject)
-        deputyRoles <- ZIO
-          .foreach(deputyships.map(_.deputy).distinct.filter(cleared.contains))(d =>
-            directory.heldRoles(d).map(held => d -> held.filter(_.isActiveAt(now)).map(_.role).toSet)
-          )
-          .map(_.toMap)
-      yield Rules.ownerDeputies(owner, subject.classPath, deputyships, deputyRoles, now)
+  /** The active deputies of whoever answers for a version, the document's owner or, without owner, its author
+    * (DMS-146, ADR 0064), for information. Like [[ownerDeadlineAudience]] they are told and decide nothing.
+    */
+  def responsibleDeputies(document: DocumentId, version: UUID): IO[WorkflowError, List[TaskDeputy]] =
+    documents.subject(document, version).flatMap { subject =>
+      subject.owner.fold(deputiesOf(subject.author, Rules.AuthorRole, subject))(
+        deputiesOf(_, Rules.OwnerRole, subject)
+      )
     }
+
+  private def ownerDeputies(subject: ReviewSubject): IO[WorkflowError, List[TaskDeputy]] =
+    subject.owner.fold(ZIO.succeed(List.empty[TaskDeputy]))(deputiesOf(_, Rules.OwnerRole, subject))
+
+  private def deputiesOf(
+      principal: UserId,
+      role: String,
+      subject: ReviewSubject
+  ): IO[WorkflowError, List[TaskDeputy]] =
+    for
+      now         <- Clock.instant
+      deputyships <- sql(DeputyStore.activeForPrincipals(List(principal), now))
+      // A deputy who may not see a confidential version holds no role for it (DMS-101).
+      cleared     <- directory.cleared(deputyships.map(_.deputy).toSet, subject)
+      deputyRoles <- ZIO
+        .foreach(deputyships.map(_.deputy).distinct.filter(cleared.contains))(d =>
+          directory.heldRoles(d).map(held => d -> held.filter(_.isActiveAt(now)).map(_.role).toSet)
+        )
+        .map(_.toMap)
+    yield Rules.deputiesInRole(principal, role, subject.classPath, deputyships, deputyRoles, now)
 
   /** The deadline of a task as stored when it was created. */
   private def deadlineOfRow(t: TaskRow): Option[TaskDeadline] =

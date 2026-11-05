@@ -325,13 +325,26 @@ final case class ObjectLockConfig(
   *   read in-app notifications and finished deliveries are deleted after this many days
   * @param smtp
   *   SMTP server; an empty host turns email off (in-app only)
+  * @param failureReminderDays
+  *   days after a job failed for good on which those who have not read its notice are reminded (DMS-146);
+  *   empty: no reminders
+  * @param failureReminderCheckSeconds
+  *   how often the reminder check runs per tenant
   */
 final case class NotificationsConfig(
     appBaseUrl: String,
     maxAttempts: Int,
     retentionDays: Int,
-    smtp: dms.notifications.core.SmtpConfig
+    smtp: dms.notifications.core.SmtpConfig,
+    failureReminderDays: List[Int] = FailureReminderConfig.DefaultDays,
+    failureReminderCheckSeconds: Int = 3600
 ):
+  def failureReminders: FailureReminderConfig =
+    FailureReminderConfig(
+      failureReminderDays.filter(_ > 0).distinct.sorted,
+      zio.Duration.fromSeconds(failureReminderCheckSeconds.max(1).toLong)
+    )
+
   def settings: dms.notifications.core.DeliverySettings =
     dms.notifications.core.DeliverySettings(
       appBaseUrl,

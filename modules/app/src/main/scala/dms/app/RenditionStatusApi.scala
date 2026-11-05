@@ -2,7 +2,7 @@ package dms.app
 
 import com.augustnagro.magnum.sql
 import dms.audit.*
-import dms.authz.{Action, Resource}
+import dms.authz.{Action, Confidentiality, Resource}
 import dms.db.{Db, DbError, Jsonb}
 import dms.documents.DocumentStatus
 import dms.documents.core.DocumentError
@@ -21,8 +21,9 @@ import java.time.{Instant, OffsetDateTime}
 import java.util.UUID
 
 /** Why the last attempt failed. `code` (`unavailable`, `rejected`, `not_archivable`, `invalid`, `integrity`,
-  * `database`) says what kind of failure it was, so the client can explain it; `message` is the technical
-  * detail.
+  * `database`, `timeout`, `internal`; of a publication `conflict`, `legal_hold`, `invalid`, `not_found`,
+  * `database`, `timeout`, `internal`) says what kind of failure it was, so the client can explain it;
+  * `message` is the technical detail.
   */
 final case class RenditionErrorView(code: Option[String], message: String) derives JsonCodec, Schema
 
@@ -119,8 +120,8 @@ object RenditionStatusApi:
       .description(
         "Requeues the rendering job of a version in approval whose rendition failed (Failed: starts over with " +
           "all attempts) or waits for its next attempt (Retrying: runs now). 409 rendition_not_failed in any " +
-          "other state. Requires RetryRendition: the document's owner (without owner: its author), records " +
-          "managers and tenant administrators. Audited."
+          "other state. Requires RetryRendition: the person named owner (without owner: the author) with any " +
+          "role covering the document, records managers and tenant administrators. Audited."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -203,40 +204,47 @@ object RenditionStatusApi:
       .out(jsonBody[List[RenditionFailureView]])
       .description(
         "Versions in approval whose rendition failed (Failed) or is being retried (Retrying), most recent first, " +
-          "at most 200. Requires RetryRendition on the tenant (records managers, tenant administrators); the " +
-          "title is left out where the caller may not retry (e.g. not cleared for the document's confidentiality)."
+          "at most 200 of the tenant before the filter. Records managers and tenant administrators see those " +
+          "their role covers, everyone else those they are named owner of (without owner: author of); for others " +
+          "the list is empty. The title is left out where the caller may not retry (e.g. not cleared for the " +
+          "document's confidentiality)."
       )
       .tag("Documents")
       .serverLogic(p =>
         _ =>
           DocumentApi.inTransaction(p) { ctx =>
             for
-              _    <- ctx.check(Action.RetryRendition, Resource(p.tenantId))
-              jobs <- failedJobs
-              rows <- ZIO.foreach(jobs) { job =>
+              tenantWide <- ctx.allowed(Action.RetryRendition, Resource(p.tenantId))
+              jobs       <- failedJobs
+              rows       <- ZIO.foreach(jobs) { job =>
                 for
                   details <- ctx.service.get(DocumentId(job.documentId))
                   version = details.versions.find(_.id == job.versionId)
                   view <- version.fold(ZIO.none) { v =>
                     val resource = DocumentApi.resource(p.tenantId, details, v)
-                    ctx.allowed(Action.RetryRendition, resource).map { retry =>
-                      Some(
-                        RenditionFailureView(
-                          job.documentId,
-                          job.versionId,
-                          v.label,
-                          Option.when(retry)(details.document.title),
-                          stateOf(job.row),
-                          job.row.attempts,
-                          job.row.maxAttempts,
-                          job.row.createdAt,
-                          nextAttempt(job.row),
-                          job.row.finishedAt,
-                          job.row.lastError.map(errorView),
-                          retry
+                    (ctx.allowed(Action.RetryRendition, resource) <*> covers(
+                      ctx,
+                      Action.RetryRendition,
+                      resource
+                    ))
+                      .map { (retry, covered) =>
+                        Option.when(tenantWide || covered)(
+                          RenditionFailureView(
+                            job.documentId,
+                            job.versionId,
+                            v.label,
+                            Option.when(retry)(details.document.title),
+                            stateOf(job.row),
+                            job.row.attempts,
+                            job.row.maxAttempts,
+                            job.row.createdAt,
+                            nextAttempt(job.row),
+                            job.row.finishedAt,
+                            job.row.lastError.map(errorView),
+                            retry
+                          )
                         )
-                      )
-                    }
+                      }
                   }
                 yield view
               }
@@ -328,6 +336,12 @@ object RenditionStatusApi:
           FailedJob(doc, version, row((status, attempts, max, runAt, error, created, finished)))
         }
     ).mapError((e: DbError) => DocumentError.Database(e))
+
+  /** Whether a version belongs in the caller's failure list: they could retry it but for its confidentiality
+    * (ADR 0064). Someone not cleared gets the row without title, as tenant-wide records managers always did.
+    */
+  private[app] def covers(ctx: DocumentApi.Context, retry: Action, resource: Resource): UIO[Boolean] =
+    ctx.allowed(retry, resource.copy(confidentiality = Confidentiality.Internal))
 
   private[app] def stateOf(job: JobRow): String = job.status match
     case "dead"                       => Failed

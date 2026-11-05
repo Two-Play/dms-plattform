@@ -6,7 +6,7 @@ import type { components } from './schema'
 /**
  * Scheduled publications (DMS-142, ADR 0058): the state of the publication job of an approved
  * version, the retry for the document's owner, records managers and tenant administrators, and the
- * list of failed publications of the tenant for the records view.
+ * list of failed publications the caller's role covers or they are named for (ADR 0064).
  */
 
 export type PublicationStatus = components['schemas']['PublicationStatusView']
@@ -17,7 +17,8 @@ export type PublicationError = components['schemas']['RenditionErrorView']
 export type PublicationState = 'Pending' | 'Retrying' | 'Failed' | 'None'
 
 /** The failure codes the backend reports for publications. */
-export type PublicationErrorCode = 'conflict' | 'legal_hold' | 'invalid' | 'not_found' | 'database'
+export type PublicationErrorCode =
+  'conflict' | 'legal_hold' | 'invalid' | 'not_found' | 'database' | 'timeout' | 'internal'
 
 const ERROR_CODES: ReadonlySet<string> = new Set([
   'conflict',
@@ -25,6 +26,8 @@ const ERROR_CODES: ReadonlySet<string> = new Set([
   'invalid',
   'not_found',
   'database',
+  'timeout',
+  'internal',
 ])
 
 /** The failure code if the backend sent a known one. */

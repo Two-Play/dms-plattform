@@ -34,6 +34,15 @@ export function canManageLegalHolds(me: Me | undefined): boolean {
   )
 }
 
+/**
+ * Whether the user is a records manager of a unit or class only (DMS-146, ADR 0064): legal holds are
+ * closed to them, so the failures their role covers have a page of their own.
+ */
+export function hasRestrictedRecordsRole(me: Me | undefined): boolean {
+  const records = (me?.assignments ?? []).filter((a) => a.role === 'RecordsManager')
+  return records.length > 0 && !canManageLegalHolds(me)
+}
+
 /** The search of the search page as a hold filter, without confirmation. */
 export interface HoldSearch {
   q?: string

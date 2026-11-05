@@ -161,20 +161,35 @@ object Rules:
       deputyRoles: Map[UserId, Set[String]],
       now: Instant
   ): List[TaskDeputy] =
+    deputiesInRole(owner, OwnerRole, classPath, deputyships, deputyRoles, now)
+
+  /** Like [[ownerDeputies]] for the role `principal` is responsible in: `Owner`, or `Author` for the author
+    * of a document without owner (DMS-146, ADR 0064). Being told decides nothing, so the rule of ADR 0028
+    * that nobody stands in for an author's vote is not touched.
+    */
+  def deputiesInRole(
+      principal: UserId,
+      role: String,
+      classPath: List[String],
+      deputyships: List[Deputyship],
+      deputyRoles: Map[UserId, Set[String]],
+      now: Instant
+  ): List[TaskDeputy] =
     deputyships
       .filter(d =>
         d.isActiveAt(now) &&
-          d.principal == owner &&
-          d.deputy != owner &&
-          d.roles.contains(OwnerRole) &&
+          d.principal == principal &&
+          d.deputy != principal &&
+          d.roles.contains(role) &&
           d.documentClass.forall(classPath.contains) &&
-          deputyRoles.getOrElse(d.deputy, Set.empty).contains(OwnerRole)
+          deputyRoles.getOrElse(d.deputy, Set.empty).contains(role)
       )
       .sortBy(_.deputy.value)
       .map(d => TaskDeputy(d.deputy, d.principal))
       .distinctBy(_.deputy)
 
-  private val OwnerRole = "Owner"
+  val OwnerRole  = "Owner"
+  val AuthorRole = "Author"
 
   /** BPMN element id of the user task of a lane. */
   def taskKey(step: String, lane: String): String = s"task.$step.$lane"

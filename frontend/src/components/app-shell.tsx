@@ -16,11 +16,12 @@ import {
   Settings,
   ShieldCheck,
   Sun,
+  TriangleAlert,
   UserRoundCheck,
 } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 import { useAuth } from 'react-oidc-context'
-import { canManageLegalHolds } from '@/api/legal-holds'
+import { canManageLegalHolds, hasRestrictedRecordsRole } from '@/api/legal-holds'
 import { canManageRetention } from '@/api/retention'
 import { hasRole, useMe, type BusinessRole, type Me } from '@/api/me'
 import { displayName } from '@/auth/profile'
@@ -58,6 +59,7 @@ const navItems: readonly {
     | '/templates'
     | '/compliance'
     | '/legal-holds'
+    | '/failures'
     | '/retention'
     | '/admin'
   label: keyof Messages['shell']['nav']
@@ -74,6 +76,9 @@ const navItems: readonly {
   { to: '/compliance', label: 'compliance', icon: ShieldCheck, role: 'ComplianceOfficer' },
   // Records managers for the whole tenant: the only ones the legal hold endpoints accept (ADR 0047).
   { to: '/legal-holds', label: 'legalHolds', icon: Scale, allowed: canManageLegalHolds },
+  // Records managers of a unit or class reach their failures here (DMS-146, ADR 0064); those named
+  // for a document come from the notice.
+  { to: '/failures', label: 'failures', icon: TriangleAlert, allowed: hasRestrictedRecordsRole },
   // Retention and destruction (DMS-82, ADR 0054): the same records managers.
   { to: '/retention', label: 'retention', icon: Archive, allowed: canManageRetention },
   { to: '/admin', label: 'admin', icon: Settings, role: 'TenantAdmin' },

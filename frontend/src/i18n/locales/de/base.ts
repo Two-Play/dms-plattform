@@ -43,6 +43,7 @@ export const shell: Translation<typeof en.shell> = {
     templates: 'Vorlagen',
     compliance: 'Compliance',
     legalHolds: 'Legal Holds',
+    failures: 'Fehlgeschlagene Verarbeitungen',
     retention: 'Aufbewahrung',
     admin: 'Administration',
   },

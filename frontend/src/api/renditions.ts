@@ -7,7 +7,7 @@ import type { components } from './schema'
  * Archive renditions (DMS-93, ADR 0055): the state of a version's rendition while it waits for
  * approval (pending, retried automatically with backoff, failed), the retry action for the
  * document's owner, records managers and tenant administrators, and the list of failed renditions
- * of the tenant for the records view.
+ * the caller's role covers or they are named for (ADR 0064).
  */
 
 export type RenditionStatus = components['schemas']['RenditionStatusView']
@@ -19,7 +19,14 @@ export type RenditionState = 'Done' | 'Pending' | 'Retrying' | 'Failed' | 'None'
 
 /** The failure codes the backend reports (`RenditionErrorView.code`). */
 export type RenditionErrorCode =
-  'unavailable' | 'rejected' | 'not_archivable' | 'invalid' | 'integrity' | 'database'
+  | 'unavailable'
+  | 'rejected'
+  | 'not_archivable'
+  | 'invalid'
+  | 'integrity'
+  | 'database'
+  | 'timeout'
+  | 'internal'
 
 const ERROR_CODES: ReadonlySet<string> = new Set([
   'unavailable',
@@ -28,6 +35,8 @@ const ERROR_CODES: ReadonlySet<string> = new Set([
   'invalid',
   'integrity',
   'database',
+  'timeout',
+  'internal',
 ])
 
 /** The failure code if the backend sent a known one. */

@@ -175,6 +175,28 @@ object WorkersSpec extends ZIOSpecDefault:
           .either
       yield assertTrue(visibleB == 0L, foreign.left.exists(_.isInstanceOf[DbError.PermissionDenied]))
     },
+    test("a defect is recorded with the failure code internal (DMS-146)") {
+      for
+        env <- ZIO.service[Env]
+        t   <- newTenant
+        id  <- env.app.transact(t)(JobQueue.enqueue("test.defect", maxAttempts = 1))
+        _   <- drain(
+          JobRunner(
+            env.app,
+            Map("test.defect" -> (_ => ZIO.die(RuntimeException("boom")))),
+            config("w4")
+          ).runOnce
+        )
+        code <- env.owner.transactSystem(
+          Db.sql(
+            sql"select dms.job_failure_code(last_error) from dms.job where id = ${id.get}"
+              .query[Option[String]]
+              .run()
+              .head
+          )
+        )
+      yield assertTrue(code.contains("internal"))
+    },
     test("system jobs carry no tenant and tenants can be listed for fan-out") {
       for
         env <- ZIO.service[Env]

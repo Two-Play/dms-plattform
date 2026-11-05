@@ -292,12 +292,15 @@ object RenditionApiSpec extends ZIOSpecDefault:
       .fromJson[A]
       .fold(e => throw AssertionError(s"$e: ${response.status} ${response.text}"), identity)
 
-  private def values(partner: String, validFrom: String) =
+  private def values(partner: String, validFrom: String, owner: UserId, access: Option[String]) =
     s""""contractPartner":{"type":"Text","value":"$partner"},
-       |"owner":{"type":"PersonRef","userId":"${author.value}"},
+       |"owner":{"type":"PersonRef","userId":"${owner.value}"},
        |"organizationalUnit":{"type":"Text","value":"Legal"},
        |"validFrom":{"type":"Date","value":"$validFrom"},
-       |"confidentiality":{"type":"Selection","code":"Internal"},
+       |"confidentiality":{"type":"Selection","code":"${access.fold("Internal")(_ => "Confidential")}"},
+       |${access.fold("")(g =>
+        s""""allowedGroups":{"type":"Many","values":[{"type":"Text","value":"$g"}]},"""
+      )}
        |"language":{"type":"Text","value":"de"},
        |"retentionRule":{"type":"Text","value":"contract-10y"},
        |"containsPersonalData":{"type":"YesNo","value":false}""".stripMargin
@@ -305,7 +308,9 @@ object RenditionApiSpec extends ZIOSpecDefault:
   /** A document submitted, reviewed and approved by the last vote: its case waits for the rendition. */
   private def approvedByVotes(
       partner: String,
-      validFrom: String = "2027-01-01"
+      validFrom: String = "2027-01-01",
+      owner: UserId = author,
+      access: Option[String] = None
   ): ZIO[Env, Nothing, (DocumentView, WorkflowCaseView)] =
     for
       s       <- setup.await
@@ -315,7 +320,7 @@ object RenditionApiSpec extends ZIOSpecDefault:
         "/api/v1/documents",
         Some(
           s"""{"templateId":"${s.released.value}","templateVersion":1,"title":"Vertrag $partner",
-             |"values":{${values(partner, validFrom)}}}""".stripMargin
+             |"values":{${values(partner, validFrom, owner, access)}}}""".stripMargin
         )
       ).map(as[DocumentView])
       _       <- call(author, "POST", s"/api/v1/documents/${created.id}/submit")
@@ -417,9 +422,12 @@ object RenditionApiSpec extends ZIOSpecDefault:
 
   /** The dead-job events of a document as the outbox relay hands them out. */
   private def deadEvents(documentId: UUID): ZIO[Any, DbError, List[OutboxEvent]] =
+    events(documentId, "%-dead")
+
+  private def events(documentId: UUID, types: String): ZIO[Any, DbError, List[OutboxEvent]] =
     ownerQuery(
       sql"""select id, event_type, payload::text from dms.outbox_event
-            where aggregate_id = $documentId and event_type like '%-dead' order by id"""
+            where aggregate_id = $documentId and event_type like $types order by id"""
         .query[(Long, String, String)]
         .run()
         .toList
@@ -448,7 +456,9 @@ object RenditionApiSpec extends ZIOSpecDefault:
       PlatformNotificationEvents(
         documents,
         RoleAssignments.Postgres,
-        dms.archive.core.LegalHoldService(audit)
+        dms.archive.core.LegalHoldService(audit),
+        Some(workflow),
+        Some(Groups.Postgres)
       ),
       PolicyNotificationDocuments(documents, workflow, authz, RoleAssignments.Postgres, Groups.Postgres),
       directory,
@@ -457,13 +467,44 @@ object RenditionApiSpec extends ZIOSpecDefault:
     )
 
   /** Hands the document's dead-job events to the subscriber and runs the delivery jobs. */
-  private def deliverDead(documentId: UUID, jobs: NotificationJobs) =
+  private def deliverDead(documentId: UUID, jobs: NotificationJobs) = deliver(documentId, "%-dead", jobs)
+
+  private def deliver(documentId: UUID, types: String, jobs: NotificationJobs) =
     for
-      s      <- setup.await
-      events <- deadEvents(documentId)
-      _      <- ZIO.foreachDiscard(events)(jobs.deliver).orDieWith(RuntimeException(_))
-      _      <- JobRunner(s.app, jobs.handlers, WorkerConfig("notice-worker")).runOnce
+      s     <- setup.await
+      found <- events(documentId, types)
+      _     <- ZIO.foreachDiscard(found)(jobs.deliver).orDieWith(RuntimeException(_))
+      _     <- JobRunner(s.app, jobs.handlers, WorkerConfig("notice-worker")).runOnce
     yield ()
+
+  /** Runs `body` while `grants` hold; they would otherwise count as records managers in the other tests. */
+  private def withRoles[A](grants: (UserId, RoleAssignment)*)(body: ZIO[Env, DbError, A]) =
+    for
+      s   <- setup.await
+      ids <- s.app.transact(tenantId)(
+        ZIO.foreach(grants)((user, role) => RoleAssignments.Postgres.grant(user, role, admin))
+      )
+      result <- body.ensuring(
+        s.app
+          .transact(tenantId)(ZIO.foreach(ids)(RoleAssignments.Postgres.revoke(_, Instant.now())))
+          .orDieWith(e => RuntimeException(e.toString))
+      )
+    yield result
+
+  private def failedAt(versionId: UUID) =
+    ownerQuery(
+      sql"""select finished_at from dms.job where idempotency_key = ${"rendition:" + versionId}"""
+        .query[java.time.OffsetDateTime]
+        .run()
+        .head
+        .toInstant
+    )
+
+  /** The follow-ups of a process with the default reminder days. */
+  private val followUps =
+    (setup.await <*> ZIO.service[AuditTrail]).map((s, audit) =>
+      FailureFollowUps(s.app, audit, FailureReminderConfig())
+    )
 
   /** The in-app notices of a document: recipient, subject, body and link, oldest first. */
   private def notices(documentId: UUID) =
@@ -672,8 +713,8 @@ object RenditionApiSpec extends ZIOSpecDefault:
         retrying.lastError.exists(e =>
           e.code.contains("unavailable") && e.message.contains("connection refused")
         ),
-        // the author is named owner but holds no owner role: may see, not retry
-        !retrying.canRetry,
+        // the author is named owner: the role does not matter (ADR 0064)
+        retrying.canRetry,
         // the tenant administrator cannot read a version in approval (no business role)
         byAdmin.status == Status.Forbidden,
         listed.exists(f =>
@@ -698,8 +739,8 @@ object RenditionApiSpec extends ZIOSpecDefault:
         _          <- jobs(renderer = Some(unavailable)).flatMap(runJobs)
         dead       <- renditionJob(version)
         listed     <- failures(admin).map(as[List[RenditionFailureView]])
-        notAllowed <- failures(author)
-        byAuthor   <- retry(author, doc.id, version)
+        ofReader   <- failures(reader).map(as[List[RenditionFailureView]])
+        byReader   <- retry(reader, doc.id, version)
         byReviewer <- retry(reviewer, doc.id, version)
         byRecords  <- retry(records, doc.id, version)
         view = as[RenditionStatusView](byRecords)
@@ -720,8 +761,8 @@ object RenditionApiSpec extends ZIOSpecDefault:
       yield assertTrue(
         dead.exists((status, attempts, _) => status == "dead" && attempts == 1),
         listed.exists(f => f.versionId == version && f.state == "Failed" && f.canRetry),
-        notAllowed.status == Status.Forbidden,
-        byAuthor.status == Status.Forbidden,
+        ofReader.isEmpty,
+        byReader.status == Status.Forbidden,
         byReviewer.status == Status.Forbidden,
         byRecords.status == Status.Ok,
         view.state == "Pending",
@@ -779,8 +820,8 @@ object RenditionApiSpec extends ZIOSpecDefault:
           byRecords.exists(_._3.contains("nicht erreichbar")),
           byRecords.exists(_._4.contains("/legal-holds")),
           listed.exists(f => f.versionId == version && f.canRetry && f.title.contains("Vertrag Stark")),
-          // the named owner holds no owner role here: the text does not promise a retry
-          byOwner.exists(_._3.contains("erneut versuchen kann es das Records Management")),
+          // the named owner can read and retry, whichever role they hold (ADR 0064)
+          byOwner.exists(_._3.contains("auf der Dokumentseite erneut versuchen")),
           byOwner.exists(_._4.contains(s"/documents/${doc.id}?version=$version")),
           second.size == 4
         )
@@ -822,7 +863,7 @@ object RenditionApiSpec extends ZIOSpecDefault:
       val roles = new RoleAssignments:
         private val real          = RoleAssignments.Postgres
         def forUser(user: UserId) =
-          ZIO.succeed(Set(RoleAssignment(Role.Owner)))
+          ZIO.succeed(Set(RoleAssignment(if user == admin then Role.TenantAdmin else Role.Owner)))
         def grant(user: UserId, assignment: RoleAssignment, by: UserId) = real.grant(user, assignment, by)
         def revoke(id: UUID, at: Instant)                               = real.revoke(id, at)
         def activeAt(at: Instant)                                       = real.activeAt(at)
@@ -881,8 +922,8 @@ object RenditionApiSpec extends ZIOSpecDefault:
         failed <- call(author, "GET", s"/api/v1/documents/${doc.id}/versions/$version/publication/status")
           .map(as[PublicationStatusView])
         listed <- call(records, "GET", "/api/v1/publications/failures").map(as[List[PublicationFailureView]])
-        notAllowed <- call(author, "GET", "/api/v1/publications/failures")
-        byAuthor   <- call(author, "POST", s"/api/v1/documents/${doc.id}/versions/$version/publication/retry")
+        ofReader <- call(reader, "GET", "/api/v1/publications/failures").map(as[List[PublicationFailureView]])
+        byReader <- call(reader, "POST", s"/api/v1/documents/${doc.id}/versions/$version/publication/retry")
         byRecords <- call(records, "POST", s"/api/v1/documents/${doc.id}/versions/$version/publication/retry")
         requeued  <- publishJob(version)
         actions   <- ownerQuery(
@@ -919,13 +960,13 @@ object RenditionApiSpec extends ZIOSpecDefault:
         sent.count(_.subject.contains("Veröffentlichung fehlgeschlagen")) == 3,
         failed.state == "Failed",
         failed.failedAt.isDefined,
-        // the author is named owner but holds no owner role: may see, not retry
-        !failed.canRetry,
+        // the author is named owner: the role does not matter (ADR 0064)
+        failed.canRetry,
         listed.exists(f =>
           f.versionId == version && f.state == "Failed" && f.canRetry && f.title.contains("Vertrag Hooli")
         ),
-        notAllowed.status == Status.Forbidden,
-        byAuthor.status == Status.Forbidden,
+        ofReader.isEmpty,
+        byReader.status == Status.Forbidden,
         byRecords.status == Status.Ok,
         as[PublicationStatusView](byRecords).state == "Pending",
         requeued.exists((status, attempts, _) => status == "queued" && attempts == 0),
@@ -936,6 +977,228 @@ object RenditionApiSpec extends ZIOSpecDefault:
         !after.exists(_.versionId == version),
         // a late event of a version that was published in the meantime
         unchanged == 0L
+      )
+    },
+    test("records managers of a unit are told of what they cover, and reach it (DMS-146)") {
+      val inLegal = UserId("records-legal")
+      val inSales = UserId("records-sales")
+      withRoles(
+        inLegal -> RoleAssignment(Role.RecordsManager, organizationalUnit = Some("Legal")),
+        inSales -> RoleAssignment(Role.RecordsManager, organizationalUnit = Some("Sales"))
+      )(
+        for
+          pair <- approvedByVotes("Soylent")
+          (doc, waiting) = pair
+          version        = waiting.versionId
+          mails   <- Ref.make(List.empty[Mail])
+          _       <- makeDue(version, maxAttempts = 1)
+          _       <- jobs(renderer = Some(unavailable)).flatMap(runJobs)
+          _       <- notifications(mails).flatMap(deliverDead(doc.id, _))
+          told    <- notices(doc.id)
+          ofLegal <- failures(inLegal).map(as[List[RenditionFailureView]])
+          ofSales <- failures(inSales).map(as[List[RenditionFailureView]])
+          bySales <- retry(inSales, doc.id, version)
+          byLegal <- retry(inLegal, doc.id, version)
+        yield assertTrue(
+          told.map(_._1).toSet == Set(author.value, records.value, inLegal.value),
+          told.find(_._1 == inLegal.value).exists(_._2.contains("Vertrag Soylent (1.0-draft.1)")),
+          told.find(_._1 == inLegal.value).exists(_._3.contains("„Fehlgeschlagene Verarbeitungen“")),
+          told.find(_._1 == inLegal.value).exists(_._4.contains("/failures")),
+          told.find(_._1 == records.value).exists(_._4.contains("/legal-holds")),
+          ofLegal.exists(f => f.versionId == version && f.canRetry && f.title.contains("Vertrag Soylent")),
+          !ofSales.exists(_.versionId == version),
+          bySales.status == Status.Forbidden,
+          byLegal.status == Status.Ok
+        )
+      )
+    },
+    test(
+      "the person named owner can retry without the owner role, also if nobody else is cleared (DMS-146)"
+    ) {
+      val named = UserId("named-1")
+      for
+        s <- setup.await
+        _ <- s.app.transact(tenantId)(
+          Groups.Postgres.create("legal-team", "Legal team", admin) *>
+            ZIO.foreachDiscard(List(reviewer, approver))(Groups.Postgres.addMember("legal-team", _, admin))
+        )
+        result <- withRoles(named -> RoleAssignment(Role.Reader))(
+          for
+            pair <- approvedByVotes("Wonka", owner = named, access = Some("legal-team"))
+            (doc, waiting) = pair
+            version        = waiting.versionId
+            mails     <- Ref.make(List.empty[Mail])
+            _         <- makeDue(version, maxAttempts = 1)
+            _         <- jobs(renderer = Some(unavailable)).flatMap(runJobs)
+            _         <- notifications(mails).flatMap(deliverDead(doc.id, _))
+            told      <- notices(doc.id)
+            ofNamed   <- failures(named).map(as[List[RenditionFailureView]])
+            ofRecords <- failures(records).map(as[List[RenditionFailureView]])
+            onPage    <- status(named, doc.id, version)
+            byRecords <- retry(records, doc.id, version)
+            byNamed   <- retry(named, doc.id, version)
+            requeued  <- renditionJob(version)
+            actors    <- ownerQuery(
+              sql"""select actor_id from dms.audit_event
+                    where object_id = ${doc.id} and action = ${RenditionStatusApi.RetryRequested}"""
+                .query[String]
+                .run()
+                .toList
+            )
+            _        <- jobs().flatMap(runJobs)
+            approved <- document(doc.id)
+          yield assertTrue(
+            told.map(_._1).toSet == Set(named.value, records.value),
+            // not able to open the version: the list is the place of the retry
+            told.find(_._1 == named.value).exists(_._2.contains("Vertrag Wonka (1.0-draft.1)")),
+            told.find(_._1 == named.value).exists(_._3.contains("„Fehlgeschlagene Verarbeitungen“")),
+            told.find(_._1 == named.value).exists(_._4.contains("/failures")),
+            // not cleared: no title, and no retry promised
+            told.find(_._1 == records.value).exists(_._2 == "Archiv-PDF fehlgeschlagen: Dokument"),
+            told.find(_._1 == records.value).exists(_._3.contains("nicht freigegeben")),
+            ofNamed.exists(f => f.versionId == version && f.canRetry && f.title.contains("Vertrag Wonka")),
+            ofRecords.exists(f => f.versionId == version && !f.canRetry && f.title.isEmpty),
+            onPage.status == Status.Forbidden,
+            byRecords.status == Status.Forbidden,
+            byNamed.status == Status.Ok,
+            requeued.exists((status, attempts, _) => status == "queued" && attempts == 0),
+            actors == List(named.value),
+            approved.current.status == "Approved"
+          )
+        )
+      yield result
+    },
+    test("the deputies of the owner are told; they decide nothing by that (DMS-146)") {
+      val named  = UserId("owner-away")
+      val deputy = UserId("owner-deputy")
+      withRoles(
+        named  -> RoleAssignment(Role.Owner),
+        deputy -> RoleAssignment(Role.Owner, organizationalUnit = Some("Sales"))
+      )(
+        for
+          // The deputyship API is not part of these routes; WorkflowApiSpec covers it.
+          _ <- ownerQuery(
+            sql"""insert into dms.deputyship
+                    (id, tenant_id, principal_id, deputy_id, valid_from, valid_until, roles, created_by)
+                  values (${UUID.randomUUID()}, ${tenantId.value}, ${named.value}, ${deputy.value},
+                          now() - interval '1 minute', now() + interval '1 hour', ${Jsonb("""["Owner"]""")},
+                          ${named.value})""".update.run()
+          )
+          pair <- approvedByVotes("Stark", owner = named)
+          (doc, waiting) = pair
+          version        = waiting.versionId
+          mails    <- Ref.make(List.empty[Mail])
+          _        <- makeDue(version, maxAttempts = 1)
+          _        <- jobs(renderer = Some(unavailable)).flatMap(runJobs)
+          _        <- notifications(mails).flatMap(deliverDead(doc.id, _))
+          told     <- notices(doc.id)
+          byDeputy <- retry(deputy, doc.id, version)
+        yield assertTrue(
+          told.map(_._1).toSet == Set(named.value, deputy.value, records.value),
+          told.find(_._1 == deputy.value).exists(_._3.contains(s"als Vertretung von ${named.value}")),
+          told
+            .find(_._1 == deputy.value)
+            .exists(_._3.contains("Erneut versuchen kann es das Records Management")),
+          // the version is outside the deputy's own role: no title, and no link to a page closed to them
+          told.find(_._1 == deputy.value).exists(_._2 == "Archiv-PDF fehlgeschlagen: Dokument"),
+          told.find(_._1 == deputy.value).exists(_._4.isEmpty),
+          !told.find(_._1 == named.value).exists(_._3.contains("Vertretung")),
+          byDeputy.status == Status.Forbidden
+        )
+      )
+    },
+    test("a notice left unread is reminded of on the reminder days, until someone retries (DMS-146)") {
+      val days = (n: Long) => java.time.Duration.ofDays(n)
+      for
+        pair <- approvedByVotes("Tyrell")
+        (doc, waiting) = pair
+        version        = waiting.versionId
+        mails   <- Ref.make(List.empty[Mail])
+        follow  <- followUps
+        n       <- notifications(mails)
+        _       <- makeDue(version, maxAttempts = 1)
+        _       <- jobs(renderer = Some(unavailable)).flatMap(runJobs)
+        _       <- deliverDead(doc.id, n)
+        died    <- failedAt(version)
+        tooSoon <- follow.check(tenantId, died.plus(days(2)))
+        _       <- ownerQuery(
+          sql"""update dms.notification set read_at = now()
+                where user_id = ${records.value} and document_id = ${doc.id}""".update.run()
+        )
+        first    <- follow.check(tenantId, died.plus(days(3)))
+        repeated <- follow.check(tenantId, died.plus(days(4)))
+        _        <- deliver(doc.id, FailureFollowUps.ReminderEvent, n)
+        once     <- notices(doc.id).map(_.filter(_._2.startsWith("Erinnerung: ")))
+        second   <- follow.check(tenantId, died.plus(days(30)))
+        done     <- follow.check(tenantId, died.plus(days(31)))
+        _        <- deliver(doc.id, FailureFollowUps.ReminderEvent, n)
+        twice    <- notices(doc.id).map(_.filter(_._2.startsWith("Erinnerung: ")))
+        sent     <- mails.get
+        _        <- retry(records, doc.id, version)
+        retried  <- follow.check(tenantId, died.plus(days(60)))
+        rounds   <- ownerQuery(
+          sql"""select count(*) from dms.job_failure_reminder r join dms.job j on j.id = r.job_id
+                where j.idempotency_key = ${"rendition:" + version}""".query[Long].run().head
+        )
+      yield assertTrue(
+        tooSoon == 0,
+        // other tests left failures open in this tenant; `rounds` counts those of this job
+        first >= 1,
+        repeated == 0,
+        // who read a notice of this failure is left alone
+        once.map(_._1) == List(author.value),
+        once.exists(_._2 == "Erinnerung: Archiv-PDF fehlgeschlagen: Vertrag Tyrell (1.0-draft.1)"),
+        once.exists(_._3.startsWith("Seit ")),
+        once.exists(_._4.contains(s"/documents/${doc.id}?version=$version")),
+        // the days in between are not caught up
+        second >= 1,
+        done == 0,
+        twice.map(_._1) == List(author.value, author.value),
+        sent.count(_.subject.contains("Erinnerung: Archiv-PDF fehlgeschlagen")) == 2,
+        retried == 0,
+        rounds == 2L
+      )
+    },
+    test("a dead publication is audited once, whatever the relay repeats; its owner retries it (DMS-146)") {
+      val failing: Map[String, dms.integration.JobHandler] =
+        Map(PublicationJobs.PublishKind -> (_ => ZIO.fail("[conflict] the scope of Secret Corp is taken")))
+      for
+        pair <- approvedByVotes("Massive", validFrom = "2026-01-01")
+        (doc, waiting) = pair
+        version        = waiting.versionId
+        s       <- setup.await
+        service <- ZIO.service[DocumentService]
+        audit   <- ZIO.service[AuditTrail]
+        follow  <- followUps
+        _       <- jobs().flatMap(runJobs)
+        publishing = PublicationJobs(s.app, service, PublicationScheduleConfig())
+        _       <- publishing.enqueue(tenantId).orDieWith(e => RuntimeException(e.toString))
+        _       <- makePublishDue(version, maxAttempts = 1)
+        _       <- JobRunner(s.app, failing, WorkerConfig("publisher")).runOnce
+        found   <- deadEvents(doc.id)
+        _       <- ZIO.foreachDiscard(found ++ found)(follow.deliver).orDieWith(RuntimeException(_))
+        entries <- ownerQuery(
+          sql"""select actor_id, actor_kind, channel, details ->> 'versionId', details ->> 'reason', details::text
+                from dms.audit_event where object_id = ${doc.id} and action = ${FailureFollowUps.PublicationFailed}"""
+            .query[(String, String, String, String, String, String)]
+            .run()
+            .toList
+        )
+        chain    <- audit.verify(tenantId)
+        retried  <- call(author, "POST", s"/api/v1/documents/${doc.id}/versions/$version/publication/retry")
+        requeued <- publishJob(version)
+      yield assertTrue(
+        found.map(_.eventType) == List(dms.documents.Publication.DeadEvent),
+        entries.size == 1,
+        entries.exists((actor, kind, channel, entryVersion, reason, _) =>
+          actor == FailureFollowUps.PublicationActor && kind == "technical" && channel == "automation" &&
+            entryVersion == version.toString && reason == "conflict"
+        ),
+        // the error text can quote document content
+        !entries.exists(_._6.contains("Secret Corp")),
+        chain.ok,
+        retried.status == Status.Ok,
+        requeued.exists((status, attempts, _) => status == "queued" && attempts == 0)
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

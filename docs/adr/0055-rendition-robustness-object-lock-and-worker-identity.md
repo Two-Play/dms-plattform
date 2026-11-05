@@ -106,3 +106,7 @@ Flyway V36. No new dependency.
 ## Reversibility
 
 **medium**: Status, retry and provenance are additive (one function, one table, three endpoints) and can be removed without data migration. Object Lock retention cannot be shortened or removed in compliance mode, and in governance mode only with the bypass permission: locks set until reversal stay in force until their end. Switching the mode or the periods applies to new locks only.
+
+## Addendum (DMS-146, 2026-11-05)
+
+ADR 0064 changes who may retry: the person named owner (without owner: the author) needs some active role that covers the document, not the owner or author role.

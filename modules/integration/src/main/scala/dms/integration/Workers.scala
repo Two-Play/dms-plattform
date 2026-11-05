@@ -79,14 +79,18 @@ final class OutboxRelay(db: Db, deliver: OutboxEvent => IO[String, Unit], config
 
 private object Workers:
 
-  /** Runs `work` with a timeout below the lease; turns failures, defects and timeouts into an error text. */
+  /** Runs `work` with a timeout below the lease; turns failures, defects and timeouts into an error text. A
+    * defect starts with the failure code `[internal]` (ADR 0064): no handler can name it itself.
+    */
   def guarded(work: IO[String, Unit], config: WorkerConfig): UIO[Option[String]] =
     work
       .timeoutFail(s"timed out after ${config.lease.toSeconds * 9 / 10} s")(config.lease * 0.9)
       .foldCauseZIO(
         cause =>
           ZIO.some(
-            cause.failureOption.getOrElse(cause.prettyPrint.linesIterator.nextOption().getOrElse("defect"))
+            cause.failureOption.getOrElse(
+              s"[internal] ${cause.prettyPrint.linesIterator.nextOption().getOrElse("defect")}"
+            )
           ),
         _ => ZIO.none
       )

@@ -96,3 +96,7 @@ Flyway V40. No new dependency.
 ## Reversibility
 
 **high**: The trigger, the index and the two functions can be dropped without touching business data; deliveries and notifications are ADR 0052's. The endpoints, the action and the category are additive. Dropping the category leaves preference entries that are ignored.
+
+## Addendum (DMS-146, 2026-11-05)
+
+ADR 0064 closes the follow-ups on reminders and on the audit entry of a dead publication, extends the recipients to restricted records managers and deputies, and changes who may retry. The table in point 5 and the sentence on an owner without the owner role apply as changed there.

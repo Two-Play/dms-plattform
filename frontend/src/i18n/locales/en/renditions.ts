@@ -1,3 +1,10 @@
+/** The page of the failures a person's role covers or they are named for (DMS-146). */
+export const failures = {
+  title: 'Failed processing',
+  description:
+    'Archive PDFs and publications that failed for good and that you can retry or that your role covers.',
+} as const
+
 /** Archive renditions: state, failures and retry (DMS-93). */
 export const renditions = {
   loading: 'Loading the state of the archive PDF',
@@ -20,7 +27,9 @@ export const renditions = {
     invalid: 'The version cannot be rendered in its current state.',
     integrity: 'A stored file does not match its checksum.',
     database: 'The database could not be reached.',
-    unknown: 'The cause is unknown.',
+    timeout: 'The rendering did not finish in time.',
+    internal: 'An internal error occurred in the platform.',
+    unknown: 'The processing stopped; the technical detail says more.',
   },
   retry: 'Retry now',
   retryPending: 'Retrying …',
