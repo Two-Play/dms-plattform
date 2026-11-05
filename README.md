@@ -176,6 +176,8 @@ Migrate the database (runs as the schema owner `dms`: Flyway migrations, then th
 sbt "app/runMain dms.app.Migrate"
 ```
 
+New migrations: indexes on tables with data follow the convention in [modules/db/README.md](modules/db/README.md#migrations-without-a-transaction).
+
 Register the tenant, the demo users and their role assignments (`tenant` and role assignments as schema owner through `psql` in the `db` container; role assignments have no API yet), then seed the demo content through a running backend:
 
 ```bash

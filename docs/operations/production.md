@@ -132,6 +132,19 @@ Restore, in this order:
 
 `pg_dump` and `pg_restore` of the complete database were exercised with the load test's data (98,000 versions, 970,000 acknowledgements) for every run. The full procedure above, with point-in-time recovery and object store replication, has not been rehearsed: do so once before going live and record the time it takes.
 
+## When a migration fails
+
+A normal migration rolls back, and `bin/migrate` can simply run again once the cause is fixed.
+
+A migration without a transaction (an index built concurrently, see [modules/db/README.md](../../modules/db/README.md), ADR 0066) cannot roll back. It stays in the history as failed, and `bin/migrate` refuses to continue with a message about a failed migration; an index it was building stays behind as invalid. The running application is not affected: it does not use an invalid index. As schema owner:
+
+1. Look at the failure: `select version, description, installed_on from dms.flyway_schema_history where not success;`
+2. Fix its cause, for example duplicate rows for a unique index.
+3. Remove the failed row: `delete from dms.flyway_schema_history where not success;`
+4. Run `bin/migrate` again. The migration starts by dropping what the failed build left.
+
+Do not use `flyway repair` here: it also realigns the checksums of applied migrations. A build that takes long is usually waiting for a long transaction; `pg_stat_activity` shows it, `pg_stat_progress_create_index` shows the progress. Stopping the build counts as a failure of the migration.
+
 ## Capacity
 
 See [scripts/loadtest/README.md](../../scripts/loadtest/README.md) for the measured load. In short: the library holds about 2 KB per valid version in memory (`DMS_LIBRARY_CACHE_MAX_VERSIONS`, default 200,000, so about 400 MB at most; plan the JVM heap with it). Rendering and conversion run outside the application and are the slowest parts: scale them independently.

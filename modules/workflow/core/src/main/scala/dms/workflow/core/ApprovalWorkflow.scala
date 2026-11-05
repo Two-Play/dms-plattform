@@ -323,11 +323,10 @@ final class ApprovalWorkflow(
         else
           sql(WorkflowStore.openTasksOfAny(standing.map(_.principal)))
             .map(_.filterNot(t => direct.exists(_.id == t.id)))
-      all = direct ++ forwarded
-      perCase <- ZIO.foreach(all.map(_.caseId).distinct)(id =>
-        caseRow(id).flatMap(row => views(row, all.filter(_.caseId == id)))
-      )
-    yield perCase.flatten
+      byCase = (direct ++ forwarded).groupBy(_.caseId)
+      rows    <- sql(WorkflowStore.casesById(byCase.keys.toList))
+      perCase <- views(rows.map(row => row -> byCase.getOrElse(row.id, Nil)))
+    yield perCase.values.toList.flatten
       .flatMap(t =>
         if t.candidates.contains(user) then Some(t)
         else t.deputies.find(_.deputy == user).map(d => t.copy(actingFor = Some(d.principal)))
@@ -356,12 +355,17 @@ final class ApprovalWorkflow(
       tasks     <- sql(WorkflowStore.tasksOfCases(ids)).map(_.groupBy(_.caseId))
       votes     <- sql(WorkflowStore.votesOfCases(ids)).map(_.groupBy(_.caseId))
       approvals <- sql(WorkflowStore.approvalsOfCases(ids)).map(_.map(a => a.caseId -> a).toMap)
-      cases     <- ZIO.foreach(rows)(row =>
-        views(row, tasks.getOrElse(row.id, Nil)).map(taskViews =>
-          CaseDetails(row.toCase, taskViews, votes.getOrElse(row.id, Nil), approvals.get(row.id))
+      taskViews <- views(rows.map(row => row -> tasks.getOrElse(row.id, Nil)))
+    yield rows
+      .map(row =>
+        CaseDetails(
+          row.toCase,
+          taskViews.getOrElse(row.id, Nil),
+          votes.getOrElse(row.id, Nil),
+          approvals.get(row.id)
         )
       )
-    yield cases.groupBy(_.workflowCase.documentId)
+      .groupBy(_.workflowCase.documentId)
 
   /** The case of a version, if it was submitted. */
   def caseOfVersion(versionId: UUID): IO[WorkflowError, Option[CaseDetails]] =
@@ -1117,37 +1121,66 @@ final class ApprovalWorkflow(
     * deputies when the period starts and are the candidates' alone again when it ends.
     */
   private def views(row: CaseRow, tasks: List[TaskRow]): IO[WorkflowError, List[WorkflowTask]] =
-    val open       = tasks.filter(t => t.status == TaskStatus.Open.toString)
-    val principals = open.flatMap(_.candidateList).distinct
+    views(List(row -> tasks)).map(_.getOrElse(row.id, Nil))
+
+  /** The tasks of several cases with their deputies, by case: a fixed number of queries, however many cases
+    * and tasks there are (DMS-138). Who may stand in is still decided per case and task.
+    */
+  private def views(cases: List[(CaseRow, List[TaskRow])]): IO[WorkflowError, Map[UUID, List[WorkflowTask]]] =
+    val open       = cases.map((row, tasks) => row -> tasks.filter(_.status == TaskStatus.Open.toString))
+    val principals = open.flatMap(_._2.flatMap(_.candidateList)).distinct
     for
       now         <- Clock.instant
       deputyships <-
         if principals.isEmpty then ZIO.succeed(Nil)
         else sql(DeputyStore.activeForPrincipals(principals, now))
-      deputies <-
-        if deputyships.isEmpty then ZIO.succeed(Map.empty[String, List[TaskDeputy]])
-        else
-          for
-            subject <- documents.subject(DocumentId(row.documentId), row.versionId)
-            // A deputy who may not see a confidential version holds no role for it (DMS-101).
-            cleared     <- directory.cleared(deputyships.map(_.deputy).toSet, subject)
-            deputyRoles <- ZIO
-              .foreach(deputyships.map(_.deputy).distinct.filter(cleared.contains))(d =>
-                directory.heldRoles(d).map(held => d -> held.filter(_.isActiveAt(now)).map(_.role).toSet)
-              )
-              .map(_.toMap)
-          yield open.map { t =>
-            t.id -> Rules.taskDeputies(
-              t.role,
-              t.candidateList,
-              subject.author,
-              subject.classPath,
-              deputyships,
-              deputyRoles,
-              now
-            )
-          }.toMap
-    yield tasks.map(t => view(row, t).copy(deputies = deputies.getOrElse(t.id, Nil)))
+      standing = deputyships.map(_.principal).toSet
+      // Only cases with a deputyship of one of their candidates need their document.
+      deputies <- taskDeputies(
+        open.filter(_._2.exists(_.candidateList.exists(standing.contains))),
+        deputyships,
+        now
+      )
+    yield cases
+      .map((row, tasks) =>
+        row.id -> tasks.map(t => view(row, t).copy(deputies = deputies.getOrElse(t.id, Nil)))
+      )
+      .toMap
+
+  /** The deputies of the open tasks of `cases`, by task. */
+  private def taskDeputies(
+      cases: List[(CaseRow, List[TaskRow])],
+      deputyships: List[Deputyship],
+      now: Instant
+  ): IO[WorkflowError, Map[String, List[TaskDeputy]]] =
+    if cases.isEmpty then ZIO.succeed(Map.empty)
+    else
+      for
+        subjects <- documents.subjects(cases.map((row, _) => DocumentId(row.documentId) -> row.versionId))
+        ofCase   <- ZIO.foreach(cases)((row, tasks) =>
+          ZIO
+            .fromOption(subjects.get(row.versionId))
+            .orElseFail(WorkflowError.NotFound(s"document version ${row.versionId} does not exist"))
+            .map(_ -> tasks)
+        )
+        // A deputy who may not see a confidential version holds no role for it (DMS-101).
+        cleared <- directory.clearedFor(deputyships.map(_.deputy).toSet, subjects.values.toList)
+        held    <- directory.heldRolesOf(cleared.values.flatten.toSet)
+        active = held.map((d, roles) => d -> roles.filter(_.isActiveAt(now)).map(_.role).toSet)
+      yield ofCase.flatMap { (subject, tasks) =>
+        val mayStandIn = cleared.getOrElse(subject.versionId, Set.empty)
+        tasks.map(t =>
+          t.id -> Rules.taskDeputies(
+            t.role,
+            t.candidateList,
+            subject.author,
+            subject.classPath,
+            deputyships,
+            active.filter((d, _) => mayStandIn.contains(d)),
+            now
+          )
+        )
+      }.toMap
 
   private def details(caseId: UUID): IO[WorkflowError, CaseDetails] =
     for

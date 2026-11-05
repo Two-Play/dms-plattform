@@ -587,7 +587,8 @@ final class DocumentService(
 
   /** Several documents with all versions, by id; unknown ones are left out. */
   def getAll(ids: List[DocumentId]): IO[DocumentError, Map[DocumentId, DocumentDetails]] =
-    sql(DocumentStore.documents(ids)).flatMap(detailsOf).map(_.map(d => d.document.id -> d).toMap)
+    if ids.isEmpty then ZIO.succeed(Map.empty)
+    else sql(DocumentStore.documents(ids)).flatMap(detailsOf).map(_.map(d => d.document.id -> d).toMap)
 
   /** The details of documents with a fixed number of queries, however many there are (DMS-60). */
   private def detailsOf(documents: List[Document]): IO[DocumentError, List[DocumentDetails]] =

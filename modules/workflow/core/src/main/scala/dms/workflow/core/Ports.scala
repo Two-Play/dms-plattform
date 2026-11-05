@@ -77,6 +77,10 @@ final case class ReviewSubject(
 trait DocumentGateway:
   def subject(documentId: DocumentId, versionId: UUID): IO[WorkflowError, ReviewSubject]
 
+  /** [[subject]] for several versions at once, by version id, for lists (DMS-138); unknown ones are left out.
+    */
+  def subjects(versions: List[(DocumentId, UUID)]): IO[WorkflowError, Map[UUID, ReviewSubject]]
+
   /** Applies a lifecycle event to the version as `actor` (`ReviewPassed`, `Approve`, `RequestChanges`,
     * `Reject`).
     */
@@ -112,11 +116,20 @@ trait ParticipantDirectory:
     */
   def cleared(users: Set[UserId], subject: ReviewSubject): IO[WorkflowError, Set[UserId]]
 
+  /** [[cleared]] for several subjects at once, by version id, for lists (DMS-138). */
+  def clearedFor(
+      users: Set[UserId],
+      subjects: List[ReviewSubject]
+  ): IO[WorkflowError, Map[UUID, Set[UserId]]]
+
   /** Tenant administrators to notify when a step has no eligible participant. */
   def tenantAdmins: IO[WorkflowError, List[UserId]]
 
   /** All role assignments of `user`, including expired and future ones (callers check the validity). */
   def heldRoles(user: UserId): IO[WorkflowError, List[HeldRole]]
+
+  /** [[heldRoles]] for several people at once, for lists (DMS-138); people without any are left out. */
+  def heldRolesOf(users: Set[UserId]): IO[WorkflowError, Map[UserId, List[HeldRole]]]
 
 /** Who hears of a deadline: the responsible people, their deputies and the escalation targets (without the
   * responsible people).

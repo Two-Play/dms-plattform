@@ -16,6 +16,10 @@ final case class AccessDenied(action: Action, reason: String)
   */
 trait RoleAssignments:
   def forUser(user: UserId): IO[DbError, Set[RoleAssignment]]
+
+  /** [[forUser]] for several people at once (DMS-138); people without any assignment are left out. */
+  def forUsers(users: Set[UserId]): IO[DbError, Map[UserId, Set[RoleAssignment]]]
+
   def grant(user: UserId, assignment: RoleAssignment, grantedBy: UserId): IO[DbError, UUID]
   def revoke(id: UUID, at: Instant): IO[DbError, Boolean]
 
@@ -38,6 +42,22 @@ object RoleAssignments:
       ).map(_.map { case (role, ou, cls, from, until) =>
         RoleAssignment(Role.valueOf(role), ou, cls, from.toInstant, until.map(_.toInstant))
       }.toSet)
+
+    def forUsers(users: Set[UserId]): IO[DbError, Map[UserId, Set[RoleAssignment]]] =
+      if users.isEmpty then ZIO.succeed(Map.empty)
+      else
+        val ids = users.map(_.value).toArray
+        Db.sql(
+          sql"""select user_id, role, organizational_unit, document_class, valid_from, valid_until
+                from dms.role_assignment where user_id = any(cast($ids as text[]))"""
+            .query[(String, String, Option[String], Option[String], OffsetDateTime, Option[OffsetDateTime])]
+            .run()
+            .toList
+        ).map(
+          _.groupMap(row => UserId(row._1)) { case (_, role, ou, cls, from, until) =>
+            RoleAssignment(Role.valueOf(role), ou, cls, from.toInstant, until.map(_.toInstant))
+          }.view.mapValues(_.toSet).toMap
+        )
 
     def grant(user: UserId, assignment: RoleAssignment, grantedBy: UserId): IO[DbError, UUID] =
       Db.sql(

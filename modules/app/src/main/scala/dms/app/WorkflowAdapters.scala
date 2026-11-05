@@ -29,6 +29,22 @@ final class WorkflowDocuments(service: DocumentService) extends DocumentGateway:
         .map(WorkflowDocuments.subject(details, _))
     }
 
+  def subjects(versions: List[(DocumentId, UUID)]): IO[WorkflowError, Map[UUID, ReviewSubject]] =
+    service
+      .getAll(versions.map(_._1))
+      .mapBoth(
+        WorkflowDocuments.toWorkflowError,
+        all =>
+          versions.flatMap { (documentId, versionId) =>
+            all
+              .get(documentId)
+              .flatMap(details =>
+                details.versions.find(_.id == versionId).map(WorkflowDocuments.subject(details, _))
+              )
+              .map(versionId -> _)
+          }.toMap
+      )
+
   def advance(
       documentId: DocumentId,
       versionId: UUID,
@@ -134,16 +150,26 @@ final class RoleDirectory(assignments: RoleAssignments, groups: Groups) extends 
     yield inScope.filter(allowed.contains).sortBy(_.value)
 
   def cleared(users: Set[UserId], subject: ReviewSubject): IO[WorkflowError, Set[UserId]] =
-    subject.accessGroups match
-      case None          => ZIO.succeed(users)
-      case Some(allowed) =>
-        groups
-          .membersOfAny(allowed)
-          .mapBoth(
-            WorkflowError.Database(_),
-            members =>
-              users.filter(u => u == subject.author || subject.owner.contains(u) || members.contains(u))
-          )
+    clearedFor(users, List(subject)).map(_.getOrElse(subject.versionId, Set.empty))
+
+  def clearedFor(
+      users: Set[UserId],
+      subjects: List[ReviewSubject]
+  ): IO[WorkflowError, Map[UUID, Set[UserId]]] =
+    groups
+      .membersOfEach(subjects.flatMap(_.accessGroups).flatten.toSet)
+      .mapBoth(
+        WorkflowError.Database(_),
+        members =>
+          subjects.map { subject =>
+            subject.versionId -> subject.accessGroups.fold(users)(allowed =>
+              users.filter(u =>
+                u == subject.author || subject.owner.contains(u) ||
+                  allowed.exists(members.getOrElse(_, Set.empty).contains(u))
+              )
+            )
+          }.toMap
+      )
 
   def tenantAdmins: IO[WorkflowError, List[UserId]] =
     for
@@ -152,15 +178,20 @@ final class RoleDirectory(assignments: RoleAssignments, groups: Groups) extends 
     yield all.collect { case (user, a) if a.isActiveAt(now) => user }.distinct.sortBy(_.value)
 
   def heldRoles(user: UserId): IO[WorkflowError, List[HeldRole]] =
+    heldRolesOf(Set(user)).map(_.getOrElse(user, Nil))
+
+  def heldRolesOf(users: Set[UserId]): IO[WorkflowError, Map[UserId, List[HeldRole]]] =
     assignments
-      .forUser(user)
+      .forUsers(users)
       .mapBoth(
         WorkflowError.Database(_),
-        _.toList
-          .map(a =>
-            HeldRole(a.role.toString, a.organizationalUnit, a.documentClass, a.validFrom, a.validUntil)
-          )
-          .sortBy(r => (r.role, r.organizationalUnit, r.documentClass, r.validFrom))
+        _.map((user, held) =>
+          user -> held.toList
+            .map(a =>
+              HeldRole(a.role.toString, a.organizationalUnit, a.documentClass, a.validFrom, a.validUntil)
+            )
+            .sortBy(r => (r.role, r.organizationalUnit, r.documentClass, r.validFrom))
+        )
       )
 
 object RoleDirectory:

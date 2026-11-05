@@ -218,10 +218,7 @@ object WorkflowApi:
       )
       .tag("Workflow")
       .serverLogic(p =>
-        _ =>
-          inTransaction(p)(ctx =>
-            ctx.workflow.myTasks(p.userId).flatMap(ZIO.filter(_)(ctx.mayRead)).map(_.map(taskView))
-          )
+        _ => inTransaction(p)(ctx => ctx.workflow.myTasks(p.userId).flatMap(ctx.mayRead).map(_.map(taskView)))
       )
 
   val vote: ZServerEndpoint[Env, Any] =
@@ -438,17 +435,22 @@ object WorkflowApi:
     ): IO[WorkflowError | AccessDenied, Unit] =
       Delegation.subject(authz, subject, tasks).flatMap(s => authz.check(s, action, resource).unit)
 
-    /** Whether the confidentiality of the version of `task` still lets the caller see it, e.g. they still
-      * belong to an access group of a confidential version (DMS-101).
+    /** The tasks whose version the caller may still see given its confidentiality, e.g. they still belong to
+      * an access group of a confidential version (DMS-101). Reads all documents at once (DMS-138); the
+      * decision stays per task, on the task's own version.
       */
-    def mayRead(task: WorkflowTask): IO[WorkflowError, Boolean] =
-      documents
-        .get(task.documentId)
-        .map(details =>
-          details.versions
-            .find(_.id == task.versionId)
-            .exists(v => Policy.clearedFor(subject, DocumentApi.resource(subject.tenantId, details, v)))
+    def mayRead(tasks: List[WorkflowTask]): IO[WorkflowError, List[WorkflowTask]] =
+      service
+        .getAll(tasks.map(_.documentId))
+        .mapBoth(
+          WorkflowDocuments.toWorkflowError,
+          all => tasks.filter(t => all.get(t.documentId).exists(cleared(t, _)))
         )
+
+    private def cleared(task: WorkflowTask, details: DocumentDetails): Boolean =
+      details.versions
+        .find(_.id == task.versionId)
+        .exists(v => Policy.clearedFor(subject, DocumentApi.resource(subject.tenantId, details, v)))
 
     def configure(p: Principal): IO[AccessDenied, Unit] =
       check(Action.Configure, Resource(p.tenantId, configurationArea = Some(ConfigurationArea.Workflows)))
