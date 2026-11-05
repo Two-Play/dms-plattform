@@ -27,17 +27,16 @@ const people = [
   { id: 'u-3', displayName: 'Rita Reviewer' },
 ]
 
-/** Like the backend: every word starts a part of the name or the email. */
+/** Like the backend: every word is part of the name or the email. */
 function directory(path: string, init?: Init): Reply {
   if (path === '/api/v1/users/search') {
     const q = (init?.params?.query?.q as string | undefined) ?? ''
     const words = q.toLowerCase().split(/\s+/)
-    return ok(
-      people.filter((p) => {
-        const parts = [...p.displayName.toLowerCase().split(' '), p.email ?? '']
-        return words.every((w) => parts.some((part) => part.startsWith(w)))
-      }),
-    )
+    const items = people.filter((p) => {
+      const text = `${p.displayName} ${p.email ?? ''}`.toLowerCase()
+      return words.every((w) => text.includes(w))
+    })
+    return ok({ items, total: items.length })
   }
   if (path === '/api/v1/users') {
     const ids = ((init?.params?.query?.ids as string | undefined) ?? '').split(',')
@@ -109,7 +108,7 @@ describe('PersonPicker (DMS-111)', () => {
     expect(searches(get)).toEqual([
       [
         '/api/v1/users/search',
-        expect.objectContaining({ params: { query: { q: 'an', limit: 10 } } }),
+        expect.objectContaining({ params: { query: { q: 'an', offset: 0, limit: 20 } } }),
       ],
     ])
 
@@ -194,7 +193,7 @@ describe('PersonPicker (DMS-111)', () => {
     })
     expect(screen.getByRole('status')).toHaveTextContent('Searching…')
     answer?.({
-      data: [people[0]],
+      data: { items: [people[0]], total: 1 },
       error: undefined,
       response: new Response(null, { status: 200 }),
     })
@@ -230,6 +229,12 @@ describe('PersonPicker (DMS-111)', () => {
     expect(screen.queryByRole('button', { name: /as user id/ })).not.toBeInTheDocument()
   })
 
+  it('finds people by a part of the name, not only by its start (DMS-125)', async () => {
+    const { user } = renderWith(<Picker />)
+    await user.type(combobox(), 'eview')
+    expect(await screen.findByRole('option', { name: /Rita Reviewer/ })).toBeInTheDocument()
+  })
+
   it('speaks German', async () => {
     setLocale('de')
     const { user } = renderWith(<Picker initial="u-3" />)
@@ -249,6 +254,192 @@ describe('PersonPicker (DMS-111)', () => {
     await user.clear(combobox())
     await user.type(combobox(), 'zz')
     expect(await screen.findByText('Niemand gefunden für „zz“.')).toBeInTheDocument()
+  })
+})
+
+/** 45 people on pages of 20, as the backend answers with `offset` and `nextOffset`. */
+const crowd = Array.from({ length: 45 }, (_, i) => ({ id: `p-${i}`, displayName: `Person ${i}` }))
+
+function pagedDirectory(reach = crowd.length) {
+  return (path: string, init?: Init): Reply => {
+    if (path !== '/api/v1/users/search') return directory(path, init)
+    const offset = (init?.params?.query?.offset as number | undefined) ?? 0
+    const next = offset + 20
+    return ok({
+      items: crowd.slice(offset, next),
+      total: crowd.length,
+      nextOffset: next < Math.min(reach, crowd.length) ? next : undefined,
+    })
+  }
+}
+
+const loadMore = () => screen.getByRole('option', { name: 'Load more' })
+
+describe('PersonPicker with more hits than one page (DMS-125)', () => {
+  it('says how many are shown and loads the next page with the mouse', async () => {
+    const { get, user } = renderWith(<Picker />, pagedDirectory())
+    await user.type(combobox(), 'person')
+
+    await screen.findAllByText('20 of 45 people shown.')
+    expect(screen.getByRole('status')).toHaveTextContent('20 of 45 people shown.')
+    expect(screen.getAllByRole('option')).toHaveLength(21)
+    // The open list covers the status line: it says the same itself, hidden from screen readers.
+    const footer = screen
+      .getAllByText('20 of 45 people shown.')
+      .find((e) => e.getAttribute('aria-hidden') === 'true')
+    expect(footer).toBeVisible()
+    expect(screen.getByRole('option', { name: 'Person 0' })).toHaveAttribute('aria-setsize', '45')
+
+    await user.click(loadMore())
+    expect(await screen.findByRole('option', { name: 'Person 20' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('40 of 45 people shown.')
+    expect(combobox()).toHaveAttribute('aria-expanded', 'true')
+    expect(searches(get).map(([, init]) => (init as Init).params?.query?.offset)).toEqual([0, 20])
+
+    await user.click(loadMore())
+    expect(await screen.findByText('45 people found.')).toHaveAttribute('role', 'status')
+    expect(screen.queryByRole('option', { name: 'Load more' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('option', { name: 'Person 44' }))
+    expect(screen.getByTestId('value')).toHaveTextContent('p-44')
+  })
+
+  it('works with the keyboard: End reaches the row, Enter loads and moves to the first new hit', async () => {
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView')
+    const { user } = renderWith(<Picker />, pagedDirectory())
+    await user.type(combobox(), 'person')
+    await screen.findByRole('listbox')
+
+    await user.keyboard('{End}')
+    expect(combobox()).toHaveAttribute('aria-activedescendant', loadMore().id)
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' })
+    scroll.mockClear()
+    await user.keyboard('{Enter}')
+
+    const first = await screen.findByRole('option', { name: 'Person 20' })
+    expect(combobox()).toHaveFocus()
+    expect(combobox()).toHaveAttribute('aria-activedescendant', first.id)
+    expect(scroll.mock.contexts).toContain(first)
+    await user.keyboard('{Enter}')
+    expect(screen.getByTestId('value')).toHaveTextContent('p-20')
+    scroll.mockRestore()
+  })
+
+  it('shows that more is loading and keeps the hits', async () => {
+    let answer: ((reply: Awaited<Reply>) => void) | undefined
+    const paged = pagedDirectory()
+    const { user } = renderWith(<Picker />, (path, init) =>
+      init?.params?.query?.offset === 20
+        ? new Promise((resolve) => {
+            answer = resolve
+          })
+        : paged(path, init),
+    )
+    await user.type(combobox(), 'person')
+    await screen.findAllByText('20 of 45 people shown.')
+    await user.click(loadMore())
+
+    const row = await screen.findByRole('option', { name: 'Loading more people…' })
+    expect(row).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByRole('status')).toHaveTextContent('Loading more people…')
+    expect(screen.getByRole('option', { name: 'Person 19' })).toBeInTheDocument()
+    answer?.(await paged('/api/v1/users/search', { params: { query: { offset: 20 } } }))
+    expect(await screen.findByRole('option', { name: 'Person 39' })).toBeInTheDocument()
+  })
+
+  it('keeps the hits when loading more fails, says why and can try again', async () => {
+    let down = true
+    const paged = pagedDirectory()
+    const { user } = renderWith(<Picker />, (path, init) =>
+      down && init?.params?.query?.offset === 20
+        ? failed(503, { code: 'user_directory_unavailable', message: 'down' })
+        : paged(path, init),
+    )
+    await user.type(combobox(), 'person')
+    await screen.findAllByText('20 of 45 people shown.')
+    await user.click(loadMore())
+
+    const retry = await screen.findByRole('option', { name: 'Try loading more again' })
+    expect(screen.getByRole('status')).toHaveTextContent('People cannot be searched right now.')
+    // The open list covers the status line, so it says so as well.
+    expect(
+      screen
+        .getAllByText('People cannot be searched right now.')
+        .find((e) => e.getAttribute('aria-hidden') === 'true'),
+    ).toBeVisible()
+    expect(screen.getByRole('option', { name: 'Person 0' })).toBeInTheDocument()
+    // The directory did answer before: no offer to take the typed text as a user id.
+    expect(screen.queryByRole('button', { name: /as user id/ })).not.toBeInTheDocument()
+
+    down = false
+    await user.click(retry)
+    expect(await screen.findByRole('option', { name: 'Person 20' })).toBeInTheDocument()
+  })
+
+  it('asks to refine the search where paging ends', async () => {
+    const { user } = renderWith(<Picker />, pagedDirectory(20))
+    await user.type(combobox(), 'person')
+    expect(
+      await screen.findAllByText('20 of 45 people shown. Refine your search to find the others.'),
+    ).toHaveLength(2)
+    expect(screen.queryByRole('option', { name: 'Load more' })).not.toBeInTheDocument()
+  })
+
+  it('lists a person once if the same hit comes on two pages', async () => {
+    const { user } = renderWith(<Picker />, (path, init) => {
+      if (path !== '/api/v1/users/search') return directory(path, init)
+      return init?.params?.query?.offset === 2
+        ? ok({ items: [people[1], people[2]], total: 4 })
+        : ok({ items: [people[0], people[1]], total: 4, nextOffset: 2 })
+    })
+    await user.type(combobox(), 'an')
+    await screen.findAllByText('2 of 4 people shown.')
+    await user.click(loadMore())
+    await screen.findByRole('option', { name: /Rita Reviewer/ })
+    expect(screen.getAllByRole('option', { name: /Andreas Approver/ })).toHaveLength(1)
+  })
+
+  it('speaks German', async () => {
+    setLocale('de')
+    const { user } = renderWith(<Picker />, pagedDirectory())
+    await user.type(combobox(), 'person')
+    await screen.findAllByText('20 von 45 Personen angezeigt.')
+    expect(screen.getByRole('status')).toHaveTextContent('20 von 45 Personen angezeigt.')
+    expect(screen.getByRole('option', { name: 'Mehr laden' })).toBeInTheDocument()
+  })
+})
+
+describe('people who cannot be picked (DMS-125)', () => {
+  function Group({ onChange }: { onChange: (id: string) => void }) {
+    return (
+      <>
+        <label htmlFor="member">Member</label>
+        <PersonPicker
+          id="member"
+          value=""
+          onChange={onChange}
+          excluded={{ ids: ['u-1'], label: 'Already a member' }}
+        />
+      </>
+    )
+  }
+
+  it('marks them; neither mouse nor Enter picks them, and the others stay pickable', async () => {
+    const onChange = vi.fn()
+    const { user } = renderWith(<Group onChange={onChange} />)
+    const input = screen.getByRole('combobox', { name: 'Member' })
+    await user.type(input, 'an')
+
+    const member = await screen.findByRole('option', { name: /Anna Author.*Already a member/ })
+    expect(member).toHaveAttribute('aria-disabled', 'true')
+    await user.click(member)
+    await user.keyboard('{ArrowDown}')
+    // The mouse rests on the marked person: the arrow moved on from there.
+    await user.keyboard('{ArrowUp}{Enter}')
+    expect(input).toHaveAttribute('aria-activedescendant', member.id)
+    expect(onChange).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('option', { name: /Andreas Approver/ }))
+    expect(onChange).toHaveBeenLastCalledWith('u-2')
   })
 })
 
@@ -273,6 +464,12 @@ describe('PeoplePicker (DMS-111)', () => {
     await user.type(input, 'rita')
     await user.click(await screen.findByRole('option', { name: /Rita Reviewer/ }))
     expect(screen.getByTestId('ids')).toHaveTextContent('u-1,u-3')
+
+    await user.clear(input)
+    await user.type(input, 'anna')
+    const again = await screen.findByRole('option', { name: /Anna Author.*Already selected/ })
+    expect(again).toHaveAttribute('aria-disabled', 'true')
+    await user.clear(input)
 
     const picked = screen.getByRole('list', { name: 'Selected people' })
     expect(within(picked).getByText('Anna Author')).toBeInTheDocument()

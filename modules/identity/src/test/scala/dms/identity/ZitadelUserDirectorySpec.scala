@@ -22,7 +22,12 @@ object ZitadelUserDirectorySpec extends ZIOSpecDefault:
   private val token = "directory-token"
 
   /** A fake ZITADEL user service v2; `users` are the users it knows, as JSON objects of ListUsers. */
-  final class FakeZitadel(users: List[String], status: Int = 200, delayMillis: Long = 0):
+  final class FakeZitadel(
+      users: List[String],
+      status: Int = 200,
+      delayMillis: Long = 0,
+      searchTotal: Option[Int] = None
+  ):
     val hits           = AtomicInteger(0)
     val requests       = ConcurrentLinkedQueue[(String, String, Option[String])]()
     private val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
@@ -55,7 +60,10 @@ object ZitadelUserDirectorySpec extends ZIOSpecDefault:
           val answer =
             if !body.contains("inUserIdsQuery") then users
             else users.filter(u => ids.exists(id => u.contains(s"\"userId\":\"$id\"")))
-          val bytes = s"""{"details":{"totalResult":"${answer.size}"},"result":[${answer.mkString(",")}]}"""
+          val details = searchTotal.fold(s""""totalResult":"${answer.size}"""")(n =>
+            if n > 0 then s""""totalResult":"$n"""" else ""
+          )
+          val bytes = s"""{"details":{$details},"result":[${answer.mkString(",")}]}"""
             .getBytes(StandardCharsets.UTF_8)
           exchange.getResponseHeaders.add("Content-Type", "application/json")
           exchange.sendResponseHeaders(status, bytes.length.toLong)
@@ -67,11 +75,18 @@ object ZitadelUserDirectorySpec extends ZIOSpecDefault:
     def url: String  = s"http://127.0.0.1:${server.getAddress.getPort}"
     def stop(): Unit = server.stop(0)
 
-  private def withZitadel[A](users: List[String], status: Int = 200, delayMillis: Long = 0)(
+  private def withZitadel[A](
+      users: List[String],
+      status: Int = 200,
+      delayMillis: Long = 0,
+      searchTotal: Option[Int] = None
+  )(
       f: FakeZitadel => ZIO[Any, Any, A]
   ): ZIO[Scope, Any, A] =
     ZIO
-      .acquireRelease(ZIO.succeed(FakeZitadel(users, status, delayMillis)))(s => ZIO.succeed(s.stop()))
+      .acquireRelease(ZIO.succeed(FakeZitadel(users, status, delayMillis, searchTotal)))(s =>
+        ZIO.succeed(s.stop())
+      )
       .flatMap(f)
 
   private def human(
@@ -121,7 +136,7 @@ object ZitadelUserDirectorySpec extends ZIOSpecDefault:
         )
       })
     },
-    test("searches people: the organization, human users, active ones and every word as prefix (DMS-111)") {
+    test("searches people: the organization, human users, active ones and every word as part (DMS-125)") {
       val users = List(
         human("1", "Anna", "Author", "Anna Author"),
         human("2", "Andreas", "Approver", "andreas Approver"),
@@ -133,28 +148,79 @@ object ZitadelUserDirectorySpec extends ZIOSpecDefault:
         for
           d     <- directory(zitadel.url)
           query <- ZIO.fromEither(UserQuery.parse("  AN  Au "))
-          found <- d.search(org, query, 1)
-          more  <- d.search(org, query, 10)
-          none  <- d.search(org, query, 0)
+          found <- d.search(org, query, 0, 2)
+          more  <- d.search(org, query, 0, 10)
+          none  <- d.search(org, query, 0, 0)
           body = zitadel.requests.asScala.head._2
         yield assertTrue(
-          found.map(_.id) == List(UserId("2")),
-          more.map(_.displayName) == List("andreas Approver", "Anna Author"),
-          more.map(_.email) == List(Some("2@example.com"), Some("1@example.com")),
-          none == Nil,
+          found.users.map(_.id) == List(UserId("2"), UserId("1")),
+          more.users.map(_.displayName) == List("andreas Approver", "Anna Author"),
+          more.users.map(_.email) == List(Some("2@example.com"), Some("1@example.com")),
+          none == UserSearchPage.empty,
           zitadel.hits.get == 2,
           body.contains(s""""organizationIdQuery":{"organizationId":"$org"}"""),
           body.contains(""""typeQuery":{"type":"TYPE_HUMAN"}"""),
           body.contains(""""notQuery":{"query":{"stateQuery":{"state":"USER_STATE_INACTIVE"}}}"""),
           body.contains(
-            """"lastNameQuery":{"lastName":"an","method":"TEXT_QUERY_METHOD_STARTS_WITH_IGNORE_CASE"}"""
+            """"lastNameQuery":{"lastName":"an","method":"TEXT_QUERY_METHOD_CONTAINS_IGNORE_CASE"}"""
           ),
           body.contains(
-            """"emailQuery":{"emailAddress":"au","method":"TEXT_QUERY_METHOD_STARTS_WITH_IGNORE_CASE"}"""
+            """"emailQuery":{"emailAddress":"au","method":"TEXT_QUERY_METHOD_CONTAINS_IGNORE_CASE"}"""
           ),
           body.contains(""""sortingColumn":"USER_FIELD_NAME_DISPLAY_NAME""""),
-          body.contains(""""query":{"limit":1,"asc":true}""")
+          body.contains(""""query":{"limit":2,"asc":true}"""),
+          !body.contains("STARTS_WITH")
         )
+      })
+    },
+    test("pages through the hits: offset to ZITADEL, total from ZITADEL, next page from ZITADEL's rows") {
+      val rows =
+        List(human("1", "Anna", "Author"), human("2", "Berta", "Author"), human("3", "Clara", "Author"))
+      ZIO.scoped(withZitadel(rows, searchTotal = Some(7)) { zitadel =>
+        for
+          d     <- directory(zitadel.url)
+          query <- ZIO.fromEither(UserQuery.parse("author"))
+          first <- d.search(org, query, 0, 3)
+          next  <- d.search(org, query, 3, 3)
+          last  <- d.search(org, query, 6, 3)
+          bodies = zitadel.requests.asScala.toList.map(_._2)
+        yield assertTrue(
+          first == first.copy(total = 7, nextOffset = Some(3)),
+          first.users.size == 3,
+          next.nextOffset.contains(6),
+          last.nextOffset.isEmpty,
+          last.total == 9,
+          bodies(0).contains(""""query":{"limit":3,"asc":true}"""),
+          bodies(1).contains(""""query":{"limit":3,"asc":true,"offset":3}""")
+        )
+      })
+    },
+    test("rows the adapter drops do not end the paging, and never reach the page") {
+      val rows = List(
+        human("1", "Anna", "Author"),
+        human("8", "Other", "Tenant", owner = "org-2"),
+        human("9", "Anke", "Gone", state = "USER_STATE_DELETED")
+      )
+      ZIO.scoped(withZitadel(rows, searchTotal = Some(30)) { zitadel =>
+        for
+          d     <- directory(zitadel.url)
+          query <- ZIO.fromEither(UserQuery.parse("an"))
+          page  <- d.search(org, query, 0, 3)
+        yield assertTrue(
+          page.users.map(_.id) == List(UserId("1")),
+          page.total == 30,
+          page.nextOffset.contains(3)
+        )
+      })
+    },
+    test("a page past the end has no rows and no total: paging stops there") {
+      ZIO.scoped(withZitadel(Nil, searchTotal = Some(0)) { zitadel =>
+        for
+          d      <- directory(zitadel.url)
+          query  <- ZIO.fromEither(UserQuery.parse("an"))
+          past   <- d.search(org, query, 40, 20)
+          nobody <- d.search(org, query, 0, 20)
+        yield assertTrue(past == UserSearchPage(Nil, 40, None), nobody == UserSearchPage(Nil, 0, None))
       })
     },
     test("search queries are normalized and bounded") {
@@ -170,7 +236,7 @@ object ZitadelUserDirectorySpec extends ZIOSpecDefault:
     test("without a directory searching fails with a reason, resolving does not") {
       for
         query    <- ZIO.fromEither(UserQuery.parse("anna"))
-        searched <- UserDirectory.none.search(org, query, 10).flip
+        searched <- UserDirectory.none.search(org, query, 0, 10).flip
         resolved <- UserDirectory.none.lookup(org, Set(UserId("1")))
       yield assertTrue(
         searched == UserDirectoryError.Unavailable(UserDirectory.NotConfigured),
@@ -239,49 +305,61 @@ object ZitadelUserDirectorySpec extends ZIOSpecDefault:
           )
         )
       },
-      test("keeps search answers per organization, query and limit for a short while; found people resolve") {
-        val searches = Unsafe.unsafe(implicit u => Ref.unsafe.make(List.empty[(String, String, Int)]))
+      test(
+        "keeps answers per organization, query, offset and limit for a short while; found people resolve"
+      ) {
+        val searches = Unsafe.unsafe(implicit u => Ref.unsafe.make(List.empty[(String, String, Int, Int)]))
         val lookups  = Unsafe.unsafe(implicit u => Ref.unsafe.make(0))
         val failing  = Unsafe.unsafe(implicit u => Ref.unsafe.make(false))
         val inner    = new UserDirectory:
           def lookup(organizationId: String, ids: Set[UserId]) = lookups.update(_ + 1).as(Map.empty)
-          override def search(organizationId: String, query: UserQuery, limit: Int) =
-            searches.update(_ :+ (organizationId, query.text, limit)) *> failing.get.flatMap(fail =>
+          override def search(organizationId: String, query: UserQuery, offset: Int, limit: Int) =
+            searches.update(_ :+ (organizationId, query.text, offset, limit)) *> failing.get.flatMap(fail =>
               if fail then ZIO.fail(UserDirectoryError.Unavailable("down"))
-              else ZIO.succeed(List(UserInfo(UserId("1"), s"Anna $organizationId", None)))
+              else
+                ZIO.succeed(
+                  UserSearchPage(
+                    List(UserInfo(UserId("1"), s"Anna $organizationId $offset", None)),
+                    total = 1,
+                    nextOffset = None
+                  )
+                )
             )
         for
           cached <- CachedUserDirectory.make(inner, 10.minutes, 100, searchTtl = 1.minute)
           lower  <- ZIO.fromEither(UserQuery.parse("anna"))
           upper  <- ZIO.fromEither(UserQuery.parse(" ANNA "))
-          first  <- cached.search(org, lower, 10)
-          again  <- cached.search(org, upper, 10)
-          other  <- cached.search("org-2", lower, 10)
-          fewer  <- cached.search(org, lower, 5)
+          first  <- cached.search(org, lower, 0, 10)
+          again  <- cached.search(org, upper, 0, 10)
+          other  <- cached.search("org-2", lower, 0, 10)
+          fewer  <- cached.search(org, lower, 0, 5)
+          paged  <- cached.search(org, lower, 10, 10)
           name   <- cached.lookup(org, Set(UserId("1")))
           _      <- TestClock.adjust(2.minutes)
           _      <- failing.set(true)
-          failed <- cached.search(org, lower, 10).either
+          failed <- cached.search(org, lower, 0, 10).either
           _      <- failing.set(false)
-          later  <- cached.search(org, lower, 10)
+          later  <- cached.search(org, lower, 0, 10)
           asked  <- searches.get
           looked <- lookups.get
           kept   <- cached.searchesKept
         yield assertTrue(
-          first.map(_.displayName) == List("Anna org-1"),
+          first.users.map(_.displayName) == List("Anna org-1 0"),
           again == first,
-          other.map(_.displayName) == List("Anna org-2"),
+          other.users.map(_.displayName) == List("Anna org-2 0"),
           fewer == first,
-          name.get(UserId("1")).map(_.displayName).contains("Anna org-1"),
+          paged.users.map(_.displayName) == List("Anna org-1 10"),
+          name.get(UserId("1")).isDefined,
           looked == 0,
           failed.isLeft,
           later == first,
           asked == List(
-            (org, "anna", 10),
-            ("org-2", "anna", 10),
-            (org, "anna", 5),
-            (org, "anna", 10),
-            (org, "anna", 10)
+            (org, "anna", 0, 10),
+            ("org-2", "anna", 0, 10),
+            (org, "anna", 0, 5),
+            (org, "anna", 10, 10),
+            (org, "anna", 0, 10),
+            (org, "anna", 0, 10)
           ),
           kept == 1
         )

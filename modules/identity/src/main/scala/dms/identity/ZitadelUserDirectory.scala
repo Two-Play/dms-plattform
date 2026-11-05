@@ -15,8 +15,9 @@ import java.nio.file.{Files, Path}
   * @param url
   *   base URL of the ZITADEL API; defaults to the issuer (`dms.auth.issuer`)
   * @param tokenFile
-  *   file with the personal access token of a ZITADEL service user that may read users (e.g. instance role
-  *   `IAM_OWNER_VIEWER`, or `ORG_OWNER_VIEWER` in a single-organization setup). Read once at start-up.
+  *   file with the personal access token of a ZITADEL service user that may read users: `ORG_OWNER_VIEWER` in
+  *   every tenant's organization, or the instance role `IAM_OWNER_VIEWER` (docs/operations/production.md).
+  *   Read once at start-up.
   * @param token
   *   the token itself, if not from a file (e.g. from a secret store via environment variable)
   * @param timeoutMillis
@@ -60,9 +61,13 @@ private[identity] object ZitadelJson:
       machine: Option[Machine] = None
   ) derives JsonDecoder
 
-  final case class ListUsersResponse(result: Option[List[User]] = None) derives JsonDecoder
+  /** `totalResult` is a string (uint64 in JSON), and ZITADEL leaves it out when a page has no rows. */
+  final case class ListDetails(totalResult: Option[String] = None) derives JsonDecoder
+  final case class ListUsersResponse(details: Option[ListDetails] = None, result: Option[List[User]] = None)
+      derives JsonDecoder
 
-  final case class Pagination(limit: Int, asc: Option[Boolean] = None) derives JsonEncoder
+  final case class Pagination(limit: Int, asc: Option[Boolean] = None, offset: Option[Int] = None)
+      derives JsonEncoder
   final case class InUserIds(userIds: List[String]) derives JsonEncoder
   final case class OrganizationId(organizationId: String) derives JsonEncoder
 
@@ -98,29 +103,32 @@ private[identity] object ZitadelJson:
       sortingColumn: Option[String] = None
   ) derives JsonEncoder
 
-  private val StartsWith = "TEXT_QUERY_METHOD_STARTS_WITH_IGNORE_CASE"
+  /** The widest text match ZITADEL has (ADR 0067): it has no fuzzy or similarity method. `%` and `_` in a
+    * word are matched literally, ZITADEL escapes them.
+    */
+  private val Contains = "TEXT_QUERY_METHOD_CONTAINS_IGNORE_CASE"
 
   /** Active human users of the organization whose first name, last name, display name, email or user name
-    * starts with each of the words; sorted by display name.
+    * contains each of the words; sorted by display name, `limit` of them after skipping `offset`.
     */
-  def searchRequest(organizationId: String, query: UserQuery, limit: Int): ListUsersRequest =
+  def searchRequest(organizationId: String, query: UserQuery, offset: Int, limit: Int): ListUsersRequest =
     val words = query.words.map(word =>
       Query(orQuery =
         Some(
           AnyOf(
             List(
-              TextQuery(firstNameQuery = Some(FirstName(word, StartsWith))),
-              TextQuery(lastNameQuery = Some(LastName(word, StartsWith))),
-              TextQuery(displayNameQuery = Some(DisplayName(word, StartsWith))),
-              TextQuery(emailQuery = Some(EmailAddress(word, StartsWith))),
-              TextQuery(userNameQuery = Some(UserName(word, StartsWith)))
+              TextQuery(firstNameQuery = Some(FirstName(word, Contains))),
+              TextQuery(lastNameQuery = Some(LastName(word, Contains))),
+              TextQuery(displayNameQuery = Some(DisplayName(word, Contains))),
+              TextQuery(emailQuery = Some(EmailAddress(word, Contains))),
+              TextQuery(userNameQuery = Some(UserName(word, Contains)))
             )
           )
         )
       )
     )
     ListUsersRequest(
-      Pagination(limit, asc = Some(true)),
+      Pagination(limit, asc = Some(true), offset = Some(offset).filter(_ > 0)),
       Query(organizationIdQuery = Some(OrganizationId(organizationId))) ::
         Query(typeQuery = Some(UserType("TYPE_HUMAN"))) ::
         Query(notQuery = Some(NotQuery(StateQuery(UserState("USER_STATE_INACTIVE"))))) ::
@@ -162,18 +170,25 @@ final class ZitadelUserDirectory(baseUrl: URI, token: String, timeout: Duration,
   override def search(
       organizationId: String,
       query: UserQuery,
+      offset: Int,
       limit: Int
-  ): IO[UserDirectoryError, List[UserInfo]] =
-    if limit <= 0 then ZIO.succeed(Nil)
+  ): IO[UserDirectoryError, UserSearchPage] =
+    if limit <= 0 then ZIO.succeed(UserSearchPage.empty)
     else
-      listUsers(searchRequest(organizationId, query, limit)).map(
-        _.filter(_.details.flatMap(_.resourceOwner).contains(organizationId))
+      listUsers(searchRequest(organizationId, query, offset, limit)).map { answer =>
+        val rows  = answer.result.getOrElse(Nil).take(limit)
+        val users = rows
+          .filter(_.details.flatMap(_.resourceOwner).contains(organizationId))
           .filter(_.human.isDefined)
           .filterNot(_.state.exists(Unpickable.contains))
           .flatMap(toUserInfo)
           .sortBy(u => (u.displayName.toLowerCase(java.util.Locale.ROOT), u.id.value))
-          .take(limit)
-      )
+        // Counted on ZITADEL's rows, not on the people kept: a dropped row must not end the paging early.
+        val reached = offset + rows.size
+        // A page without rows has no total: the hits ended at or before `offset`.
+        val total = answer.details.flatMap(_.totalResult).flatMap(_.toIntOption).getOrElse(0).max(reached)
+        UserSearchPage(users, total, Some(reached).filter(next => rows.nonEmpty && next < total))
+      }
 
   private def list(organizationId: String, ids: List[String]): IO[UserDirectoryError, List[UserInfo]] =
     listUsers(
@@ -185,12 +200,14 @@ final class ZitadelUserDirectory(baseUrl: URI, token: String, timeout: Duration,
         )
       )
     ).map(
-      _.filter(u => ids.contains(u.userId))
+      _.result
+        .getOrElse(Nil)
+        .filter(u => ids.contains(u.userId))
         .filter(_.details.flatMap(_.resourceOwner).contains(organizationId))
         .flatMap(toUserInfo)
     )
 
-  private def listUsers(listRequest: ListUsersRequest): IO[UserDirectoryError, List[User]] =
+  private def listUsers(listRequest: ListUsersRequest): IO[UserDirectoryError, ListUsersResponse] =
     val body    = listRequest.toJson
     val request = HttpRequest
       .newBuilder(baseUrl.resolve("v2/users"))
@@ -216,7 +233,6 @@ final class ZitadelUserDirectory(baseUrl: URI, token: String, timeout: Duration,
               .mapError(e =>
                 UserDirectoryError.Unavailable(s"ZITADEL answered with an unexpected user list: $e")
               )
-              .map(_.result.getOrElse(Nil))
           case status => ZIO.fail(UserDirectoryError.Unavailable(s"ZITADEL answered with HTTP $status"))
       }
 
@@ -244,9 +260,10 @@ object ZitadelUserDirectory:
     yield ZitadelUserDirectory(uri, token, timeout, client)
 
 /** Keeps resolved and unknown users per organization for a while, bounded in size, so pages listing the same
-  * people do not ask ZITADEL again. Answers to searches for people (DMS-111) are kept per organization, query
-  * and limit for `searchTtl`, at most [[CachedUserDirectory.MaxSearches]] of them; the people found are kept
-  * as resolved users as well, so their names show without another request. Failures are not cached.
+  * people do not ask ZITADEL again. Answers to searches for people (DMS-111) are kept per organization,
+  * query, offset and limit for `searchTtl`, at most [[CachedUserDirectory.MaxSearches]] of them; the people
+  * found are kept as resolved users as well, so their names show without another request. Failures are not
+  * cached.
   */
 final class CachedUserDirectory(
     underlying: UserDirectory,
@@ -254,7 +271,7 @@ final class CachedUserDirectory(
     maxEntries: Int,
     searchTtl: Duration,
     entries: Ref.Synchronized[Map[(String, UserId), CachedUserDirectory.Entry]],
-    searches: Ref.Synchronized[Map[(String, String, Int), CachedUserDirectory.Found]]
+    searches: Ref.Synchronized[Map[(String, String, Int, Int), CachedUserDirectory.Found]]
 ) extends UserDirectory:
   import CachedUserDirectory.{Entry, Found, MaxSearches}
 
@@ -274,25 +291,26 @@ final class CachedUserDirectory(
   override def search(
       organizationId: String,
       query: UserQuery,
+      offset: Int,
       limit: Int
-  ): IO[UserDirectoryError, List[UserInfo]] =
-    val key = (organizationId, query.text, limit)
+  ): IO[UserDirectoryError, UserSearchPage] =
+    val key = (organizationId, query.text, offset, limit)
     for
       now    <- Clock.instant
       cached <- searches.get.map(_.get(key).filter(_.expiresAt.isAfter(now)))
       found  <- cached match
-        case Some(hit) => ZIO.succeed(hit.users)
+        case Some(hit) => ZIO.succeed(hit.page)
         case None      =>
           for
-            users <- underlying.search(organizationId, query, limit)
-            _     <- searches.update { current =>
+            page <- underlying.search(organizationId, query, offset, limit)
+            _    <- searches.update { current =>
               val merged = current.filter(_._2.expiresAt.isAfter(now)) +
-                (key -> Found(users, now.plusMillis(searchTtl.toMillis)))
+                (key -> Found(page, now.plusMillis(searchTtl.toMillis)))
               if merged.size <= MaxSearches then merged
               else merged.toList.sortBy(_._2.expiresAt).takeRight(MaxSearches).toMap
             }
-            _ <- remember(organizationId, users.map(u => u.id -> Some(u)).toSet, now)
-          yield users
+            _ <- remember(organizationId, page.users.map(u => u.id -> Some(u)).toSet, now)
+          yield page
     yield found
 
   private def remember(
@@ -316,9 +334,9 @@ final class CachedUserDirectory(
 
 object CachedUserDirectory:
   final case class Entry(user: Option[UserInfo], expiresAt: java.time.Instant)
-  final case class Found(users: List[UserInfo], expiresAt: java.time.Instant)
+  final case class Found(page: UserSearchPage, expiresAt: java.time.Instant)
 
-  /** Search answers kept at most; a picker asks one per typed prefix. */
+  /** Search answers kept at most; a picker asks one per typed prefix and page. */
   val MaxSearches = 1000
 
   def make(
@@ -329,7 +347,7 @@ object CachedUserDirectory:
   ): UIO[CachedUserDirectory] =
     for
       entries  <- Ref.Synchronized.make(Map.empty[(String, UserId), Entry])
-      searches <- Ref.Synchronized.make(Map.empty[(String, String, Int), Found])
+      searches <- Ref.Synchronized.make(Map.empty[(String, String, Int, Int), Found])
     yield CachedUserDirectory(underlying, ttl, maxEntries.max(1), searchTtl, entries, searches)
 
 object UserDirectories:

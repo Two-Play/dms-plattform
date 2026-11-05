@@ -56,13 +56,17 @@ const people = [
   { id: 'nobody', displayName: 'Nora Nobody' },
 ]
 
-/** Like the backend: every word starts a part of the name or the email. */
+/** Like the backend: every word is part of the name or the email. */
 function searchPeople(q: string) {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean)
   return people.filter((p) => {
-    const parts = [...p.displayName.toLowerCase().split(' '), p.email ?? '']
-    return words.every((w) => parts.some((part) => part.startsWith(w)))
+    const text = `${p.displayName} ${p.email ?? ''}`.toLowerCase()
+    return words.every((w) => text.includes(w))
   })
+}
+
+function page<T>(items: T[]) {
+  return { items, total: items.length }
 }
 
 function deputyship(over: Partial<Deputyship>): Deputyship {
@@ -132,7 +136,7 @@ function renderAt(path: string) {
       case '/api/v1/publications/failures':
         return ok([])
       case '/api/v1/users/search':
-        return ok(searchPeople((init?.params?.query?.q as string | undefined) ?? ''))
+        return ok(page(searchPeople((init?.params?.query?.q as string | undefined) ?? '')))
       default:
         return failed(404, { code: 'not_found', message: `unexpected ${p}` })
     }
@@ -244,6 +248,30 @@ describe('admin: access groups (DMS-105)', () => {
     expect(within(rows[0] as HTMLElement).getByText('approver-1')).toBeInTheDocument()
     expect(within(rows[1] as HTMLElement).getByText('Former')).toBeInTheDocument()
     expect(within(rows[1] as HTMLElement).queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('marks current members in the picker; former members can be added again (DMS-125)', async () => {
+    state.members.board = [
+      { userId: 'reviewer-1', addedBy: 'admin-1', addedAt: '2026-10-01T10:00:00Z' },
+      {
+        userId: 'approver-2',
+        addedBy: 'admin-1',
+        addedAt: '2026-09-01T10:00:00Z',
+        removedBy: 'admin-1',
+        removedAt: '2026-09-20T10:00:00Z',
+      },
+    ]
+    const { user } = renderAt('/admin')
+    await membersTable()
+
+    await user.type(screen.getByRole('combobox', { name: 'Person' }), 'example')
+    const hits = await screen.findByRole('listbox', { name: 'People found' })
+    expect(
+      within(hits).getByRole('option', { name: /Rita Reviewer.*Already a member/ }),
+    ).toHaveAttribute('aria-disabled', 'true')
+    const former = within(hits).getByRole('option', { name: /Arne Approver/ })
+    expect(former).not.toHaveAttribute('aria-disabled')
+    expect(former).not.toHaveTextContent('Already a member')
   })
 
   it('adds and removes members', async () => {

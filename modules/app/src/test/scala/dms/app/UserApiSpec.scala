@@ -29,8 +29,9 @@ import javax.sql.DataSource
   *
   *   - resolving ids (DMS-110): order and duplicates, unknown ids, the tenant's organization as scope,
   *     limits, an unreachable directory;
-  *   - searching people for the people picker (DMS-111): only the caller's tenant, only with a role in the
-  *     tenant, bounded queries and result sizes, an unreachable or missing directory.
+  *   - searching people for the people picker (DMS-111, DMS-125): only the caller's tenant, only with a role
+  *     in the tenant, bounded queries and result sizes, paging and its reach, an unreachable or missing
+  *     directory.
   */
 object UserApiSpec extends ZIOSpecDefault:
 
@@ -107,8 +108,8 @@ object UserApiSpec extends ZIOSpecDefault:
   /** Asked organizations and ids. */
   private val asked = Unsafe.unsafe(implicit u => Ref.unsafe.make(List.empty[(String, Set[UserId])]))
 
-  /** Asked organizations, queries and limits. */
-  private val searched = Unsafe.unsafe(implicit u => Ref.unsafe.make(List.empty[(String, String, Int)]))
+  /** Asked organizations, queries, offsets and limits. */
+  private val searched = Unsafe.unsafe(implicit u => Ref.unsafe.make(List.empty[(String, String, Int, Int)]))
   private val up       = Unsafe.unsafe(implicit u => Ref.unsafe.make(true))
 
   private def person(id: String, name: String, email: Option[String] = None) =
@@ -125,8 +126,8 @@ object UserApiSpec extends ZIOSpecDefault:
     orgB -> Map(person("u-9", "Andrea Other Tenant", Some("andrea@other.example")))
   )
 
-  /** Like ZITADEL: every word starts a part of the name or the email; sorted by name. The limit is ignored on
-    * purpose, so the endpoint's own bound is tested.
+  /** Like ZITADEL: every word is part of the name or the email; sorted by name. Pages like ZITADEL as well,
+    * but the page may hold one person too many, so the endpoint's own bound is tested.
     */
   private val directory = new UserDirectory:
     def lookup(organizationId: String, ids: Set[UserId]) =
@@ -134,20 +135,22 @@ object UserApiSpec extends ZIOSpecDefault:
         if ok then ZIO.succeed(people.getOrElse(organizationId, Map.empty).filter((id, _) => ids(id)))
         else ZIO.fail(UserDirectoryError.Unavailable("ZITADEL is not reachable (refused)"))
       )
-    override def search(organizationId: String, query: UserQuery, limit: Int) =
-      searched.update(_ :+ (organizationId, query.text, limit)) *> up.get.flatMap(ok =>
+    override def search(organizationId: String, query: UserQuery, offset: Int, limit: Int) =
+      searched.update(_ :+ (organizationId, query.text, offset, limit)) *> up.get.flatMap(ok =>
         if !ok then ZIO.fail(UserDirectoryError.Unavailable("ZITADEL is not reachable (refused)"))
         else
+          val hits = people
+            .getOrElse(organizationId, Map.empty)
+            .values
+            .filter { u =>
+              val text = (u.displayName :: u.email.toList).mkString(" ").toLowerCase
+              query.words.forall(text.contains)
+            }
+            .toList
+            .sortBy(_.displayName)
+          val next = offset + limit
           ZIO.succeed(
-            people
-              .getOrElse(organizationId, Map.empty)
-              .values
-              .filter { u =>
-                val parts = u.displayName.toLowerCase.split(' ').toList ++ u.email.toList
-                query.words.forall(w => parts.exists(_.startsWith(w)))
-              }
-              .toList
-              .sortBy(_.displayName)
+            UserSearchPage(hits.slice(offset, next + 1), hits.size, Some(next).filter(_ < hits.size))
           )
       )
 
@@ -202,8 +205,23 @@ object UserApiSpec extends ZIOSpecDefault:
   private def users(body: String): List[UserView] =
     body.fromJson[List[UserView]].fold(e => throw AssertionError(s"$e: $body"), identity)
 
-  private def matches(body: String): List[UserMatch] =
-    body.fromJson[List[UserMatch]].fold(e => throw AssertionError(s"$e: $body"), identity)
+  private def page(body: String): UserMatchPage =
+    body.fromJson[UserMatchPage].fold(e => throw AssertionError(s"$e: $body"), identity)
+
+  private def matches(body: String): List[UserMatch] = page(body).items
+
+  /** A directory with `hits` people that answers every page, for the reach of paging. */
+  private def crowded(hits: Int) = new UserDirectory:
+    def lookup(organizationId: String, ids: Set[UserId]) = ZIO.succeed(Map.empty)
+    override def search(organizationId: String, query: UserQuery, offset: Int, limit: Int) =
+      val next = offset + limit
+      ZIO.succeed(
+        UserSearchPage(
+          (offset until next.min(hits)).toList.map(i => UserInfo(UserId(s"u$i"), s"Person $i", None)),
+          hits,
+          Some(next).filter(_ < hits)
+        )
+      )
 
   private val lookupTests = suite("resolving ids (DMS-110)")(
     test("resolves the tenant's users in the order asked, without duplicates; others have no name") {
@@ -247,7 +265,7 @@ object UserApiSpec extends ZIOSpecDefault:
   )
 
   private val searchTests = suite("searching people (DMS-111)")(
-    test("finds people of the caller's tenant by name prefix, with email, sorted by name") {
+    test("finds people of the caller's tenant by part of the name, with email, sorted by name") {
       for
         _              <- searched.set(Nil)
         (status, body) <- get("/api/v1/users/search?q=%20AN%20")
@@ -260,23 +278,27 @@ object UserApiSpec extends ZIOSpecDefault:
           UserMatch("u-1", "Anna Author", Some("anna@example.com")),
           UserMatch("u-4", "Anton Admin", None)
         ),
-        asks == List((orgA, "an", UserApi.DefaultResults))
+        page(body).total == 4,
+        page(body).nextOffset.isEmpty,
+        asks == List((orgA, "an", 0, UserApi.DefaultResults))
       )
     },
-    test("every word narrows the search; email prefixes match as well") {
+    test("every word narrows the search; parts of names and emails match as well") {
       for
-        (_, words) <- get("/api/v1/users/search?q=an%20au")
-        (_, email) <- get("/api/v1/users/search?q=rita@")
+        (_, words)  <- get("/api/v1/users/search?q=an%20au")
+        (_, email)  <- get("/api/v1/users/search?q=rita@")
+        (_, inside) <- get("/api/v1/users/search?q=eview")
       yield assertTrue(
         matches(words).map(_.id) == List("u-1"),
-        matches(email).map(_.id) == List("u-3")
+        matches(email).map(_.id) == List("u-3"),
+        matches(inside).map(_.id) == List("u-3")
       )
     },
     test("never shows people of another tenant: each tenant searches its own organization") {
       for
         _            <- searched.set(Nil)
         (sa, bodyA)  <- get("/api/v1/users/search?q=andrea")
-        (sb, bodyB)  <- get("/api/v1/users/search?q=an", as = Some(readerB -> orgB))
+        (sb, bodyB)  <- get("/api/v1/users/search?q=an&offset=0", as = Some(readerB -> orgB))
         (_, isolate) <- get("/api/v1/users/search?q=other", as = Some(reader -> orgA))
         asks         <- searched.get
       yield assertTrue(
@@ -338,11 +360,50 @@ object UserApiSpec extends ZIOSpecDefault:
       yield assertTrue(
         s == Status.Ok,
         matches(body).map(_.id) == List("u-2", "u-5"),
-        asks == List((orgA, "an", 2)),
+        asks == List((orgA, "an", 0, 2)),
         zero == Status.BadRequest,
         b0.contains("invalid_limit"),
         many == Status.BadRequest,
         max == Status.Ok
+      )
+    },
+    test("pages through the hits with the offset the page before named") {
+      for
+        _           <- searched.set(Nil)
+        (s1, first) <- get("/api/v1/users/search?q=an&limit=3")
+        next = page(first).nextOffset
+        (s2, second) <- get(s"/api/v1/users/search?q=an&limit=3&offset=${next.getOrElse(-1)}")
+        asks         <- searched.get
+      yield assertTrue(
+        s1 == Status.Ok,
+        matches(first).map(_.id) == List("u-2", "u-5", "u-1"),
+        page(first).total == 4,
+        next.contains(3),
+        s2 == Status.Ok,
+        matches(second).map(_.id) == List("u-4"),
+        page(second).total == 4,
+        page(second).nextOffset.isEmpty,
+        asks == List((orgA, "an", 0, 3), (orgA, "an", 3, 3))
+      )
+    },
+    test("paging ends at the reach, while the total still tells how many hits there are") {
+      val users = crowded(UserApi.MaxReach + 50)
+      val last  = UserApi.MaxReach - 20
+      for
+        (_, before)   <- get(s"/api/v1/users/search?q=pe&limit=20&offset=${last - 20}", users = users)
+        (_, end)      <- get(s"/api/v1/users/search?q=pe&limit=20&offset=$last", users = users)
+        (_, odd)      <- get(s"/api/v1/users/search?q=pe&limit=20&offset=${last + 15}", users = users)
+        (beyond, b)   <- get(s"/api/v1/users/search?q=pe&offset=${UserApi.MaxReach}", users = users)
+        (negative, _) <- get("/api/v1/users/search?q=pe&offset=-1", users = users)
+      yield assertTrue(
+        page(before).nextOffset.contains(last),
+        page(end).items.size == 20,
+        page(end).nextOffset.isEmpty,
+        page(end).total == UserApi.MaxReach + 50,
+        page(odd).items.size == 5,
+        beyond == Status.BadRequest,
+        b.contains("invalid_offset"),
+        negative == Status.BadRequest
       )
     },
     test("an unreachable directory and a missing directory are 503 with the reason") {

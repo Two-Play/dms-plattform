@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-10-29, implemented in DMS-110; addendum DMS-111: people picker) |
+| Status | Accepted (2026-10-29, implemented in DMS-110; addendum DMS-111: people picker; search and paging changed by ADR 0067, DMS-125) |
 | Date | 2026-10-29 |
 | Decided by | Philippe |
 
@@ -88,3 +88,7 @@ Given:
 - Negative: every search is a request to ZITADEL (debounced in the UI, cached a minute); the read-only service token now also serves searches, so it must be able to list users of every tenant's organization (unchanged requirement); results are limited to 20 without paging; prefix search only (no fuzzy matching, "Mayer" does not find "Meier"). Newly added people show up after at most a minute.
 - Follow-ups: optional "exclude" of people already in the list (e.g. current group members); fuzzy search if users ask for it.
 - Reversibility: **high**. The search is one port method behind one endpoint and one component; removing it brings back the id fields.
+
+## Addendum (DMS-125, 2026-11-05): see ADR 0067
+
+[ADR 0067](0067-people-picker-partial-search-paging-and-marking.md) changes the addendum above: the search matches inside words instead of word starts, the endpoint answers pages (`{items, total, nextOffset?}`) up to 200 hits, and people already in a list are marked. It also confirms that ZITADEL has no fuzzy matching. "One service user per organization" was never meant: there is one service user with a member entry in every tenant's organization, see [docs/operations/production.md](../operations/production.md#service-user-of-the-user-directory).
