@@ -25,6 +25,18 @@ enum EditViolation:
 
   def section: SectionId
 
+  /** Stable code of the violation for API clients, which write their own sentence from it. */
+  def code: String = this match
+    case LockedSectionRemoved(_)                 => "locked_section_removed"
+    case LockedSectionMoved(_)                   => "locked_section_moved"
+    case LockedSectionRenamed(_, _, _)           => "locked_section_renamed"
+    case LockedSectionUnlocked(_)                => "locked_section_unlocked"
+    case LockedSectionChangedWithoutDeviation(_) => "locked_section_changed"
+    case NewSectionNotAllowed(_)                 => "new_section_not_allowed"
+    case NewSectionMisplaced(_)                  => "new_section_misplaced"
+    case NewSectionLocked(_)                     => "new_section_locked"
+    case DuplicateSection(_)                     => "duplicate_section"
+
   def reason: String = this match
     case LockedSectionRemoved(s) => s"Locked section '${s.value}' must not be removed."
     case LockedSectionMoved(s)   =>

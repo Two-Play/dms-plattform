@@ -518,10 +518,33 @@ describe('Document page with a draft', () => {
       () => failed(409, { code: 'lifecycle', message: 'The version is already in review.' }),
       () =>
         failed(422, {
-          code: 'invalid',
-          message: "Locked section 'parties' was changed.",
+          code: 'unauthorized_deviations',
+          message: "Locked section 'parties' was changed without a deviation request.",
+          issues: [
+            {
+              field: 'parties',
+              label: 'Parties',
+              code: 'locked_section_changed',
+              message: "Locked section 'parties' was changed without a deviation request.",
+            },
+            {
+              field: 'extra',
+              label: 'Extra',
+              code: 'new_section_not_allowed',
+              message: "Section 'extra' is not part of the template; new sections are not allowed.",
+            },
+            {
+              field: 'later',
+              label: 'Later',
+              code: 'a_later_code',
+              message: 'As the server says.',
+            },
+          ],
         }),
     ]
+    state.document.current.content = {
+      sections: [{ id: 'parties', title: 'Parties', locked: true }],
+    }
     const { user } = renderAt(`/documents/${documentId}`)
     await waitFor(() => {
       expect(term()).toHaveValue('12')
@@ -534,11 +557,18 @@ describe('Document page with a draft', () => {
     expect(statusAlert()).toHaveTextContent('reload the page')
 
     await user.click(screen.getByRole('button', { name: 'Submit for review' }))
-    await waitFor(() => {
-      expect(statusAlert()).toHaveTextContent(
-        'Changes to locked sections need an authorized deviation request.',
-      )
-    })
+    const blocked = await screen.findByTestId('blocked-sections')
+    expect(statusAlert()).toHaveTextContent('these sections break the rules of the template')
+    expect(statusAlert()).toHaveTextContent('Request a deviation for a changed locked section')
+    expect(blocked).toHaveTextContent('Its standard text was changed without a deviation request.')
+    expect(blocked).toHaveTextContent('The template does not allow new sections.')
+    // A code this frontend does not know yet still says what is wrong.
+    expect(blocked).toHaveTextContent('As the server says.')
+    // The link leads to the section, where the author can request the deviation.
+    await user.click(within(blocked).getByRole('button', { name: 'Parties' }))
+    expect(await screen.findByTestId('locked-section')).toHaveFocus()
+    // Only locked sections have a place on the page to go to.
+    expect(within(blocked).queryByRole('button', { name: 'Extra' })).not.toBeInTheDocument()
   })
 
   it('tells the reader when the document does not exist', async () => {

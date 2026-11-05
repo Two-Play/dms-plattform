@@ -190,3 +190,9 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | – | DMS-146 | Task | Backlog (MVP) | – | DMS-142: scoped records managers, deputies, reminder and audit of dead jobs |
 | – | DMS-147 | Task | Backlog (MVP) | – | DMS-145: check fields of later statuses at submission |
 | – | DMS-148 | Task | Backlog (MVP) | – | DMS-147: remaining points after the check at submission |
+| – | DMS-149 | Task | Backlog (MVP) | – | DMS-146: escalation of read failures, audit of dead renditions, retry by deputies, lists over 200 |
+| – | DMS-150 | Task | Backlog (MVP) | – | DMS-85: translatable test case names and field messages, take over a suggestion, guard for dyn results |
+| – | DMS-151 | Task | Backlog (MVP) | – | DMS-125: detect missing read rights, order of hits, umlauts |
+| – | DMS-152 | Task | Backlog (MVP) | – | DMS-138: repeat load test, paging, narrower read, GIN index when needed |
+| – | DMS-153 | Task | Backlog (MVP) | – | DMS-104: announce the rollout, review settings in the UI, notice of moved dates, report of kept dates |
+| – | DMS-154 | Task | Backlog (MVP) | – | DMS-84: change locked text in the UI so that a deviation request takes effect |

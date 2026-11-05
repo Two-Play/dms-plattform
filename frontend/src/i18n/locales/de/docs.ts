@@ -68,8 +68,7 @@ export const docs: Translation<typeof en.docs> = {
     computedMissing: 'Wird für den berechneten Wert {fields} gebraucht.',
     noRetentionRule:
       'Für die Dokumentenklasse ist keine Aufbewahrungsregel hinterlegt – bitte das Records Management informieren. Der Entwurf wurde gespeichert.',
-    invalid:
-      'Der Entwurf wurde gespeichert, kann aber nicht eingereicht werden: {message} Änderungen an gesperrten Abschnitten erfordern einen genehmigten Abweichungsantrag.',
+    invalid: 'Der Entwurf wurde gespeichert, kann aber nicht eingereicht werden: {message}',
     submitFailed: 'Einreichen fehlgeschlagen: {message}',
     saving: 'Wird gespeichert …',
     saveDraft: 'Entwurf speichern',

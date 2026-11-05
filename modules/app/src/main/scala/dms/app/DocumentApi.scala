@@ -605,7 +605,9 @@ object DocumentApi:
       .out(jsonBody[DocumentVersionView])
       .description(
         "Submits the draft for review and starts the workflow of the document class (or the next round after " +
-          "a return). Blocked while fields required in review are missing (422 with issues)."
+          "a return). Blocked while fields required in review are missing (422 `incomplete` with issues) and " +
+          "while the content breaks the edit rules of the template (422 `unauthorized_deviations`: one issue " +
+          "per violation, `field` is the section id, `label` its title, `code` the kind of violation)."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -1351,6 +1353,12 @@ object DocumentApi:
       (StatusCode.Forbidden, ApiError("forbidden", s"You are not allowed to do this: $reason."))
     case DocumentError.NotFound(message) => (StatusCode.NotFound, ApiError("not_found", message))
     case e @ DocumentError.Invalid(_)    => (StatusCode.UnprocessableEntity, ApiError("invalid", e.describe))
+    case e @ DocumentError.UnauthorizedDeviations(deviations) =>
+      val issues = deviations.map { d =>
+        val section = d.violation.section.value
+        IssueView(section, d.sectionTitle.getOrElse(section), d.violation.code, d.violation.reason)
+      }
+      (StatusCode.UnprocessableEntity, ApiError("unauthorized_deviations", e.describe, Some(issues)))
     case e @ DocumentError.InvalidValues(issues) =>
       (StatusCode.UnprocessableEntity, ApiError("invalid_values", e.describe, issueViews(issues)))
     case e @ DocumentError.Incomplete(_, issues) =>

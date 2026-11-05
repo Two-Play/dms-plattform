@@ -60,9 +60,9 @@ PR numbers refer to GitHub pull requests; early items without a number were comm
 |---|---|---|---|---|---|
 | S-02.a | DMS-32 | Classes and field definitions | done | #17, ADR 0019 | |
 | US-02.1 | DMS-33 | Status-dependent mandatory fields | done | #17, `RequirednessSpec` | |
-| S-01.a | DMS-34 | Templates with placeholders and CEL | done | #18, ADR 0020 | Hints for missing inputs in test mode: DMS-85 |
+| S-01.a | DMS-34 | Templates with placeholders and CEL | done | #18, ADR 0020 | |
 | S-01.b | DMS-35 | Template lifecycle, four eyes | done | #18, `TemplateApiSpec` | |
-| US-01.1 | DMS-36 | Locked and editable sections | **partly** | #20, #25, #26, ADR 0022, `DocumentApiSpec` | Requesting a deviation and reading the report work through the API only. In the UI authors cannot change locked sections at all, which is safe, but there is no way to ask for a deviation (DMS-84) |
+| US-01.1 | DMS-36 | Locked and editable sections | **partly** | #20, #25, #26, #98, ADR 0022, 0069, `DocumentApiSpec`, `deviations-panel.test.tsx` | In the UI authors see locked sections, request and withdraw deviations, and readers of a version see the report. Changing the text of a locked section still works through the API only, so the deviation cannot be finished in the UI |
 | US-01.2 | DMS-50 | Impact analysis | done | #39, `TemplateImpactApiSpec` | |
 | S-03.a | DMS-37 | Document from template | done | #23, `DocumentApiSpec` | |
 | S-05.a | DMS-38 | Frozen version packages | done | #23, ADR 0021, `DocumentVersionSchemaSpec` | |
@@ -104,14 +104,14 @@ The 14 follow-ups still open in Jira, each checked criterion by criterion agains
 | Issue | Covered by later work | Still open | For stage 1 |
 |---|---|---|---|
 | DMS-81 Version model | Owner confirmation of minor versions (#32), retention rule from the class (DMS-133, #82) | Language and overlapping scopes in the validity key | Defer languages; decide an operating rule for scopes (see below) |
-| DMS-84 Deviation UI | Hint text on refused submission | Everything else | Defer: not reachable from the UI |
-| DMS-85 Test mode hints | | Everything | Defer: the release block prevents wrong output |
+| DMS-84 Deviation UI | Locked sections, requesting and withdrawing, the report, own error code at submission (#98, ADR 0069) | Changing the text of a locked section in the UI, which DMS-84 does not ask for | Decide: without it a request changes nothing in the UI |
+| DMS-85 Test mode hints | Solved by #94 | Rest in DMS-150 | Defer: the release block prevents wrong output |
 | DMS-88 Workflow extensions | My tasks, votes, workflow status in the UI (#38); deputyships instead of per-task delegation (DMS-49, 99, 105) | Review modes, metadata conditions, parent owner, per-task delegation, four-eyes switch for the approval, workflow configuration UI | Defer; configure the workflow of the class through the API |
 | DMS-89 Partner master | | Everything; the profile warns about `demo` | Defer to stage 2 |
 | DMS-91 Document page | Display names (#56), version history, rendered versions, votes on the page (#38, #57), no workflow query per document (this branch) | Paged list with filters (search and library cover finding documents), partner id, reload button on 409 | Defer; close the list point by decision |
 | DMS-92 Publication | Notice on a dead publication job, with a retry (DMS-142); withdrawing an approved version (DMS-143) | Time zone endpoint, editorial settings, overlapping scopes | Defer |
 | DMS-102 Search | Notifications as outbox subscriber (#79); Word text (#63); basic auth, https and replicas are configurable, the profile now requires them | Clause text, PDF and OCR text, a later subscriber misses earlier events, owner change and version time | Defer, except PDF text if policies are uploaded as PDFs |
-| DMS-104 Review | Notification and escalation (DMS-141, ADR 0057) | Inheritance, recalculation, backfill | Defer |
+| DMS-104 Review | Notification and escalation (DMS-141, ADR 0057); inheritance, recalculation, backfill (#99, ADR 0068) | Rollout notice, settings in the UI, notice of moved dates: DMS-153 | Announce the rollout before going live |
 | DMS-108 Report and cockpit | Owner UI for the name list (#71), display names in the UI, purpose in the request body (DMS-144) | Chain cache, report list and retention, cockpit export and actions, names in the PDF | Defer |
 | DMS-118 On-demand PDFs | | Limits and a plain variant | Defer: `draft.pdf` stayed fast in the load test |
 | DMS-124 Office fields | | Everything | Defer |

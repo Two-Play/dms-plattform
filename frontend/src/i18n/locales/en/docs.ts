@@ -66,8 +66,7 @@ export const docs = {
     computedMissing: 'Needed for the computed value {fields}.',
     noRetentionRule:
       'The document class has no retention rule – please inform records management. The draft was saved.',
-    invalid:
-      'The draft was saved but cannot be submitted: {message} Changes to locked sections need an authorized deviation request.',
+    invalid: 'The draft was saved but cannot be submitted: {message}',
     submitFailed: 'Submitting failed: {message}',
     saving: 'Saving…',
     saveDraft: 'Save draft',

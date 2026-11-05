@@ -536,6 +536,12 @@ object DocumentApiSpec extends ZIOSpecDefault:
         afterWd.exists(v => !v.requiresExtraReview && v.deviations.forall(!_.authorized)),
         afterWd.exists(_.requests.map(_.active) == List(false)),
         blocked._1 == Status.UnprocessableEntity,
+        error(blocked._2).exists(_.code == "unauthorized_deviations"),
+        error(blocked._2)
+          .flatMap(_.issues)
+          .exists(
+            _.map(i => (i.field, i.label, i.code)) == List(("parties", "Parties", "locked_section_changed"))
+          ),
         submitted._1 == Status.Ok,
         // In review, nobody may edit the draft (EditDraft), so its requests cannot change either.
         late._1 == Status.Forbidden,

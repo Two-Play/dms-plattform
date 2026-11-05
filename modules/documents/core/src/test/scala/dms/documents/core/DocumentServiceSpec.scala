@@ -633,8 +633,9 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         twice.left.exists(_.isInstanceOf[DocumentError.Conflict]),
         missing.left.exists(_.isInstanceOf[DocumentError.NotFound]),
         blocked.left.exists {
-          case DocumentError.Invalid(p) =>
-            p.exists(_.contains("'parties' was changed without a deviation request"))
+          case DocumentError.UnauthorizedDeviations(List(d)) =>
+            d.violation == EditViolation.LockedSectionChangedWithoutDeviation(Parties) &&
+            d.sectionTitle.contains("Parties")
           case _ => false
         },
         submitted.status == InReview,

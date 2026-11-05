@@ -825,7 +825,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Submits the draft for review and starts the workflow of the document class (or the next round after a return). Blocked while fields required in review are missing (422 with issues). */
+    /** @description Submits the draft for review and starts the workflow of the document class (or the next round after a return). Blocked while fields required in review are missing (422 `incomplete` with issues) and while the content breaks the edit rules of the template (422 `unauthorized_deviations`: one issue per violation, `field` is the section id, `label` its title, `code` the kind of violation). */
     post: operations['postApiV1DocumentsIdSubmit']
     delete?: never
     options?: never
