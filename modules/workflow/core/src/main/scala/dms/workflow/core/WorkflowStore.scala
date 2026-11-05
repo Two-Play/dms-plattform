@@ -131,6 +131,19 @@ private[core] object WorkflowStore:
       .run()
       .headOption
 
+  /** The given cases; unknown ones are left out. */
+  def casesById(cases: List[UUID])(using DbTx): List[CaseRow] =
+    if cases.isEmpty then Nil
+    else
+      val ids = cases.distinct.map(_.toString).toArray
+      sql"""select id, document_id, version_id, class_key, definition_version, definition, four_eyes,
+                   process_definition_id, process_instance_id, round, status, current_step, returned_step,
+                   content_sha256, author_id, started_by, started_at, updated_at
+            from dms.workflow_case where id = any(cast($ids as uuid[]))"""
+        .query[CaseRow]
+        .run()
+        .toList
+
   /** The cases of the given documents, oldest first: one query for a whole list (DMS-60). */
   def casesOfDocuments(documents: List[DocumentId])(using DbTx): List[CaseRow] =
     if documents.isEmpty then Nil

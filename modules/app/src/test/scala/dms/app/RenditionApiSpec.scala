@@ -864,6 +864,8 @@ object RenditionApiSpec extends ZIOSpecDefault:
         private val real          = RoleAssignments.Postgres
         def forUser(user: UserId) =
           ZIO.succeed(Set(RoleAssignment(if user == admin then Role.TenantAdmin else Role.Owner)))
+        def forUsers(users: Set[UserId]) =
+          ZIO.foreach(users.toList)(u => forUser(u).map(u -> _)).map(_.toMap)
         def grant(user: UserId, assignment: RoleAssignment, by: UserId) = real.grant(user, assignment, by)
         def revoke(id: UUID, at: Instant)                               = real.revoke(id, at)
         def activeAt(at: Instant)                                       = real.activeAt(at)

@@ -62,6 +62,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
   private val designer  = UserId("designer-1")
   private val designer2 = UserId("designer-2")
   private val deputy    = UserId("deputy-1")
+  private val deputy2   = UserId("deputy-2")
 
   private val signingKey: RSAKey = RSAKeyGenerator(2048).keyID("key-1").generate()
 
@@ -73,7 +74,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       |  create role dms_app_user login nobypassrls password 'dms-app-test' in role dms_app;
       |end $$""".stripMargin
 
-  final case class Setup(app: Db, owner: Db, released: TemplateId)
+  final case class Setup(app: Db, owner: Db, released: TemplateId, queries: CountingDataSource)
 
   private val setup = Unsafe.unsafe(implicit u => Promise.unsafe.make[Nothing, Setup](FiberId.None))
 
@@ -115,7 +116,8 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         )
         .orDieWith(e => RuntimeException(e.toString))
       appSource <- dataSource(DbConfig(c.jdbcUrl, "dms_app_user", "dms-app-test", poolSize = 4))
-      app       = Db(appSource)
+      queries   = CountingDataSource(appSource)
+      app       = Db(queries.dataSource)
       audit     = AuditTrailLive(app, TsaTrust(Nil))
       classes   = DocumentClassService(audit)
       templates = TemplateService(audit, DocumentClassProfiles(classes))
@@ -150,7 +152,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         )
         .mapError(e => RuntimeException(e.toString))
         .orDie
-      _ <- setup.succeed(Setup(app, owner, released))
+      _ <- setup.succeed(Setup(app, owner, released, queries))
     yield ZEnvironment(app, appSource)
   )
 
@@ -297,7 +299,10 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       |],"resetTo":"review"}}""".stripMargin
 
   /** A draft with all review fields. */
-  private def draftDocument(partner: String = "ACME GmbH"): ZIO[Env, Nothing, DocumentView] =
+  private def draftDocument(
+      partner: String = "ACME GmbH",
+      fields: Option[String] = None
+  ): ZIO[Env, Nothing, DocumentView] =
     for
       s       <- setup.await
       created <- call(
@@ -306,7 +311,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         "/api/v1/documents",
         Some(
           s"""{"templateId":"${s.released.value}","templateVersion":1,"title":"Contract $partner",
-             |"values":{${values(partner)}}}""".stripMargin
+             |"values":{${fields.getOrElse(values(partner))}}}""".stripMargin
         )
       ).map(as[DocumentView])
     yield created
@@ -376,9 +381,12 @@ object WorkflowApiSpec extends ZIOSpecDefault:
     )
 
   /** A submitted document whose review is done: its approval task is open. */
-  private def awaitingApproval(partner: String): ZIO[Env, Nothing, (UUID, TaskView)] =
+  private def awaitingApproval(
+      partner: String,
+      fields: Option[String] = None
+  ): ZIO[Env, Nothing, (UUID, TaskView)] =
     for
-      doc     <- draftDocument(partner)
+      doc     <- draftDocument(partner, fields)
       _       <- submit(doc.id)
       started <- cases(doc.id).map(_.head)
       // the class's latest workflow (from earlier tests) has a department lane and possibly a compliance lane
@@ -396,6 +404,46 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       ZIO.withClock(Clock.ClockJava(java.time.Clock.offset(java.time.Clock.systemUTC(), offset)))(effect)
 
   private def ahead(offset: Duration): Ahead = Ahead(offset)
+
+  /** The fields of a confidential document that members of `group` may see. */
+  private def confidentialTo(group: String, partner: String) =
+    values(partner).replace("\"Internal\"", "\"Confidential\"") +
+      s""","allowedGroups":{"type":"Many","values":[{"type":"Text","value":"$group"}]}"""
+
+  private def accessGroup(key: String, members: UserId*) =
+    call(admin, "POST", "/api/v1/groups", Some(s"""{"key":"$key","name":"$key"}""")) *>
+      ZIO.foreachDiscard(members)(m => call(admin, "PUT", s"/api/v1/groups/$key/members/${m.value}"))
+
+  /** The second deputy of the approver, for the next hour from a minute on; use with a clock ahead of that.
+    */
+  private def secondDeputy =
+    val now = Instant.now()
+    for
+      s <- setup.await
+      _ <- s.app
+        .transact(tenantId)(
+          RoleAssignments.Postgres
+            .grant(deputy2, RoleAssignment(Role.Approver, documentClass = Some("policy")), admin)
+        )
+        .orDieWith(e => RuntimeException(e.toString))
+      _ <- call(
+        approver,
+        "POST",
+        "/api/v1/deputyships",
+        Some(
+          s"""{"deputy":"${deputy2.value}","validFrom":"${now.plusSeconds(60)}",
+             |"validUntil":"${now.plusSeconds(3600)}","roles":["Approver"]}""".stripMargin
+        )
+      ).map(r => assert(r._1 == Status.Created, r._2))
+    yield ()
+
+  /** The caller's inbox and the statements reading it took. */
+  private def inbox(user: UserId) =
+    for
+      s      <- setup.await
+      before <- ZIO.succeed(s.queries.statements)
+      tasks  <- call(user, "GET", "/api/v1/workflow/tasks").map(as[List[TaskView]])
+    yield (tasks, s.queries.statements - before)
 
   private def deputyships(user: UserId, query: String = "") =
     call(user, "GET", s"/api/v1/deputyships$query")
@@ -1192,5 +1240,101 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         meaning.forall(_.category == dms.notifications.NotificationCategory.Deadline),
         reset.source == "installation"
       )
+    },
+    test("reading the inbox takes the same number of queries for few and for many tasks (DMS-138)") {
+      val inPeriod                 = ahead(120.seconds)
+      def more(from: Int, to: Int) =
+        ZIO.foreach((from to to).toList)(n =>
+          awaitingApproval(s"Inbox $n", Option.when(n % 2 == 0)(confidentialTo("inbox-count", s"Inbox $n")))
+        )
+      for
+        _         <- accessGroup("inbox-count", reviewer1, reviewer2, approver, deputy2)
+        _         <- secondDeputy
+        _         <- more(1, 2)
+        few       <- inPeriod(inbox(approver))
+        fewAsDep  <- inPeriod(inbox(deputy2))
+        added     <- more(3, 10)
+        many      <- inPeriod(inbox(approver))
+        manyAsDep <- inPeriod(inbox(deputy2))
+      yield assertTrue(
+        added.size == 8,
+        many._1.size == few._1.size + 8,
+        added.forall((_, task) => many._1.exists(t => t.id == task.id && t.actingFor.isEmpty)),
+        // the deputy of the approver is told apart on every task, confidential ones included
+        added.forall((_, task) =>
+          manyAsDep._1.exists(t => t.id == task.id && t.actingFor.contains(approver.value))
+        ),
+        added.forall((_, task) =>
+          many._1.exists(t => t.id == task.id && t.deputies.exists(_.deputy == deputy2.value))
+        ),
+        many._2 == few._2,
+        manyAsDep._2 == fewAsDep._2
+      )
+    },
+    test("the inbox decides per document: a task whose version the reader may not see stays hidden") {
+      val inPeriod = ahead(120.seconds)
+      for
+        s <- setup.await
+        _ <- accessGroup("inbox-board", reviewer1, reviewer2, approver, deputy2)
+        _ <- accessGroup("inbox-audit", reviewer1, reviewer2, approver)
+        // deputy-2 is the approver's deputy since the previous test
+        open  <- awaitingApproval("Open to all")
+        board <- awaitingApproval("Board", Some(confidentialTo("inbox-board", "Board")))
+        audit <- awaitingApproval("Audit", Some(confidentialTo("inbox-audit", "Audit")))
+        ids = List(open, board, audit).map(_._2.id)
+        before       <- inbox(approver).map(_._1.map(_.id))
+        deputyBefore <- inPeriod(inbox(deputy2)).map(_._1.map(_.id))
+        // Ended without the re-resolution the API does: the approver stays a candidate of a task they may not see.
+        _ <- s.app
+          .transact(tenantId)(Groups.Postgres.removeMember("inbox-audit", approver, admin, Instant.now()))
+          .orDieWith(e => RuntimeException(e.toString))
+        after        <- inbox(approver).map(_._1)
+        task         <- cases(audit._1).map(c => openTask(c.head, "approver"))
+        byReviewer   <- inbox(reviewer1).map(_._1.map(_.id))
+        byOutsider   <- inbox(reader).map(_._1.map(_.id))
+        deputyAfter  <- inPeriod(inbox(deputy2)).map(_._1.map(_.id))
+        deputyOfTask <- inPeriod(cases(audit._1).map(c => openTask(c.head, "approver").deputies))
+      yield assertTrue(
+        ids.forall(before.contains),
+        task.candidates.contains(approver.value),
+        task.status == "Open",
+        after.map(_.id).contains(open._2.id),
+        after.map(_.id).contains(board._2.id),
+        !after.map(_.id).contains(audit._2.id),
+        after.map(_.createdAt) == after.map(_.createdAt).sorted,
+        !ids.exists(byReviewer.contains),
+        !ids.exists(byOutsider.contains),
+        // the deputy is not in the audit group: that task never reached them
+        deputyBefore.contains(open._2.id),
+        deputyBefore.contains(board._2.id),
+        !deputyBefore.contains(audit._2.id),
+        deputyAfter.contains(board._2.id),
+        !deputyAfter.contains(audit._2.id),
+        deputyOfTask.isEmpty
+      )
+    },
+    test("the batched reads of the inbox stay inside the tenant: the same user elsewhere finds nothing") {
+      val other = TenantId.random()
+      for
+        s <- setup.await
+        _ <- s.owner
+          .transactSystem(
+            Db.sql(sql"insert into dms.tenant (id, name) values (${other.value}, ${"Other"})".update.run())
+          )
+          .orDieWith(e => RuntimeException(e.toString))
+        mine     <- inbox(approver).map(_._1)
+        service  <- ZIO.service[DocumentService]
+        workflow <- ZIO.service[ApprovalWorkflow]
+        ids  = mine.map(t => dms.kernel.DocumentId(t.documentId))
+        read = (tenant: TenantId) =>
+          s.app
+            .transact(tenant)(
+              workflow.myTasks(approver).map(_.size) <*> service.getAll(ids).map(_.size) <*>
+                workflow.casesOf(ids).map(_.size)
+            )
+            .orDieWith(e => RuntimeException(e.toString))
+        here  <- read(tenantId)
+        there <- read(other)
+      yield assertTrue(mine.nonEmpty, here._1 > 0, here._2 > 0, here._3 > 0, there == (0, 0, 0))
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

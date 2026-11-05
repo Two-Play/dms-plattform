@@ -39,6 +39,8 @@ object DeputyshipsSpec extends ZIOSpecDefault:
     def holders(role: String, subject: ReviewSubject): IO[WorkflowError, List[UserId]]      = ZIO.succeed(Nil)
     def cleared(users: Set[UserId], subject: ReviewSubject): IO[WorkflowError, Set[UserId]] =
       ZIO.succeed(users)
+    def clearedFor(users: Set[UserId], subjects: List[ReviewSubject]) =
+      ZIO.succeed(subjects.map(_.versionId -> users).toMap)
     def tenantAdmins: IO[WorkflowError, List[UserId]]              = ZIO.succeed(List(admin))
     def heldRoles(user: UserId): IO[WorkflowError, List[HeldRole]] =
       ZIO.succeed(user.value match
@@ -47,6 +49,8 @@ object DeputyshipsSpec extends ZIOSpecDefault:
           List(HeldRole("Approver", Some("Legal"), Some("contract"), Instant.EPOCH, None))
         case "erik" => List(HeldRole("Reviewer", None, None, Instant.EPOCH, None))
         case _      => Nil)
+    def heldRolesOf(users: Set[UserId]) =
+      ZIO.foreach(users.toList)(u => heldRoles(u).map(u -> _)).map(_.toMap)
 
   final case class Env(app: Db, owner: Db, tenant: TenantId, other: TenantId, audit: Ref[List[AuditEvent]])
 

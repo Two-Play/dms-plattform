@@ -100,7 +100,7 @@ The baseline did not fail slowly, it collapsed: ten statements held all ten conn
 
 - Deliveries run at about 100 per second on one worker. One publication to 1,100 readers takes about 11 s to deliver, one to 100,000 readers about 17 minutes, which the 48 hours of 14.2 allow. In these runs a backlog remains, because the first reminder check also asks readers for the bulk-loaded versions (no request records exist for them).
 - Renditions run one at a time per instance. Without a limit on publications (0.7 per second, thousands of times the peak of 14.2) the time from approval to publication grows to 46 s at p95, while reading stays unaffected.
-- The approver's inbox loads one document per task: 450 ms p50 with 240 open tasks in the run above. Fine for people, who have few tasks, and the next thing to batch.
+- The approver's inbox loaded one document per task: 450 ms p50 with 240 open tasks in the run above. It has read in batches since DMS-138 (ADR 0066); the load test has not been repeated since.
 - A new library copy takes about 0.6 s at 19,000 versions, and more at full volume.
 
 ## What the numbers do not say

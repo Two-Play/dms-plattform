@@ -55,6 +55,9 @@ trait Groups:
   /** Current members of any of `keys`. */
   def membersOfAny(keys: Set[String]): IO[DbError, Set[UserId]]
 
+  /** The current members of each of `keys` (DMS-138); groups without any are left out. */
+  def membersOfEach(keys: Set[String]): IO[DbError, Map[String, Set[UserId]]]
+
   /** The current group keys of every user who belongs to a group (compliance cockpit, ADR 0036). */
   def currentMemberships: IO[DbError, Map[UserId, Set[String]]]
 
@@ -137,6 +140,16 @@ object Groups:
           removedAt.map(_.toInstant)
         )
       })
+
+    def membersOfEach(keys: Set[String]): IO[DbError, Map[String, Set[UserId]]] =
+      if keys.isEmpty then ZIO.succeed(Map.empty)
+      else
+        Db.sql(
+          sql"""select group_key, user_id from dms.access_group_member
+                where group_key in (select jsonb_array_elements_text(${jsonArray(
+              keys
+            )})) and removed_at is null""".query[(String, String)].run().toList
+        ).map(_.groupMap(_._1)(row => UserId(row._2)).view.mapValues(_.toSet).toMap)
 
     def membersOfAny(keys: Set[String]): IO[DbError, Set[UserId]] =
       if keys.isEmpty then ZIO.succeed(Set.empty)
