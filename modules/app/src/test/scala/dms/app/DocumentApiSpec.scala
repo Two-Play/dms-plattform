@@ -427,6 +427,32 @@ object DocumentApiSpec extends ZIOSpecDefault:
         outbox == 2L
       )
     },
+    test("a field a computed field needs blocks the submission with its own code, naming that field") {
+      val withoutTerm = reviewValues
+        .replace(""""termMonths":{"type":"Number","value":12},""", "")
+        .replace(
+          """,
+          |"termMonths":{"type":"Number","value":12}""".stripMargin,
+          ""
+        )
+      for
+        doc     <- createDocument(withoutTerm)
+        blocked <- call(author, "POST", s"/api/v1/documents/${doc.id}/submit")
+      yield assertTrue(
+        blocked._1 == Status.UnprocessableEntity,
+        error(blocked._2).exists(e =>
+          e.code == "incomplete" && e.issues.exists(
+            _.map(i => (i.field, i.code, i.computedFields)) == List(
+              (
+                "termMonths",
+                "computed_field_missing",
+                Some(List(ComputedFieldView("totalValue", "totalValue")))
+              )
+            )
+          )
+        )
+      )
+    },
     test("authors request deviations for locked sections; reviewers read the deviation report") {
       val deviating = content.copy(sections =
         content.sections.map(s =>

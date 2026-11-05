@@ -171,11 +171,27 @@ final case class ValidateMetadata(
 ) derives JsonCodec,
       Schema
 
+/** A computed field of a template: its stable key, and its label or else the key. */
+final case class ComputedFieldView(key: String, label: String) derives JsonCodec, Schema
+
 /** A field problem; `field` is the stable field key, `code` a stable issue code such as `missing_required`.
   */
-final case class IssueView(field: String, label: String, code: String, message: String)
-    derives JsonCodec,
+final case class IssueView(
+    field: String,
+    label: String,
+    code: String,
+    message: String,
+    /** With code `computed_field_missing`: the computed fields that have no value without this field. */
+    computedFields: Option[List[ComputedFieldView]] = None
+) derives JsonCodec,
       Schema
+
+object IssueView:
+  def of(issue: FieldIssue): IssueView =
+    val computed = issue.kind match
+      case IssueKind.ComputedFieldMissing(fields) => Some(fields.map(f => ComputedFieldView(f.key, f.label)))
+      case _                                      => None
+    IssueView(issue.field, issue.label, issue.kind.code, issue.kind.message, computed)
 
 final case class ValidationResult(
     classId: UUID,
@@ -371,7 +387,7 @@ object DocumentClassApi:
               profile.version,
               req.targetStatus,
               issues.isEmpty,
-              issues.map(i => IssueView(i.field, i.label, i.kind.code, i.kind.message))
+              issues.map(IssueView.of)
             )
           )
       )

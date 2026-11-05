@@ -282,6 +282,46 @@ object TemplateApiSpec extends ZIOSpecDefault:
         catalogFields._1 == Status.NotFound
       )
     },
+    test("the test mode hints at computed fields and conditions that depend on empty fields") {
+      val body =
+        """{"name":"Hints","documentClassId":"%s","documentClassVersion":1,
+           |"content":{"sections":[{"id":"main","locked":false,"blocks":[
+           |{"type":"Conditional","condition":"termType == 'fixed'","body":[]}]}],
+           |"computed":[{"key":"termName","label":"Name of the term","expression":"termType + '!'"},
+           |{"key":"oldStyle","expression":"termType + '?'"}]}}""".stripMargin
+      for
+        classId <- contractClass.await
+        create  <- call(designer, "POST", "/api/v1/admin/templates", Some(body.format(classId)))
+        id = created(create._2).templateId
+        response <- call(designer, "POST", s"/api/v1/admin/templates/$id/versions/1/test", Some("{}"))
+        run = response._2.fromJson[TestRunView].toOption
+      yield assertTrue(
+        create._1 == Status.Created,
+        response._1 == Status.Ok,
+        run.exists(
+          _.computedHints.map(h => (h.key, h.label, h.guard, h.suggestion)) == List(
+            (
+              "termName",
+              "Name of the term",
+              "'termType' in present_fields",
+              Some("'termType' in present_fields ? termType + '!' : ''")
+            ),
+            (
+              "oldStyle",
+              "oldStyle",
+              "'termType' in present_fields",
+              Some("'termType' in present_fields ? termType + '?' : ''")
+            )
+          )
+        ),
+        run.exists(_.computedHints.forall(_.missingInputs == List(MissingValueView("termType", "Term")))),
+        run.exists(_.computedHints.forall(_.cases.contains("empty optional fields"))),
+        run.exists(
+          _.conditionHints.map(h => (h.condition, h.missingInputs, h.location.blockPath)) ==
+            List(("termType == 'fixed'", List(MissingValueView("termType", "Term")), "/blocks/0"))
+        )
+      )
+    },
     test("release needs a second template designer; only released versions are in the catalog") {
       for
         classId <- contractClass.await
@@ -345,7 +385,13 @@ object TemplateApiSpec extends ZIOSpecDefault:
         byAuthor <- call(author, "POST", preview, Some(values))
         cached   <- call(author, "POST", preview, Some("""{"values":{}}"""))
         byAdmin  <- call(admin, "POST", preview, Some(values))
-        badLang  <- call(author, "POST", preview, Some("""{"values":{},"language":"fr"}"""))
+        filled   <- call(
+          author,
+          "POST",
+          preview,
+          Some("""{"values":{"termType":{"type":"Selection","code":"fixed"}}}""")
+        )
+        badLang <- call(author, "POST", preview, Some("""{"values":{},"language":"fr"}"""))
         formFields = fields._2.fromJson[TemplateFieldsView].toOption
         result     = byAuthor._2.fromJson[PreviewView].toOption
         empty      = cached._2.fromJson[PreviewView].toOption
@@ -363,6 +409,14 @@ object TemplateApiSpec extends ZIOSpecDefault:
         result.exists(_.issues.map(i => (i.field, i.code)) == List(Some("termType") -> "unknown_option")),
         result.exists(_.missingRequired.exists(_.field == "owner")),
         empty.exists(_.missingRequired.headOption.contains(MissingValueView("title", "Title"))),
+        // A refused value is left out, so the condition reads the field as empty.
+        result.exists(_.conditionHints.map(_.condition) == List("termType == 'fixed'")),
+        filled._2.fromJson[PreviewView].toOption.exists(_.conditionHints.isEmpty),
+        empty.exists(
+          _.conditionHints == List(
+            ConditionHintView("termType == 'fixed'", List(MissingValueView("termType", "Term")))
+          )
+        ),
         empty.exists(_.html.contains("dms-missing-required")),
         byAdmin._1 == Status.Forbidden,
         badLang._1 == Status.UnprocessableEntity

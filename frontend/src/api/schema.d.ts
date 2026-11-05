@@ -482,7 +482,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Test mode: resolves the version with the given values, or with generated sample data that shows every condition branch, empty optional fields and long values. Reports which branches were reached. */
+    /** @description Test mode: resolves the version with the given values, or with generated sample data that shows every condition branch, empty optional fields and long values. Reports which branches were reached, computed fields without value with a `present_fields` guard to add, and conditions that read a missing value as empty. */
     post: operations['postApiV1AdminTemplatesIdVersionsVersionTest']
     delete?: never
     options?: never
@@ -567,7 +567,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Live preview while filling in a document (US-03.2): resolves the released version with the values entered so far and returns HTML marked "Draft – not valid" with missing values marked. Values that do not fit their field are left out and reported in `issues`; the resolver's limits apply. */
+    /** @description Live preview while filling in a document (US-03.2): resolves the released version with the values entered so far and returns HTML marked "Draft – not valid" with missing values marked. Values that do not fit their field are left out and reported in `issues`; conditions that read a missing value as empty are listed in `conditionHints`; the resolver's limits apply. */
     post: operations['postApiV1TemplatesIdVersionsVersionPreview']
     delete?: never
     options?: never
@@ -3184,6 +3184,21 @@ export interface components {
     ComputedField: {
       key: string
       expression: string
+      label?: string
+    }
+    /** ComputedFieldView */
+    ComputedFieldView: {
+      key: string
+      label: string
+    }
+    /** ComputedHintView */
+    ComputedHintView: {
+      key: string
+      label: string
+      missingInputs?: components['schemas']['MissingValueView'][]
+      guard: string
+      suggestion?: string
+      cases?: string[]
     }
     /** ConditionChanged */
     ConditionChanged: {
@@ -3194,6 +3209,11 @@ export interface components {
        * @enum {string}
        */
       type: 'ConditionChanged'
+    }
+    /** ConditionHintView */
+    ConditionHintView: {
+      condition: string
+      missingInputs?: components['schemas']['MissingValueView'][]
     }
     /** Conditional */
     Conditional: {
@@ -3924,6 +3944,7 @@ export interface components {
       label: string
       code: string
       message: string
+      computedFields?: components['schemas']['ComputedFieldView'][]
     }
     /** Item */
     Item: {
@@ -4488,6 +4509,7 @@ export interface components {
       html: string
       missingRequired?: components['schemas']['MissingValueView'][]
       issues?: components['schemas']['PreviewIssueView'][]
+      conditionHints?: components['schemas']['ConditionHintView'][]
     }
     /** ProfileFieldView */
     ProfileFieldView: {
@@ -5234,11 +5256,20 @@ export interface components {
       branches?: components['schemas']['BranchView'][]
       error?: string
     }
+    /** TestConditionHintView */
+    TestConditionHintView: {
+      location: components['schemas']['LocationView']
+      condition: string
+      missingInputs?: components['schemas']['MissingValueView'][]
+      cases?: string[]
+    }
     /** TestRunView */
     TestRunView: {
       cases?: components['schemas']['TestCaseView'][]
       coverage?: components['schemas']['BranchView'][]
       allBranchesCovered: boolean
+      computedHints?: components['schemas']['ComputedHintView'][]
+      conditionHints?: components['schemas']['TestConditionHintView'][]
     }
     /** TestTemplate */
     TestTemplate: {

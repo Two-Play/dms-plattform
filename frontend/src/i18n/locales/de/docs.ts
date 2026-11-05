@@ -65,6 +65,7 @@ export const docs: Translation<typeof en.docs> = {
     submitted: 'Zur Prüfung eingereicht',
     incomplete:
       'Der Entwurf wurde gespeichert, kann aber noch nicht eingereicht werden. Zuerst diese Werte ausfüllen:',
+    computedMissing: 'Wird für den berechneten Wert {fields} gebraucht.',
     noRetentionRule:
       'Für die Dokumentenklasse ist keine Aufbewahrungsregel hinterlegt – bitte das Records Management informieren. Der Entwurf wurde gespeichert.',
     invalid:
@@ -123,6 +124,7 @@ export const docs: Translation<typeof en.docs> = {
       one: '{count} Pflichtwert fehlt',
       other: '{count} Pflichtwerte fehlen',
     }),
+    conditionHint: 'Der Text kann sich noch ändern, wenn diese Felder ausgefüllt werden:',
   },
   view: {
     content: 'Inhalt',

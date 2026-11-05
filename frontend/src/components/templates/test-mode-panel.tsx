@@ -1,8 +1,14 @@
 import { useMutation } from '@tanstack/react-query'
-import { CheckCircle2, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, XCircle } from 'lucide-react'
 import { useId, useState } from 'react'
 import { useApiClient } from '@/api/context'
-import { runTest, type TemplateVersion, type TestRun } from '@/api/template-admin'
+import {
+  runTest,
+  type ComputedHint,
+  type TemplateVersion,
+  type TestConditionHint,
+  type TestRun,
+} from '@/api/template-admin'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -19,10 +25,122 @@ function outcomes(values: boolean[] | undefined): string {
     .join(t('templates.test.and'))
 }
 
+function labels(fields: { label: string }[] | undefined): string {
+  return (fields ?? []).map((f) => f.label).join(t('templates.test.and'))
+}
+
+/** The test cases that showed a hint; choosing one shows it rendered. */
+function SeenIn({ names, onSelect }: { names: string[]; onSelect: (name: string) => void }) {
+  return (
+    <p className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+      {t('templates.test.hints.seenIn')}
+      {names.map((name) => (
+        <button
+          key={name}
+          type="button"
+          className="underline underline-offset-2 hover:text-foreground"
+          onClick={() => {
+            onSelect(name)
+          }}
+        >
+          {name}
+        </button>
+      ))}
+    </p>
+  )
+}
+
+function ComputedHintItem({
+  hint,
+  onSelect,
+}: {
+  hint: ComputedHint
+  onSelect: (name: string) => void
+}) {
+  return (
+    <li className="space-y-1 rounded-md border p-2">
+      <p>
+        {t('templates.test.hints.computed', {
+          name: hint.label,
+          fields: labels(hint.missingInputs),
+        })}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        {hint.suggestion ? t('templates.test.hints.suggestion') : t('templates.test.hints.guard')}
+      </p>
+      <code className="block overflow-x-auto rounded bg-muted px-2 py-1 font-mono text-xs">
+        {hint.suggestion ?? hint.guard}
+      </code>
+      {hint.suggestion && (
+        <p className="text-xs text-muted-foreground">{t('templates.test.hints.fallback')}</p>
+      )}
+      <SeenIn names={hint.cases ?? []} onSelect={onSelect} />
+    </li>
+  )
+}
+
+function ConditionHintItem({
+  hint,
+  onSelect,
+}: {
+  hint: TestConditionHint
+  onSelect: (name: string) => void
+}) {
+  return (
+    <li className="space-y-1 rounded-md border p-2">
+      <code className="block overflow-x-auto font-mono text-xs">{hint.condition}</code>
+      <p className="text-xs text-muted-foreground">{locationLabel(hint.location)}</p>
+      <p>{t('templates.test.hints.condition', { fields: labels(hint.missingInputs) })}</p>
+      <SeenIn names={hint.cases ?? []} onSelect={onSelect} />
+    </li>
+  )
+}
+
+/** What the run found about empty fields (ADR 0065): the designer can still change the template here. */
+function Hints({ run, onSelect }: { run: TestRun; onSelect: (name: string) => void }) {
+  const computed = run.computedHints ?? []
+  const conditions = run.conditionHints ?? []
+  if (computed.length === 0 && conditions.length === 0) return null
+  return (
+    <section aria-label={t('templates.test.hints.title')} className="space-y-3 text-sm">
+      {computed.length > 0 && (
+        <div className="space-y-1">
+          <h3 className="flex items-center gap-2 font-medium">
+            <AlertTriangle className="size-4 text-destructive" aria-hidden="true" />
+            {t('templates.test.hints.computedTitle')}
+          </h3>
+          <ul className="space-y-2">
+            {computed.map((h) => (
+              <ComputedHintItem key={h.key} hint={h} onSelect={onSelect} />
+            ))}
+          </ul>
+        </div>
+      )}
+      {conditions.length > 0 && (
+        <div className="space-y-1">
+          <h3 className="font-medium">{t('templates.test.hints.conditionsTitle')}</h3>
+          <p className="text-xs text-muted-foreground">
+            {t('templates.test.hints.conditionGuard')}
+          </p>
+          <ul className="space-y-2">
+            {conditions.map((h) => (
+              <ConditionHintItem key={locationLabel(h.location)} hint={h} onSelect={onSelect} />
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function Results({ run }: { run: TestRun }) {
   const cases = run.cases ?? []
   const [selected, setSelected] = useState(0)
   const current = cases[selected]
+  const select = (name: string) => {
+    const index = cases.findIndex((c) => c.name === name)
+    if (index >= 0) setSelected(index)
+  }
   return (
     <div className="space-y-4">
       <p className="flex items-center gap-2 text-sm" role="status">
@@ -66,6 +184,7 @@ function Results({ run }: { run: TestRun }) {
           </table>
         </div>
       )}
+      <Hints run={run} onSelect={select} />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
         <ul aria-label={t('templates.test.cases')} className="space-y-1">
           {cases.map((c, i) => (

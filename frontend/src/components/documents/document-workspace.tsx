@@ -97,6 +97,14 @@ type SaveState =
 /** Issue code of a required retention rule whose document class has none (DMS-133). */
 const NO_RETENTION_RULE = 'no_retention_rule'
 
+/** A field computed fields need names them in the language of the UI (ADR 0065). */
+function issueMessage(issue: FieldIssue): string {
+  const computed = (issue.computedFields ?? []).map((c) => c.label)
+  return computed.length > 0
+    ? t('docs.workspace.computedMissing', { fields: computed.join(', ') })
+    : issue.message
+}
+
 /** A backend issue for a field, shown while the field still has the value that was sent. */
 interface Rejected {
   message: string
@@ -241,7 +249,10 @@ export function DocumentWorkspace({
   const reject = (issues: FieldIssue[], at: Record<string, MetadataValue>) => {
     setRejected(
       Object.fromEntries(
-        issues.map((i) => [i.field, { message: i.message, sent: JSON.stringify(at[i.field]) }]),
+        issues.map((i) => [
+          i.field,
+          { message: issueMessage(i), sent: JSON.stringify(at[i.field]) },
+        ]),
       ),
     )
   }
@@ -456,6 +467,7 @@ export function DocumentWorkspace({
                         >
                           {issue.label}
                         </button>
+                        {(issue.computedFields ?? []).length > 0 && <> {issueMessage(issue)}</>}
                       </li>
                     ))}
                   </ul>

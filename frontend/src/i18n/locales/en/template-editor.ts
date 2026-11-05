@@ -167,6 +167,8 @@ export const templateEditor = {
     numbered: 'Computed field {n}',
     key: 'Name',
     keyHint: 'The name placeholders and expressions use.',
+    label: 'Label',
+    labelHint: 'What authors and designers read in hints. Without a label they read the name.',
     taken: 'A field or an earlier computed field already has this name.',
     calculation: 'Calculation',
     expression: 'Calculation (CEL expression)',

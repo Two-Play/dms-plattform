@@ -53,6 +53,25 @@ object TemplateCompilerSpec extends ZIOSpecDefault:
           List(("/blocks/0", "condition"), ("/blocks/1", "collection"), ("/blocks/2", "condition"))
       )
     },
+    test("a label of a computed field is optional, but must not be blank or too long") {
+      val found = issues(
+        TemplateContent(
+          Nil,
+          List(
+            ComputedField("a", "1.0", Some("Total")),
+            ComputedField("b", "1.0", Some("  ")),
+            ComputedField("c", "1.0", Some("x" * 201)),
+            ComputedField("d", "1.0")
+          )
+        )
+      )
+      assertTrue(
+        found.map(i => (i.location.blockPath, i.location.part)) == List(
+          "/computed/1" -> "label",
+          "/computed/2" -> "label"
+        )
+      )
+    },
     test("computed fields are checked in order and may use earlier computed fields only") {
       val content = TemplateContent(
         Nil,

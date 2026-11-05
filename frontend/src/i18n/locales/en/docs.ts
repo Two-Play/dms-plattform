@@ -63,6 +63,7 @@ export const docs = {
     draftSaved: 'Draft saved',
     submitted: 'Submitted for review',
     incomplete: 'The draft was saved but cannot be submitted yet. Fill in these values first:',
+    computedMissing: 'Needed for the computed value {fields}.',
     noRetentionRule:
       'The document class has no retention rule – please inform records management. The draft was saved.',
     invalid:
@@ -121,6 +122,7 @@ export const docs = {
       one: '{count} required value is missing',
       other: '{count} required values are missing',
     }),
+    conditionHint: 'The text can still change when these fields are filled in:',
   },
   view: {
     content: 'Content',

@@ -433,6 +433,36 @@ describe('Document page with a draft', () => {
     expect(within(alert).queryByRole('button', { name: 'Retention rule' })).not.toBeInTheDocument()
   })
 
+  it('names the computed field a missing value is needed for (DMS-85)', async () => {
+    state.document = draftDocument({})
+    state.submitReplies = [
+      () =>
+        failed(422, {
+          code: 'incomplete',
+          message: 'the document cannot move to InReview',
+          issues: [
+            {
+              field: 'termMonths',
+              label: 'Term in months',
+              code: 'computed_field_missing',
+              message: 'server text',
+              computedFields: [{ key: 'totalValue', label: 'Total contract value' }],
+            },
+          ],
+        }),
+    ]
+    const { user } = renderAt(`/documents/${documentId}`)
+    await waitFor(() => {
+      expect(screen.getByLabelText(/^Title\*?$/)).toHaveValue('Service contract ACME')
+    })
+    await user.click(screen.getByRole('button', { name: 'Submit for review' }))
+
+    const alert = await findStatusAlert()
+    expect(within(alert).getByRole('button', { name: 'Term in months' })).toBeInTheDocument()
+    expect(alert).toHaveTextContent('Needed for the computed value Total contract value.')
+    expect(alert).not.toHaveTextContent('server text')
+  })
+
   it('lists the values missing for review, then submits and shows the workflow state', async () => {
     state.document = draftDocument({})
     state.submitReplies = [

@@ -16,7 +16,18 @@ object ValidationSpec extends ZIOSpecDefault:
   private def field(fieldType: FieldType, multiple: Boolean = false) =
     FieldDefinition(key("someField"), 1, "Some field", None, fieldType, multiple)
 
+  private val computedMissing = test("a field computed fields need has its own code and names them") {
+    val kind = IssueKind.ComputedFieldMissing(
+      List(ComputedFieldName("totalValue", "Total value"), ComputedFieldName("perYear", "perYear"))
+    )
+    assertTrue(
+      kind.code == "computed_field_missing",
+      kind.message.contains("'Total value', 'perYear'")
+    )
+  }
+
   def spec = suite("Validation")(
+    computedMissing,
     suite("types")(
       test("text: maximum length and pattern") {
         val t = field(FieldType.Text(maxLength = Some(5), pattern = Some("[A-Z]+")))

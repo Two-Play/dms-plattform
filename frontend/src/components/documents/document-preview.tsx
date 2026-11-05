@@ -1,6 +1,6 @@
 import { AlertTriangle, Loader2 } from 'lucide-react'
 import type { MouseEvent } from 'react'
-import type { MissingValue, Preview, PreviewIssue } from '@/api/templates'
+import type { ConditionHint, MissingValue, Preview, PreviewIssue } from '@/api/templates'
 import { Badge } from '@/components/ui/badge'
 import { t } from '@/i18n'
 // The document stylesheet shared with the PDF rendering (modules/templates, DMS-39).
@@ -34,6 +34,38 @@ function MissingList({
             <button
               type="button"
               className="rounded border border-destructive/40 px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
+              onClick={() => {
+                onFocusField(m.field)
+              }}
+            >
+              {m.label}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/** Conditions that read an empty field (ADR 0065): the fields, once each, since authors act on those. */
+function ConditionHints({
+  hints,
+  onFocusField,
+}: {
+  hints: ConditionHint[]
+  onFocusField: (key: string) => void
+}) {
+  const fields = new Map(hints.flatMap((h) => h.missingInputs ?? []).map((m) => [m.field, m]))
+  if (fields.size === 0) return null
+  return (
+    <div className="rounded-lg border p-3 text-sm">
+      <p className="text-muted-foreground">{t('docs.preview.conditionHint')}</p>
+      <ul className="mt-1 flex flex-wrap gap-1.5">
+        {[...fields.values()].map((m) => (
+          <li key={m.field}>
+            <button
+              type="button"
+              className="rounded border px-1.5 py-0.5 text-xs hover:bg-muted"
               onClick={() => {
                 onFocusField(m.field)
               }}
@@ -99,6 +131,7 @@ export function DocumentPreview({ preview, updating, error, onFocusField }: Docu
       {preview && (
         <>
           <MissingList missing={preview.missingRequired ?? []} onFocusField={onFocusField} />
+          <ConditionHints hints={preview.conditionHints ?? []} onFocusField={onFocusField} />
           <TemplateIssues issues={preview.issues ?? []} />
           {preview.html && (
             // Mouse shortcut only: keyboard users reach the same fields through the list of missing values.

@@ -11,7 +11,7 @@ import dms.kernel.{TenantId, UserId}
 import dms.rendering.{ArchiveStandard, RenditionRequest}
 import dms.rendering.core.*
 import dms.templates.core.*
-import dms.templates.{Language, Limits, ResolvedContent, TemplateSchema}
+import dms.templates.{Language, Limits, ResolvedContent, TemplateContent, TemplateSchema}
 import dms.workflow.core.{ApprovalRendition, ApprovalWorkflow, ReviewSubject, WorkflowError}
 import zio.*
 
@@ -209,7 +209,7 @@ object DocumentRenditions:
       resolution <- ZIO
         .fromEither(Resolver.resolve(compiled, fieldValues, lang))
         .mapError(e => invalid(v, e.message))
-      labels = profile.fields.map(f => f.key.value -> f.definition.label).toMap
+      labels = fieldLabels(profile, compiled)
     yield (
       HtmlRenderer.renderDocument(
         resolution.content,
@@ -262,7 +262,7 @@ object DocumentRenditions:
       resolution <- ZIO
         .fromEither(Resolver.resolve(compiled, fieldValues, lang))
         .mapError(e => invalid(v, e.message))
-      labels       = profile.fields.map(f => f.key.value -> f.definition.label).toMap
+      labels       = fieldLabels(profile, compiled)
       systemFields = profile.fields.filterNot(_.definition.editable).map(_.key.value).toSet
     yield VersionRendering(
       resolution.content,
@@ -274,6 +274,11 @@ object DocumentRenditions:
         systemFields
       )
     )
+
+  /** What people read for the fields and computed fields of a version. */
+  private def fieldLabels(profile: MetadataProfile, compiled: CompiledTemplate): Map[String, String] =
+    profile.fields.map(f => f.key.value -> f.definition.label).toMap ++
+      TemplateContent.computedLabels(compiled.content)
 
   /** The class profile of the version's template, the schema, the compiled content and the language. */
   private def prepare(

@@ -15,6 +15,18 @@ object ContentJsonSpec extends ZIOSpecDefault:
         ContentJson.decodeStored(json) == Right(Fixtures.content)
       )
     },
+    test("computed fields of older content have no label and show their key; a label round-trips") {
+      val older   = """{"format":1,"sections":[],"computed":[{"key":"total","expression":"1.0"}]}"""
+      val labeled = TemplateContent(Nil, List(ComputedField("total", "1.0", Some("Total value"))))
+      val decoded = ContentJson.decodeStored(older)
+      assertTrue(
+        decoded.map(_.computed) == Right(List(ComputedField("total", "1.0", None))),
+        decoded.map(c => TemplateContent.computedLabels(c)) == Right(Map("total" -> "total")),
+        decoded.map(ContentJson.encodeStored).exists(!_.contains("label")),
+        ContentJson.decodeStored(ContentJson.encodeStored(labeled)) == Right(labeled),
+        TemplateContent.computedLabels(labeled) == Map("total" -> "Total value")
+      )
+    },
     test("blocks carry their case name as type; defaults may be omitted") {
       val json = """{"sections":[{"id":"a","title":null,"locked":false,"blocks":[
                    |{"type":"Paragraph","content":[{"type":"Text","value":"Hi "},

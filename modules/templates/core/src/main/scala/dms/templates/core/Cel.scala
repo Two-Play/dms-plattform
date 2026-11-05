@@ -182,6 +182,11 @@ private[core] object Cel:
       case _ => Set.empty
     walk(ast.getExpr, Set.empty)
 
+  /** Whether the whole expression is a conditional (`a ? b : c`). */
+  def isConditional(ast: CelAbstractSyntaxTree): Boolean =
+    val e = ast.getExpr
+    e.getKind == CelExpr.ExprKind.Kind.CALL && e.call.function == "_?_:_"
+
   /** Literal values in an expression, used to derive test data around the values a condition compares with.
     */
   def constants(ast: CelAbstractSyntaxTree): List[CelConstant] =

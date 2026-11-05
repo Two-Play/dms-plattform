@@ -87,6 +87,11 @@ final case class PreviewIssueView(
 ) derives JsonCodec,
       Schema
 
+/** A condition whose outcome depends on missing values: it read them as empty, so the branch can change. */
+final case class ConditionHintView(condition: String, missingInputs: List[MissingValueView])
+    derives JsonCodec,
+      Schema
+
 final case class PreviewView(
     /** HTML fragment (`article.dms-document`) marked "Draft – not valid"; all text is escaped. Style it with
       * the document stylesheet. Empty when the template could not be resolved (see `issues`).
@@ -95,7 +100,9 @@ final case class PreviewView(
     /** Required fields without a value, in profile order. */
     missingRequired: List[MissingValueView],
     /** Values that were left out because they do not fit their field, and resolution problems. */
-    issues: List[PreviewIssueView]
+    issues: List[PreviewIssueView],
+    /** Conditions whose outcome can still change when the author fills in the named fields. */
+    conditionHints: List[ConditionHintView]
 ) derives JsonCodec,
       Schema
 
@@ -129,7 +136,8 @@ object TemplatePreviewApi:
       .description(
         "Live preview while filling in a document (US-03.2): resolves the released version with the values " +
           "entered so far and returns HTML marked \"Draft – not valid\" with missing values marked. Values " +
-          "that do not fit their field are left out and reported in `issues`; the resolver's limits apply."
+          "that do not fit their field are left out and reported in `issues`; conditions that read a missing " +
+          "value as empty are listed in `conditionHints`; the resolver's limits apply."
       )
       .tag("Templates")
       .serverLogic(p =>
@@ -149,7 +157,10 @@ object TemplatePreviewApi:
           yield PreviewView(
             result.html,
             result.missingRequired.map(m => MissingValueView(m.field, m.label)),
-            result.issues.map(i => PreviewIssueView(i.field, i.label, i.code, i.message))
+            result.issues.map(i => PreviewIssueView(i.field, i.label, i.code, i.message)),
+            result.conditionHints.map(h =>
+              ConditionHintView(h.condition, h.missingInputs.map(m => MissingValueView(m.field, m.label)))
+            )
           )
       )
 

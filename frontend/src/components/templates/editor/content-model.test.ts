@@ -4,6 +4,7 @@ import {
   addTableColumn,
   addTableRow,
   canonical,
+  computedName,
   contentKey,
   duplicateSectionIds,
   fromEditor,
@@ -271,6 +272,30 @@ describe('placing server issues', () => {
   const issue = (sectionId: string | undefined, blockPath: string, part = ''): ContentIssue => ({
     location: { sectionId, blockPath, part, line: 0, column: 0 },
     message: `${sectionId ?? ''}${blockPath}`,
+  })
+
+  it('keeps the label of a computed field; without one, or a blank one, there is none', () => {
+    const state = toEditor({
+      sections: [],
+      computed: [
+        { key: 'a', expression: '1.0', label: 'Total' },
+        { key: 'b', expression: '2.0' },
+      ],
+      references: [],
+    })
+    const blank = {
+      ...state,
+      computed: [...state.computed, { uid: 'c', key: 'c', expression: '3.0', label: ' ' }],
+    }
+    expect(fromEditor(blank).computed).toEqual([
+      { key: 'a', expression: '1.0', label: 'Total' },
+      { key: 'b', expression: '2.0' },
+      { key: 'c', expression: '3.0' },
+    ])
+    expect(state.computed.map(computedName)).toEqual(['Total', 'b'])
+    expect(
+      parseContent('{"sections":[],"computed":[{"key":"a","expression":"1.0","label":1}]}'),
+    ).toMatchObject({ ok: false, path: '/computed/0/label' })
   })
 
   it('finds the block, computed field, reference field or section an issue names', () => {

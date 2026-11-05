@@ -92,7 +92,7 @@ object VersionPublicationSpec extends ZIOSpecDefault:
         template: TemplateVersion,
         content: TemplateContent,
         values: Map[String, MetadataValue]
-    ): IO[DocumentError, Map[String, List[String]]]                 = ZIO.succeed(Map.empty)
+    ): IO[DocumentError, List[MissingComputed]]                     = ZIO.succeed(Nil)
     def encode(content: TemplateContent): String                    = content.toJson
     def decode(json: String): Either[String, TemplateContent]       = json.fromJson[TemplateContent]
     def encodeReport(report: DeviationReport): String               = report.toJson

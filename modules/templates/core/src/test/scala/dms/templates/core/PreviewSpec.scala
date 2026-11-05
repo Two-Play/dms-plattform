@@ -58,6 +58,47 @@ object PreviewSpec extends ZIOSpecDefault:
         r.html.contains("data-field=\"monthlyFee\" data-required=\"true\">Monthly fee</span>")
       )
     },
+    test("names conditions a missing value decides, without those of fields the platform sets") {
+      val systemField = TemplateContent(
+        List(
+          Section(
+            SectionId("main"),
+            None,
+            locked = false,
+            List(Block.Conditional("documentId == 'x'", Nil), Block.Conditional("international", Nil))
+          )
+        )
+      )
+      val compiled = TemplateCompiler
+        .compile(systemField, ProfileSchema.from(profile))
+        .fold(i => throw AssertionError(i.map(_.show).mkString("; ")), identity)
+      val hints = Preview
+        .run(PreviewTemplate(version, profile, compiled), Map.empty, Language.En)
+        .conditionHints
+      assertTrue(
+        run().conditionHints.isEmpty,
+        run(PreviewFixtures.values - "international").conditionHints.nonEmpty,
+        run(PreviewFixtures.values - "international").conditionHints
+          .forall(_.missingInputs == List(MissingValue("international", "International"))),
+        hints.map(h => (h.condition, h.missingInputs)) ==
+          List(("international", List(MissingValue("international", "International"))))
+      )
+    },
+    test("a computed field without value shows its label; without a label it shows its key") {
+      val labeled = content.copy(computed = content.computed.map {
+        case c if c.key == "totalValue" => c.copy(label = Some("Total <value>"))
+        case c                          => c
+      })
+      val compiled = TemplateCompiler
+        .compile(labeled, ProfileSchema.from(profile))
+        .fold(i => throw AssertionError(i.map(_.show).mkString("; ")), identity)
+      val values = PreviewFixtures.values - "termMonths"
+      val html   = Preview.run(PreviewTemplate(version, profile, compiled), values, Language.En).html
+      assertTrue(
+        html.contains("Total &lt;value&gt; <span class=\"dms-missing-hint\">(missing: Term in months)"),
+        run(values).html.contains("totalValue <span class=\"dms-missing-hint\">(missing: Term in months)")
+      )
+    },
     test("shows fields the platform sets neutrally with a hint, not as missing values") {
       val en = run().html
       val de = run(language = Language.De).html

@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
 import {
+  computedName,
   contentKey,
   fromEditor,
   parseContent,
@@ -173,7 +174,7 @@ export function ContentEditor({
         .filter((c) => c.key !== '')
         .map((c) => ({
           path: c.key,
-          label: c.key,
+          label: computedName(c),
           kind: 'Unknown' as const,
           multiple: false,
           source: 'computed' as const,

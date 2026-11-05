@@ -35,6 +35,9 @@ final case class MissingValue(field: String, label: String)
   */
 final case class PreviewIssue(field: Option[String], label: Option[String], code: String, message: String)
 
+/** A condition whose outcome depends on missing values (ADR 0065), which it read as empty. */
+final case class ConditionHint(location: Location, condition: String, missingInputs: List[MissingValue])
+
 /** Result of a live preview.
   *
   * @param html
@@ -42,8 +45,16 @@ final case class PreviewIssue(field: Option[String], label: Option[String], code
   * @param missingRequired
   *   the required fields without value, then the fields without value that computed fields read (a document
   *   cannot be approved without them either, DMS-83)
+  * @param conditionHints
+  *   conditions whose outcome can still change when the author fills in a field; values the platform sets are
+  *   left out, as the author can do nothing about them
   */
-final case class PreviewResult(html: String, missingRequired: List[MissingValue], issues: List[PreviewIssue])
+final case class PreviewResult(
+    html: String,
+    missingRequired: List[MissingValue],
+    issues: List[PreviewIssue],
+    conditionHints: List[ConditionHint] = Nil
+)
 
 /** A released template version prepared for previews: compiled once against its class profile. Released
   * versions and class profile versions never change, so instances can be cached.
@@ -75,7 +86,12 @@ final case class PreviewTemplate(
     }
     all.filter(_.usedInTemplate) ++ all.filterNot(_.usedInTemplate)
 
-  lazy val labels: Map[String, String] = profile.fields.map(f => f.key.value -> f.definition.label).toMap
+  /** What people read for each field and computed field, by key. */
+  lazy val labels: Map[String, String] =
+    profile.fields.map(f => f.key.value -> f.definition.label).toMap ++
+      TemplateContent.computedLabels(compiled.content)
+
+  def named(keys: List[String]): List[MissingValue] = keys.map(k => MissingValue(k, labels.getOrElse(k, k)))
 
   /** Keys of the fields the platform sets (not editable). */
   lazy val systemFields: Set[String] = profile.fields.filterNot(_.definition.editable).map(_.key.value).toSet
@@ -105,12 +121,16 @@ object Preview:
       case Right(resolution) =>
         val computedInputs = resolution.missingComputed.flatMap(_.missingInputs)
         val missing        =
-          (resolution.missingRequired ++ computedInputs).distinct.filterNot(systemKeys.contains).map { key =>
-            MissingValue(key, template.labels.getOrElse(key, key))
-          }
+          template.named(
+            (resolution.missingRequired ++ computedInputs).distinct.filterNot(systemKeys.contains)
+          )
+        val hints = resolution.conditionsOnMissing.flatMap { c =>
+          val inputs = c.missingInputs.filterNot(systemKeys.contains)
+          Option.when(inputs.nonEmpty)(ConditionHint(c.location, c.condition, template.named(inputs)))
+        }
         val html =
           HtmlRenderer.render(resolution.content, HtmlOptions.draft(language, template.labels, systemKeys))
-        PreviewResult(html, missing, issues)
+        PreviewResult(html, missing, issues, hints)
       case Left(error) =>
         val code = error match
           case ResolveError.LimitExceeded(_, _) => "limit_exceeded"

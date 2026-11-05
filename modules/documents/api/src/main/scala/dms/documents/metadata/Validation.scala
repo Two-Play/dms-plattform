@@ -24,17 +24,23 @@ enum IssueKind:
     */
   case NoRetentionRule
 
+  /** The field has no value and the computed fields named here need it, so they have none either (DMS-83, ADR
+    * 0065). The field itself is not required by the class.
+    */
+  case ComputedFieldMissing(computed: List[ComputedFieldName])
+
   def code: String = this match
-    case MissingRequired(_) => "missing_required"
-    case UnknownField       => "unknown_field"
-    case WrongType(_, _)    => "wrong_type"
-    case OutOfRange(_)      => "out_of_range"
-    case PatternMismatch(_) => "pattern_mismatch"
-    case UnknownOption(_)   => "unknown_option"
-    case RetiredOption(_)   => "retired_option"
-    case UnknownCurrency(_) => "unknown_currency"
-    case NotEditable        => "not_editable"
-    case NoRetentionRule    => "no_retention_rule"
+    case MissingRequired(_)      => "missing_required"
+    case UnknownField            => "unknown_field"
+    case WrongType(_, _)         => "wrong_type"
+    case OutOfRange(_)           => "out_of_range"
+    case PatternMismatch(_)      => "pattern_mismatch"
+    case UnknownOption(_)        => "unknown_option"
+    case RetiredOption(_)        => "retired_option"
+    case UnknownCurrency(_)      => "unknown_currency"
+    case NotEditable             => "not_editable"
+    case NoRetentionRule         => "no_retention_rule"
+    case ComputedFieldMissing(_) => "computed_field_missing"
 
   def message: String = this match
     case MissingRequired(status)     => s"The field is required in status $status."
@@ -48,6 +54,13 @@ enum IssueKind:
     case NotEditable                 =>
       "The field is set by the platform or taken over from a business system and cannot be entered."
     case NoRetentionRule => "The document class has no retention rule; please inform records management."
+    case ComputedFieldMissing(computed) =>
+      val names = computed.map(c => s"'${c.label}'").mkString(", ")
+      s"The document cannot be approved without this value; these computed fields need it: $names."
+
+/** A computed field of a template by its stable key and the name people read: its label, otherwise its key.
+  */
+final case class ComputedFieldName(key: String, label: String)
 
 /** A problem with one field, addressable by its stable key. */
 final case class FieldIssue(field: String, label: String, kind: IssueKind)

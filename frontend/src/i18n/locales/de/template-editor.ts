@@ -171,6 +171,9 @@ export const templateEditor: Translation<typeof en.templateEditor> = {
     numbered: 'Berechnetes Feld {n}',
     key: 'Name',
     keyHint: 'Der Name, den Platzhalter und Ausdrücke verwenden.',
+    label: 'Bezeichnung',
+    labelHint:
+      'Das lesen Autor/innen und Designer/innen in Hinweisen. Ohne Bezeichnung lesen sie den Namen.',
     taken: 'Ein Feld oder ein früheres berechnetes Feld hat bereits diesen Namen.',
     calculation: 'Berechnung',
     expression: 'Berechnung (CEL-Ausdruck)',

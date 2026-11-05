@@ -33,9 +33,8 @@ final class DocumentTemplates(service: TemplateService, profiles: ProfileSource)
       template: TemplateVersion,
       content: TemplateContent,
       values: Map[String, MetadataValue]
-  ): IO[DocumentError, Map[String, List[String]]] =
+  ): IO[DocumentError, List[MissingComputed]] =
     evaluate(template, content, values)(Resolver.missingComputed)
-      .map(_.map(m => m.key -> m.missingInputs).toMap)
 
   /** Compiles `content` against the profile the template was designed against and evaluates its computed
     * fields with the profile values among `values` (computed values are left out).
