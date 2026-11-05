@@ -18,7 +18,7 @@ final case class CompiledExpression(
   private[core] def resultType: CelType = ast.getResultType
 
   /** Names of fields, computed fields and repeat items the expression uses. */
-  def identifiers: Set[String] = Cel.identifiers(ast)
+  lazy val identifiers: Set[String] = Cel.identifiers(ast)
 
 /** A compiled conditional block. */
 final case class ConditionalInfo(expression: CompiledExpression, enclosingRepeats: List[CompiledExpression])
@@ -60,6 +60,9 @@ object TemplateCompiler:
   )
 
   private val Identifier = "[a-z][a-zA-Z0-9]{0,62}".r
+
+  /** Longest label of a computed field, in characters. */
+  private val MaxLabelLength = 200
 
   /** Static information about a name in scope. `valueType` is `None` when only CEL knows the type. */
   private final case class Binding(valueType: Option[ValueType], celType: CelType)
@@ -170,6 +173,11 @@ object TemplateCompiler:
     fields.zipWithIndex.foldLeft((base, List.empty[(ComputedField, CompiledExpression)])) {
       case ((scope, done), (field, i)) =>
         val location = Location(None, s"/computed/$i", "expression")
+        field.label.foreach { label =>
+          if label.trim.isEmpty then state.issue(location.copy(part = "label"), "the label is empty")
+          else if label.length > MaxLabelLength then
+            state.issue(location.copy(part = "label"), s"the label is longer than $MaxLabelLength characters")
+        }
         if !Identifier.matches(field.key) then
           state.issue(location.copy(part = "key"), s"'${field.key}' is not a valid name (lower camel case)")
           (scope, done)

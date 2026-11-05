@@ -16,8 +16,13 @@ final case class TemplateContent(
     references: List[ReferenceField] = Nil
 )
 
-/** A field derived from other fields, e.g. `totalValue = monthlyFee * termMonths` (CEL, ADR 0020). */
-final case class ComputedField(key: String, expression: String)
+/** A field derived from other fields, e.g. `totalValue = monthlyFee * termMonths` (CEL, ADR 0020).
+  *
+  * @param label
+  *   the name people read in hints and missing-value markers (ADR 0065); content without one shows the key
+  */
+final case class ComputedField(key: String, expression: String, label: Option[String] = None):
+  def displayLabel: String = label.map(_.trim).filter(_.nonEmpty).getOrElse(key)
 
 /** A master data source reference fields can take values from (ADR 0023).
   *
@@ -131,6 +136,10 @@ object TemplateContent:
         case _                         => Nil
       }
       .collect { case Inline.Placeholder(path, _) => path }
+
+  /** What people read for each computed field, by key. */
+  def computedLabels(content: TemplateContent): Map[String, String] =
+    content.computed.map(c => c.key -> c.displayLabel).toMap
 
   /** The reference field that fills `field`, with the attribute it takes over, if any. */
   def referenceOf(content: TemplateContent, field: String): Option[(ReferenceField, ReferenceMapping)] =

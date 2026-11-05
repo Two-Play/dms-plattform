@@ -81,6 +81,8 @@ const fields: TemplateFields = {
   ],
 }
 
+const clientField = { field: 'clientName', label: 'Client name' }
+
 /** A preview like the backend's: the client name is marked missing until it has a value. */
 function previewFor(values: Record<string, MetadataValue>): Preview {
   const client = values.clientName
@@ -95,6 +97,14 @@ function previewFor(values: Record<string, MetadataValue>): Preview {
       ...(values.monthlyFee ? [] : [{ field: 'monthlyFee', label: 'Monthly fee' }]),
     ],
     issues: [],
+    conditionHints: [
+      ...(client
+        ? []
+        : [
+            { condition: "clientName == 'x'", missingInputs: [clientField] },
+            { condition: "clientName != 'y'", missingInputs: [clientField] },
+          ]),
+    ],
   }
 }
 
@@ -243,6 +253,17 @@ describe('NewDocumentPage', () => {
     await waitFor(() => {
       expect(lastBody()?.values).toEqual({ termMonths: { type: 'Number', value: 36 } })
     })
+  })
+
+  it('names the fields conditions read as empty, once each, and leads to them (DMS-85)', async () => {
+    setup()
+    const user = await chooseTemplate()
+    const hint = await screen.findByText(
+      'The text can still change when these fields are filled in:',
+    )
+    // getByRole finds exactly one: two conditions read the field, it is listed once.
+    await user.click(within(hint.parentElement as HTMLElement).getByRole('button'))
+    expect(fieldControl('Client name')).toHaveFocus()
   })
 
   it('focuses the form field when a missing value in the preview is clicked', async () => {

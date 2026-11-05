@@ -144,6 +144,37 @@ const testRun: TestRun = {
     },
   ],
   allBranchesCovered: true,
+  computedHints: [
+    {
+      key: 'totalValue',
+      label: 'Total contract value',
+      missingInputs: [{ field: 'termMonths', label: 'Term in months' }],
+      guard: "'termMonths' in present_fields",
+      suggestion: "'termMonths' in present_fields ? monthlyFee.amount * termMonths : 0.0",
+      cases: ['empty optional fields'],
+    },
+    {
+      key: 'endsOn',
+      label: 'endsOn',
+      missingInputs: [{ field: 'endDate', label: 'End date' }],
+      guard: "'endDate' in present_fields",
+      cases: ['empty optional fields'],
+    },
+  ],
+  conditionHints: [
+    {
+      location: {
+        sectionId: 'main',
+        blockPath: '/blocks/1',
+        part: 'condition',
+        line: 1,
+        column: 1,
+      },
+      condition: "termType == 'fixed'",
+      missingInputs: [{ field: 'termType', label: 'Term' }],
+      cases: ['empty optional fields'],
+    },
+  ],
 }
 
 type Reply = Promise<{ data: unknown; error: unknown; response: Response }>
@@ -384,8 +415,42 @@ describe('Template page', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('false and true')).toBeInTheDocument()
     expect(screen.getByTestId('test-case-preview')).toHaveTextContent('Fixed term rendered')
-    await user.click(screen.getByRole('button', { name: /empty optional fields/ }))
+    const list = screen.getByRole('list', { name: 'Test cases' })
+    await user.click(within(list).getByRole('button', { name: /empty optional fields/ }))
     expect(screen.getByTestId('test-case-preview')).toHaveTextContent('Empty case rendered')
     expect(screen.getByText('Missing required values: termType')).toBeInTheDocument()
+  })
+
+  it('points to computed fields and conditions that depend on empty fields (DMS-85)', async () => {
+    const { user } = renderAt(`/templates/${templateId}`)
+
+    await user.click(await screen.findByRole('button', { name: 'Run test mode' }))
+
+    const hints = await screen.findByRole('region', { name: 'Hints on empty fields' })
+    expect(
+      within(hints).getByText(
+        'Total contract value has no value while Term in months is empty. Documents cannot be approved like this.',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(hints).getByText(
+        "'termMonths' in present_fields ? monthlyFee.amount * termMonths : 0.0",
+      ),
+    ).toBeInTheDocument()
+    // Without a label the key, without a full suggestion the guard alone.
+    expect(within(hints).getByText(/^endsOn has no value while End date/)).toBeInTheDocument()
+    expect(within(hints).getByText("'endDate' in present_fields")).toBeInTheDocument()
+    expect(
+      within(hints).getByText(
+        'This condition reads Term as empty, so the result can change with a value.',
+      ),
+    ).toBeInTheDocument()
+
+    // A hint leads to the case that shows it.
+    const hint = within(hints)
+      .getByText(/^endsOn has no value/)
+      .closest('li') as HTMLElement
+    await user.click(within(hint).getByRole('button', { name: 'empty optional fields' }))
+    expect(screen.getByTestId('test-case-preview')).toHaveTextContent('Empty case rendered')
   })
 })

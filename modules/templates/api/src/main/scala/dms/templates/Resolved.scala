@@ -61,10 +61,20 @@ final case class BranchOutcome(location: Location, condition: String, outcomes: 
 
 /** A computed field without value because its expression reads fields that have none (DMS-83).
   *
+  * @param label
+  *   what people read for the field: its label, otherwise its key
   * @param missingInputs
   *   the fields without value the expression read, directly or through other computed fields, in schema order
   */
-final case class MissingComputed(key: String, missingInputs: List[String])
+final case class MissingComputed(key: String, label: String, missingInputs: List[String])
+
+/** A condition whose outcome depends on a value that is missing (ADR 0065): it read the value as empty, so
+  * the branch it took can still change. A condition that checks `present_fields` first is not one of these.
+  *
+  * @param missingInputs
+  *   the fields without value that decide the outcome, directly or through computed fields, in schema order
+  */
+final case class ConditionOnMissing(location: Location, condition: String, missingInputs: List[String])
 
 /** Result of resolving a template with field values.
   *
@@ -74,12 +84,15 @@ final case class MissingComputed(key: String, missingInputs: List[String])
   *   the outcome of every conditional that was evaluated, in document order
   * @param missingComputed
   *   computed fields without value, in definition order; a document with such fields cannot be approved
+  * @param conditionsOnMissing
+  *   the evaluated conditions whose outcome depends on a missing value, in document order
   */
 final case class Resolution(
     content: ResolvedContent,
     missingRequired: List[String],
     branches: List[BranchOutcome],
-    missingComputed: List[MissingComputed]
+    missingComputed: List[MissingComputed],
+    conditionsOnMissing: List[ConditionOnMissing]
 )
 
 enum ResolveError:

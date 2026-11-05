@@ -126,6 +126,19 @@ export const templates = {
     german: 'German',
     running: 'Running…',
     run: 'Run test mode',
+    hints: {
+      title: 'Hints on empty fields',
+      computedTitle: 'Computed fields without value',
+      computed:
+        '{name} has no value while {fields} is empty. Documents cannot be approved like this.',
+      guard: 'Check first whether the field has a value:',
+      suggestion: 'Suggested calculation:',
+      fallback: 'Replace the last value with what the document should show without the field.',
+      conditionsTitle: 'Conditions that depend on empty fields',
+      condition: 'This condition reads {fields} as empty, so the result can change with a value.',
+      conditionGuard: 'Check present_fields first if an empty field should count as intended.',
+      seenIn: 'Seen in:',
+    },
   },
   release: {
     documentStatus: 'Document status',

@@ -92,10 +92,10 @@ object ResolverSpec extends ZIOSpecDefault:
       assertTrue(
         inlines.contains(ResolvedInline.Missing("totalValue", required = true, List("termMonths"))),
         text(r).contains("Total: [missing: totalValue]"),
-        r.missingComputed == List(MissingComputed("totalValue", List("termMonths"))),
+        r.missingComputed == List(MissingComputed("totalValue", "totalValue", List("termMonths"))),
         Resolver.computedValues(Fixtures.compiled(), Fixtures.values - "termMonths") == Right(Map.empty),
         Resolver.missingComputed(Fixtures.compiled(), Fixtures.values - "termMonths") ==
-          Right(List(MissingComputed("totalValue", List("termMonths")))),
+          Right(List(MissingComputed("totalValue", "totalValue", List("termMonths")))),
         Resolver.missingComputed(Fixtures.compiled(), Fixtures.values) == Right(Nil)
       )
     },
@@ -124,12 +124,62 @@ object ResolverSpec extends ZIOSpecDefault:
         ),
         missing == Right(
           List(
-            MissingComputed("perMonth", List("termMonths")),
-            MissingComputed("perYear", List("termMonths")),
-            MissingComputed("both", List("termMonths", "international"))
+            MissingComputed("perMonth", "perMonth", List("termMonths")),
+            MissingComputed("perYear", "perYear", List("termMonths")),
+            MissingComputed("both", "both", List("termMonths", "international"))
           )
         )
       )
+    },
+    test("a condition is reported if a missing value decides it, not if it checks or never needs the value") {
+      val hint     = (condition: String) => Conditional(condition, Nil)
+      val template = Fixtures.compiled(
+        oneSection(
+          hint("termMonths > 12.0"),
+          hint("'termMonths' in present_fields && termMonths > 12.0"),
+          hint("termMonths > 12.0 || termType == 'fixed'"),
+          hint("totalValue > 100.0"),
+          hint("services.exists(s, s == 'Hosting')"),
+          hint("termType == 'fixed'")
+        ).copy(computed = Fixtures.content.computed)
+      )
+      val r = resolve(Fixtures.values - "termMonths" - "services", template = template)
+      assertTrue(
+        r.conditionsOnMissing.map(c => (c.condition, c.missingInputs)) == List(
+          ("termMonths > 12.0", List("termMonths")),
+          ("totalValue > 100.0", List("termMonths")),
+          ("services.exists(s, s == 'Hosting')", List("services"))
+        ),
+        r.conditionsOnMissing.head.location == Location(Some(SectionId("main")), "/blocks/0", "condition"),
+        r.branches.size == 6,
+        resolve(template = template).conditionsOnMissing.isEmpty
+      )
+    },
+    test("a condition in a repeat is reported once, and only if it was reached") {
+      val template = Fixtures.compiled(
+        oneSection(
+          Repeat("services", "service", List(Conditional("service == noticePeriod", Nil))),
+          Conditional(
+            "false && termType == 'fixed'",
+            List(Conditional("endDate > timestamp('2026-01-01T00:00:00Z')", Nil))
+          )
+        ).copy(computed = Nil)
+      )
+      val r = resolve(Fixtures.values - "noticePeriod" - "endDate", template = template)
+      assertTrue(r.conditionsOnMissing.map(_.missingInputs) == List(List("noticePeriod")))
+    },
+    test("reporting does not change which branch a condition takes") {
+      val template = Fixtures.compiled(
+        oneSection(
+          Conditional(
+            "termMonths == 0.0",
+            List(Paragraph(List(Text("empty")))),
+            List(Paragraph(List(Text("set"))))
+          )
+        ).copy(computed = Nil)
+      )
+      val r = resolve(Fixtures.values - "termMonths", template = template)
+      assertTrue(text(r) == "empty", r.branches.map(_.outcomes) == List(Set(true)))
     },
     test("conditions still see empty values for missing fields and computed fields without value") {
       val condition = Conditional(

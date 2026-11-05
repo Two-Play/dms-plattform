@@ -53,12 +53,15 @@ final case class TemplateDraft(
   * @param template
   *   the tested version compiled against its class profile, for rendering the cases (field labels, system
   *   fields)
+  * @param hints
+  *   what the cases found about missing values (ADR 0065)
   */
 final case class TestRun(
     schema: TemplateSchema,
     cases: List[(TestCase, Either[ResolveError, Resolution])],
     coverage: List[BranchCoverage],
-    template: PreviewTemplate
+    template: PreviewTemplate,
+    hints: TestHints
 )
 
 /** Manages templates and their versions in the current tenant (business concept 4.1).
@@ -377,15 +380,12 @@ final class TemplateService(audit: AuditTrail, profiles: ProfileSource, limits: 
             outcomes.fold(Set.empty[Boolean])(_.outcomes)
           )
         }
-        TestRun(compiled.schema, List(TestCase("given values", vs) -> result), coverage, template)
+        val cases = List(TestCase("given values", vs) -> result)
+        TestRun(compiled.schema, cases, coverage, template, TestHints.from(template, cases))
       case None =>
         val suite = TestCases.generate(compiled, language)
-        TestRun(
-          compiled.schema,
-          suite.cases.map(c => c -> Resolver.resolve(compiled, c.values, language)),
-          suite.coverage,
-          template
-        )
+        val cases = suite.cases.map(c => c -> Resolver.resolve(compiled, c.values, language))
+        TestRun(compiled.schema, cases, suite.coverage, template, TestHints.from(template, cases))
 
   private def validate(draft: TemplateDraft): IO[TemplateError, Unit] =
     for

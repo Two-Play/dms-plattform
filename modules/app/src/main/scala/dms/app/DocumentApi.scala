@@ -1344,7 +1344,7 @@ object DocumentApi:
     )
 
   private def issueViews(issues: List[FieldIssue]): Option[List[IssueView]] =
-    Some(issues.map(i => IssueView(i.field, i.label, i.kind.code, i.kind.message)))
+    Some(issues.map(IssueView.of))
 
   def toResponse(error: AccessDenied | DbError | DocumentError): (StatusCode, ApiError) = error match
     case AccessDenied(_, reason) =>

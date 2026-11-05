@@ -109,6 +109,7 @@ object Resolver:
     private var repeatIterations          = 0
     private var outputLength              = 0L
     private val branches                  = mutable.LinkedHashMap.empty[Location, (String, Set[Boolean])]
+    private val onMissing                 = mutable.LinkedHashMap.empty[Location, (String, Set[String])]
     var currentLocation: Option[Location] = None
 
     /** The field values and, evaluated in order, the computed fields. A computed field that reads a field
@@ -142,8 +143,6 @@ object Resolver:
             val value = Cel.fromCel(result).fold(m => fail(expression.location, m), identity)
             scope + (field.key -> Entry(Some(value), Some(result), valueType, required = false))
           case Some(names) =>
-            val inputs =
-              names.flatMap(n => scope.get(n).map(_.missingInputs).filter(_.nonEmpty).getOrElse(List(n)))
             val asBefore = conditionView(expression, scope).toOption.filter(Cel.unknownVariables(_).isEmpty)
             scope + (field.key -> Entry(
               None,
@@ -151,13 +150,21 @@ object Resolver:
               valueType,
               required = false,
               missing = true,
-              missingInputs = template.schema.variables.map(_.name).filter(inputs.contains)
+              missingInputs = inputsOf(names, scope)
             ))
       }
 
+    /** The fields without value behind `names`, which are fields or computed fields, in schema order. */
+    private def inputsOf(names: Set[String], scope: Map[String, Entry]): List[String] =
+      val inputs = names.flatMap(n => scope.get(n).map(_.missingInputs).filter(_.nonEmpty).getOrElse(List(n)))
+      template.schema.variables.map(_.name).filter(inputs.contains)
+
     def missingComputed(scope: Map[String, Entry]): List[MissingComputed] =
       template.computed.flatMap { (field, _) =>
-        scope.get(field.key).filter(_.missing).map(e => MissingComputed(field.key, e.missingInputs))
+        scope
+          .get(field.key)
+          .filter(_.missing)
+          .map(e => MissingComputed(field.key, field.displayLabel, e.missingInputs))
       }
 
     def resolution(): Resolution =
@@ -172,7 +179,10 @@ object Resolver:
         branches.toList.map { case (location, (condition, outcomes)) =>
           BranchOutcome(location, condition, outcomes)
         },
-        missingComputed(scope)
+        missingComputed(scope),
+        onMissing.toList.map { case (location, (condition, names)) =>
+          ConditionOnMissing(location, condition, inputsOf(names, scope))
+        }
       )
 
     private def fail(location: Location, message: String): Nothing =
@@ -207,6 +217,27 @@ object Resolver:
       }
       result
 
+    /** Records a condition whose outcome depends on a missing value (ADR 0065): evaluated once more with
+      * those values unknown, like a computed field, so a check of `present_fields` absorbs them. The outcome
+      * itself stays that of the empty values. This second evaluation only informs, so it never fails the
+      * resolution: if it cannot tell, the names the expression mentions count.
+      */
+    private def noteMissing(
+        expression: CompiledExpression,
+        condition: String,
+        scope: Map[String, Entry]
+    ): Unit =
+      val absent = expression.identifiers.filter(scope.get(_).exists(_.missing))
+      if absent.nonEmpty then
+        val known   = scope.collect { case (name, e) if !e.missing => name -> e.cel }
+        val unknown = scope.collect { case (name, e) if e.missing => name }
+        val names   =
+          try run(expression, known, unknown).fold(_ => absent, Cel.unknownVariables(_).getOrElse(Set.empty))
+          catch case _: Cel.BudgetExceeded => absent
+        if names.nonEmpty then
+          val (_, seen) = onMissing.getOrElse(expression.location, (condition, Set.empty[String]))
+          onMissing.update(expression.location, (condition, seen ++ names))
+
     private def blocks(
         bs: List[Block],
         section: Option[SectionId],
@@ -239,10 +270,12 @@ object Resolver:
         case Block.ClauseRef(key, version)                 => List(ResolvedBlock.ClauseRef(key, version))
         case Block.PageBreak                               => List(ResolvedBlock.PageBreak)
         case Block.Conditional(condition, body, otherwise) =>
-          val location = here.copy(part = "condition")
-          val outcome  = evaluate(template.expression(location), scope) match
+          val location   = here.copy(part = "condition")
+          val expression = template.expression(location)
+          val outcome    = evaluate(expression, scope) match
             case b: java.lang.Boolean => b.booleanValue
             case other => fail(location, s"the condition did not yield true or false but $other")
+          noteMissing(expression, condition, scope)
           val (_, seen) = branches.getOrElse(location, (condition, Set.empty[Boolean]))
           branches.update(location, (condition, seen + outcome))
           if outcome then nested(body, "/body") else nested(otherwise, "/otherwise")

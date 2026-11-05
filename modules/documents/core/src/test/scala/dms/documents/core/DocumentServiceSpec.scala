@@ -102,7 +102,7 @@ object DocumentServiceSpec extends ZIOSpecDefault:
       val term = values.get("termMonths").collect { case MetadataValue.Number(n) => n }
       ZIO.succeed(
         content.computed.flatMap {
-          case ComputedField("totalValue", _) =>
+          case ComputedField("totalValue", _, _) =>
             fee.zip(term).map((f, t) => "totalValue" -> MetadataValue.Number(f * t))
           case _ => None
         }.toMap
@@ -112,12 +112,12 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         template: TemplateVersion,
         content: TemplateContent,
         values: Map[String, MetadataValue]
-    ): IO[DocumentError, Map[String, List[String]]] =
+    ): IO[DocumentError, List[MissingComputed]] =
       ZIO.succeed(
         content.computed.collect {
-          case ComputedField("totalValue", _) if !values.contains("termMonths") =>
-            "totalValue" -> List("termMonths")
-        }.toMap
+          case c @ ComputedField("totalValue", _, _) if !values.contains("termMonths") =>
+            MissingComputed(c.key, c.displayLabel, List("termMonths"))
+        }
       )
 
     def encode(content: TemplateContent): String              = content.toJson
@@ -126,6 +126,9 @@ object DocumentServiceSpec extends ZIOSpecDefault:
     // The column default of migration V10 is the empty report of the real format, {"format":1,"deviations":[]}.
     def encodeReport(report: DeviationReport): String               = report.toJson
     def decodeReport(json: String): Either[String, DeviationReport] = json.fromJson[DeviationReport]
+
+  private val totalValueMissing =
+    IssueKind.ComputedFieldMissing(List(ComputedFieldName("totalValue", "totalValue")))
 
   private val env: ZLayer[Any, Throwable, Env] = ZLayer.scoped(
     for
@@ -789,7 +792,7 @@ object DocumentServiceSpec extends ZIOSpecDefault:
       yield assertTrue(
         blocked.left.toOption.collect { case DocumentError.Incomplete(InReview, issues) =>
           issues.map(i => (i.field, i.kind))
-        } == Some(List("termMonths" -> IssueKind.MissingRequired(Approved))),
+        } == Some(List("termMonths" -> totalValueMissing)),
         stored.status == Draft
       )
     },
@@ -809,7 +812,7 @@ object DocumentServiceSpec extends ZIOSpecDefault:
       yield assertTrue(
         blocked.left.toOption.collect { case DocumentError.Incomplete(Approved, issues) =>
           issues.map(i => (i.field, i.kind))
-        } == Some(List("termMonths" -> IssueKind.MissingRequired(Approved))),
+        } == Some(List("termMonths" -> totalValueMissing)),
         !stored.values.contains("totalValue"),
         stored.status == InApproval
       )

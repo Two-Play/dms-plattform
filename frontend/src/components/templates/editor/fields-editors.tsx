@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { t } from '@/i18n'
 import { IssueList } from './block-editor'
 import {
+  computedName,
   move,
   newUid,
   REFERENCES_TARGET,
@@ -55,7 +56,7 @@ export function ComputedEditor({
             ...fields,
             ...computed.slice(0, i).map((x) => ({
               path: x.key,
-              label: x.key,
+              label: computedName(x),
               kind: 'Unknown' as const,
               multiple: false,
               source: 'computed' as const,
@@ -115,6 +116,23 @@ export function ComputedEditor({
                     className="w-48 font-mono"
                   />
                 </div>
+                <div className="space-y-1">
+                  <Label htmlFor={`${id}-label`}>{t('templateEditor.computed.label')}</Label>
+                  <Input
+                    id={`${id}-label`}
+                    value={c.label ?? ''}
+                    readOnly={env.readOnly}
+                    maxLength={200}
+                    aria-invalid={
+                      issues?.some((x) => x.location.part === 'label') ? true : undefined
+                    }
+                    aria-describedby={`${id}-label-help`}
+                    onChange={(e) => {
+                      onChange(replaceAt(computed, i, { ...c, label: e.target.value }))
+                    }}
+                    className="w-64"
+                  />
+                </div>
                 {!env.readOnly && (
                   <Button
                     size="xs"
@@ -142,6 +160,9 @@ export function ComputedEditor({
                     : keyProblem === 'taken'
                       ? t('templateEditor.computed.taken')
                       : t('templateEditor.computed.keyHint')}
+                </p>
+                <p id={`${id}-label-help`} className="w-full text-xs text-muted-foreground">
+                  {t('templateEditor.computed.labelHint')}
                 </p>
               </div>
               <ScopeContext value={scope}>

@@ -17,6 +17,7 @@ import dms.templates.{
   DeviationReport,
   DeviationRequest,
   EditRules,
+  MissingComputed,
   SectionId,
   TemplateContent,
   TemplateStatus,
@@ -107,13 +108,14 @@ trait TemplateSource extends ContentCodec:
   ): IO[DocumentError, Map[String, MetadataValue]]
 
   /** The computed fields of `content` that have no value for the given field values because they read fields
-    * without value, each with those fields (DMS-83). A document cannot be approved while there are any.
+    * without value, each with those fields (DMS-83), in definition order. A document cannot be approved while
+    * there are any.
     */
   def missingComputed(
       template: TemplateVersion,
       content: TemplateContent,
       values: Map[String, MetadataValue]
-  ): IO[DocumentError, Map[String, List[String]]]
+  ): IO[DocumentError, List[MissingComputed]]
 
 /** Request to create a document. `values` are the entered field values with their origin (normally `Manual`;
   * a business system filling master data uses `System(source)`). A file document (DMS-115) gets its content
@@ -1934,7 +1936,8 @@ final class DocumentService(
     }
 
   /** Fields without value that computed fields of the version read (DMS-83): an approved document must not
-    * contain computed fields without value, so these fields are required for the approval.
+    * contain computed fields without value, so these fields are required for the approval. Each issue names
+    * the computed fields that need the field (ADR 0065).
     */
   private def missingComputedInputs(
       profile: MetadataProfile,
@@ -1943,9 +1946,10 @@ final class DocumentService(
     for
       template <- templates.version(current.templateId, current.templateVersion)
       missing  <- templates.missingComputed(template, current.content, metadataOf(current.values))
-    yield missing.values.flatten.toList.distinct.sorted.map { key =>
-      val label = profile.field(key).fold(key)(_.definition.label)
-      FieldIssue(key, label, IssueKind.MissingRequired(DocumentStatus.Approved))
+    yield missing.flatMap(_.missingInputs).distinct.sorted.map { key =>
+      val label    = profile.field(key).fold(key)(_.definition.label)
+      val computed = missing.filter(_.missingInputs.contains(key)).map(c => ComputedFieldName(c.key, c.label))
+      FieldIssue(key, label, IssueKind.ComputedFieldMissing(computed))
     }
 
   /** Publication replaces the valid version of the same scope (business concept 5.2) in the same transaction;

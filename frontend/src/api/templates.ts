@@ -10,6 +10,7 @@ export type MetadataValue = components['schemas']['MetadataValue']
 export type Preview = components['schemas']['PreviewView']
 export type PreviewIssue = components['schemas']['PreviewIssueView']
 export type MissingValue = components['schemas']['MissingValueView']
+export type ConditionHint = components['schemas']['ConditionHintView']
 
 /** Document languages the backend formats values for. */
 export type DocumentLanguage = 'en' | 'de'

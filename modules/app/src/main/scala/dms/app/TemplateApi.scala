@@ -148,10 +148,39 @@ final case class TestCaseView(
 ) derives JsonCodec,
       Schema
 
+/** A computed field that has no value when optional fields are empty, which blocks approval (ADR 0065). */
+final case class ComputedHintView(
+    key: String,
+    /** The label of the computed field, otherwise its key. */
+    label: String,
+    /** The optional fields it needs, in profile order. */
+    missingInputs: List[MissingValueView],
+    /** The check to put in front of the calculation, e.g. `'termMonths' in present_fields`. */
+    guard: String,
+    /** The whole calculation with the guard and an empty fallback value, where the template compiles with it.
+      */
+    suggestion: Option[String],
+    /** Names of the test cases that showed this. */
+    cases: List[String]
+) derives JsonCodec,
+      Schema
+
+/** A condition that read a missing value as empty, so its outcome depends on that value (ADR 0065). */
+final case class TestConditionHintView(
+    location: LocationView,
+    condition: String,
+    missingInputs: List[MissingValueView],
+    /** Names of the test cases that showed this. */
+    cases: List[String]
+) derives JsonCodec,
+      Schema
+
 final case class TestRunView(
     cases: List[TestCaseView],
     coverage: List[BranchView],
-    allBranchesCovered: Boolean
+    allBranchesCovered: Boolean,
+    computedHints: List[ComputedHintView],
+    conditionHints: List[TestConditionHintView]
 ) derives JsonCodec,
       Schema
 
@@ -266,7 +295,9 @@ object TemplateApi:
       .out(jsonBody[TestRunView])
       .description(
         "Test mode: resolves the version with the given values, or with generated sample data that shows every " +
-          "condition branch, empty optional fields and long values. Reports which branches were reached."
+          "condition branch, empty optional fields and long values. Reports which branches were reached, " +
+          "computed fields without value with a `present_fields` guard to add, and conditions that read a " +
+          "missing value as empty."
       )
       .tag("Templates")
       .serverLogic(p =>
@@ -395,4 +426,20 @@ object TemplateApi:
     }
     val coverage =
       run.coverage.map(b => BranchView(locationView(b.location), b.condition, b.covered.toList.sorted))
-    TestRunView(cases, coverage, run.coverage.forall(_.complete))
+    def named(values: List[MissingValue]) = values.map(m => MissingValueView(m.field, m.label))
+    TestRunView(
+      cases,
+      coverage,
+      run.coverage.forall(_.complete),
+      run.hints.computed.map(h =>
+        ComputedHintView(h.key, h.label, named(h.missingInputs), h.guard, h.suggestion, h.cases)
+      ),
+      run.hints.conditions.map(h =>
+        TestConditionHintView(
+          locationView(h.hint.location),
+          h.hint.condition,
+          named(h.hint.missingInputs),
+          h.cases
+        )
+      )
+    )

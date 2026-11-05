@@ -353,6 +353,7 @@ describe('Visual template editor', () => {
     // A computed field: monthly fee times term.
     await user.click(screen.getByRole('button', { name: 'Add computed field' }))
     await user.type(screen.getByRole('textbox', { name: 'Name' }), 'totalValue')
+    await user.type(screen.getByRole('textbox', { name: 'Label' }), 'Total value ')
     const calc = screen.getByRole('group', { name: 'Calculation' })
     await user.selectOptions(within(calc).getByLabelText('Value 1'), 'monthlyFee.amount')
     await user.click(within(calc).getByRole('button', { name: 'Add step' }))
@@ -366,7 +367,7 @@ describe('Visual template editor', () => {
       condition: 'termType == "fixed" && termMonths >= 12.0',
     })
     expect(saved.computed).toEqual([
-      { key: 'totalValue', expression: 'monthlyFee.amount * termMonths' },
+      { key: 'totalValue', expression: 'monthlyFee.amount * termMonths', label: 'Total value' },
     ])
   })
 

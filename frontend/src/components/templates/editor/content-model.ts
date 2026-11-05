@@ -36,6 +36,14 @@ export interface EditorComputed {
   uid: string
   key: string
   expression: string
+  /** What people read in hints (ADR 0065); without one they read the key. */
+  label?: string
+}
+
+/** The name people read for a computed field: its label, otherwise its key. */
+export function computedName(c: { key: string; label?: string }): string {
+  const label = c.label?.trim()
+  return label ? label : c.key
 }
 
 export interface EditorMapping {
@@ -197,6 +205,7 @@ export function toEditor(content: TemplateContent): EditorContent {
       uid: newUid(),
       key: c.key,
       expression: c.expression,
+      ...(c.label === undefined ? {} : { label: c.label }),
     })),
     references: (references ?? []).map((r) => ({
       uid: newUid(),
@@ -267,7 +276,10 @@ export function fromEditor(content: EditorContent): TemplateContent {
       }
       return section
     }),
-    computed: content.computed.map((c) => ({ key: c.key, expression: c.expression })),
+    computed: content.computed.map((c) => {
+      const label = c.label?.trim()
+      return { key: c.key, expression: c.expression, ...(label ? { label } : {}) }
+    }),
     references: content.references.map((r) => ({
       key: r.key,
       label: r.label,
@@ -438,6 +450,7 @@ export function parseContent(text: string): ParseResult | { ok: false; syntax: s
       const field = obj(c, p)
       str(field.key, `${p}/key`)
       str(field.expression, `${p}/expression`)
+      if (field.label !== undefined) str(field.label, `${p}/label`)
     })
     arr(o.references, '/references').forEach((r, i) => {
       const p = `/references/${String(i)}`

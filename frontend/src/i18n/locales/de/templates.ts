@@ -127,6 +127,20 @@ export const templates: Translation<typeof en.templates> = {
     german: 'Deutsch',
     running: 'Läuft …',
     run: 'Testmodus ausführen',
+    hints: {
+      title: 'Hinweise zu leeren Feldern',
+      computedTitle: 'Berechnete Felder ohne Wert',
+      computed:
+        '{name} hat keinen Wert, solange {fields} leer ist. So können Dokumente nicht freigegeben werden.',
+      guard: 'Zuerst prüfen, ob das Feld einen Wert hat:',
+      suggestion: 'Vorschlag für die Berechnung:',
+      fallback: 'Den letzten Wert durch das ersetzen, was das Dokument ohne das Feld zeigen soll.',
+      conditionsTitle: 'Bedingungen, die von leeren Feldern abhängen',
+      condition:
+        'Diese Bedingung liest {fields} als leer; mit einem Wert kann das Ergebnis anders ausfallen.',
+      conditionGuard: 'Zuerst present_fields prüfen, wenn ein leeres Feld bewusst so zählen soll.',
+      seenIn: 'Gesehen in:',
+    },
   },
   release: {
     documentStatus: 'Dokumentstatus',
