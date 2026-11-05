@@ -600,6 +600,30 @@ final class ApprovalWorkflow(
       )
     }
 
+  /** The approvals `deputy` gave as deputy on a version and may still act for (DMS-145, ADR 0070), latest
+    * first, out of `cases`. A vote gives no lasting right: the deputyship must be active now, as for every
+    * action of a deputy (ADR 0028), see [[Rules.standsIn]]. Costs nothing for someone without such a vote.
+    */
+  def standingApprovals(
+      cases: List[CaseDetails],
+      document: DocumentId,
+      version: UUID,
+      deputy: UserId
+  ): IO[WorkflowError, List[DeputyApproval]] =
+    val approvals = Rules.deputyApprovals(cases, version, deputy)
+    if approvals.isEmpty then ZIO.succeed(Nil)
+    else
+      for
+        now         <- Clock.instant
+        subject     <- documents.subject(document, version)
+        deputyships <- sql(DeputyStore.activeForPrincipals(approvals.map(_.principal).distinct, now))
+        cleared     <- directory.cleared(Set(deputy), subject)
+        held        <- ZIO.when(cleared.contains(deputy))(directory.heldRoles(deputy)).map(_.getOrElse(Nil))
+        roles = Map(deputy -> held.filter(_.isActiveAt(now)).map(_.role).toSet)
+      yield approvals.filter(
+        Rules.standsIn(_, deputy, subject.author, subject.classPath, deputyships, roles, now)
+      )
+
   private def ownerDeputies(subject: ReviewSubject): IO[WorkflowError, List[TaskDeputy]] =
     subject.owner.fold(ZIO.succeed(List.empty[TaskDeputy]))(deputiesOf(_, Rules.OwnerRole, subject))
 

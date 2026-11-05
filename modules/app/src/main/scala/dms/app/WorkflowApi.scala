@@ -2,11 +2,12 @@ package dms.app
 
 import dms.authz.{AccessDenied, Action, Authorizer, ConfigurationArea, Policy, Resource, Role, Subject}
 import dms.db.{Db, DbError}
+import dms.documents.DocumentStatus
 import dms.documents.core.{DocumentDetails, DocumentService}
 import dms.identity.{Authenticator, Principal}
 import dms.kernel.DocumentId
 import dms.workflow.*
-import dms.workflow.core.{ApprovalWorkflow, WorkflowError}
+import dms.workflow.core.{ApprovalWorkflow, Rules, WorkflowError}
 import sttp.model.StatusCode
 import sttp.tapir.Schema
 import sttp.tapir.json.zio.jsonBody
@@ -192,6 +193,46 @@ private[app] object Delegation:
         authz.onBehalfOf(s, principal, roles.toSet)
       }
       .mapError(WorkflowError.Database(_))
+
+  /** `subject` with the assignments of the lane's role of whom they approved for as deputy (DMS-145, ADR
+    * 0070), for a decision on that version only. [[Policy]] still checks validity and scope of each of them.
+    */
+  def forApproval(authz: Authorizer, subject: Subject, approval: DeputyApproval): IO[WorkflowError, Subject] =
+    scala.util.Try(Role.valueOf(approval.role)).toOption match
+      case None       => ZIO.succeed(subject)
+      case Some(role) =>
+        authz.onBehalfOf(subject, approval.principal, Set(role)).mapError(WorkflowError.Database(_))
+
+  /** The versions the caller may read because they approved them as deputy and the deputyship stands
+    * (DMS-145, ADR 0070): without this the version they can withdraw would be out of their sight, since the
+    * task that gave them the principal's scope is done. Only the version itself, and only while it waits for
+    * its date or stays a version that never took effect; the other versions of the document stay as they are.
+    */
+  def approvedAsDeputy(
+      authz: Authorizer,
+      workflow: ApprovalWorkflow,
+      subject: Subject,
+      details: DocumentDetails,
+      cases: List[CaseDetails]
+  ): IO[WorkflowError, Set[UUID]] =
+    val waiting = details.versions.filter(v =>
+      (v.status == DocumentStatus.Approved || v.withdrawal.isDefined) &&
+        Rules.deputyApprovals(cases, v.id, subject.userId).nonEmpty
+    )
+    ZIO
+      .foreach(waiting) { v =>
+        for
+          standing <- workflow.standingApprovals(cases, details.document.id, v.id, subject.userId)
+          actor    <- ZIO.foldLeft(standing)(subject)(forApproval(authz, _, _))
+          now      <- Clock.instant
+          resource = DocumentApi
+            .resource(subject.tenantId, details, v, Map.empty)
+            .copy(approvedBy = DocumentApi.approversOf(cases, v.id) ++ v.releasedBy)
+        yield Option.when(
+          standing.nonEmpty && Policy.decide(actor, Action.ReadDocument, resource, now).isPermitted
+        )(v.id)
+      }
+      .map(_.flatten.toSet)
 
 /** Review and approval workflows (business concept 6.1; DMS-40 to DMS-42).
   *
@@ -462,17 +503,19 @@ object WorkflowApi:
     ): IO[WorkflowError | AccessDenied, Set[UUID]] =
       val participants = DocumentApi.participantsOf(cases)
       for
-        now   <- Clock.instant
-        actor <- Delegation.subject(authz, subject, cases.flatMap(_.tasks))
+        now      <- Clock.instant
+        actor    <- Delegation.subject(authz, subject, cases.flatMap(_.tasks))
+        asDeputy <- Delegation.approvedAsDeputy(authz, workflow, subject, details, cases)
         visible = details.versions.filter(v =>
-          Policy
-            .decide(
-              actor,
-              Action.ReadDocument,
-              DocumentApi.resource(subject.tenantId, details, v, participants),
-              now
-            )
-            .isPermitted
+          asDeputy(v.id) ||
+            Policy
+              .decide(
+                actor,
+                Action.ReadDocument,
+                DocumentApi.resource(subject.tenantId, details, v, participants),
+                now
+              )
+              .isPermitted
         )
         _ <- ZIO.when(visible.isEmpty)(
           details.versions.lastOption.fold(ZIO.unit)(v =>

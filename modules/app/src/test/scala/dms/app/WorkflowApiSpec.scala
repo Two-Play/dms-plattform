@@ -63,6 +63,8 @@ object WorkflowApiSpec extends ZIOSpecDefault:
   private val designer2 = UserId("designer-2")
   private val deputy    = UserId("deputy-1")
   private val deputy2   = UserId("deputy-2")
+  private val standIn   = UserId("deputy-3")
+  private val bystander = UserId("deputy-4")
 
   private val signingKey: RSAKey = RSAKeyGenerator(2048).keyID("key-1").generate()
 
@@ -436,6 +438,24 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         )
       ).map(r => assert(r._1 == Status.Created, r._2))
     yield ()
+
+  /** A version valid from far ahead, approved by `voter` as deputy within a period the clock `at` is in. */
+  private def approvedAsDeputy(voter: UserId, at: Ahead, partner: String, fields: String) =
+    for
+      pair <- awaitingApproval(partner, Some(fields.replace("2027-01-01", "2099-01-01")))
+      (doc, task) = pair
+      _ <- at(vote(voter, task, "Approve", signedInSecondsAgo = 30)).map(r => assert(r._1 == Status.Ok, r._2))
+      _ <- renderPending
+      v <- call(author, "GET", s"/api/v1/documents/$doc").map(as[DocumentView])
+    yield (doc, v.current.id)
+
+  private def withdraw(user: UserId, doc: UUID, version: UUID) =
+    call(
+      user,
+      "POST",
+      s"/api/v1/documents/$doc/versions/$version/withdraw",
+      Some(WithdrawVersion("Approved by mistake").toJson)
+    )
 
   /** The caller's inbox and the statements reading it took. */
   private def inbox(user: UserId) =
@@ -1336,5 +1356,90 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         here  <- read(tenantId)
         there <- read(other)
       yield assertTrue(mine.nonEmpty, here._1 > 0, here._2 > 0, here._3 > 0, there == (0, 0, 0))
+    },
+    test("a deputy who approved a version withdraws it in the approver's name; nobody else gains (DMS-145)") {
+      val now                      = Instant.now()
+      val inPeriod                 = ahead(120.seconds)
+      val afterward                = ahead(2.hours)
+      def deputyship(user: UserId) =
+        call(
+          approver,
+          "POST",
+          "/api/v1/deputyships",
+          Some(
+            s"""{"deputy":"${user.value}","validFrom":"${now.plusSeconds(60)}",
+               |"validUntil":"${now.plusSeconds(3600)}","roles":["Approver"]}""".stripMargin
+          )
+        ).map(r => assert(r._1 == Status.Created, r._2))
+      def grant(user: UserId, assignment: RoleAssignment) =
+        setup.await.flatMap(
+          _.app
+            .transact(tenantId)(RoleAssignments.Postgres.grant(user, assignment, admin))
+            .orDieWith(e => RuntimeException(e.toString))
+        )
+      def document(user: UserId, doc: UUID) = call(user, "GET", s"/api/v1/documents/$doc")
+      val policy                            = RoleAssignment(Role.Approver, documentClass = Some("policy"))
+      for
+        _        <- grant(standIn, policy) *> grant(bystander, policy)
+        _        <- deputyship(standIn) *> deputyship(bystander)
+        approved <- approvedAsDeputy(standIn, inPeriod, "Cyberdyne", values("Cyberdyne"))
+        (doc, version) = approved
+        // Neither a second deputy of the approver, nor anyone else, nor the deputy once the period is over.
+        idle     <- inPeriod(withdraw(bystander, doc, version))
+        idleRead <- inPeriod(document(bystander, doc))
+        byReader <- inPeriod(withdraw(reader, doc, version))
+        late     <- afterward(withdraw(standIn, doc, version))
+        lateRead <- afterward(document(standIn, doc))
+        // The deputy, in the period.
+        view    <- inPeriod(document(standIn, doc)).map(as[DocumentView])
+        history <- inPeriod(cases(doc, standIn))
+        done    <- inPeriod(withdraw(standIn, doc, version))
+        twice   <- inPeriod(withdraw(standIn, doc, version))
+        audit   <- lastAudit("document.withdrawn-before-valid")
+        events  <- outbox("document.approved-version-withdrawn")
+        after   <- inPeriod(document(standIn, doc)).map(as[DocumentView])
+        // Left the group of a confidential version: nothing, like every action of a deputy (DMS-101).
+        _      <- accessGroup("stand-in-board", approver, standIn, reviewer1, reviewer2)
+        secret <- approvedAsDeputy(
+          standIn,
+          inPeriod,
+          "Tyrell",
+          confidentialTo("stand-in-board", "Tyrell")
+        )
+        _          <- call(admin, "DELETE", s"/api/v1/groups/stand-in-board/members/${standIn.value}")
+        notCleared <- inPeriod(withdraw(standIn, secret._1, secret._2))
+        // A role of their own in the scope counts after the period as well; it is still the approver's vote.
+        kept     <- approvedAsDeputy(standIn, inPeriod, "Massive Dynamic", values("Massive Dynamic"))
+        _        <- grant(standIn, RoleAssignment(Role.Approver, documentClass = Some("contract")))
+        ownRole  <- afterward(withdraw(standIn, kept._1, kept._2))
+        ownAudit <- lastAudit("document.withdrawn-before-valid")
+      yield assertTrue(
+        idle._1 == Status.Forbidden,
+        idleRead._1 == Status.Forbidden,
+        byReader._1 == Status.Forbidden,
+        late._1 == Status.Forbidden,
+        lateRead._1 == Status.Forbidden,
+        view.current.id == version,
+        view.withdrawable.map(w => (w.versionId, w.actingFor)).contains((version, Some(approver.value))),
+        history.exists(_.approval.exists(_.actingFor.contains(approver.value))),
+        done._1 == Status.Ok,
+        as[DocumentVersionView](done).withdrawal.exists(w =>
+          w.by == standIn.value && w.actingFor.contains(approver.value)
+        ),
+        twice._1 == Status.Conflict,
+        audit.contains((standIn.value, Some(approver.value), Some("Approved by mistake"))),
+        events.lastOption.exists(e =>
+          e.contains(s""""actingFor": "${approver.value}"""") &&
+            e.contains(s""""withdrawnBy": "${standIn.value}"""") &&
+            // The approver and the author, who is the owner here; not the deputy who did it.
+            e.contains(s""""recipients": ["${approver.value}", "${author.value}"]""")
+        ),
+        after.current.withdrawal.exists(_.actingFor.contains(approver.value)),
+        after.withdrawable.isEmpty,
+        notCleared._1 == Status.Forbidden,
+        ownRole._1 == Status.Ok,
+        as[DocumentVersionView](ownRole).withdrawal.exists(_.actingFor.contains(approver.value)),
+        ownAudit.exists(_._2.contains(approver.value))
+      )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

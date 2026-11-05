@@ -222,6 +222,7 @@ object SearchApiSpec extends ZIOSpecDefault:
     )
     val request = method match
       case "POST" => Request.post(url, Body.fromString(body.getOrElse("{}"))).addHeaders(headers)
+      case "PUT"  => Request.put(url, Body.fromString(body.getOrElse("{}"))).addHeaders(headers)
       case _      => Request.get(url).addHeaders(headers)
     ZIO.scoped(routes.runZIO(request)).flatMap(r => r.body.asString.map(b => (r.status, b)).orDie)
 
@@ -468,6 +469,75 @@ object SearchApiSpec extends ZIOSpecDefault:
         before.hits.map(_.versionLabel) == List("1.0"),
         superseded.hits.isEmpty,
         current.hits.map(h => (h.versionLabel, h.status)) == List(("2.0", "Published"))
+      )
+    },
+    test("a version withdrawn before it took effect is never found, also not after a rebuild (DMS-145)") {
+      val later                = LocalDate.of(2099, 1, 1)
+      val all                  = "status=Published,ReviewDue,Superseded"
+      def draft(title: String) =
+        setup.await.flatMap(s =>
+          call(
+            author,
+            "POST",
+            "/api/v1/documents",
+            Some(
+              s"""{"templateId":"${s.released.value}","templateVersion":1,"title":"$title",
+                 |"values":${values("Compliance", "Internal", later, Nil)}}""".stripMargin
+            )
+          ).map(as[DocumentView])
+        )
+      def withdraw(doc: UUID, version: UUID) =
+        call(
+          owner,
+          "POST",
+          s"/api/v1/documents/$doc/versions/$version/withdraw",
+          Some(WithdrawVersion("Approved by mistake").toJson)
+        ).map(r => assert(r._1 == Status.Ok, r._2))
+      for
+        // A valid version with a successor waiting for its date, and a first version waiting for its date.
+        doc <- validDocument("Homeoffice", "Compliance")
+        _   <- call(
+          author,
+          "POST",
+          s"/api/v1/documents/${doc.id}/versions",
+          Some("""{"changeKind":"Major","reason":"Content revised"}""")
+        )
+        _ <- call(
+          author,
+          "PUT",
+          s"/api/v1/documents/${doc.id}/draft",
+          Some(s"""{"values":${values("Compliance", "Internal", later, Nil)}}""")
+        )
+        _        <- approveDefault(doc.id)
+        first    <- draft("Notfallplan")
+        _        <- approveDefault(first.id)
+        _        <- runPublicationJobs
+        _        <- runIndexing
+        versions <- call(owner, "GET", s"/api/v1/documents/${doc.id}/versions")
+          .map(as[List[DocumentVersionView]])
+        waiting      <- results(owner, s"q=Homeoffice&$all")
+        waitingFirst <- results(owner, s"q=Notfallplan&$all")
+        _            <- withdraw(doc.id, versions.last.id)
+        _            <- withdraw(first.id, first.current.id)
+        _            <- runPublicationJobs
+        _            <- runIndexing
+        forReader    <- results(reader, s"q=Homeoffice&$all")
+        forOwner     <- results(owner, s"q=Homeoffice&$all")
+        neverValid   <- results(owner, s"q=Notfallplan&$all")
+        refused      <- search(owner, "q=Homeoffice&status=Withdrawn")
+        rebuilt      <- call(admin, "POST", "/api/v1/admin/search/rebuild")
+        afterRebuild <- results(owner, s"q=Homeoffice&$all")
+        gone         <- results(owner, s"q=Notfallplan&$all")
+      yield assertTrue(
+        waiting.hits.map(h => (h.versionLabel, h.status)) == List(("1.0", "Published")),
+        waitingFirst.hits.isEmpty,
+        forReader.hits.map(h => (h.versionLabel, h.status)) == List(("1.0", "Published")),
+        forOwner.hits.map(h => (h.versionLabel, h.status)) == List(("1.0", "Published")),
+        neverValid.hits.isEmpty,
+        refused._1 == Status.BadRequest,
+        rebuilt._1 == Status.Ok,
+        afterRebuild.hits.map(h => (h.versionLabel, h.status)) == List(("1.0", "Published")),
+        gone.hits.isEmpty
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock @@ TestAspect.timeout(10.minutes)

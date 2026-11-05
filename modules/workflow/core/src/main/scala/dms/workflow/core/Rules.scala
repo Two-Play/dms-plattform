@@ -5,6 +5,7 @@ import dms.kernel.UserId
 import dms.workflow.*
 
 import java.time.{Duration, Instant}
+import java.util.UUID
 
 /** Pure rules of the approval workflow (business concept 2.4, 6.1; DMS-40 to DMS-42). */
 object Rules:
@@ -187,6 +188,45 @@ object Rules:
       .sortBy(_.deputy.value)
       .map(d => TaskDeputy(d.deputy, d.principal))
       .distinctBy(_.deputy)
+
+  /** Whom `deputy` stood in for with a valid approving vote in an approval step of `version`, with the role
+    * of the lane, latest vote first. Reviews, rejections, invalidated votes, votes of other versions and
+    * votes of the deputy's own do not count.
+    */
+  def deputyApprovals(cases: List[CaseDetails], version: UUID, deputy: UserId): List[DeputyApproval] =
+    cases
+      .filter(_.workflowCase.versionId == version)
+      .flatMap { c =>
+        val approvalLanes = c.tasks.filter(_.kind == StepKind.Approval).map(t => t.id -> t.role).toMap
+        c.votes.flatMap(v =>
+          for
+            principal <- v.actingFor.filter(_ => v.voter == deputy)
+            role      <- approvalLanes.get(v.taskId)
+            if v.decision.approves && v.invalidatedAt.isEmpty
+          yield v.votedAt -> DeputyApproval(principal, role)
+        )
+      }
+      .sortBy(_._1)
+      .reverse
+      .map(_._2)
+      .distinct
+
+  /** Whether `deputy` may still act for an approval they gave as deputy (DMS-145, ADR 0070): the rules of
+    * [[taskDeputies]] at the moment they act. The deputyship is active and covers the lane's role and the
+    * document's class, and the deputy still holds that role. Neither of them is the author.
+    */
+  def standsIn(
+      approval: DeputyApproval,
+      deputy: UserId,
+      author: UserId,
+      classPath: List[String],
+      deputyships: List[Deputyship],
+      deputyRoles: Map[UserId, Set[String]],
+      now: Instant
+  ): Boolean =
+    approval.principal != author && deputy != author &&
+      deputiesInRole(approval.principal, approval.role, classPath, deputyships, deputyRoles, now)
+        .exists(_.deputy == deputy)
 
   val OwnerRole  = "Owner"
   val AuthorRole = "Author"

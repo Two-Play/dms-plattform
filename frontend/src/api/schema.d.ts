@@ -876,7 +876,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Stops an approved version before its valid-from date (DMS-143), or later if its publication failed for good (Failed, DMS-145): it goes to Withdrawn, is never published, the valid version stays valid and the document can get a new version. Requires Withdraw: the owner role or having approved this version. The reason is required (422), at most 4000 characters, and recorded in the audit trail. Approvers and the owner are notified, readers are not. 409 with the code `version_published` if the publication got there first, `version_due` from its valid-from date on unless the publication failed for good (also if a retry got there first), `version_withdrawn` if it was withdrawn already, `version_not_approved` if it was never approved. */
+    /** @description Stops an approved version before its valid-from date (DMS-143), or later if its publication failed for good (Failed, DMS-145): it goes to Withdrawn, is never published, the valid version stays valid and the document can get a new version. Requires Withdraw: the owner role or having approved this version. The reason is required (422), at most 4000 characters, and recorded in the audit trail. A deputy who approved the version may withdraw it while the deputyship stands, recorded on behalf of the approver. Author, approvers and owner are notified, readers are not. 409 with the code `version_published` if the publication got there first, `version_due` from its valid-from date on unless the publication failed for good (also if a retry got there first), `version_withdrawn` if it was withdrawn already, `version_not_approved` if it was never approved. */
     post: operations['postApiV1DocumentsIdVersionsVersionidWithdraw']
     delete?: never
     options?: never
@@ -5700,6 +5700,7 @@ export interface components {
       validFrom?: string
       validVersion?: string
       publicationFailed: boolean
+      actingFor?: string
     }
     /** WithdrawalView */
     WithdrawalView: {
@@ -5707,6 +5708,7 @@ export interface components {
       at: string
       by: string
       reason: string
+      actingFor?: string
     }
     /** WordColumnDefinition */
     WordColumnDefinition: {

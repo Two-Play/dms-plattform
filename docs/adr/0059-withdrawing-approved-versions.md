@@ -35,7 +35,7 @@ Given: `Withdrawn` exists as "out of force" for valid versions (US-07.1, ADR 003
    - *Acknowledgements:* none can be open. The audience is recorded at publication and readers can acknowledge valid versions only, so nothing has to be closed; a test shows no audience row exists. Acknowledgements of the valid version are untouched.
    - *Review date:* none, it is set at publication.
 8. **Audit and events.** Audit action `document.withdrawn-before-valid` with reason, from, to and version. Outbox: the usual `document.status-changed` (the search index syncs; webhooks announce only withdrawals of valid versions, so nothing reaches connected systems) and `document.approved-version-withdrawn` with the recipients.
-9. **Notifications.** Kind `publication.withdrawn` (category publication) to the approvers and the document's owner, without whoever withdrew it. Readers get nothing. The API collects the approvers from the workflow, because `documents` must not depend on it, and passes them to the service. The reason is shown only to recipients who may read the document, like the title (ADR 0052).
+9. **Notifications.** Kind `publication.withdrawn` (category publication) to the approvers and the document's owner (since DMS-145, ADR 0070, also the author), without whoever withdrew it. Readers get nothing. The API collects the approvers from the workflow, because `documents` must not depend on it, and passes them to the service. The reason is shown only to recipients who may read the document, like the title (ADR 0052).
 10. **Who still reads the version.** `ReadDocument` on a version with a withdrawal: those who could read it while it was approved (author, owner role, assigned reviewers and approvers, whoever approved it), plus records managers and auditors. Without this the approvers would be notified without a title, and the author could not see what to correct. Readers never see it. Other withdrawn versions stay as they were. The attribute is `Resource.withdrawnBeforeValid`; the search filter needs no rule because these versions are not indexed.
 11. **What the document looks like afterwards.** The current version of `GET /documents/{id}` and of the list is the open one, else the latest one that was not withdrawn before taking effect. New versions start from the valid version. If there is none (a first version approved by mistake), they start from the withdrawn version (`Versioning.startingPoint`), otherwise the document would be stuck. Numbers are not given again: after a withdrawn 2.0 follow 3.0 or 2.1 (`DocumentView.latestReleasedVersion` lets the UI say so). The editorial comparison ignores the withdrawn version.
    Without a valid version only a major version can be started: a minor version needs just the owner's confirmation, and nothing may first take effect that way.
@@ -95,16 +95,17 @@ Given: `Withdrawn` exists as "out of force" for valid versions (US-07.1, ADR 003
 - When a valid version exists, the next version starts from it, so changes made in the withdrawn version have to be made again. The comparison with the withdrawn version helps.
 - A review task decided as "revise" points to the new version. If that version is withdrawn, the task stays decided. (Since DMS-145, ADR 0061, a new task opens for the valid version and its review date; the same for discarded drafts.)
 - The workflow case stays `Approved`: it says what happened in the workflow, the version says what happened since.
-- On-demand copies and filled Word documents name the status "Withdrawn"/"Außer Kraft" like for a version taken out of force.
+- On-demand copies and filled Word documents name the status "Withdrawn"/"Außer Kraft" like for a version taken out of force. (Solved in DMS-145, ADR 0070, which also found that filled files said "Freigegeben".)
 
 ## Follow-ups
 
 - Done (DMS-145, ADR 0061): a review task whose revision was withdrawn or discarded opens again for the valid version.
 - Done (DMS-145, ADR 0061): a way out for a due version whose publication can never succeed, for example because a field required from `Published` is empty in the frozen values: a version whose publication job is dead can be withdrawn after its date, too, and the document can get a new version. Preventing such a version stays open (ADR 0061, decision 13).
 - Should (DMS-145): decide rights on the valid version, not on the latest one, in `RetentionApi`, `LegalHoldApi` and `EvidenceReportApi`. A never-valid version with wrong metadata stays the latest one, which can lock out records managers scoped to the valid version.
-- Should: tell the author as well; the story names approvers and owner, but the author was told about the approval.
-- Should: the withdrawal in the evidence report's version section (it is in the report's audit trail today).
-- Should: "never in force" wording for on-demand copies.
+- Done (DMS-145, ADR 0070): the author is told as well; the story names approvers and owner, but the author was told about the approval.
+- Done (DMS-145, ADR 0070): the withdrawal in the evidence report's version section.
+- Done (DMS-145, ADR 0070): "never valid" wording for on-demand copies and filled files.
+- Done (DMS-145, ADR 0070): a deputy who approved the version may withdraw it while the deputyship stands; search and library have tests end to end.
 
 ## Reversibility
 

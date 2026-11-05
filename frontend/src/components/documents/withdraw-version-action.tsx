@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { UserName } from '@/components/shared/user-name'
 import { t, tOptional } from '@/i18n'
 import { formatDate } from '@/i18n/format'
 import { toast } from '@/lib/toast'
@@ -141,7 +142,8 @@ function description(version: WithdrawableVersion): string {
 /**
  * "Withdraw version" on the document page (DMS-143, ADR 0059): stops an approved version before its valid-from
  * date, or later if its publication failed for good (DMS-145, ADR 0061), for callers the backend names the
- * version to (`withdrawable`: owner role or having approved it). A confirmation dialog with a required reason.
+ * version to (`withdrawable`: owner role or having approved it, as deputy too: DMS-145, ADR 0070, then
+ * `actingFor` names the approver). A confirmation dialog with a required reason.
  * The backend decides again; if the publication or a retry got there first, the dialog says so, and closing it
  * reloads the document.
  */
@@ -180,6 +182,11 @@ export function WithdrawVersionAction({ document }: { document: DocumentView }) 
             <DialogTitle>{t('withdrawVersion.title', { label: version.version })}</DialogTitle>
             <DialogDescription>{description(version)}</DialogDescription>
           </DialogHeader>
+          {version.actingFor && (
+            <p className="text-sm">
+              {t('withdrawVersion.actingFor')} <UserName id={version.actingFor} />.
+            </p>
+          )}
           {open && (
             <WithdrawForm
               documentId={document.id}

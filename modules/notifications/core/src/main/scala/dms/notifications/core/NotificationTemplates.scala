@@ -312,14 +312,17 @@ object NotificationTemplates:
         val reason = Option.when(ctx.document.isDefined)(p("reason"))
         // After a publication that failed for good the date may have passed (ADR 0061).
         val failed = params.get("publicationFailed").contains("true")
+        // A deputy who approved the version acts for the approver (ADR 0070).
+        val forDe = params.get("actingFor").fold("")(_ => s" i. V. für ${person("actingFor")}")
+        val forEn = params.get("actingFor").fold("")(_ => s" on behalf of ${person("actingFor")}")
         r(de = s"Zurückgezogen: $docShort", en = s"Withdrawn: $docShort")(
-          bodyDe = s"${person("withdrawnBy")} hat $doc " +
+          bodyDe = s"${person("withdrawnBy")}$forDe hat $doc " +
             (if failed then
                s"zurückgezogen, weil die Veröffentlichung${validFromDe} endgültig fehlgeschlagen ist. "
              else s"vor dem Gültigkeitsdatum${validFromDe} zurückgezogen. ") +
             "Die Version wird nicht veröffentlicht; was bisher galt, gilt weiter." +
             reason.fold("")(t => s" Begründung: $t"),
-          bodyEn = s"${person("withdrawnBy")} withdrew $doc " +
+          bodyEn = s"${person("withdrawnBy")}$forEn withdrew $doc " +
             (if failed then s"after its publication${validFromEn} failed for good. "
              else s"before its valid-from date${validFromEn}. ") +
             "The version will not be published; what applied so far still applies." +

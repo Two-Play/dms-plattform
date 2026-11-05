@@ -383,6 +383,20 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
       attachment: Option[(String, Array[Byte])] = None
   ): ZIO[Env, Any, DocumentView] =
     for
+      created <- approvedDocument(partner, values(partner), attachment)
+      _       <- runPublicationJobs
+      v       <- call(reader, "GET", s"/api/v1/documents/${created.id}").map(as[DocumentView])
+      _       <- call(reader, "POST", s"/api/v1/documents/${created.id}/versions/${v.current.id}/opened")
+      _ <- call(reader, "POST", s"/api/v1/documents/${created.id}/versions/${v.current.id}/acknowledgement")
+    yield v
+
+  /** A contract reviewed with conditions, approved by a deputy on behalf of the approver and rendered. */
+  private def approvedDocument(
+      partner: String,
+      fields: String,
+      attachment: Option[(String, Array[Byte])] = None
+  ): ZIO[Env, Any, DocumentView] =
+    for
       s       <- setup.await
       created <- call(
         author,
@@ -390,7 +404,7 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         "/api/v1/documents",
         Some(
           s"""{"templateId":"${s.released.value}","templateVersion":1,"title":"Vertrag $partner",
-             |"values":{${values(partner)}}}""".stripMargin
+             |"values":{$fields}}""".stripMargin
         )
       ).map(as[DocumentView])
       until = Instant.now().plusSeconds(86400)
@@ -415,11 +429,7 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
       approval = reviewed.tasks.find(t => t.status == "Open" && t.kind == "Approval").get
       _ <- vote(deputy, approval, "Approve", None, 30)
       _ <- runRenditionJobs
-      _ <- runPublicationJobs
-      v <- call(reader, "GET", s"/api/v1/documents/${created.id}").map(as[DocumentView])
-      _ <- call(reader, "POST", s"/api/v1/documents/${created.id}/versions/${v.current.id}/opened")
-      _ <- call(reader, "POST", s"/api/v1/documents/${created.id}/versions/${v.current.id}/acknowledgement")
-    yield v
+    yield created
 
   /** Stores a file in object storage and attaches it to the draft (DMS-114), as the upload endpoint does. */
   private def attach(doc: DocumentView, name: String, bytes: Array[Byte]): ZIO[Env, Any, Unit] =
@@ -568,6 +578,45 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         texts.exists(_.contains("Annex 2 must be attached")),
         texts.exists(_.contains(s"${deputy.value} on behalf of ${approver.value}")),
         texts.exists(_.contains("1 of 7 readers (14.3 %)"))
+      )
+    },
+    test("the version section names a withdrawal before validity, with deputy and approver (DMS-145)") {
+      for
+        doc <- approvedDocument(
+          "Nie Gültig AG",
+          values("Nie Gültig AG").replaceAll("\\d{4}-\\d{2}-\\d{2}", "2099-01-01")
+        )
+        done <- call(
+          deputy,
+          "POST",
+          s"/api/v1/documents/${doc.id}/versions/${doc.current.id}/withdraw",
+          Some(WithdrawVersion("Falscher Vertragspartner").toJson)
+        )
+        created <- createReport(auditor, doc.id)
+        view = as[EvidenceReportView](created)
+        json <- payloadOf(auditor, view)
+        parsed = EvidenceReport.parse(json.text).fold(e => throw AssertionError(e), identity)
+        pdf <- call(auditor, "GET", view.pdfUrl)
+        texts = RenderingWorker.pageTexts(pdf.body).map(RenderingWorker.normalized)
+        other <- publishedDocument("Gilt AG")
+        valid <- createReport(auditor, other.id).map(as[EvidenceReportView])
+        plain <- payloadOf(auditor, valid)
+      yield assertTrue(
+        done.status == Status.Ok,
+        parsed.versions.map(_.status) == List("Withdrawn"),
+        parsed.versions.head.validity.isEmpty,
+        parsed.versions.head.withdrawal.exists(w =>
+          w.by == deputy.value && w.actingFor.contains(
+            approver.value
+          ) && w.reason == "Falscher Vertragspartner"
+        ),
+        parsed.format == EvidenceReport.Format,
+        EvidenceReport.canonical(parsed) == json.text,
+        texts.exists(_.contains(s"by ${deputy.value} on behalf of ${approver.value}")),
+        texts.exists(_.contains("Withdrawn, never valid")),
+        texts.exists(_.contains("Falscher Vertragspartner")),
+        // The format stays: reports of other versions do not change.
+        !plain.text.contains("\"withdrawal\"")
       )
     },
     test("only auditors and records managers create and read reports") {

@@ -1,5 +1,6 @@
 package dms.app
 
+import dms.documents.DocumentVersion
 import dms.rendering.core.{RenditionFacts, RenditionLayout}
 import dms.templates.core.HtmlRenderer.escape
 
@@ -18,6 +19,9 @@ import java.util.Locale
   *   the author's change summary
   * @param approvedBy
   *   display name (or user id) of the approver; with `actingFor` the approver a deputy stood in for
+  * @param withdrawnAt
+  *   when the version was withdrawn before it took effect (ADR 0059), by `withdrawnBy` (a deputy: for
+  *   `withdrawnFor`)
   */
 final case class ChangelogEntry(
     version: String,
@@ -30,7 +34,10 @@ final case class ChangelogEntry(
     approvedBy: Option[String],
     actingFor: Option[String],
     validFrom: Option[LocalDate],
-    publishedAt: Option[Instant]
+    publishedAt: Option[Instant],
+    withdrawnAt: Option[Instant] = None,
+    withdrawnBy: Option[String] = None,
+    withdrawnFor: Option[String] = None
 )
 
 /** One attachment in the list of attachments appendix ("Anlagenverzeichnis", DMS-115).
@@ -55,6 +62,9 @@ final case class AttachmentEntry(name: String, size: Long, sha256: String)
   * @param copyOf
   *   for an approved version: the facts of its archive rendition (approval note, valid-from date) and its
   *   SHA-256; `None` for a version that was never approved, which is printed as a draft
+  * @param neverValid
+  *   the version was approved but withdrawn before it took effect (ADR 0059): the copy says so instead of
+  *   naming a valid-from date (ADR 0070)
   */
 final case class PrintFacts(
     documentId: String,
@@ -65,9 +75,13 @@ final case class PrintFacts(
     generatedAt: Instant,
     generatedBy: String,
     zone: ZoneId,
-    copyOf: Option[PrintFacts.Copy] = None
+    copyOf: Option[PrintFacts.Copy] = None,
+    neverValid: Boolean = false
 ):
   def draft: Boolean = copyOf.isEmpty
+
+  /** Whether the marking must stand out: this paper is not valid. */
+  def notValid: Boolean = draft || neverValid
 
 object PrintFacts:
   final case class Copy(rendition: RenditionFacts, sha256: Option[String])
@@ -82,7 +96,8 @@ object PrintFacts:
   *     that it is neither approved nor archived.
   *   - **Copy** (an approved version, only to attach the change history): header and footer like the archive
   *     rendition (valid-from date, approval note) plus "Copy generated on … – the archived rendition is
-  *     authoritative" with its SHA-256.
+  *     authoritative" with its SHA-256. A version withdrawn before it took effect says "Withdrawn, never
+  *     valid" instead of naming the valid-from date, in the marking colour of a draft (ADR 0070).
   *
   * The change history lists the versions up to the printed one: label and kind of change, the change summary,
   * status with creation, approval and publication dates, and the approver.
@@ -90,7 +105,16 @@ object PrintFacts:
 object VersionPrintLayout:
 
   /** Version of the layout below; written as generator into the PDF. Bump it when the output changes. */
-  val Version: String = "print-layout-2"
+  val Version: String = "print-layout-3"
+
+  /** The key of the label for a version approved but withdrawn before it took effect (ADR 0059). */
+  val NeverValid: String = "WithdrawnBeforeValid"
+
+  /** The key of the label of a version's status: a version that never took effect keeps saying so, whatever
+    * becomes of the record later (ADR 0070).
+    */
+  def statusKey(v: DocumentVersion): String =
+    if v.withdrawal.isDefined then NeverValid else v.status.toString
 
   private final case class Labels(
       documentId: String,
@@ -112,6 +136,7 @@ object VersionPrintLayout:
       created: String,
       approvedOn: String,
       published: String,
+      withdrawn: String,
       validFrom: String,
       onBehalfOf: String,
       noSummary: String,
@@ -147,6 +172,7 @@ object VersionPrintLayout:
     created = "Erstellt",
     approvedOn = "Freigegeben",
     published = "Veröffentlicht",
+    withdrawn = "Zurückgezogen",
     validFrom = "Gültig ab",
     onBehalfOf = "i. V. für",
     noSummary = "ohne Änderungsgrund",
@@ -166,6 +192,7 @@ object VersionPrintLayout:
       "ReviewDue"  -> "Rezertifizierung fällig",
       "Superseded" -> "Abgelöst",
       "Withdrawn"  -> "Außer Kraft",
+      NeverValid   -> "Zurückgezogen, nie gültig",
       "Archived"   -> "Archiviert",
       "Destroyed"  -> "Vernichtet",
       "Discarded"  -> "Verworfen"
@@ -194,6 +221,7 @@ object VersionPrintLayout:
     created = "Created",
     approvedOn = "Approved",
     published = "Published",
+    withdrawn = "Withdrawn",
     validFrom = "Valid from",
     onBehalfOf = "on behalf of",
     noSummary = "no change summary",
@@ -213,6 +241,7 @@ object VersionPrintLayout:
       "ReviewDue"  -> "Recertification due",
       "Superseded" -> "Superseded",
       "Withdrawn"  -> "Withdrawn",
+      NeverValid   -> "Withdrawn, never valid",
       "Archived"   -> "Archived",
       "Destroyed"  -> "Destroyed",
       "Discarded"  -> "Discarded"
@@ -234,7 +263,9 @@ object VersionPrintLayout:
   /** The marking of the header: the draft marking, or the copy note of an approved version. */
   def marking(facts: PrintFacts): String =
     val l = labels(facts.language)
-    if facts.draft then l.draft else l.copy
+    if facts.draft then l.draft
+    else if facts.neverValid then s"${l.statuses(NeverValid)} · ${l.copy}"
+    else l.copy
 
   /** Document id (and number) and version, as in the header on the right. */
   def identification(facts: PrintFacts): String =
@@ -255,7 +286,7 @@ object VersionPrintLayout:
       case None       => s"${generated(facts)} · ${l.notArchived}"
       case Some(copy) =>
         List(
-          Some(RenditionLayout.validity(copy.rendition)),
+          Some(if facts.neverValid then l.statuses(NeverValid) else RenditionLayout.validity(copy.rendition)),
           Some(RenditionLayout.approvalNote(copy.rendition)),
           Some(generated(facts)),
           copy.sha256.map(sha => s"${l.archived} $sha")
@@ -266,7 +297,7 @@ object VersionPrintLayout:
     val l      = labels(facts.language)
     val margin =
       "font-family: \"Noto Sans\", sans-serif; font-size: 7.5pt; color: #333; white-space: pre-wrap;"
-    val mark  = if facts.draft then "color: #b42318; font-weight: 700;" else ""
+    val mark  = if facts.notValid then "color: #b42318; font-weight: 700;" else ""
     val right = s"${marking(facts)}\n${identification(facts)}"
     s"""@page {
        |  ${if facts.draft then "" else "margin-bottom: 34mm;"}
@@ -316,7 +347,11 @@ object VersionPrintLayout:
         Some(s"${l.created} ${date(e.createdAt)} ${l.by} ${e.createdBy}"),
         e.approvedAt.map(a => s"${l.approvedOn} ${date(a)}"),
         e.validFrom.map(d => s"${l.validFrom} ${l.date.format(d)}"),
-        e.publishedAt.map(p => s"${l.published} ${date(p)}")
+        e.publishedAt.map(p => s"${l.published} ${date(p)}"),
+        e.withdrawnAt.map(w =>
+          s"${l.withdrawn} ${date(w)}" + e.withdrawnBy.fold("")(b => s" ${l.by} $b") +
+            e.withdrawnFor.fold("")(f => s" ${l.onBehalfOf} $f")
+        )
       ).flatten
       val approver = e.approvedBy.fold("–")(a => a + e.actingFor.fold("")(f => s" (${l.onBehalfOf} $f)"))
       val current  = if e.version == facts.version then " class=\"dms-changelog-current\"" else ""
@@ -385,7 +420,7 @@ object VersionPrintLayout:
   def wordPage(page: String, facts: PrintFacts): String =
     val body   = page.indexOf("<body>")
     val note   = s"${marking(facts)} · ${identification(facts)} · ${generated(facts)}"
-    val color  = if facts.draft then "#b42318" else "#333333"
+    val color  = if facts.notValid then "#b42318" else "#333333"
     val marker =
       s"""<p class="dms-word-marking" style="color: $color; font-size: 8pt; font-weight: 700">${escape(
           note

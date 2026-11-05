@@ -370,10 +370,10 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
 
   private val past = LocalDate.of(2026, 1, 1)
 
-  private def values(language: String) =
+  private def values(language: String, validFrom: LocalDate = past) =
     s"""{"owner":{"type":"PersonRef","userId":"${owner.value}"},
        |"organizationalUnit":{"type":"Text","value":"Finance"},
-       |"validFrom":{"type":"Date","value":"$past"},
+       |"validFrom":{"type":"Date","value":"$validFrom"},
        |"confidentiality":{"type":"Selection","code":"Internal"},
        |"language":{"type":"Text","value":"$language"},
        |"retentionRule":{"type":"Text","value":"policy-10y"},
@@ -396,7 +396,9 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
     )
   )
 
-  private def wordTemplate: ZIO[Env, Any, (UUID, WordTemplateView)] =
+  private def wordTemplate: ZIO[Env, Any, (UUID, WordTemplateView)] = wordTemplate(template)
+
+  private def wordTemplate(file: Array[Byte]): ZIO[Env, Any, (UUID, WordTemplateView)] =
     for
       s <- setup.await
       t <- ZIO.serviceWithZIO[TemplateService](svc =>
@@ -411,7 +413,7 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
         designer,
         s"/api/v1/admin/templates/${t.templateId.value}/versions/1/word",
         "Wartungsvertrag.docx",
-        template
+        file
       ).map(as[WordTemplateView])
     yield (t.templateId.value, uploaded)
 
@@ -676,6 +678,56 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
         audit.contains(FileDocumentApi.FilledDocxAction),
         audit.contains(VersionViewApi.DraftPdfAction),
         audit.contains("document.rendition-created")
+      )
+    },
+    test("a filled file of a version withdrawn before it took effect says never valid (DMS-145)") {
+      val withStatus = docx(
+        paragraph(textRun("Status: ") + control("dms:status", "Status", "–")) +
+          paragraph(textRun("Kunde: ") + control("customer", "Customer", "Name des Kunden"))
+      )
+      for
+        created <- wordTemplate(withStatus)
+        (id, _) = created
+        _   <- release(id, 1)
+        doc <- call(
+          author,
+          "POST",
+          "/api/v1/documents/word",
+          Some(s"""{"templateId":"$id","templateVersion":1,"title":"Vertrag D",
+                   |"values":${values("de", LocalDate.of(2099, 1, 1))}}""".stripMargin)
+        ).map(as[DocumentView])
+        _ <- call(
+          author,
+          "PUT",
+          s"/api/v1/documents/${doc.id}/word-fields",
+          Some("""{"values":{"customer":"ACME GmbH"}}""")
+        )
+        _ <- approve(doc.id)
+        path = s"/api/v1/documents/${doc.id}/versions/${doc.current.id}"
+        approved  <- call(author, "GET", s"$path/filled.docx")
+        withdrawn <- call(
+          owner,
+          "POST",
+          s"$path/withdraw",
+          Some(WithdrawVersion("Falscher Kunde").toJson)
+        )
+        filled <- call(author, "GET", s"$path/filled.docx")
+        other  <- call(author, "GET", s"$path/filled")
+        fields <- call(author, "GET", s"$path/word-fields").map(as[WordFieldsView])
+        copy   <- call(author, "GET", s"$path/copy.pdf")
+        body  = part(filled.body.toArray, "word/document.xml")
+        pages = RenderingWorker.pageTexts(copy.body).map(RenderingWorker.normalized)
+      yield assertTrue(
+        part(approved.body.toArray, "word/document.xml").contains("Freigegeben"),
+        withdrawn.status == Status.Ok,
+        filled.status == Status.Ok,
+        body.contains("Zurückgezogen, nie gültig"),
+        !body.contains("Freigegeben"),
+        !body.contains("Außer Kraft"),
+        part(other.body.toArray, "word/document.xml").contains("Zurückgezogen, nie gültig"),
+        fields.fields.find(_.key == "status").flatMap(_.value).contains("Zurückgezogen, nie gültig"),
+        copy.status == Status.Ok,
+        pages.forall(_.contains("Zurückgezogen, nie gültig · Kopie"))
       )
     },
     test("a new version takes the file and values over; a revised Word file keeps the field definitions") {

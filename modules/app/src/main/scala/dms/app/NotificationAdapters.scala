@@ -46,8 +46,8 @@ import scala.util.Try
   *   - `document.acknowledgement-requested`, `document.acknowledgement-reminder`: the named readers
   *   - `workflow.deputyship-*`: principal and deputy
   *   - `document.status-changed` Approved → Published: the owner
-  *   - `document.approved-version-withdrawn`: approvers and owner, without who withdrew it; never readers,
-  *     for whom nothing changed (DMS-143)
+  *   - `document.approved-version-withdrawn`: author, approvers and owner, without who withdrew it; never
+  *     readers, for whom nothing changed (DMS-143)
   *   - `legal-hold.created`, `legal-hold.released`: tenant-wide records managers
   *   - `document.rendition-dead`, `document.publication-dead` (DMS-142, ADR 0058): the document's owner
   *     (without owner: the version's author) and their active deputies, the records managers whose role
@@ -254,7 +254,7 @@ final class PlatformNotificationEvents(
                 NotificationCategory.Publication,
                 users("recipients"),
                 document,
-                params("version", "validFrom", "withdrawnBy", "reason") ++
+                params("version", "validFrom", "withdrawnBy", "actingFor", "reason") ++
                   payload.get("publicationFailed").map(_ => "publicationFailed" -> "true")
               )
             )

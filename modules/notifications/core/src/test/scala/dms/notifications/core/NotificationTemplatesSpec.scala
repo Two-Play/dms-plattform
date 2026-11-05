@@ -139,6 +139,17 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
         !en.body.contains("before its valid-from date")
       )
     },
+    test("a deputy's withdrawal names whom they acted for (DMS-145)") {
+      val params =
+        Map("withdrawnBy" -> "ben", "actingFor" -> "anna", "reason" -> "Falsch", "version" -> "2.0")
+      def render(language: Language, values: Map[String, String]) =
+        NotificationTemplates.render("publication.withdrawn", language, values, Some(doc), ctx(Some(facts)))
+      assertTrue(
+        render(Language.De, params).body.startsWith("Ben Becker i. V. für Anna Albers hat"),
+        render(Language.En, params).body.startsWith("Ben Becker on behalf of Anna Albers withdrew"),
+        !render(Language.De, params - "actingFor").body.contains("i. V.")
+      )
+    },
     test("a review task open again says why, by when, and leads to the inbox") {
       def render(language: Language, status: String) =
         NotificationTemplates.render(

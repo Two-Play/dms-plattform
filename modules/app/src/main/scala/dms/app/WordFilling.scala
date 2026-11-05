@@ -40,7 +40,10 @@ object WordFilling:
       Some("version" -> (if v.releasedAt.isDefined || approval.isDefined then v.number.show else v.label)),
       Some(
         "status" -> VersionPrintLayout.statusLabel(
-          if approval.isDefined then "Approved" else v.status.toString,
+          // The approval is what a filled file records, but not of a version that never took effect (ADR 0070).
+          if v.withdrawal.isDefined then VersionPrintLayout.statusKey(v)
+          else if approval.isDefined then "Approved"
+          else v.status.toString,
           language
         )
       ),
