@@ -19,9 +19,9 @@ function stateLabel(state: string): string {
 }
 
 /**
- * Versions of the tenant whose archive PDF failed or is being retried (DMS-93), for records
- * managers and tenant administrators, each with its cause and a retry button where the caller may
- * retry. Titles of documents the caller is not cleared for are not shown.
+ * Versions whose archive PDF failed or is being retried (DMS-93): those the caller's role covers or
+ * they are named for (ADR 0064), each with its cause and a retry button where the caller may retry.
+ * Titles of documents the caller is not cleared for are not shown.
  */
 export function RenditionFailuresPanel() {
   const client = useApiClient()

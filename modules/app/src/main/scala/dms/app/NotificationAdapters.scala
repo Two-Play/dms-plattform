@@ -2,7 +2,7 @@ package dms.app
 
 import dms.archive.LegalHoldId
 import dms.archive.core.LegalHoldService
-import dms.authz.{Action, Authorizer, Groups, Policy, Role, RoleAssignments, Subject}
+import dms.authz.{Action, Authorizer, Groups, Policy, Resource, Role, RoleAssignments, Subject}
 import dms.db.Db
 import dms.db.queue.OutboxEvent
 import dms.documents.{DocumentStatus, DocumentVersion, Publication}
@@ -13,16 +13,19 @@ import dms.notifications.*
 import dms.notifications.core.{
   DeliverySettings,
   NotificationJobs,
+  NotificationStore,
   NotificationTemplates,
   SmtpConfig,
   SmtpMailSender
 }
 import dms.rendering.RenditionEvents
+import dms.workflow.CaseDetails
 import dms.workflow.core.ApprovalWorkflow
 import zio.*
 import zio.json.*
 import zio.json.ast.Json
 
+import java.time.Instant
 import java.util.UUID
 import scala.util.Try
 
@@ -47,16 +50,20 @@ import scala.util.Try
   *     for whom nothing changed (DMS-143)
   *   - `legal-hold.created`, `legal-hold.released`: tenant-wide records managers
   *   - `document.rendition-dead`, `document.publication-dead` (DMS-142, ADR 0058): the document's owner
-  *     (without owner: the version's author) and the tenant-wide records managers, or the tenant
-  *     administrators if there are none; of a publication also those who approved the version, who can
-  *     withdraw it (DMS-148). Each audience gets the link it can reach; nothing is sent if the version does
-  *     not wait any more (rejected, withdrawn, published in the meantime)
+  *     (without owner: the version's author) and their active deputies, the records managers whose role
+  *     covers the document (DMS-146, ADR 0064), or the tenant administrators if there are none; of a
+  *     publication also those who approved the version, who can withdraw it (DMS-148). Each audience gets the
+  *     link it can reach; nothing is sent if the version does not wait any more (rejected, withdrawn,
+  *     published in the meantime)
+  *   - `document.failure-reminder` (DMS-146, ADR 0064): the same people as far as they have not read a notice
+  *     of this failure
   */
 final class PlatformNotificationEvents(
     documents: DocumentService,
     roles: RoleAssignments,
     holds: LegalHoldService,
-    workflow: Option[ApprovalWorkflow] = None
+    workflow: Option[ApprovalWorkflow] = None,
+    groups: Option[Groups] = None
 ) extends NotificationEvents:
   import PlatformNotificationEvents.*
 
@@ -273,7 +280,24 @@ final class PlatformNotificationEvents(
             )
           )
         case RenditionEvents.Dead | Publication.DeadEvent =>
-          ZIO.foreach(document)(failureNotices(event, _, text("reason"))).map(_.toList.flatten)
+          val rendition = event.eventType == RenditionEvents.Dead
+          ZIO.foreach(document)(failureNotices(event, _, rendition, text("reason"))).map(_.toList.flatten)
+        case FailureFollowUps.ReminderEvent =>
+          val failedAt  = text("failedAt").flatMap(t => Try(Instant.parse(t)).toOption)
+          val rendition = text("jobKind").contains(FailureFollowUps.RenditionJob)
+          val reminder  = params("reminder", "failedAt")
+          ZIO
+            .foreach(document.zip(failedAt)) { (ref, since) =>
+              for
+                notices <- failureNotices(event, ref, rendition, text("reason"), reminder)
+                read    <- ZIO
+                  .foreach(ref.versionId)(NotificationStore.readersOf(failureKind(rendition), _, since))
+                  .mapBoth(_.toString, _.getOrElse(Set.empty))
+              yield notices
+                .map(n => n.copy(recipients = n.recipients.filterNot(read)))
+                .filter(_.recipients.nonEmpty)
+            }
+            .map(_.toList.flatten)
         case _ => ZIO.succeed(Nil)
     }
 
@@ -304,11 +328,12 @@ final class PlatformNotificationEvents(
   private def failureNotices(
       event: OutboxEvent,
       ref: DocumentRef,
-      reason: Option[String]
+      rendition: Boolean,
+      reason: Option[String],
+      reminder: Map[String, String] = Map.empty
   ): IO[String, List[Notice]] =
-    val rendition = event.eventType == RenditionEvents.Dead
-    val kind      = if rendition then "failure.rendition" else "failure.publication"
-    val retry     = if rendition then Action.RetryRendition else Action.RetryPublication
+    val kind  = failureKind(rendition)
+    val retry = if rendition then Action.RetryRendition else Action.RetryPublication
     details(ref).flatMap { found =>
       val waiting = found.filterNot(_.discarded).flatMap { d =>
         d.versions
@@ -322,51 +347,83 @@ final class PlatformNotificationEvents(
       ZIO
         .foreach(waiting) { (d, v) =>
           val responsible = d.document.ownerId.getOrElse(v.createdBy)
-          val base        = DocumentApi.resource(event.tenant, d, v)
           def notice(recipients: List[UserId], extra: (String, String)*) =
             Notice(
               kind,
               NotificationCategory.ProcessingFailure,
               recipients,
               Some(ref),
-              Map("version" -> v.label) ++ reason.map("reason" -> _) ++ extra
+              Map("version" -> v.label) ++ reason.map("reason" -> _) ++ reminder ++ extra
             )
           for
-            managers  <- recordsManagers
-            admins    <- if managers.isEmpty then tenantAdministrators else ZIO.succeed(Nil)
-            approvers <- if rendition then ZIO.succeed(Set.empty[UserId]) else approversOf(d.document.id, v)
-            now       <- Clock.instant
+            cases <- ZIO
+              .foreach(workflow)(_.cases(d.document.id).mapError(_.describe))
+              .map(_.getOrElse(Nil))
+            base = DocumentApi.resource(event.tenant, d, v, DocumentApi.participantsOf(cases))
+            now                <- Clock.instant
+            (tenantWide, unit) <- recordsManagers(base, now)
+            admins             <-
+              if tenantWide.isEmpty && unit.isEmpty then tenantAdministrators else ZIO.succeed(Nil)
+            approvers = if rendition then Set.empty[UserId] else approversOf(cases, v)
+            deputies <- ZIO
+              .foreach(workflow)(_.responsibleDeputies(d.document.id, v.id).mapError(_.describe))
+              .map(_.getOrElse(Nil))
             resource = base.copy(approvedBy = approvers)
-            // Neither the owner nor an approver is always able to retry or withdraw (both depend on the roles
-            // held), so the text must not promise it. Owner and author pass confidentiality whatever their groups.
-            personal <- ZIO.foreach(
-              (responsible :: approvers.toList.sortBy(_.value)).distinct.diff(managers ++ admins)
-            ) { user =>
-              roles.forUser(user).mapError(_.toString).map { held =>
-                val subject = Subject(user, event.tenant, held)
-                notice(
-                  List(user),
-                  "audience" -> NotificationTemplates.Audience.Owner,
-                  "canRetry" -> Policy.decide(subject, retry, resource, now).isPermitted.toString,
-                  // Withdrawing is the way out if a retry cannot help; only a publication has it (ADR 0061).
-                  "canWithdraw" -> Policy.decide(subject, Action.Withdraw, resource, now).isPermitted.toString
+            may      = (subject: Subject, action: Action) =>
+              Policy.decide(subject, action, resource, now).isPermitted
+            // Someone in two audiences gets the link of the list, which needs no reading permission. A list does
+            // not help someone not cleared for the document, so their text says who can retry.
+            lists <- ZIO.foreach(
+              List(
+                NotificationTemplates.Audience.Records -> tenantWide,
+                NotificationTemplates.Audience.Scoped  -> unit,
+                NotificationTemplates.Audience.Admin   -> admins
+              )
+            ) { (audience, people) =>
+              ZIO.foreach(people)(user => subjectOf(event.tenant, user).map(may(_, retry))).map { cleared =>
+                val (can, cannot) = people.zip(cleared).partition(_._2)
+                List(
+                  notice(can.map(_._1), "audience"    -> audience),
+                  notice(cannot.map(_._1), "audience" -> audience, "canRetry" -> "false")
                 )
               }
             }
-          yield List(
-            // Someone in two audiences gets the link of the list, which needs no reading permission.
-            notice(managers, "audience" -> NotificationTemplates.Audience.Records),
-            notice(admins, "audience"   -> NotificationTemplates.Audience.Admin)
-          ).filter(_.recipients.nonEmpty) ++ personal
+            onList = (tenantWide ++ unit ++ admins).toSet
+            // Neither the owner nor an approver is always able to retry or withdraw (both depend on the roles
+            // held), so the text must not promise it; the same goes for reading the version on the page.
+            personal = (user: UserId, extra: Option[(String, String)]) =>
+              subjectOf(event.tenant, user).map(subject =>
+                notice(
+                  List(user),
+                  List(
+                    "audience" -> NotificationTemplates.Audience.Owner,
+                    "canRetry" -> may(subject, retry).toString,
+                    "canRead"  -> may(subject, Action.ReadDocument).toString,
+                    // Withdrawing is the way out if a retry cannot help; only a publication has it (ADR 0061).
+                    "canWithdraw" -> may(subject, Action.Withdraw).toString
+                  ) ++ extra*
+                )
+              )
+            answerable = (responsible :: approvers.toList.sortBy(_.value)).distinct.filterNot(onList)
+            direct  <- ZIO.foreach(answerable)(personal(_, None))
+            standIn <- ZIO.foreach(
+              deputies.filterNot(t => onList(t.deputy) || answerable.contains(t.deputy))
+            )(t => personal(t.deputy, Some("actingFor" -> t.principal.value)))
+          yield lists.flatten.filter(_.recipients.nonEmpty) ++ direct ++ standIn
         }
         .map(_.toList.flatten)
     }
 
+  /** Whom a decision is about: their roles and, as a confidential version asks for it, their groups. */
+  private def subjectOf(tenant: TenantId, user: UserId): IO[String, Subject] =
+    for
+      held     <- roles.forUser(user).mapError(_.toString)
+      memberOf <- ZIO.foreach(groups)(_.groupsOf(user).mapError(_.toString))
+    yield Subject(user, tenant, held, memberOf.getOrElse(Set.empty))
+
   /** Who approved a version; the final approver is on the version even without the workflow. */
-  private def approversOf(document: DocumentId, v: DocumentVersion): IO[String, Set[UserId]] =
-    ZIO
-      .foreach(workflow)(_.cases(document).mapError(_.describe))
-      .map(_.fold(Set.empty[UserId])(DocumentApi.approversOf(_, v.id)) ++ v.releasedBy)
+  private def approversOf(cases: List[CaseDetails], v: DocumentVersion): Set[UserId] =
+    DocumentApi.approversOf(cases, v.id) ++ v.releasedBy
 
   /** The `deputies` of a workflow event: deputy and the principal they stand in for. */
   private def deputiesOf(payload: Json.Obj): List[(UserId, String)] =
@@ -415,6 +472,18 @@ final class PlatformNotificationEvents(
       case (user, a) if a.isActiveAt(now) && a.organizationalUnit.isEmpty && a.documentClass.isEmpty => user
     }.distinct
 
+  /** The records managers of a document, for the whole tenant and for a unit or class that covers it. */
+  private def recordsManagers(resource: Resource, now: Instant): IO[String, (List[UserId], List[UserId])] =
+    roles.holders(Role.RecordsManager).mapError(_.toString).map { holders =>
+      val covering = holders.filter((user, a) =>
+        Policy.rolesInScope(Subject(user, resource.tenantId, Set(a)), resource, now).nonEmpty
+      )
+      val (tenantWide, restricted) =
+        covering.partition((_, a) => a.organizationalUnit.isEmpty && a.documentClass.isEmpty)
+      val wide = tenantWide.map(_._1).distinct
+      (wide, restricted.map(_._1).distinct.diff(wide))
+    }
+
   /** Tenant administrators: told of failures when no records manager can be. */
   private def tenantAdministrators: IO[String, List[UserId]] =
     for
@@ -425,6 +494,11 @@ final class PlatformNotificationEvents(
     }.distinct
 
 object PlatformNotificationEvents:
+
+  /** The kind of a failure notice. */
+  private def failureKind(rendition: Boolean): String =
+    if rendition then "failure.rendition" else "failure.publication"
+
   val Types: Set[String] = Set(
     "workflow.task-assigned",
     "workflow.task-due-soon",
@@ -449,7 +523,8 @@ object PlatformNotificationEvents:
     "legal-hold.created",
     "legal-hold.released",
     RenditionEvents.Dead,
-    Publication.DeadEvent
+    Publication.DeadEvent,
+    FailureFollowUps.ReminderEvent
   )
 
 /** The read check at delivery time (DMS-130): the recipient's current role assignments and access group
@@ -554,7 +629,7 @@ object PlatformNotifications:
           .unless(smtp.enabled)
       yield NotificationJobs(
         db,
-        PlatformNotificationEvents(documents, roles, holds, Some(workflow)),
+        PlatformNotificationEvents(documents, roles, holds, Some(workflow), Some(groups)),
         PolicyNotificationDocuments(documents, workflow, authz, roles, groups),
         DirectoryRecipients(directory, orgs),
         SmtpMailSender(smtp),

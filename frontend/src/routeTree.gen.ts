@@ -16,6 +16,7 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAdminRouteImport } from './routes/_app/admin'
 import { Route as AppComplianceRouteImport } from './routes/_app/compliance'
 import { Route as AppDeputiesRouteImport } from './routes/_app/deputies'
+import { Route as AppFailuresRouteImport } from './routes/_app/failures'
 import { Route as AppLegalHoldsRouteImport } from './routes/_app/legal-holds'
 import { Route as AppLibraryRouteImport } from './routes/_app/library'
 import { Route as AppNotificationsRouteImport } from './routes/_app/notifications'
@@ -63,6 +64,11 @@ const AppComplianceRoute = AppComplianceRouteImport.update({
 const AppDeputiesRoute = AppDeputiesRouteImport.update({
   id: '/deputies',
   path: '/deputies',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFailuresRoute = AppFailuresRouteImport.update({
+  id: '/failures',
+  path: '/failures',
   getParentRoute: () => AppRoute,
 } as any)
 const AppLegalHoldsRoute = AppLegalHoldsRouteImport.update({
@@ -145,6 +151,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AppAdminRoute
   '/compliance': typeof AppComplianceRoute
   '/deputies': typeof AppDeputiesRoute
+  '/failures': typeof AppFailuresRoute
   '/legal-holds': typeof AppLegalHoldsRoute
   '/library': typeof AppLibraryRoute
   '/notifications': typeof AppNotificationsRoute
@@ -166,6 +173,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AppAdminRoute
   '/compliance': typeof AppComplianceRoute
   '/deputies': typeof AppDeputiesRoute
+  '/failures': typeof AppFailuresRoute
   '/legal-holds': typeof AppLegalHoldsRoute
   '/library': typeof AppLibraryRoute
   '/notifications': typeof AppNotificationsRoute
@@ -190,6 +198,7 @@ export interface FileRoutesById {
   '/_app/admin': typeof AppAdminRoute
   '/_app/compliance': typeof AppComplianceRoute
   '/_app/deputies': typeof AppDeputiesRoute
+  '/_app/failures': typeof AppFailuresRoute
   '/_app/legal-holds': typeof AppLegalHoldsRoute
   '/_app/library': typeof AppLibraryRoute
   '/_app/notifications': typeof AppNotificationsRoute
@@ -215,6 +224,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/compliance'
     | '/deputies'
+    | '/failures'
     | '/legal-holds'
     | '/library'
     | '/notifications'
@@ -236,6 +246,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/compliance'
     | '/deputies'
+    | '/failures'
     | '/legal-holds'
     | '/library'
     | '/notifications'
@@ -259,6 +270,7 @@ export interface FileRouteTypes {
     | '/_app/admin'
     | '/_app/compliance'
     | '/_app/deputies'
+    | '/_app/failures'
     | '/_app/legal-holds'
     | '/_app/library'
     | '/_app/notifications'
@@ -331,6 +343,13 @@ declare module '@tanstack/react-router' {
       path: '/deputies'
       fullPath: '/deputies'
       preLoaderRoute: typeof AppDeputiesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/failures': {
+      id: '/_app/failures'
+      path: '/failures'
+      fullPath: '/failures'
+      preLoaderRoute: typeof AppFailuresRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/legal-holds': {
@@ -438,6 +457,7 @@ interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
   AppComplianceRoute: typeof AppComplianceRoute
   AppDeputiesRoute: typeof AppDeputiesRoute
+  AppFailuresRoute: typeof AppFailuresRoute
   AppLegalHoldsRoute: typeof AppLegalHoldsRoute
   AppLibraryRoute: typeof AppLibraryRoute
   AppNotificationsRoute: typeof AppNotificationsRoute
@@ -459,6 +479,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
   AppComplianceRoute: AppComplianceRoute,
   AppDeputiesRoute: AppDeputiesRoute,
+  AppFailuresRoute: AppFailuresRoute,
   AppLegalHoldsRoute: AppLegalHoldsRoute,
   AppLibraryRoute: AppLibraryRoute,
   AppNotificationsRoute: AppNotificationsRoute,

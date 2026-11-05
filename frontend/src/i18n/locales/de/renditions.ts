@@ -1,6 +1,12 @@
 import type { Translation } from '@/i18n/core'
 import type * as en from '@/i18n/locales/en/renditions'
 
+export const failures: Translation<typeof en.failures> = {
+  title: 'Fehlgeschlagene Verarbeitungen',
+  description:
+    'Archiv-PDFs und Veröffentlichungen, die endgültig fehlgeschlagen sind und die Sie erneut versuchen können oder die Ihre Rolle abdeckt.',
+}
+
 export const renditions: Translation<typeof en.renditions> = {
   loading: 'Stand des Archiv-PDFs wird geladen',
   pending: 'Das Archiv-PDF wird erzeugt; danach ist die Version freigegeben.',
@@ -22,7 +28,9 @@ export const renditions: Translation<typeof en.renditions> = {
     invalid: 'Die Version kann in ihrem jetzigen Zustand nicht gerendert werden.',
     integrity: 'Eine gespeicherte Datei stimmt nicht mit ihrer Prüfsumme überein.',
     database: 'Die Datenbank war nicht erreichbar.',
-    unknown: 'Die Ursache ist nicht bekannt.',
+    timeout: 'Das Erzeugen wurde nicht rechtzeitig fertig.',
+    internal: 'In der Plattform ist ein interner Fehler aufgetreten.',
+    unknown: 'Die Verarbeitung ist abgebrochen; Näheres steht in den technischen Details.',
   },
   retry: 'Jetzt erneut versuchen',
   retryPending: 'Wird erneut versucht …',

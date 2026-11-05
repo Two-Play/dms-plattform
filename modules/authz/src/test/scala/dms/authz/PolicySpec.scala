@@ -113,11 +113,33 @@ object PolicySpec extends ZIOSpecDefault:
     // Discarding a draft never submitted (DMS-129, ADR 0050): its author, the document's owner and tenant
     // administrators (clean-up without reading the content).
     DiscardDraft -> List(Never, Partial, Partial, Never, Never, Never, Never, Never, Full, Never),
-    // Retrying a failed rendition (DMS-93, ADR 0055): the document's owner (without owner: its author), records
-    // managers and tenant administrators.
-    RetryRendition -> List(Never, Partial, Partial, Never, Never, Never, Full, Never, Full, Never),
+    // Retrying a failed rendition (DMS-93, ADR 0055): the person named owner (without owner: the author) with
+    // any role (DMS-146, ADR 0064), records managers and tenant administrators.
+    RetryRendition -> List(
+      Partial,
+      Partial,
+      Partial,
+      Partial,
+      Partial,
+      Partial,
+      Full,
+      Partial,
+      Full,
+      Partial
+    ),
     // Retrying a dead publication job (DMS-142, ADR 0058): the same people as for a rendition.
-    RetryPublication -> List(Never, Partial, Partial, Never, Never, Never, Full, Never, Full, Never)
+    RetryPublication -> List(
+      Partial,
+      Partial,
+      Partial,
+      Partial,
+      Partial,
+      Partial,
+      Full,
+      Partial,
+      Full,
+      Partial
+    )
   )
 
   private def permitted(roles: Seq[Role], action: Action, resource: Resource): Boolean =
@@ -397,7 +419,8 @@ object PolicySpec extends ZIOSpecDefault:
       val owned = document(Approved).copy(ownerId = Some(user))
       assertTrue(
         permitted(Seq(Owner), RetryPublication, owned),
-        !permitted(Seq(Author), RetryPublication, owned),
+        permitted(Seq(Reader), RetryPublication, owned),
+        !permitted(Seq(Owner), RetryPublication, document(Approved).copy(ownerId = Some(other))),
         !permitted(Seq(Owner), RetryPublication, owned.copy(status = Some(Published))),
         !permitted(Seq(Owner), RetryPublication, owned.copy(status = Some(InApproval))),
         permitted(Seq(RecordsManager), RetryPublication, document(Approved)),

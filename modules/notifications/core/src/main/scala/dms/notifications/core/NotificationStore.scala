@@ -236,6 +236,18 @@ object NotificationStore:
             where id = $id and user_id = ${user.value}""".update.run() > 0
     )
 
+  /** Who read an in-app notification of `kind` about `version` created since `since`: for reminders, a reader
+    * of any of them knows of the failure (DMS-146, ADR 0064).
+    */
+  def readersOf(kind: String, version: UUID, since: Instant): IO[DbError, Set[UserId]] =
+    Db.sql(
+      sql"""select distinct n.user_id
+            from dms.notification n
+            join dms.notification_delivery d on d.id = n.id
+            where d.kind = $kind and d.version_id = $version and n.created_at >= ${utc(since)}
+              and n.read_at is not null""".query[String].run().map(UserId(_)).toSet
+    )
+
   /** Marks every unread notification of `user` as read; returns how many. */
   def markAllRead(user: UserId, at: Instant): IO[DbError, Int] =
     Db.sql(

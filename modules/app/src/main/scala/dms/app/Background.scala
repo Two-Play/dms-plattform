@@ -39,15 +39,16 @@ import java.net.http.HttpClient
   * legal hold, object retention, file clean-up, deputyship, acknowledgement reminder, notification and task
   * deadline jobs), the outbox relay and the schedulers of periodic audit jobs, scheduled publications, the
   * periodic review check, the search synchronization, the deputyship check, the acknowledgement reminder
-  * check, the notification clean-up and the deadline check of workflow tasks (DMS-87) and periodic review
-  * tasks (DMS-141).
+  * check, the notification clean-up, the deadline check of workflow tasks (DMS-87) and periodic review tasks
+  * (DMS-141) and the reminder check of failed jobs (DMS-146).
   *
   * The outbox relay hands every event to its subscribers, which turn the events they need into jobs; an event
   * no subscriber needs is marked delivered. Subscribers: the search index (DMS-51, ADR 0029) and the webhooks
   * (DMS-58, ADR 0035), which record a delivery and a job per subscription, so a receiver that is down never
   * holds up the relay, the notifications (DMS-130, ADR 0052), which record a delivery and a job per recipient
-  * and channel, and the acknowledgement reminders, which check a tenant at once when a version that requires
-  * acknowledgement became valid.
+  * and channel, the acknowledgement reminders, which check a tenant at once when a version that requires
+  * acknowledgement became valid, and the audit entry of a publication that failed for good (DMS-146), first
+  * so that a later subscriber's failure cannot hold it up.
   */
 object Background:
 
@@ -126,11 +127,12 @@ object Background:
         List(ReviewDeadlines(reviews, documents, workflow))
       )
       reminders = AcknowledgementReminderJobs(db, documents, acks, roles, groups, config.documents.reminders)
+      failures  = FailureFollowUps(db, trail, config.notifications.failureReminders)
       lanes     = jobLanes(
         jobs.handlers ++ publications.handlers ++ reviewJobs.handlers ++ searchJobs.handlers ++
           legalHolds.handlers ++ retention.handlers ++ fileCleanup.handlers ++ webhooks.handlers ++
           deputyJobs.handlers ++ reminders.handlers ++ objectCleanup.handlers ++ maintenance.handlers ++
-          notices.handlers ++ deadlineJobs.handlers +
+          notices.handlers ++ deadlineJobs.handlers ++ failures.handlers +
           (RenditionRequest.JobKind -> rendering.handle)
       )
       runner     = JobRunner(db, lanes._1, WorkerConfig(s"${workerName(config)}-jobs"))
@@ -138,9 +140,8 @@ object Background:
       relay      = OutboxRelay(
         db,
         event =>
-          searchJobs.deliver(event) *> webhooks.deliver(event) *> notices.deliver(event) *> reminders.deliver(
-            event
-          ),
+          failures.deliver(event) *> searchJobs.deliver(event) *> webhooks.deliver(event) *>
+            notices.deliver(event) *> reminders.deliver(event),
         WorkerConfig(s"${workerName(config)}-outbox")
       )
       nothing <- runner.run
@@ -155,6 +156,7 @@ object Background:
         .raceFirst(maintenance.schedule)
         .raceFirst(notices.schedule)
         .raceFirst(deadlineJobs.schedule)
+        .raceFirst(failures.schedule)
     yield nothing
 
   /** Encrypts plain-text webhook secrets and re-encrypts those of older keys with the active key (DMS-107). A

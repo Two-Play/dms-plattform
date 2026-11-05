@@ -99,8 +99,8 @@ final class RenditionJobs(
   /** The job handler for the job runner (`dms.integration.JobRunner`). */
   def handle(job: ClaimedJob): IO[String, Unit] =
     for
-      tenant  <- ZIO.fromOption(job.tenant).orElseFail("a rendition job needs a tenant")
-      request <- ZIO.fromEither(decode(job.payload))
+      tenant  <- ZIO.fromOption(job.tenant).orElseFail("[invalid] a rendition job needs a tenant")
+      request <- ZIO.fromEither(decode(job.payload)).mapError(e => s"[invalid] $e")
       _       <- render(tenant, request).foldZIO(
         error =>
           notifyFailure(tenant, request, error, job)
@@ -269,11 +269,16 @@ object RenditionJobs:
   /** The error text of a failed job: the failure's code in brackets, then its description. */
   def jobError(error: RenderingError): String = s"[${error.code}] ${error.describe}"
 
-  /** The code and message of a job error written by [[jobError]]; `None` as code for other texts. */
+  /** The code and message of a job error written by [[jobError]] or the job runner, the same as
+    * `dms.job_failure_code` finds (`timeout` for the texts of a timeout and an expired lease); `None` as code
+    * for other texts.
+    */
   def parseJobError(text: String): (Option[String], String) =
     text match
       case JobErrorPattern(code, message) => (Some(code), message)
-      case other                          => (None, other)
+      case other if other.startsWith("timed out") || other.startsWith("lease expired") =>
+        (Some("timeout"), other)
+      case other => (None, other)
 
   private val JobErrorPattern = "(?s)^\\[([a-z_]+)\\] (.*)$".r
 

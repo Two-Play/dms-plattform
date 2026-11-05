@@ -33,9 +33,12 @@ object RenditionJobErrorSpec extends ZIOSpecDefault:
         parsed(2)._2.contains("6.2.11.4.1-1")
       )
     },
-    test("texts of other writers (timeouts, defects, older jobs) keep their message without a code") {
+    test("timeouts read like dms.job_failure_code; other texts keep their message without a code") {
       assertTrue(
-        RenditionJobs.parseJobError("timed out after 270 s") == (None, "timed out after 270 s"),
+        RenditionJobs.parseJobError("timed out after 270 s") == (Some("timeout"), "timed out after 270 s"),
+        RenditionJobs.parseJobError("lease expired after the last attempt")._1.contains("timeout"),
+        RenditionJobs.parseJobError("[internal] boom") == (Some("internal"), "boom"),
+        RenditionJobs.parseJobError("something else") == (None, "something else"),
         RenditionJobs.parseJobError("[Unavailable] x") == (None, "[Unavailable] x"),
         RenditionJobs.parseJobError("[invalid] line 1\nline 2") == (Some("invalid"), "line 1\nline 2")
       )

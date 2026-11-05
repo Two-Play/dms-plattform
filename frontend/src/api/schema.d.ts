@@ -1405,7 +1405,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Requeues the rendering job of a version in approval whose rendition failed (Failed: starts over with all attempts) or waits for its next attempt (Retrying: runs now). 409 rendition_not_failed in any other state. Requires RetryRendition: the document's owner (without owner: its author), records managers and tenant administrators. Audited. */
+    /** @description Requeues the rendering job of a version in approval whose rendition failed (Failed: starts over with all attempts) or waits for its next attempt (Retrying: runs now). 409 rendition_not_failed in any other state. Requires RetryRendition: the person named owner (without owner: the author) with any role covering the document, records managers and tenant administrators. Audited. */
     post: operations['postApiV1DocumentsIdVersionsVersionidRenditionRetry']
     delete?: never
     options?: never
@@ -1420,7 +1420,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description Versions in approval whose rendition failed (Failed) or is being retried (Retrying), most recent first, at most 200. Requires RetryRendition on the tenant (records managers, tenant administrators); the title is left out where the caller may not retry (e.g. not cleared for the document's confidentiality). */
+    /** @description Versions in approval whose rendition failed (Failed) or is being retried (Retrying), most recent first, at most 200 of the tenant before the filter. Records managers and tenant administrators see those their role covers, everyone else those they are named owner of (without owner: author of); for others the list is empty. The title is left out where the caller may not retry (e.g. not cleared for the document's confidentiality). */
     get: operations['getApiV1RenditionsFailures']
     put?: never
     post?: never
@@ -1456,7 +1456,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Requeues the publication job of an approved version whose publication failed (Failed: starts over with all attempts) or waits for its next attempt (Retrying: runs now). 409 publication_not_failed in any other state, also if a withdrawal got there first. Requires RetryPublication: the document's owner (without owner: its author), records managers and tenant administrators. Audited. */
+    /** @description Requeues the publication job of an approved version whose publication failed (Failed: starts over with all attempts) or waits for its next attempt (Retrying: runs now). 409 publication_not_failed in any other state, also if a withdrawal got there first. Requires RetryPublication: the person named owner (without owner: the author) with any role covering the document, records managers and tenant administrators. Audited. */
     post: operations['postApiV1DocumentsIdVersionsVersionidPublicationRetry']
     delete?: never
     options?: never
@@ -1471,7 +1471,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description Approved versions whose publication failed (Failed) or is being retried (Retrying), most recent first, at most 200. Requires RetryPublication on the tenant (records managers, tenant administrators); the title is left out where the caller may not retry (e.g. not cleared for the document's confidentiality). */
+    /** @description Approved versions whose publication failed (Failed) or is being retried (Retrying), most recent first, at most 200 of the tenant before the filter. Records managers and tenant administrators see those their role covers, everyone else those they are named owner of (without owner: author of); for others the list is empty. The title is left out where the caller may not retry (e.g. not cleared for the document's confidentiality). */
     get: operations['getApiV1PublicationsFailures']
     put?: never
     post?: never

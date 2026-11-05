@@ -124,9 +124,9 @@ export function PublicationStatusNotice({
 }
 
 /**
- * Approved versions of the tenant whose publication failed or is being retried (DMS-142), for
- * records managers and tenant administrators, each with its cause and a retry button where the
- * caller may retry. Titles of documents the caller is not cleared for are not shown.
+ * Approved versions whose publication failed or is being retried (DMS-142): those the caller's role
+ * covers or they are named for (ADR 0064), each with its cause and a retry button where the caller
+ * may retry. Titles of documents the caller is not cleared for are not shown.
  */
 export function PublicationFailuresPanel() {
   const client = useApiClient()

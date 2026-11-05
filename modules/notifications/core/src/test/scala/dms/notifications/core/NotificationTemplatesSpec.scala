@@ -277,7 +277,7 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
         listed.body.contains("die Version auf der Dokumentseite zurückziehen"),
         !de.body.contains("zurückziehen"),
         noRetry.body.contains("records management can retry it"),
-        noRetry.body.contains("The reason is not known."),
+        noRetry.body.contains("the technical message is shown with the retry"),
         !noRetry.body.contains("You can retry"),
         listed.link.contains("/legal-holds"),
         listed.body.contains("unter Legal Holds erneut versuchen"),
@@ -288,6 +288,60 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
         blind.subject == "Archiv-PDF fehlgeschlagen: Dokument",
         blind.body.contains("von einem Dokument"),
         !blind.body.contains("Reiserichtlinie")
+      )
+    },
+    test("every failure code has a reason, and an unknown code still reads as one (DMS-146)") {
+      val version = UUID.fromString("00000000-0000-0000-0000-000000000009")
+      val ref     = doc.copy(versionId = Some(version))
+      def body(language: Language, params: (String, String)*) =
+        NotificationTemplates
+          .render("failure.publication", language, params.toMap, Some(ref), ctx(Some(facts)))
+          .body
+      val texts = NotificationTemplates.FailureReasons
+      assertTrue(
+        texts.values.forall((de, en) => de.startsWith("Grund: ") && en.startsWith("Reason: ")),
+        texts.forall { case (code, (de, en)) =>
+          body(Language.De, "reason" -> code).contains(de) && body(Language.En, "reason" -> code).contains(en)
+        },
+        body(Language.De, "reason" -> "of-a-newer-instance")
+          .contains("Grund: Die Verarbeitung ist abgebrochen"),
+        body(Language.De).contains("Grund: Die Verarbeitung ist abgebrochen"),
+        !body(Language.De).contains("nicht bekannt")
+      )
+    },
+    test("failure notices promise only what the recipient can do (DMS-146)") {
+      val version = UUID.fromString("00000000-0000-0000-0000-000000000009")
+      val ref     = doc.copy(versionId = Some(version))
+      def render(language: Language, facts: Option[DocumentFacts], params: (String, String)*) =
+        NotificationTemplates.render("failure.rendition", language, params.toMap, Some(ref), ctx(facts))
+      val owner    = "audience" -> NotificationTemplates.Audience.Owner
+      val records  = "audience" -> NotificationTemplates.Audience.Records
+      val scoped   = render(Language.En, Some(facts), "audience" -> NotificationTemplates.Audience.Scoped)
+      val named    = render(Language.De, Some(facts), owner, "canRetry" -> "true", "canRead" -> "false")
+      val neither  = render(Language.En, None, owner, "canRetry" -> "false", "canRead" -> "false")
+      val blocked  = render(Language.De, None, records, "canRetry" -> "false")
+      val deputy   = render(Language.De, Some(facts), owner, "canRetry" -> "false", "actingFor" -> anna.value)
+      val reminded = render(
+        Language.En,
+        Some(facts),
+        owner,
+        "reminder" -> "1",
+        "failedAt" -> "2026-11-05T10:00:00Z"
+      )
+      assertTrue(
+        scoped.link.contains(NotificationTemplates.FailureList),
+        scoped.body.contains("You can retry it under “Failed processing”."),
+        named.link.contains(NotificationTemplates.FailureList),
+        named.body.contains("unter „Fehlgeschlagene Verarbeitungen“ erneut versuchen"),
+        neither.link.isEmpty,
+        neither.body.contains("Records management can retry it."),
+        !neither.body.contains("document page"),
+        blocked.link.contains("/legal-holds"),
+        blocked.body.contains("nicht freigegeben"),
+        !blocked.body.contains("unter Legal Holds"),
+        deputy.body.endsWith("Sie erhalten dies als Vertretung von Anna Albers."),
+        reminded.subject == "Reminder: Archive PDF failed: Reiserichtlinie (2.0)",
+        reminded.body.startsWith("Still open since 5 Nov 2026: The archive PDF")
       )
     },
     test("the email adds greeting, absolute link and the settings page") {

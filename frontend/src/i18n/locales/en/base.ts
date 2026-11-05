@@ -44,6 +44,7 @@ export const shell = {
     templates: 'Templates',
     compliance: 'Compliance',
     legalHolds: 'Legal holds',
+    failures: 'Failed processing',
     retention: 'Retention',
     admin: 'Admin',
   },
