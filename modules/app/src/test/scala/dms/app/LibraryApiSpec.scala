@@ -110,15 +110,18 @@ object LibraryApiSpec extends ZIOSpecDefault:
       Option.when(confidential)("allowedGroups" -> MetadataValue.Many(List(MetadataValue.Text("board")))))
       .map((k, v) => k -> FieldEntry(v, ValueOrigin.Manual))
 
-  /** Moves the open version through review and approval and publishes it. */
-  private def publishOpen(service: DocumentService, doc: DocumentId) =
+  /** Moves the open version through review and approval. */
+  private def approveOpen(service: DocumentService, doc: DocumentId) =
     for
       v <- service.submit(doc, author)
       _ <- service.changeStatus(v.id, ReviewPassed, UserId("reviewer"))
       _ <- service.attachRendition(v.id, Rendition(s"r/${v.id}.pdf", None, "a" * 64), author)
-      _ <- service.changeStatus(v.id, Approve, approver)
-      p <- service.changeStatus(v.id, Publish, approver)
-    yield p
+      a <- service.changeStatus(v.id, Approve, approver)
+    yield a
+
+  /** Moves the open version through review and approval and publishes it. */
+  private def publishOpen(service: DocumentService, doc: DocumentId) =
+    approveOpen(service, doc).flatMap(v => service.changeStatus(v.id, Publish, approver))
 
   private def document(
       service: DocumentService,
@@ -472,6 +475,59 @@ object LibraryApiSpec extends ZIOSpecDefault:
         security(before).contains("2.0"),
         security(again).contains("2.0"),
         security(after).contains("3.0")
+      )
+    },
+    test("a version withdrawn before it took effect never shows; what is valid stays (DMS-145)") {
+      val security   = (v: LibraryView) => v.items.find(_.title == "IT security policy")
+      val later      = today.plusDays(30)
+      val neverValid = "Never valid instruction"
+      for
+        f         <- setup.await
+        db        <- ZIO.service[Db]
+        documents <- ZIO.service[DocumentService]
+        before    <- library(readerAll)
+        doc = f.securityV2.documentId
+        // The next version of a valid document, and a first version, both waiting for their date.
+        successor <- db
+          .transact(tenantId)(
+            documents.newVersion(doc, ChangeKind.Major, Some("Revised once more"), author) *>
+              documents.updateDraft(
+                doc,
+                DraftChange(Some("IT security policy"), values("Finance", later, List("security")), None),
+                author
+              ) *> approveOpen(documents, doc)
+          )
+          .mapError(e => RuntimeException(e.toString))
+          .orDie
+        first <- db
+          .transact(tenantId)(
+            documents
+              .create(
+                NewDocument(f.travel.templateId, 1, neverValid, values("Finance", later)),
+                author
+              )
+              .flatMap(created => approveOpen(documents, created._1.id))
+          )
+          .mapError(e => RuntimeException(e.toString))
+          .orDie
+        waiting <- library(readerAll)
+        _       <- db
+          .transact(tenantId)(
+            documents.withdrawApproved(successor.id, "Approved by mistake", Set(approver), approver) *>
+              documents.withdrawApproved(first.id, "Approved by mistake", Set(approver), approver)
+          )
+          .mapError(e => RuntimeException(e.toString))
+          .orDie
+        after  <- library(readerAll)
+        byName <- library(readerAll, s"?q=${neverValid.replace(" ", "%20")}")
+      yield assertTrue(
+        security(waiting).map(_.version) == security(before).map(_.version),
+        security(after).map(_.version) == security(before).map(_.version),
+        security(after).map(_.validFrom) == security(before).map(_.validFrom),
+        after.items.map(_.title) == before.items.map(_.title),
+        after.total == before.total,
+        !after.items.exists(_.title == neverValid),
+        byName.items.isEmpty
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

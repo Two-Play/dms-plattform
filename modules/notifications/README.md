@@ -48,7 +48,7 @@ Layout: `api` holds public types and the ports, `core` the implementation. Other
 | `document.acknowledgement-reminder` | `acknowledgement.reminder` | the reminded readers | acknowledgement |
 | `workflow.deputyship-created`, `-started`, `-ended`, `-ended-by-period` | `deputyship.*` | principal and deputy (different texts) | deputyship |
 | `document.status-changed` Approved → Published | `publication.published` | the owner | publication |
-| `document.approved-version-withdrawn` | `publication.withdrawn` | approvers and owner, without who withdrew it; never readers | publication |
+| `document.approved-version-withdrawn` | `publication.withdrawn` | author, approvers and owner, without who withdrew it; never readers | publication |
 | `legal-hold.created`, `legal-hold.released` | `legal-hold.*` | tenant-wide records managers | legal-hold |
 | `document.rendition-dead`, `document.publication-dead` (DMS-142) | `failure.rendition`, `failure.publication` | the owner (without owner: the version's author) and their active deputies, the records managers whose role covers the document, or tenant administrators if there are none; none if the version no longer waits | processing-failure |
 | `document.failure-reminder` (DMS-146) | `failure.rendition`, `failure.publication` | the same people, without those who have read a notice of this failure | processing-failure |

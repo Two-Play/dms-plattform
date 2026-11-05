@@ -1,5 +1,6 @@
 package dms.app
 
+import dms.rendering.core.RenditionFacts
 import zio.test.*
 
 import java.time.{Instant, LocalDate, ZoneId}
@@ -87,6 +88,62 @@ object VersionPrintLayoutSpec extends ZIOSpecDefault:
         // a page of appendices only starts without page break
         !german.contains("dms-page-break"),
         empty.contains("The version has no attachments.")
+      )
+    },
+    test("a copy of a version that never took effect says so, and names no valid-from date (DMS-145)") {
+      val copy = PrintFacts.Copy(
+        RenditionFacts(
+          documentId = "d-1",
+          title = "IT security policy",
+          version = "2.0",
+          validFrom = Some(LocalDate.parse("2099-01-01")),
+          approvedAt = Instant.parse("2026-10-20T08:00:00Z"),
+          approvedBy = "Anna Approver",
+          language = "de"
+        ),
+        Some("a" * 64)
+      )
+      val valid   = facts.copy(version = "2.0", language = "de", copyOf = Some(copy))
+      val never   = valid.copy(neverValid = true)
+      val english = never.copy(language = "en")
+      val word    = VersionPrintLayout.wordPage(page, never)
+      assertTrue(
+        VersionPrintLayout.marking(valid) == "Kopie – maßgeblich ist die archivierte Fassung",
+        VersionPrintLayout.footer(valid).contains("01.01.2099"),
+        !VersionPrintLayout.pageCss(valid).contains("#b42318"),
+        VersionPrintLayout.marking(never) ==
+          "Zurückgezogen, nie gültig · Kopie – maßgeblich ist die archivierte Fassung",
+        VersionPrintLayout.marking(english).startsWith("Withdrawn, never valid · Copy"),
+        // The approval happened and stays on the paper; the date never came.
+        !VersionPrintLayout.footer(never).contains("01.01.2099"),
+        VersionPrintLayout.footer(never).contains("Zurückgezogen, nie gültig"),
+        VersionPrintLayout.footer(never).contains("Anna Approver"),
+        VersionPrintLayout.pageCss(never).contains("#b42318"),
+        word.contains("#b42318"),
+        word.contains("Zurückgezogen, nie gültig")
+      )
+    },
+    test("the change history tells a version that never took effect from one taken out of force") {
+      val never = entry.copy(
+        changeReason = None,
+        status = VersionPrintLayout.NeverValid,
+        validFrom = None,
+        publishedAt = None,
+        withdrawnAt = Some(Instant.parse("2026-11-03T09:00:00Z")),
+        withdrawnBy = Some("Dan Deputy"),
+        withdrawnFor = Some("Anna Approver")
+      )
+      val outOfForce = entry.copy(status = "Withdrawn")
+      val german     = VersionPrintLayout.changelog(List(never), facts.copy(language = "de"))
+      val english    = VersionPrintLayout.changelog(List(never), facts)
+      assertTrue(
+        german.contains("Zurückgezogen, nie gültig"),
+        german.contains("Zurückgezogen 03.11.2026 von Dan Deputy i. V. für Anna Approver"),
+        !german.contains("Außer Kraft"),
+        english.contains("Withdrawn, never valid"),
+        english.contains("Withdrawn 2026-11-03 by Dan Deputy on behalf of Anna Approver"),
+        VersionPrintLayout.changelog(List(outOfForce), facts.copy(language = "de")).contains("Außer Kraft"),
+        VersionPrintLayout.statusLabel(VersionPrintLayout.NeverValid, "de") == "Zurückgezogen, nie gültig"
       )
     },
     test("the Word page carries the marking as first paragraph") {

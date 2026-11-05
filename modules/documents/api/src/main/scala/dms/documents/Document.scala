@@ -81,8 +81,11 @@ final case class Document(
 
 /** The withdrawal of an approved version before it took effect (DMS-143, ADR 0059). A version withdrawn while
   * it was valid has none: its reason is in its review task (ADR 0030).
+  *
+  * @param actingFor
+  *   the approver `by` stood in for: their right rests on a vote cast as deputy (DMS-145, ADR 0070)
   */
-final case class VersionWithdrawal(at: Instant, by: UserId, reason: String)
+final case class VersionWithdrawal(at: Instant, by: UserId, reason: String, actingFor: Option[UserId] = None)
 
 /** One version of a document: a complete, self-contained version package (ADR 0021). Open versions (draft,
   * review, approval) are worked on; from approval on, the package is frozen.

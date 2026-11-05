@@ -95,7 +95,15 @@ export function VersionHistory({ documentId, shownId }: { documentId: string; sh
                           {t('withdrawVersion.neverValid', {
                             date: formatDate(version.withdrawal.at),
                           })}{' '}
-                          <UserName id={version.withdrawal.by} />.{' '}
+                          <UserName id={version.withdrawal.by} />
+                          {version.withdrawal.actingFor && (
+                            <>
+                              {' '}
+                              {t('withdrawVersion.neverValidActingFor')}{' '}
+                              <UserName id={version.withdrawal.actingFor} />
+                            </>
+                          )}
+                          .{' '}
                           {t('withdrawVersion.neverValidReason', {
                             reason: version.withdrawal.reason,
                           })}

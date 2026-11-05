@@ -461,5 +461,42 @@ object VersionViewApiSpec extends ZIOSpecDefault:
         entries.map(_._1) == List(reader.value),
         first.rendition.isDefined
       )
+    },
+    test("a copy of a version withdrawn before it took effect says never valid, on every page (DMS-145)") {
+      for
+        found <- publishedWithDraft("Initech", "Globex")
+        (doc, first, second) = found
+        _ <- call(
+          author,
+          "PUT",
+          s"/api/v1/documents/${doc.id}/draft",
+          Some(s"""{"values":${values("Globex").replace("2026-01-01", "2099-01-01")}}""")
+        )
+        _    <- approve(doc.id)
+        done <- call(
+          approver,
+          "POST",
+          s"/api/v1/documents/${doc.id}/versions/${second.id}/withdraw",
+          Some(WithdrawVersion("Falscher Vertragspartner").toJson)
+        )
+        copy <- pdf(approver, doc.id, second.id, "copy.pdf", changelog = true)
+        pages = texts(copy)
+        ofValid <- pdf(reader, doc.id, first.id, "copy.pdf", changelog = true)
+      yield assertTrue(
+        done.status == Status.Ok,
+        copy.status == Status.Ok,
+        pages.forall(
+          _.contains("Zurückgezogen, nie gültig · Kopie – maßgeblich ist die archivierte Fassung")
+        ),
+        // The date it was meant to take effect on is not in header and footer, the approval is.
+        pages.forall(!_.contains("Gültig ab 01.01.2099")),
+        pages.forall(_.contains("UTC von Anna Approver")),
+        pages.last.contains("Änderungshistorie"),
+        pages.last.contains(s"Zurückgezogen ${java.time.LocalDate
+            .now(java.time.ZoneId.of("Europe/Berlin"))
+            .format(java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy"))} von Anna Approver"),
+        pages.forall(!_.contains("Außer Kraft")),
+        texts(ofValid).forall(!_.contains("nie gültig"))
+      )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

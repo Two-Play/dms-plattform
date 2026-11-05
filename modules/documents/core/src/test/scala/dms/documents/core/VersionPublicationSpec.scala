@@ -519,7 +519,8 @@ object VersionPublicationSpec extends ZIOSpecDefault:
         action.head.target.version.contains("2.0"),
         !published.exists(_.target.version.contains("2.0")),
         notices.size == 1,
-        notices.head.contains("""recipients": ["approver-1"]"""),
+        // The author was told about the approval as well; the owner withdrew it.
+        notices.head.contains("""recipients": ["approver-1", "author-1"]"""),
         notices.head.contains("Approved by mistake"),
         changes.count(c =>
           c.contains("""status": "Withdrawn"""") && c.contains("""previousStatus": "Approved"""")
@@ -610,7 +611,40 @@ object VersionPublicationSpec extends ZIOSpecDefault:
             )
           )
           .either
-      yield assertTrue(foreign == 0, queued.map(_._1) == List("queued"), rewrite.isLeft, onValid.isLeft)
+        deputy <- e.app
+          .transact(f.tenant)(
+            Db.sql(
+              sql"""update dms.document_version set withdrawn_acting_for = ${"someone"}
+                    where id = ${v2.id}""".update.run()
+            )
+          )
+          .either
+      yield assertTrue(
+        foreign == 0,
+        queued.map(_._1) == List("queued"),
+        rewrite.isLeft,
+        onValid.isLeft,
+        deputy.isLeft
+      )
+    },
+    test("whoever withdraws is not told, even as the author; the deputy's principal is named (DMS-145)") {
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, _) = created
+        v2       <- scheduled(f, doc, validFrom)
+        _        <- TestClock.setTime(Instant.parse("2026-12-30T10:00:00Z"))
+        byDeputy <- as(f.tenant)(
+          _.withdrawApproved(v2.id, "Approved by mistake", Set(approver, author), author, Some(approver))
+        )
+        notices <- outbox(doc, "document.approved-version-withdrawn")
+        stored  <- as(f.tenant)(_.get(doc))
+      yield assertTrue(
+        notices.last.contains("""recipients": ["approver-1", "owner-1"]"""),
+        notices.last.contains("""actingFor": "approver-1""""),
+        byDeputy.withdrawal.flatMap(_.actingFor).contains(approver),
+        stored.versions.find(_.id == v2.id).flatMap(_.withdrawal).flatMap(_.actingFor).contains(approver)
+      )
     },
     test("a reason is required, and only the service's withdrawal can stop an approved version") {
       for

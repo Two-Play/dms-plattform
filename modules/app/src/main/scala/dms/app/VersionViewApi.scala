@@ -271,7 +271,8 @@ object VersionViewApi:
         Set(h.createdBy) ++ h.releasedBy ++ found.approvals
           .get(h.id)
           .toList
-          .flatMap(a => a.approvedBy :: a.actingFor.toList)
+          .flatMap(a => a.approvedBy :: a.actingFor.toList) ++
+          h.withdrawal.toList.flatMap(w => w.by :: w.actingFor.toList)
       ) ++ found.approvals.get(found.version.id).toList.flatMap(a => a.approvedBy :: a.actingFor.toList) ++
         found.version.releasedBy
     )
@@ -372,8 +373,10 @@ object VersionViewApi:
         found.approvals.get(found.version.id),
         archived = !draft
       )
-      stamped <- ZIO.fromEither(PdfComposer.stamp(base.toArray, lines, emphasize = draft)).mapError(failed)
-      result  <-
+      stamped <- ZIO
+        .fromEither(PdfComposer.stamp(base.toArray, lines, emphasize = facts.notValid))
+        .mapError(failed)
+      result <-
         if history.isEmpty && attachments.isEmpty then ZIO.succeed(stamped)
         else
           val empty = HtmlRenderer.renderDocument(
@@ -466,7 +469,8 @@ object VersionViewApi:
       generatedAt = now,
       generatedBy = name(caller),
       zone = found.details.zone,
-      copyOf = copy
+      copyOf = copy,
+      neverValid = v.withdrawal.isDefined
     )
 
   private def changelogOf(found: Printable, names: Map[UserId, String])(
@@ -479,14 +483,18 @@ object VersionViewApi:
         version = h.label,
         changeKind = h.changeKind.toString,
         changeReason = h.changeReason,
-        status = h.status.toString,
+        status = VersionPrintLayout.statusKey(h),
         createdAt = h.createdAt,
         createdBy = name(h.createdBy),
         approvedAt = h.releasedAt.flatMap(r => approval.map(_.approvedAt).orElse(Some(r))),
         approvedBy = approval.map(_.approvedBy).orElse(h.releasedBy).map(name),
         actingFor = approval.flatMap(_.actingFor).map(name),
-        validFrom = h.validFrom,
-        publishedAt = h.publishedAt
+        // The date it was meant to take effect on never came (ADR 0070).
+        validFrom = h.validFrom.filter(_ => h.withdrawal.isEmpty),
+        publishedAt = h.publishedAt,
+        withdrawnAt = h.withdrawal.map(_.at),
+        withdrawnBy = h.withdrawal.map(w => name(w.by)),
+        withdrawnFor = h.withdrawal.flatMap(_.actingFor).map(name)
       )
     }
 

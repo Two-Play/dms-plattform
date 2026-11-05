@@ -1027,14 +1027,18 @@ final class DocumentService(
     * A review task decided as revised with this version opens again ([[ReviewService.reopenFor]]).
     *
     * @param approvers
-    *   who approved the version, known to the workflow; they are notified with the document's owner, without
-    *   the actor
+    *   who approved the version, known to the workflow; they are notified with the document's owner and the
+    *   version's author, who were told about the approval, without the actor
+    * @param actingFor
+    *   the approver the actor stands in for, if their right rests on a vote cast as deputy (DMS-145, ADR
+    *   0070); recorded on the version, in the audit trail and in the event
     */
   def withdrawApproved(
       versionId: UUID,
       reason: String,
       approvers: Set[UserId],
-      actor: UserId
+      actor: UserId,
+      actingFor: Option[UserId] = None
   ): IO[DocumentError, DocumentVersion] =
     val why = reason.trim
     for
@@ -1057,12 +1061,14 @@ final class DocumentService(
         LifecycleEvent.Withdraw,
         actor,
         withdrawalReason = Some(why),
-        publicationFailed = failed
+        publicationFailed = failed,
+        actingFor = actingFor
       )
       _ <- PublicationJobs
         .cancel(versionId, s"version ${current.label} was withdrawn by ${actor.value}")
         .mapError(DocumentError.Database(_))
-      recipients = (approvers ++ document.ownerId - actor).toList.sortBy(_.value)
+      recipients = (approvers ++ current.releasedBy ++ document.ownerId + current.createdBy - actor).toList
+        .sortBy(_.value)
       _ <- Outbox
         .publish(
           "document",
@@ -1079,6 +1085,7 @@ final class DocumentService(
                   "reason"      -> Json.Str(why),
                   "recipients"  -> Json.Arr(recipients.map(u => Json.Str(u.value))*)
                 ) ++ current.validFrom.map(d => "validFrom" -> Json.Str(d.toString)) ++
+                  actingFor.map(p => "actingFor" -> Json.Str(p.value)) ++
                   Option.when(failed)("publicationFailed" -> Json.Bool(true)))*
               )
               .toJson
@@ -1801,7 +1808,8 @@ final class DocumentService(
       actor: UserId,
       successor: Option[UUID] = None,
       withdrawalReason: Option[String] = None,
-      publicationFailed: Boolean = false
+      publicationFailed: Boolean = false,
+      actingFor: Option[UserId] = None
   ): IO[DocumentError, DocumentVersion] =
     for
       current <-
@@ -1868,7 +1876,7 @@ final class DocumentService(
             validFrom,
             supersededBy
           )
-        )(DocumentStore.withdrawApproved(current.id, actor, now, _))
+        )(DocumentStore.withdrawApproved(current.id, actor, actingFor, now, _))
       )
         .filterOrFail(identity)(changedConcurrently(current))
         .mapError(conflict(s"document ${document.id.value} already has a valid version in this scope"))
@@ -1894,7 +1902,8 @@ final class DocumentService(
         publishedAt =
           if current.status == DocumentStatus.Approved && target == DocumentStatus.Published then Some(now)
           else current.publishedAt,
-        withdrawal = withdrawalReason.map(VersionWithdrawal(now, actor, _)).orElse(current.withdrawal)
+        withdrawal =
+          withdrawalReason.map(VersionWithdrawal(now, actor, _, actingFor)).orElse(current.withdrawal)
       )
       details = Json.Obj(
         (List(
@@ -1905,6 +1914,7 @@ final class DocumentService(
           supersededBy.map(s => "supersededBy" -> Json.Str(s.toString)) ++
           reviewDueOn.map(d => "reviewDueOn" -> Json.Str(d.toString)) ++
           withdrawalReason.map(r => "reason" -> Json.Str(r)) ++
+          actingFor.map(p => "actingFor" -> Json.Str(p.value)) ++
           Option.when(publicationFailed)("publicationFailed" -> Json.Bool(true)))*
       )
       _ <- record(
@@ -1912,7 +1922,8 @@ final class DocumentService(
         withdrawalReason.fold(statusAction(event))(_ => WithdrawnBeforeValid),
         updated,
         details,
-        withdrawalReason
+        withdrawalReason,
+        actingFor
       )
       _ <- publish(
         if event == LifecycleEvent.Submit then "document.submitted" else "document.status-changed",
@@ -2000,13 +2011,18 @@ final class DocumentService(
       action: String,
       v: DocumentVersion,
       details: Json.Obj,
-      reason: Option[String] = None
+      reason: Option[String] = None,
+      onBehalfOf: Option[UserId] = None
   ) =
     val automated = isPlatform(actor)
     audit
       .record(
         AuditEvent(
-          Actor(actor.value, if automated then ActorKind.Technical else ActorKind.Person),
+          Actor(
+            actor.value,
+            if automated then ActorKind.Technical else ActorKind.Person,
+            onBehalfOf.map(_.value)
+          ),
           action,
           AuditObject("document", Some(v.documentId.value), Some(v.label)),
           if automated then Channel.Automation else Channel.Api,

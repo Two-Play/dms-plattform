@@ -214,6 +214,31 @@ describe('Withdraw an approved version on the document page (DMS-143)', () => {
     expect(within(history).getByText(/Reason: Approved by mistake/)).toBeInTheDocument()
   })
 
+  it('tells a deputy in whose name they act, and the history names both (DMS-145)', async () => {
+    state.document = documentWith(valid, {
+      withdrawable: { ...withdrawable, actingFor: 'approver-1' },
+    })
+    state.versions = [
+      valid,
+      version('v2', '2.0', 'Withdrawn', {
+        validFrom: '2027-01-01',
+        withdrawal: {
+          at: '2026-11-04T10:00:00Z',
+          by: 'deputy-1',
+          actingFor: 'approver-1',
+          reason: 'Approved by mistake',
+        },
+      }),
+    ]
+    const { user } = renderAt(page)
+    await user.click(await screen.findByRole('button', { name: 'Withdraw version 2.0' }))
+    const dialog = screen.getByRole('dialog', { name: 'Withdraw version 2.0?' })
+    expect(dialog).toHaveTextContent(/recorded on behalf of/)
+    expect(dialog).toHaveAccessibleDescription(/the author, the approvers and the owner/)
+    const history = await screen.findByRole('list', { name: 'Versions', hidden: true })
+    expect(within(history).getByText(/on behalf of/)).toBeInTheDocument()
+  })
+
   it('says who won when the publication got there first', async () => {
     state.withdrawReply = () =>
       failed(409, { code: 'version_published', message: 'version 2.0 was published first' })

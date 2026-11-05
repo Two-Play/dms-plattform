@@ -307,7 +307,7 @@ Tests: `DocumentServiceSpec` (rule on creation, new version and submission of ol
 
 ## Withdrawing an approved version (DMS-143, ADR 0059)
 
-`DocumentService.withdrawApproved(versionId, reason, approvers, actor)` stops an approved version before 00:00 of its valid-from date in the tenant's time zone: status `Withdrawn`, who and why in the same statement (`DocumentVersion.withdrawal`), queued `document.publish` jobs cancelled (`dms.job_cancel`). Nothing frozen changes. It locks the version row and reads the clock afterwards, as `publishScheduled` does, so exactly one of the two changes the version. A withdrawal that loses fails with `DocumentError.WithdrawalRefused` (`WithdrawalRefusal`, codes `version_published`, `version_due`, `version_withdrawn`, `version_not_approved`), a job that loses does nothing.
+`DocumentService.withdrawApproved(versionId, reason, approvers, actor, actingFor)` stops an approved version before 00:00 of its valid-from date in the tenant's time zone: status `Withdrawn`, who and why in the same statement (`DocumentVersion.withdrawal`), queued `document.publish` jobs cancelled (`dms.job_cancel`). Nothing frozen changes. It locks the version row and reads the clock afterwards, as `publishScheduled` does, so exactly one of the two changes the version. A withdrawal that loses fails with `DocumentError.WithdrawalRefused` (`WithdrawalRefusal`, codes `version_published`, `version_due`, `version_withdrawn`, `version_not_approved`), a job that loses does nothing.
 
 | Method | Path | Purpose | Authorization |
 |---|---|---|---|
@@ -316,6 +316,8 @@ Tests: `DocumentServiceSpec` (rule on creation, new version and submission of ol
 - A version whose newest publication job is dead can be withdrawn after its date, too, by the same people (DMS-145, ADR 0061): the job is read under the row lock, and the retry takes the same lock, so exactly one of the two wins. `WithdrawableVersionView.publicationFailed` tells the dialog. The values of the version are not validated for a withdrawal.
 - `DocumentView.withdrawable` names the version the caller may withdraw now, `DocumentVersionView.withdrawal` when, by whom and why one was withdrawn, `DocumentView.latestReleasedVersion` where new version numbers count on from.
 - `Versioning.startingPoint`: the next version starts from the valid version, without one from the version withdrawn last.
-- Audit `document.withdrawn-before-valid`; outbox `document.status-changed` and `document.approved-version-withdrawn` (notification of approvers and owner).
+- Audit `document.withdrawn-before-valid`; outbox `document.status-changed` and `document.approved-version-withdrawn` (notification of author, approvers and owner, without whoever withdrew it).
+- A deputy whose right rests on an approving vote names the principal in `actingFor` (DMS-145, ADR 0070): on the version (`withdrawn_acting_for`, migration V47), as `on_behalf_of` in the audit trail, in the event, in `DocumentVersionView.withdrawal` and, beforehand, in `WithdrawableVersionView.actingFor`.
+- Copies and filled files say "Zurückgezogen, nie gültig" / "Withdrawn, never valid" (`VersionPrintLayout.statusKey`, ADR 0070); the evidence report has `EvidenceVersion.withdrawal`. The archive PDF stays as it was.
 - Migration V41: `withdrawn_by`, `withdrawal_reason` (with a column grant to `dms_app`; `dms.document_version` has RLS), `Approved → Withdrawn` in the guards, job status `cancelled`, `dms.job_cancel` (security definer, limited to the current tenant, executable by `dms_app`).
 - Migration V42: `dms.document_review.reopens_id` (covered by the policy and the table grants of V18, no update grant), one first row per version and date, each decided task reopened at most once.

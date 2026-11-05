@@ -1,6 +1,6 @@
 package dms.workflow.core
 
-import dms.kernel.UserId
+import dms.kernel.{DocumentId, UserId}
 import dms.workflow.*
 import zio.test.*
 
@@ -67,6 +67,89 @@ object DeputyRulesSpec extends ZIOSpecDefault:
       deputyRoles: Map[UserId, Set[String]] = Map(ben -> Set("Approver"), dora -> Set("Approver")),
       at: Instant = now
   ) = Rules.taskDeputies(role, candidates, author, classPath, deputyships, deputyRoles, at)
+
+  private val version = UUID.randomUUID()
+
+  private def task(id: String, kind: StepKind = StepKind.Approval, role: String = "Approver") =
+    WorkflowTask(
+      id,
+      UUID.randomUUID(),
+      DocumentId(UUID.randomUUID()),
+      version,
+      1,
+      id,
+      id,
+      kind,
+      "lane",
+      role,
+      List(anna),
+      TaskStatus.Completed,
+      now,
+      Some(now),
+      Some(ben)
+    )
+
+  private def vote(
+      taskId: String,
+      actingFor: Option[UserId] = Some(anna),
+      voter: UserId = ben,
+      decision: VoteDecision = VoteDecision.Approve,
+      invalidated: Boolean = false,
+      at: Instant = now
+  ) = Vote(
+    UUID.randomUUID(),
+    UUID.randomUUID(),
+    taskId,
+    version,
+    1,
+    taskId,
+    "lane",
+    voter,
+    decision,
+    None,
+    "sha",
+    Some(at),
+    at,
+    Option.when(invalidated)(at),
+    actingFor
+  )
+
+  private def caseOf(of: UUID, tasks: List[WorkflowTask], votes: List[Vote]) =
+    CaseDetails(
+      WorkflowCase(
+        UUID.randomUUID(),
+        DocumentId(UUID.randomUUID()),
+        of,
+        "contract",
+        None,
+        WorkflowDefinition(Nil),
+        true,
+        1,
+        CaseStatus.Approved,
+        None,
+        None,
+        "sha",
+        clara,
+        clara,
+        now,
+        now
+      ),
+      tasks,
+      votes,
+      None
+    )
+
+  private def approvals(tasks: List[WorkflowTask], votes: Vote*) =
+    Rules.deputyApprovals(List(caseOf(version, tasks, votes.toList)), version, ben)
+
+  private def stands(
+      deputyships: List[Deputyship] = List(deputyship()),
+      approval: DeputyApproval = DeputyApproval(anna, "Approver"),
+      deputy: UserId = ben,
+      author: UserId = clara,
+      held: Set[String] = Set("Approver"),
+      at: Instant = now
+  ) = Rules.standsIn(approval, deputy, author, List("contract"), deputyships, Map(deputy -> held), at)
 
   def spec = suite("Deputy rules")(
     suite("same authority")(
@@ -169,6 +252,65 @@ object DeputyRulesSpec extends ZIOSpecDefault:
         val forAnna = deputyship()
         val forDora = deputyship(principal = dora)
         assertTrue(deputies(List(forDora, forAnna)) == List(TaskDeputy(ben, anna)))
+      }
+    ),
+    suite("approvals given as deputy (DMS-145)")(
+      test("only a valid approving vote in an approval step counts, of this deputy on this version") {
+        val approval = task("approve")
+        val review   = task("review", StepKind.Review, "Reviewer")
+        val expected = List(DeputyApproval(anna, "Approver"))
+        assertTrue(
+          approvals(List(approval), vote("approve")) == expected,
+          approvals(
+            List(approval),
+            vote("approve", decision = VoteDecision.ApproveWithConditions)
+          ) == expected,
+          approvals(List(approval), vote("approve", decision = VoteDecision.Reject)).isEmpty,
+          approvals(List(approval), vote("approve", decision = VoteDecision.RequestChanges)).isEmpty,
+          approvals(List(approval), vote("approve", invalidated = true)).isEmpty,
+          approvals(List(review), vote("review")).isEmpty,
+          // An own vote is no vote as deputy, and somebody else's vote is not theirs.
+          approvals(List(approval), vote("approve", actingFor = None)).isEmpty,
+          approvals(List(approval), vote("approve", voter = dora)).isEmpty,
+          // A vote on another version of the document does not carry over.
+          Rules
+            .deputyApprovals(
+              List(caseOf(UUID.randomUUID(), List(approval), List(vote("approve")))),
+              version,
+              ben
+            )
+            .isEmpty
+        )
+      },
+      test("the latest vote comes first, as the approval names it, and each principal and role once") {
+        val tasks = List(task("first"), task("second"))
+        assertTrue(
+          approvals(
+            tasks,
+            vote("first", actingFor = Some(dora), at = now.minus(day)),
+            vote("second", at = now)
+          ) == List(DeputyApproval(anna, "Approver"), DeputyApproval(dora, "Approver")),
+          approvals(tasks, vote("first"), vote("second")) == List(DeputyApproval(anna, "Approver"))
+        )
+      },
+      test("the vote gives no lasting right: the rules of a deputy apply when they act") {
+        val ended = deputyship(endedAt = Some(now.minus(Duration.ofHours(1))))
+        assertTrue(
+          stands(),
+          !stands(Nil),
+          !stands(List(ended)),
+          !stands(List(deputyship(until = now.minus(Duration.ofHours(1))))),
+          !stands(List(deputyship(from = now.plus(day)))),
+          // Another person's deputyship, another role, another class, the role given up.
+          !stands(List(deputyship(deputy = dora))),
+          !stands(List(deputyship(principal = dora))),
+          !stands(List(deputyship(roles = List("Reviewer")))),
+          !stands(List(deputyship(cls = Some("policy")))),
+          !stands(held = Set("Reader")),
+          // Nobody stands in for an author, and no author for anybody.
+          !stands(author = anna),
+          !stands(author = ben)
+        )
       }
     ),
     suite("who answers for a version (DMS-146)")(

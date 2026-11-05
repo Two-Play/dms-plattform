@@ -76,6 +76,12 @@ final case class EvidenceDeviationRequest(
     withdrawnAt: Option[Instant]
 ) derives JsonCodec
 
+/** The withdrawal of an approved version before it took effect (ADR 0059, 0070): the version was never valid.
+  * `actingFor` names the approver a deputy stood in for.
+  */
+final case class EvidenceWithdrawal(at: Instant, by: String, actingFor: Option[String], reason: String)
+    derives JsonCodec
+
 /** A vote: who decided what in which step, why, when, after which sign-in, and for whom as deputy. */
 final case class EvidenceVote(
     round: Int,
@@ -198,7 +204,9 @@ final case class EvidenceVersion(
     /** The uploaded original of a file document version (DMS-115); absent for structured documents. */
     original: Option[EvidenceAttachment] = None,
     /** Present only for destroyed versions (DMS-82); their content, files and rendition no longer exist. */
-    destruction: Option[EvidenceDestruction] = None
+    destruction: Option[EvidenceDestruction] = None,
+    /** Present only for versions approved but withdrawn before they took effect (ADR 0070). */
+    withdrawal: Option[EvidenceWithdrawal] = None
 ) derives JsonCodec
 
 final case class EvidenceLegalHold(
@@ -552,7 +560,9 @@ object EvidenceReport:
           d.item.contentSha256,
           d.item.files.map(f => EvidenceDestroyedFile(f.name, f.role, f.sha256, f.released))
         )
-      }
+      },
+      withdrawal =
+        v.withdrawal.map(w => EvidenceWithdrawal(w.at, w.by.value, w.actingFor.map(_.value), w.reason))
     )
 
   private def destroyed(v: DocumentVersion): Boolean = v.status == dms.documents.DocumentStatus.Destroyed

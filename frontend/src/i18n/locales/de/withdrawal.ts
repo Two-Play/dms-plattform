@@ -5,13 +5,13 @@ export const withdrawVersion: Translation<typeof en.withdrawVersion> = {
   action: 'Version {label} zurückziehen',
   title: 'Version {label} zurückziehen?',
   description:
-    'Version {label} würde am {validFrom} gültig. Ziehen Sie sie zurück, wird sie nie veröffentlicht, und Version {valid} bleibt gültig. Leser werden nicht benachrichtigt, die Freigebenden und der Eigentümer schon. Das lässt sich nicht rückgängig machen.',
+    'Version {label} würde am {validFrom} gültig. Ziehen Sie sie zurück, wird sie nie veröffentlicht, und Version {valid} bleibt gültig. Leser werden nicht benachrichtigt, Autor, Freigebende und Eigentümer schon. Das lässt sich nicht rückgängig machen.',
   descriptionNoValid:
-    'Version {label} würde am {validFrom} gültig. Ziehen Sie sie zurück, wird sie nie veröffentlicht, und das Dokument hat keine gültige Version, bis eine neue freigegeben ist. Die Freigebenden und der Eigentümer werden benachrichtigt. Das lässt sich nicht rückgängig machen.',
+    'Version {label} würde am {validFrom} gültig. Ziehen Sie sie zurück, wird sie nie veröffentlicht, und das Dokument hat keine gültige Version, bis eine neue freigegeben ist. Autor, Freigebende und Eigentümer werden benachrichtigt. Das lässt sich nicht rückgängig machen.',
   descriptionFailed:
-    'Die Veröffentlichung von Version {label} ist endgültig fehlgeschlagen. Ziehen Sie sie zurück, wird sie nie veröffentlicht, Version {valid} bleibt gültig, und eine neue Version kann begonnen werden. Leser werden nicht benachrichtigt, die Freigebenden und der Eigentümer schon. Das lässt sich nicht rückgängig machen.',
+    'Die Veröffentlichung von Version {label} ist endgültig fehlgeschlagen. Ziehen Sie sie zurück, wird sie nie veröffentlicht, Version {valid} bleibt gültig, und eine neue Version kann begonnen werden. Leser werden nicht benachrichtigt, Autor, Freigebende und Eigentümer schon. Das lässt sich nicht rückgängig machen.',
   descriptionFailedNoValid:
-    'Die Veröffentlichung von Version {label} ist endgültig fehlgeschlagen. Ziehen Sie sie zurück, wird sie nie veröffentlicht, und eine neue Version kann begonnen werden; das Dokument hat keine gültige Version, bis diese freigegeben ist. Die Freigebenden und der Eigentümer werden benachrichtigt. Das lässt sich nicht rückgängig machen.',
+    'Die Veröffentlichung von Version {label} ist endgültig fehlgeschlagen. Ziehen Sie sie zurück, wird sie nie veröffentlicht, und eine neue Version kann begonnen werden; das Dokument hat keine gültige Version, bis diese freigegeben ist. Autor, Freigebende und Eigentümer werden benachrichtigt. Das lässt sich nicht rückgängig machen.',
   reason: 'Begründung',
   reasonHint:
     'Warum darf diese Version nicht in Kraft treten? Wird in der Versionshistorie angezeigt und im Prüfpfad festgehalten.',
@@ -32,7 +32,10 @@ export const withdrawVersion: Translation<typeof en.withdrawVersion> = {
     version_withdrawn: 'Diese Version wurde bereits von jemand anderem zurückgezogen.',
     version_not_approved: 'Die Version wurde nicht zurückgezogen: Sie ist nicht freigegeben.',
   },
+  actingFor:
+    'Sie haben diese Version in Vertretung freigegeben. Das Zurückziehen wird festgehalten i. V. für',
   neverValid: 'Zurückgezogen am {date} von',
+  neverValidActingFor: 'i. V. für',
   neverValidReason: 'Begründung: {reason}',
   notice: 'Diese Version wurde vor ihrem Inkrafttreten zurückgezogen und war nie gültig.',
 }

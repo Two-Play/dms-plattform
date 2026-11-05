@@ -658,13 +658,15 @@ object PublicationApiSpec extends ZIOSpecDefault:
         as[ValidAtView](validOn).items.filter(_.documentId == doc.id).map(_.versionLabel) == List("1.0"),
         as[ValidAtView](validOwner).items.filter(_.documentId == doc.id).map(_.versionLabel) == List("1.0"),
         audit == List((owner.value, Some("Approved by mistake"), "Approved", "Withdrawn")),
-        events.exists(e => e.contains(v2.id.toString) && e.contains("""recipients": ["approver-1"]""")),
+        events.exists(e =>
+          e.contains(v2.id.toString) && e.contains("""recipients": ["approver-1", "author-1"]""")
+        ),
         next.version.startsWith("3.0"),
         // Withdrawn versions never reach the index (ADR 0029): it holds valid and superseded versions only.
         !SearchDocument.isIndexed(DocumentStatus.Withdrawn)
       )
     },
-    test("whoever approved the version may withdraw it; the notice goes to the owner, with the title") {
+    test("whoever approved the version may withdraw it; author and owner are told, with the title") {
       for
         created <- scheduledVersion(owner)
         (doc, v2) = created
@@ -710,7 +712,7 @@ object PublicationApiSpec extends ZIOSpecDefault:
         webhook    <- db.transact(tenantId)(DocumentWebhookEvents(service).describe(statusEvent))
       yield assertTrue(
         done._1 == Status.Ok,
-        notices.map(n => (n.kind, n.recipients)) == List(("publication.withdrawn", List(owner))),
+        notices.map(n => (n.kind, n.recipients)) == List(("publication.withdrawn", List(author, owner))),
         notices.head.params.get("reason").contains("Approved by mistake"),
         notices.head.params.get("withdrawnBy").contains(approver.value),
         forOwner.exists(_.title == "Code of conduct"),

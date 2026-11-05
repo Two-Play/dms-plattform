@@ -87,6 +87,9 @@ enum TaskStatus:
   */
 final case class TaskDeputy(deputy: UserId, principal: UserId)
 
+/** An approving vote cast as deputy (DMS-145, ADR 0070): for whom, and the role of the lane. */
+final case class DeputyApproval(principal: UserId, role: String)
+
 /** A task of a step lane. `candidates` are the people who may complete it.
   *
   * @param deputies
