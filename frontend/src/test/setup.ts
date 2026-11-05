@@ -11,6 +11,7 @@ configure({ asyncUtilTimeout: 5000 })
 
 // jsdom does not implement scrolling; the router's scroll restoration calls it.
 window.scrollTo = () => undefined
+Element.prototype.scrollIntoView = () => undefined
 
 // Tests run in English (the source language of the message catalogs) unless a test switches the
 // language itself, e.g. with `renderInLocale` or `setLocale('de')` for German smoke tests.

@@ -62,7 +62,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description Finds active people of the caller's tenant (its ZITADEL organization) by name or email, for pickers of group members, deputies and person fields; sorted by display name. Requires a role in the tenant. Answers 503 if the identity provider cannot be reached or no user directory is configured. */
+    /** @description Finds active people of the caller's tenant (its ZITADEL organization) by name or email, for pickers of group members, deputies and person fields; sorted by display name, one page at a time, the first 200 hits at most. Requires a role in the tenant. Answers 503 if the identity provider cannot be reached or no user directory is configured. */
     get: operations['getApiV1UsersSearch']
     put?: never
     post?: never
@@ -5427,6 +5427,14 @@ export interface components {
       displayName: string
       email?: string
     }
+    /** UserMatchPage */
+    UserMatchPage: {
+      items?: components['schemas']['UserMatch'][]
+      /** Format: int32 */
+      total: number
+      /** Format: int32 */
+      nextOffset?: number
+    }
     /** UserView */
     UserView: {
       id: string
@@ -5891,8 +5899,10 @@ export interface operations {
   getApiV1UsersSearch: {
     parameters: {
       query: {
-        /** @description Name or email: every word must be the start of the first name, last name, display name, email or user name; 2 to 100 characters, at most 4 words */
+        /** @description Name or email: every word must be part of the first name, last name, display name, email or user name, in any case, with exact characters (no typo tolerance); 2 to 100 characters, at most 4 words */
         q: string
+        /** @description Hits to skip, 0 to 199 (default 0); take it from `nextOffset` of the page before */
+        offset?: number
         /** @description People at most, 1 to 20 (default 10) */
         limit?: number
       }
@@ -5907,10 +5917,10 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['UserMatch'][]
+          'application/json': components['schemas']['UserMatchPage']
         }
       }
-      /** @description Invalid value for: query parameter q, Invalid value for: query parameter limit */
+      /** @description Invalid value for: query parameter q, Invalid value for: query parameter offset, Invalid value for: query parameter limit */
       400: {
         headers: {
           [name: string]: unknown
@@ -10994,7 +11004,7 @@ export interface operations {
           'application/json': components['schemas']['PartnerView'][]
         }
       }
-      /** @description Invalid value for: query parameter q, Invalid value for: query parameter limit */
+      /** @description Invalid value for: query parameter q, Invalid value for: query parameter offset, Invalid value for: query parameter limit */
       400: {
         headers: {
           [name: string]: unknown

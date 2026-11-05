@@ -1,10 +1,11 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { X } from 'lucide-react'
-import { useId, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { useApiClient } from '@/api/context'
 import { ApiRequestError } from '@/api/errors'
 import {
   MIN_PERSON_QUERY,
+  personHits,
   personQuery,
   personSearchQuery,
   useUser,
@@ -34,15 +35,21 @@ export interface PersonPickerProps {
   invalid?: boolean
   required?: boolean
   disabled?: boolean
+  /**
+   * People who cannot be picked here, e.g. members of the group (DMS-125). They stay in the list,
+   * marked with `label`, so nobody wonders why a person is not found.
+   */
+  excluded?: { ids: readonly string[]; label: string }
 }
 
 /**
  * "Select a person" (DMS-111): an accessible combobox (WAI-ARIA combobox with a list box) that
- * searches the tenant's people by name or email and stores the user id. Shows name and email of
- * hits and of the picked person. Keyboard: arrow keys move through the hits, Enter picks, Escape
- * closes the list (or clears the text). Loading, empty and error states are announced in a live
- * region. When the user directory cannot be asked, the typed text can be taken as user id, as
- * before DMS-111.
+ * searches the tenant's people by part of the name or email and stores the user id. Shows name and
+ * email of hits and of the picked person. Keyboard: arrow keys move through the hits, Enter picks,
+ * Escape closes the list (or clears the text). The last row of the list loads more hits (DMS-125);
+ * Enter on it keeps the focus in the text field and moves on to the first new hit. Loading, empty
+ * and error states are announced in a live region. When the user directory cannot be asked, the
+ * typed text can be taken as user id, as before DMS-111.
  */
 export function PersonPicker({
   id,
@@ -53,6 +60,7 @@ export function PersonPicker({
   invalid,
   required,
   disabled,
+  excluded,
 }: PersonPickerProps) {
   const client = useApiClient()
   const queryClient = useQueryClient()
@@ -66,24 +74,46 @@ export function PersonPicker({
   const [typing, setTyping] = useState(false)
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
+  const movedByKey = useRef(false)
 
   const debounced = useDebouncedValue(text, PERSON_SEARCH_DEBOUNCE_MS)
   const query = typing ? personQuery(debounced) : undefined
-  const search = useQuery({
+  const search = useInfiniteQuery({
     ...personSearchQuery(client, queryClient, query ?? ''),
     enabled: query !== undefined,
   })
   const selected = useUser(value === '' ? undefined : value)
 
-  const hits: UserMatch[] = query !== undefined ? (search.data ?? []) : []
-  const activeIndex = active < hits.length ? active : -1
+  const pages = query !== undefined ? (search.data?.pages ?? []) : []
+  const hits = personHits(pages)
+  const total = Math.max(pages.at(-1)?.total ?? 0, hits.length)
+  const canLoadMore = query !== undefined && search.hasNextPage
+  const loadingMore = search.isFetchingNextPage
+  // The hits, and the row that loads more of them as the last one.
+  const rows = hits.length + (canLoadMore ? 1 : 0)
+  const activeIndex = active < rows ? active : -1
   const pending =
-    typing && personQuery(text) !== undefined && (text !== debounced || search.isFetching)
+    typing &&
+    personQuery(text) !== undefined &&
+    (text !== debounced || (search.isFetching && !loadingMore))
   const unavailable =
     search.error instanceof ApiRequestError && search.error.code === 'user_directory_unavailable'
-  const expanded = open && typing && hits.length > 0
+  const expanded = open && typing && rows > 0
   const selectedName = selected.data?.displayName ?? value
   const shown = typing ? text : value !== '' ? selectedName : text
+  const optionId = (index: number) => `${own}-option-${index}`
+  const isExcluded = (person: UserMatch) => excluded?.ids.includes(person.id) ?? false
+
+  // The list scrolls: the row reached with the keyboard must be seen. The mouse needs no help.
+  useEffect(() => {
+    if (!movedByKey.current || activeIndex < 0) return
+    movedByKey.current = false
+    document.getElementById(`${own}-option-${activeIndex}`)?.scrollIntoView({ block: 'nearest' })
+  }, [activeIndex, hits.length, own])
+
+  function loadMore() {
+    if (!loadingMore) void search.fetchNextPage()
+  }
 
   function pick(person: UserMatch) {
     queryClient.setQueryData(['users', person.id], person)
@@ -116,25 +146,33 @@ export function PersonPicker({
       case 'ArrowDown':
         e.preventDefault()
         setOpen(true)
-        if (hits.length > 0) setActive(activeIndex < hits.length - 1 ? activeIndex + 1 : 0)
+        movedByKey.current = true
+        if (rows > 0) setActive(activeIndex < rows - 1 ? activeIndex + 1 : 0)
         break
       case 'ArrowUp':
         e.preventDefault()
         setOpen(true)
-        if (hits.length > 0) setActive(activeIndex > 0 ? activeIndex - 1 : hits.length - 1)
+        movedByKey.current = true
+        if (rows > 0) setActive(activeIndex > 0 ? activeIndex - 1 : rows - 1)
         break
       case 'Home':
       case 'End':
         if (expanded) {
           e.preventDefault()
-          setActive(e.key === 'Home' ? 0 : hits.length - 1)
+          movedByKey.current = true
+          setActive(e.key === 'Home' ? 0 : rows - 1)
         }
         break
       case 'Enter': {
         const person = expanded && activeIndex >= 0 ? hits[activeIndex] : undefined
-        if (person) {
+        if (person && !isExcluded(person)) {
           e.preventDefault()
           pick(person)
+        } else if (expanded && canLoadMore && activeIndex === hits.length) {
+          e.preventDefault()
+          // The first new hit takes this row's place and must be seen in full.
+          movedByKey.current = true
+          loadMore()
         } else if (typing) {
           // Never submit the surrounding form with a half-typed name.
           e.preventDefault()
@@ -160,12 +198,19 @@ export function PersonPicker({
   if (typing) {
     if (personQuery(text) === undefined) status = t('people.hint', { count: MIN_PERSON_QUERY })
     else if (pending) status = t('people.searching')
+    else if (loadingMore) status = t('people.loadingMore')
     else if (search.isError) status = unavailable ? t('people.unavailable') : search.error.message
-    else if (search.isSuccess && hits.length === 0) {
+    else if (search.isSuccess && rows === 0) {
       status = t('people.none', { query: debounced.trim() })
+    } else if (search.isSuccess && hits.length < total) {
+      // Without a next page the reach of the search is exhausted: only a narrower search helps.
+      const counts = { shown: hits.length, total }
+      status = canLoadMore ? t('people.shown', counts) : t('people.refine', counts)
     } else if (search.isSuccess) status = t('people.found', { count: hits.length })
   }
   const showHint = !typing && value === ''
+  // The open list covers the status line below it, so it repeats what matters while it is open.
+  const footer = hits.length > 0 && (search.isError || hits.length < total) ? status : ''
 
   return (
     <div className="relative grid gap-1">
@@ -182,9 +227,7 @@ export function PersonPicker({
           aria-autocomplete="list"
           aria-expanded={expanded}
           aria-controls={listId}
-          aria-activedescendant={
-            expanded && activeIndex >= 0 ? `${own}-option-${activeIndex}` : undefined
-          }
+          aria-activedescendant={expanded && activeIndex >= 0 ? optionId(activeIndex) : undefined}
           aria-describedby={
             [describedBy, value !== '' && !typing ? selectedId : undefined, hintId]
               .filter(Boolean)
@@ -223,38 +266,80 @@ export function PersonPicker({
             <X aria-hidden="true" />
           </Button>
         )}
-        <ul
-          id={listId}
-          role="listbox"
-          aria-label={t('people.results')}
+        <div
           hidden={!expanded}
-          className="absolute top-full right-0 left-0 z-20 mt-1 max-h-72 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-md"
+          className="absolute top-full right-0 left-0 z-20 mt-1 rounded-lg border bg-popover text-popover-foreground shadow-md"
         >
-          {hits.map((person, index) => (
-            <li
-              key={person.id}
-              id={`${own}-option-${index}`}
-              role="option"
-              aria-selected={index === activeIndex}
-              className="cursor-pointer rounded-md px-2 py-1.5 text-sm aria-selected:bg-muted"
-              onMouseDown={(e) => {
-                // Keeps the focus in the text field, so the click is not lost to its blur.
-                e.preventDefault()
-              }}
-              onMouseEnter={() => {
-                setActive(index)
-              }}
-              onClick={() => {
-                pick(person)
-              }}
+          <ul
+            id={listId}
+            role="listbox"
+            aria-label={t('people.results')}
+            className="max-h-72 overflow-y-auto p-1"
+          >
+            {hits.map((person, index) => {
+              const unpickable = isExcluded(person)
+              return (
+                <li
+                  key={person.id}
+                  id={optionId(index)}
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  aria-disabled={unpickable ? true : undefined}
+                  aria-posinset={index + 1}
+                  aria-setsize={total}
+                  className="cursor-pointer rounded-md px-2 py-1.5 text-sm aria-disabled:cursor-not-allowed aria-disabled:text-muted-foreground aria-selected:bg-muted"
+                  onMouseDown={(e) => {
+                    // Keeps the focus in the text field, so the click is not lost to its blur.
+                    e.preventDefault()
+                  }}
+                  onMouseEnter={() => {
+                    setActive(index)
+                  }}
+                  onClick={() => {
+                    if (!unpickable) pick(person)
+                  }}
+                >
+                  <span className="block font-medium">{person.displayName}</span>
+                  {person.email && (
+                    <span className="block text-xs text-muted-foreground">{person.email}</span>
+                  )}
+                  {unpickable && <span className="block text-xs">{excluded?.label}</span>}
+                </li>
+              )
+            })}
+            {canLoadMore && (
+              <li
+                id={optionId(hits.length)}
+                role="option"
+                aria-selected={activeIndex === hits.length}
+                aria-disabled={loadingMore ? true : undefined}
+                className="cursor-pointer rounded-md px-2 py-1.5 text-center text-sm font-medium aria-disabled:cursor-wait aria-disabled:text-muted-foreground aria-selected:bg-muted"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                }}
+                onMouseEnter={() => {
+                  setActive(hits.length)
+                }}
+                onClick={loadMore}
+              >
+                {loadingMore
+                  ? t('people.loadingMore')
+                  : search.isFetchNextPageError
+                    ? t('people.loadMoreAgain')
+                    : t('people.loadMore')}
+              </li>
+            )}
+          </ul>
+          {footer !== '' && (
+            // Announced by the status line already.
+            <p
+              aria-hidden="true"
+              className={`border-t px-3 py-1.5 text-xs ${search.isError && !loadingMore ? 'text-destructive' : 'text-muted-foreground'}`}
             >
-              <span className="block font-medium">{person.displayName}</span>
-              {person.email && (
-                <span className="block text-xs text-muted-foreground">{person.email}</span>
-              )}
-            </li>
-          ))}
-        </ul>
+              {footer}
+            </p>
+          )}
+        </div>
       </div>
       {value !== '' && !typing && (
         <p id={selectedId} className="text-xs text-muted-foreground" data-user-id={value}>
@@ -273,7 +358,7 @@ export function PersonPicker({
       >
         {status}
       </p>
-      {typing && unavailable && text.trim() !== '' && (
+      {typing && unavailable && hits.length === 0 && text.trim() !== '' && (
         // The directory is down or not configured: the id can still be typed, as before DMS-111.
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">{t('people.unavailableHint')}</span>
@@ -322,6 +407,7 @@ export function PeoplePicker({ value, onChange, disabled, ...picker }: PeoplePic
       <PersonPicker
         {...picker}
         disabled={disabled}
+        excluded={{ ids: value, label: t('people.alreadyPicked') }}
         value=""
         onChange={(userId) => {
           if (userId !== '' && !value.includes(userId)) onChange([...value, userId])

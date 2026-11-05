@@ -1,4 +1,4 @@
-import { queryOptions, useQuery, type QueryClient } from '@tanstack/react-query'
+import { infiniteQueryOptions, useQuery, type QueryClient } from '@tanstack/react-query'
 import type { ApiClient } from './client'
 import { useApiClient } from './context'
 import { requestError } from './errors'
@@ -111,14 +111,17 @@ export function useUserLabel(id: string | undefined): string | undefined {
 /** A person found by the people picker (DMS-111): the user id to store, name and email to show. */
 export type UserMatch = components['schemas']['UserMatch']
 
+/** One page of a search for people (DMS-125); `nextOffset` is missing on the last page. */
+export type UserMatchPage = components['schemas']['UserMatchPage']
+
 /** Characters (without blanks) a search for people needs; the backend rejects shorter ones. */
 export const MIN_PERSON_QUERY = 2
 
 /** Words the backend accepts per search; more do not narrow down a person further. */
 const MAX_PERSON_QUERY_WORDS = 4
 
-/** People per search in the picker; the backend allows up to 20. */
-export const PERSON_SEARCH_LIMIT = 10
+/** People per page in the picker; the backend allows up to 20. */
+export const PERSON_SEARCH_LIMIT = 20
 
 /** The search text as the backend expects it, or undefined if it is too short to search yet. */
 export function personQuery(text: string): string | undefined {
@@ -127,29 +130,41 @@ export function personQuery(text: string): string | undefined {
 }
 
 /**
- * People of the caller's tenant whose name or email starts with every word of `query`
+ * People of the caller's tenant whose name or email contains every word of `query`, page by page
  * (`GET /api/v1/users/search`). The people found go into the name cache, so `UserName` shows the
  * picked person without another request.
  */
 export function personSearchQuery(client: ApiClient, queryClient: QueryClient, query: string) {
-  return queryOptions({
+  return infiniteQueryOptions({
     queryKey: ['users', 'search', query],
-    queryFn: async ({ signal }) => {
+    initialPageParam: 0,
+    getNextPageParam: (last: UserMatchPage) => last.nextOffset,
+    queryFn: async ({ signal, pageParam }): Promise<UserMatchPage> => {
       const { data, error, response } = await client.GET('/api/v1/users/search', {
-        params: { query: { q: query, limit: PERSON_SEARCH_LIMIT } },
+        params: { query: { q: query, offset: pageParam, limit: PERSON_SEARCH_LIMIT } },
         signal,
       })
       if (!response.ok || !data) {
         throw requestError(response, error, `Searching people failed with HTTP ${response.status}`)
       }
-      const found = Array.isArray(data) ? data : []
-      for (const person of found) {
+      for (const person of data.items ?? []) {
         queryClient.setQueryData<UserView>(['users', person.id], person)
       }
-      return found
+      return data
     },
     // The backend keeps answers for a minute as well.
     staleTime: 60_000,
     retry: false,
   })
+}
+
+/**
+ * The people of all pages loaded so far, each once: the directory sorts by display name only, so
+ * people with the same name can move between pages.
+ */
+export function personHits(pages: readonly UserMatchPage[]): UserMatch[] {
+  const byId = new Map(
+    pages.flatMap((page) => page.items ?? []).map((person) => [person.id, person]),
+  )
+  return [...byId.values()]
 }

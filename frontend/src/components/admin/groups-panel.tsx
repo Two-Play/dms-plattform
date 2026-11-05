@@ -175,7 +175,12 @@ function useMembershipChange(
   })
 }
 
-function AddMemberForm({ group }: { group: Group }) {
+/** Ids of current members; the list also holds ended memberships, and those people can return. */
+function currentMemberIds(members: GroupMember[] = []): string[] {
+  return members.filter((m) => !m.removedAt).map((m) => m.userId)
+}
+
+function AddMemberForm({ group, memberIds }: { group: Group; memberIds: readonly string[] }) {
   const client = useApiClient()
   const id = useId()
   const [userId, setUserId] = useState('')
@@ -200,7 +205,12 @@ function AddMemberForm({ group }: { group: Group }) {
     >
       <div className="grid min-w-48 flex-1 gap-1.5">
         <Label htmlFor={`${id}-user`}>{t('groups.member')}</Label>
-        <PersonPicker id={`${id}-user`} value={userId} onChange={setUserId} />
+        <PersonPicker
+          id={`${id}-user`}
+          value={userId}
+          onChange={setUserId}
+          excluded={{ ids: memberIds, label: t('people.alreadyMember') }}
+        />
       </div>
       <Button type="submit" disabled={add.isPending || userId.trim() === ''}>
         {add.isPending ? t('groups.adding') : t('groups.add')}
@@ -341,7 +351,7 @@ function GroupDetail({ group }: { group: Group }) {
       </CardHeader>
       <CardContent className="space-y-6">
         <RenameForm key={group.name} group={group} />
-        <AddMemberForm group={group} />
+        <AddMemberForm group={group} memberIds={currentMemberIds(members.data)} />
         {members.isPending && <LoadingState label={t('groups.loadingMembers')} />}
         {members.isError && (
           <ErrorState error={members.error} onRetry={() => void members.refetch()} />

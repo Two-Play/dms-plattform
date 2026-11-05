@@ -23,16 +23,33 @@ trait UserDirectory:
   def lookup(organizationId: String, ids: Set[UserId]): IO[UserDirectoryError, Map[UserId, UserInfo]]
 
   /** People of the organization whose name or email matches every word of `query` (DMS-111, people picker):
-    * each word is the start of the first name, last name, display name, email or user name. Only active human
-    * users (no service accounts), sorted by display name, at most `limit`. A directory that cannot search
-    * fails, so the picker can say why it finds nobody.
+    * each word is part of the first name, last name, display name, email or user name, in any case (DMS-125,
+    * ADR 0067; exact characters: no typo tolerance). Only active human users (no service accounts), sorted by
+    * display name; one page of at most `limit` people after skipping `offset` hits. A directory that cannot
+    * search fails, so the picker can say why it finds nobody.
     */
   def search(
       @unused organizationId: String,
       @unused query: UserQuery,
+      @unused offset: Int,
       @unused limit: Int
-  ): IO[UserDirectoryError, List[UserInfo]] =
+  ): IO[UserDirectoryError, UserSearchPage] =
     ZIO.fail(UserDirectoryError.Unavailable(UserDirectory.CannotSearch))
+
+/** One page of a search for people (DMS-125).
+  *
+  * @param users
+  *   the people of this page; may be fewer than asked for, even if more follow, since the adapter drops
+  *   answers it does not trust
+  * @param total
+  *   hits of the whole search as the directory counts them
+  * @param nextOffset
+  *   where the next page starts, if there is one. Callers must use this value, not the size of `users`.
+  */
+final case class UserSearchPage(users: List[UserInfo], total: Int, nextOffset: Option[Int])
+
+object UserSearchPage:
+  val empty: UserSearchPage = UserSearchPage(Nil, 0, None)
 
 /** A normalized search for people (DMS-111): lower-case words without surrounding blanks, at least one. Built
   * with [[UserQuery.parse]], which also bounds its size.
@@ -70,8 +87,9 @@ object UserDirectory:
     override def search(
         @unused organizationId: String,
         @unused query: UserQuery,
+        @unused offset: Int,
         @unused limit: Int
-    ): IO[UserDirectoryError, List[UserInfo]] =
+    ): IO[UserDirectoryError, UserSearchPage] =
       ZIO.fail(UserDirectoryError.Unavailable(NotConfigured))
 
   /** Reason of [[none]] when searching. */

@@ -9,8 +9,8 @@ Set `DMS_PROFILE=production`. The application then refuses to start with the set
 ### Identity
 
 - [ ] **refused** `ZITADEL_ISSUER` is an https address; `DMS_ZITADEL_PROJECT_ID` and `DMS_ZITADEL_CLIENT_ID` are set (approval votes need the client id, ADR 0024).
-- [ ] **warned** `DMS_USER_DIRECTORY_TOKEN_FILE` is set: a service user that may read users, one per tenant organization (ADR 0037). Without it, user ids are not resolved and the people picker finds nobody.
-- [ ] Every tenant exists in `dms.tenant` with its ZITADEL organization and time zone; the first tenant administrator has a role assignment.
+- [ ] **warned** `DMS_USER_DIRECTORY_TOKEN_FILE` is set: the token of a service user that may read users in every tenant's organization ([steps below](#service-user-of-the-user-directory), ADR 0037, ADR 0067). Without it, user ids are not resolved and the people picker finds nobody.
+- [ ] Every tenant exists in `dms.tenant` with its ZITADEL organization and time zone; the first tenant administrator has a role assignment; the service user of the user directory passed the check for this organization.
 
 ### Data
 
@@ -49,6 +49,53 @@ Set `DMS_PROFILE=production`. The application then refuses to start with the set
 - [ ] `DMS_LOG_APPENDER=JSON` writes one JSON object per line.
 - [ ] Alerts on: `/ready` not 200, `level=ERROR`, 503 answers (the database is overloaded), dead jobs (`select kind, count(*) from dms.job where status = 'dead' group by 1`), the age of the oldest unpublished outbox event.
 - [ ] Log retention follows the data protection concept. Logs contain ids, not names, titles or field values; database error details are switched off at the driver.
+
+## Service user of the user directory
+
+The backend reads names and emails from ZITADEL and searches people for the picker with one read-only service user (ADR 0037, ADR 0067). The platform uses one token for all tenants. Tenants stay apart because every request is limited to the organization of the caller's tenant and the answers are checked, not because of the token. The token can therefore read every organization it was given rights in: keep it in the secret store.
+
+The steps were tried out on ZITADEL v4.19.5. They need an administrator's token (`ADMIN_TOKEN`, `ORG_OWNER` of the organization or `IAM_OWNER`), which the platform never sees.
+
+**Once per installation:** create the machine user, best in an organization of the operator that is not a tenant. Machine users never show up in the people picker.
+
+```bash
+curl -sS -X POST "$ZITADEL_ISSUER/management/v1/users/machine" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "x-zitadel-orgid: $OPERATOR_ORG_ID" -H "Content-Type: application/json" \
+  -d '{"userName":"dms-directory","name":"DMS user directory","accessTokenType":"ACCESS_TOKEN_TYPE_BEARER"}'
+
+# The answer holds the token once: send it straight to the secret store, not into a log or a shell history.
+curl -sS -X POST "$ZITADEL_ISSUER/management/v1/users/$DIRECTORY_USER_ID/pats" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "x-zitadel-orgid: $OPERATOR_ORG_ID" -H "Content-Type: application/json" \
+  -d '{"expirationDate":"2027-12-31T00:00:00Z"}'
+```
+
+Mount the token as a file and point `DMS_USER_DIRECTORY_TOKEN_FILE` at it (or set `DMS_USER_DIRECTORY_TOKEN` from the secret store).
+
+**For every tenant:** make the service user a member of the tenant's organization, the same id as in `dms.tenant.zitadel_org_id`. The user may belong to another organization.
+
+```bash
+curl -sS -X POST "$ZITADEL_ISSUER/management/v1/orgs/me/members" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "x-zitadel-orgid: $TENANT_ORG_ID" -H "Content-Type: application/json" \
+  -d "{\"userId\":\"$DIRECTORY_USER_ID\",\"roles\":[\"ORG_OWNER_VIEWER\"]}"
+```
+
+**Check every tenant.** Do not skip this: without read rights ZITADEL answers **200 with an empty list**, not an error. The platform cannot tell this from an organization without matching people, so user ids stay unresolved and the picker says that nobody was found.
+
+```bash
+curl -sS -X POST "$ZITADEL_ISSUER/v2/users" \
+  -H "Authorization: Bearer $(cat "$DMS_USER_DIRECTORY_TOKEN_FILE")" -H "Content-Type: application/json" \
+  -d "{\"query\":{\"limit\":1},\"queries\":[{\"organizationIdQuery\":{\"organizationId\":\"$TENANT_ORG_ID\"}}]}"
+```
+
+The answer must have a `result` with one user and a `details.totalResult`. Rights take effect within seconds. Names the platform has already looked up as unknown stay unknown for up to 600 seconds (`DMS_USER_DIRECTORY_CACHE_SECONDS`), search answers for up to 60 seconds (`DMS_USER_DIRECTORY_SEARCH_CACHE_SECONDS`).
+
+**Instead of a member entry per organization**, the instance role `IAM_OWNER_VIEWER` also works and needs no step per tenant, but a stolen token then reads every organization and the instance's settings. Use it only if adding tenants cannot include the member step.
+
+**Running it:**
+
+- The token is read at start-up: after rotating it, restart the application. Create the new token before the old one expires; an expired token makes names and searches fail with 503 `user_directory_unavailable`, and the UI falls back to user ids.
+- When a tenant leaves, remove the member entry from its organization.
+- The role only reads. The service user needs no role in the DMS project and no role assignment in the platform.
 
 ## Health, readiness, shutdown
 
