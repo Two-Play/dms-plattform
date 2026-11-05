@@ -26,7 +26,7 @@ object ReviewServiceSpec extends ZIOSpecDefault:
 
   final case class Env(app: Db, owner: Db, audit: Ref[List[AuditEvent]])
 
-  final case class Fixture(tenant: TenantId, templateId: TemplateId)
+  final case class Fixture(tenant: TenantId, templateId: TemplateId, classId: DocumentClassId)
 
   private val appUserSql =
     """do $$ begin
@@ -143,7 +143,14 @@ object ReviewServiceSpec extends ZIOSpecDefault:
       DocumentService(audit, DocumentClassService(audit), Templates, settings)
     )
 
-  private def fixture(review: ReviewPolicy = yearly, zone: String = "Europe/Berlin"): ZIO[Env, Any, Fixture] =
+  /** A tenant with a class and a template of it. With `parent`, the class lies below a class with these
+    * settings.
+    */
+  private def fixture(
+      review: ReviewPolicy = yearly,
+      zone: String = "Europe/Berlin",
+      parent: Option[ReviewPolicy] = None
+  ): ZIO[Env, Any, Fixture] =
     val tenant     = TenantId.random()
     val templateId = TemplateId.random()
     for
@@ -155,8 +162,18 @@ object ReviewServiceSpec extends ZIOSpecDefault:
         )
       )
       classes = DocumentClassService(RecordingAuditTrail(e.audit))
+      above <- ZIO.foreach(parent)(policy =>
+        e.app.transact(tenant)(
+          classes.createClass("parent", None, ClassDraft("Parent", None, Nil, review = Some(policy)), admin)
+        )
+      )
       cls <- e.app.transact(tenant)(
-        classes.createClass("policy", None, ClassDraft("Policy", None, Nil, review = Some(review)), admin)
+        classes.createClass(
+          "policy",
+          above.map(_.classId),
+          ClassDraft("Policy", None, Nil, review = Some(review)),
+          admin
+        )
       )
       _ <- e.app.transact(tenant)(RetentionFixtures.assign(classes, cls.classId, "policy-10y"))
       stored = Jsonb(Templates.encode(content))
@@ -186,7 +203,7 @@ object ReviewServiceSpec extends ZIOSpecDefault:
           Instant.EPOCH
         )
       )
-    yield Fixture(tenant, templateId)
+    yield Fixture(tenant, templateId, cls.classId)
 
   private def as[A](tenant: TenantId, settings: DocumentSettings = DocumentSettings.default)(
       f: DocumentService => IO[DocumentError, A]
@@ -280,6 +297,36 @@ object ReviewServiceSpec extends ZIOSpecDefault:
       r <- reviews
       c <- ReviewJobs(e.app, r, ReviewScheduleConfig()).check(tenant)
     yield c
+
+  /** A new version of a class with these review settings; returns its number. */
+  private def setPolicy(f: Fixture, id: DocumentClassId, policy: ReviewPolicy): ZIO[Env, Any, Int] =
+    ZIO.serviceWithZIO[Env](e =>
+      e.app
+        .transact(f.tenant)(
+          DocumentClassService(RecordingAuditTrail(e.audit))
+            .newClassVersion(id, ClassDraft("Policy", None, Nil, review = Some(policy)), admin)
+        )
+        .map(_.version)
+    )
+
+  /** The recalculation job of a class version: how many dates it moved or kept. */
+  private def recalculate(f: Fixture, id: DocumentClassId, version: Int): ZIO[Env, String, Int] =
+    for
+      e <- ZIO.service[Env]
+      r <- reviews
+      n <- ReviewJobs(e.app, r, ReviewScheduleConfig())
+        .recalculate(f.tenant, ReviewJobs.Recalculation(id.value, version))
+    yield n
+
+  /** Changes the review settings of the fixture's class and runs the recalculation. */
+  private def changeInterval(f: Fixture, policy: ReviewPolicy) =
+    setPolicy(f, f.classId, policy).flatMap(recalculate(f, f.classId, _))
+
+  private def status(tenant: TenantId, version: UUID) =
+    ZIO.serviceWithZIO[Env](_.app.transact(tenant)(Db.sql(ReviewStore.versionStatus(version))))
+
+  private def dateEvents(doc: DocumentId, action: String) =
+    auditOf(doc).map(_.filter(_.action == action).map(_.details.value))
 
   private def openTasks(tenant: TenantId) = review(tenant)(_.tasksOf(owner, open = true))
 
@@ -790,6 +837,267 @@ object ReviewServiceSpec extends ZIOSpecDefault:
         decidedInsert.isLeft,
         deleted.isLeft,
         reopened.isLeft
+      )
+    },
+    test("a longer interval moves a date that is not due yet; it is audited and recorded once") {
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, v1) = created
+        _        <- at("2026-03-01T09:00:00Z")
+        version  <- setPolicy(f, f.classId, ReviewPolicy(Some(24), 60))
+        first    <- recalculate(f, f.classId, version)
+        due      <- dueOn(f.tenant, v1.id)
+        again    <- recalculate(f, f.classId, version)
+        changed  <- dateEvents(doc, ReviewService.DateChanged)
+        events   <- outbox(doc, ReviewService.DateChanged)
+        e        <- ZIO.service[Env]
+        recorded <- e.app.transact(f.tenant)(
+          Db.sql(
+            sql"""select outcome, previous_due_on::text, next_due_on::text from dms.document_review_recalculation
+                  where version_id = ${v1.id}""".query[(String, String, String)].run().toList
+          )
+        )
+        update <- e.app
+          .transact(f.tenant)(
+            Db.sql(sql"update dms.document_review_recalculation set outcome = 'Kept'".update.run())
+          )
+          .either
+      yield assertTrue(
+        first == 1,
+        again == 0,
+        due.contains(LocalDate.of(2028, 1, 1)),
+        changed.size == 1,
+        changed.head.contains("\"previousDueOn\":\"2027-01-01\""),
+        changed.head.contains("\"nextDueOn\":\"2028-01-01\""),
+        changed.head.contains("\"trigger\":\"class-change\""),
+        events.size == 1,
+        recorded == List(("Moved", "2027-01-01", "2028-01-01")),
+        update.isLeft
+      )
+    },
+    test(
+      "a shorter interval ends the open task for the old date; a passed date becomes today and is marked"
+    ) {
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, v1) = created
+        _      <- at("2026-11-10T09:00:00Z")
+        _      <- check(f.tenant)
+        before <- openTasks(f.tenant).map(_.head)
+        _      <- changeInterval(f, ReviewPolicy(Some(6), 60))
+        due    <- dueOn(f.tenant, v1.id)
+        state  <- status(f.tenant, v1.id)
+        tasks  <- review(f.tenant)(_.tasksOfDocument(doc))
+        moved  <- dateEvents(doc, ReviewService.DateChanged)
+      yield assertTrue(
+        due.contains(LocalDate.of(2026, 11, 10)),
+        state.contains(ReviewDue),
+        tasks.map(t => (t.id == before.id, t.dueOn, t.status)).toSet == Set(
+          (true, LocalDate.of(2027, 1, 1), ReviewStatus.Obsolete),
+          (false, LocalDate.of(2026, 11, 10), ReviewStatus.Open)
+        ),
+        moved.head.contains("\"computedDueOn\":\"2026-07-01\"")
+      )
+    },
+    test("an overdue review keeps its date, status and task in both directions, and that is recorded") {
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, v1) = created
+        _       <- at("2027-02-01T09:00:00Z")
+        _       <- check(f.tenant)
+        longer  <- changeInterval(f, ReviewPolicy(Some(24), 60))
+        shorter <- changeInterval(f, ReviewPolicy(Some(6), 60))
+        due     <- dueOn(f.tenant, v1.id)
+        state   <- status(f.tenant, v1.id)
+        tasks   <- openTasks(f.tenant)
+        kept    <- dateEvents(doc, ReviewService.DateKept)
+        changed <- dateEvents(doc, ReviewService.DateChanged)
+      yield assertTrue(
+        longer == 1,
+        shorter == 1,
+        due.contains(LocalDate.of(2027, 1, 1)),
+        state.contains(ReviewDue),
+        tasks.map(_.dueOn) == List(LocalDate.of(2027, 1, 1)),
+        kept.size == 2,
+        kept.forall(_.contains("\"reason\":\"Overdue\"")),
+        changed.isEmpty
+      )
+    },
+    test("a date reached today counts as overdue before the check marked it") {
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (_, v1) = created
+        _     <- at("2027-01-01T09:00:00Z")
+        _     <- changeInterval(f, ReviewPolicy(Some(24), 60))
+        due   <- dueOn(f.tenant, v1.id)
+        state <- status(f.tenant, v1.id)
+      yield assertTrue(due.contains(LocalDate.of(2027, 1, 1)), state.contains(Published))
+    },
+    test("a longer interval leaves a date alone whose owner was asked already") {
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, v1) = created
+        _     <- at("2026-11-10T09:00:00Z")
+        _     <- check(f.tenant)
+        task  <- openTasks(f.tenant).map(_.head)
+        _     <- changeInterval(f, ReviewPolicy(Some(24), 60))
+        due   <- dueOn(f.tenant, v1.id)
+        tasks <- openTasks(f.tenant)
+        kept  <- dateEvents(doc, ReviewService.DateKept)
+      yield assertTrue(
+        due.contains(LocalDate.of(2027, 1, 1)),
+        tasks.map(_.id) == List(task.id),
+        kept.head.contains("\"reason\":\"OpenTask\"")
+      )
+    },
+    test("a date whose task is decided stays and the decision is not touched") {
+      for
+        f       <- fixture()
+        created <- revisedTask(f)
+        (doc, v1, task, _) = created
+        _     <- changeInterval(f, ReviewPolicy(Some(6), 60))
+        due   <- dueOn(f.tenant, v1.id)
+        after <- review(f.tenant)(_.task(task.id))
+        all   <- review(f.tenant)(_.tasksOfDocument(doc))
+        kept  <- dateEvents(doc, ReviewService.DateKept)
+      yield assertTrue(
+        due.contains(task.dueOn),
+        after == task,
+        all.size == 1,
+        kept.head.contains("\"reason\":\"Decided\"")
+      )
+    },
+    test("a recertified date only moves earlier, counted from the recertification, and its task stays") {
+      val chosen = LocalDate.of(2027, 6, 1)
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (_, v1) = created
+        _       <- at("2026-11-10T09:00:00Z")
+        _       <- check(f.tenant)
+        task    <- openTasks(f.tenant).map(_.head)
+        decided <- review(f.tenant)(_.recertify(task.id, Some(chosen), None, owner))
+        _       <- changeInterval(f, ReviewPolicy(Some(24), 60))
+        kept    <- dueOn(f.tenant, v1.id)
+        _       <- changeInterval(f, ReviewPolicy(Some(3), 60))
+        moved   <- dueOn(f.tenant, v1.id)
+        after   <- review(f.tenant)(_.task(task.id))
+      yield assertTrue(
+        kept.contains(chosen),
+        moved.contains(LocalDate.of(2027, 2, 10)),
+        after == decided,
+        after.nextDueOn.contains(chosen)
+      )
+    },
+    test("removing the interval keeps the review date") {
+      for
+        f       <- fixture()
+        created <- valid(f)
+        (doc, v1) = created
+        _    <- at("2026-03-01T09:00:00Z")
+        _    <- changeInterval(f, ReviewPolicy())
+        due  <- dueOn(f.tenant, v1.id)
+        kept <- dateEvents(doc, ReviewService.DateKept)
+      yield assertTrue(
+        due.contains(LocalDate.of(2027, 1, 1)),
+        kept.head.contains("\"reason\":\"NoInterval\"")
+      )
+    },
+    test(
+      "the review date and the lead time come from the parent, and a parent's change reaches the subclass"
+    ) {
+      for
+        f       <- fixture(ReviewPolicy.inherit, parent = Some(ReviewPolicy(Some(12), 30)))
+        created <- valid(f)
+        (_, v1) = created
+        e      <- ZIO.service[Env]
+        parent <- e.app.transact(f.tenant)(
+          Db.sql(sql"select id from dms.document_class where key = 'parent'".query[UUID].run().head)
+        )
+        due        <- dueOn(f.tenant, v1.id)
+        _          <- at("2026-11-15T09:00:00Z")
+        beforeLead <- check(f.tenant)
+        _          <- at("2026-12-05T09:00:00Z")
+        atLead     <- check(f.tenant)
+        version    <- setPolicy(f, DocumentClassId(parent), ReviewPolicy(Some(6), 30))
+        moved      <- recalculate(f, DocumentClassId(parent), version)
+        after      <- dueOn(f.tenant, v1.id)
+        // With settings of its own the subclass is out of reach of the parent.
+        _       <- setPolicy(f, f.classId, ReviewPolicy(Some(36), 30))
+        reached <- review(f.tenant)(_.reachedBy(parent))
+      yield assertTrue(
+        due.contains(LocalDate.of(2027, 1, 1)),
+        beforeLead.opened == 0,
+        atLead.opened == 1,
+        moved == 1,
+        after.contains(LocalDate.of(2026, 12, 5)),
+        reached.isEmpty
+      )
+    },
+    test("versions without a date get one from the check, once, and never before today") {
+      for
+        f       <- fixture(ReviewPolicy())
+        created <- valid(f)
+        (doc, v1) = created
+        none    <- dueOn(f.tenant, v1.id)
+        idle    <- check(f.tenant)
+        _       <- setPolicy(f, f.classId, yearly)
+        _       <- at("2028-03-01T09:00:00Z")
+        first   <- check(f.tenant)
+        due     <- dueOn(f.tenant, v1.id)
+        state   <- status(f.tenant, v1.id)
+        tasks   <- openTasks(f.tenant)
+        again   <- check(f.tenant)
+        changed <- dateEvents(doc, ReviewService.DateChanged)
+        e       <- ZIO.service[Env]
+        records <- e.app.transact(f.tenant)(
+          Db.sql(sql"select count(*) from dms.document_review_recalculation".query[Long].run().head)
+        )
+      yield assertTrue(
+        none.isEmpty,
+        idle.scheduled == 0,
+        first.scheduled == 1,
+        again.scheduled == 0,
+        due.contains(LocalDate.of(2028, 3, 1)),
+        state.contains(ReviewDue),
+        tasks.map(_.dueOn) == List(LocalDate.of(2028, 3, 1)),
+        changed.size == 1,
+        changed.head.contains("\"previousDueOn\":null"),
+        changed.head.contains("\"computedDueOn\":\"2027-01-01\""),
+        changed.head.contains("\"trigger\":\"missing-date\""),
+        records == 0L
+      )
+    },
+    test("the backfill leaves dated, superseded and other tenants' versions alone") {
+      for
+        f       <- fixture(ReviewPolicy())
+        other   <- fixture(ReviewPolicy())
+        created <- valid(f)
+        (doc, v1) = created
+        foreign <- valid(other)
+        _       <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Content revised"), author))
+        _       <- as(f.tenant)(
+          _.updateDraft(doc, DraftChange(None, values(LocalDate.of(2026, 2, 1)), None), author)
+        )
+        a       <- approveOpen(f, doc)
+        _       <- at("2026-02-02T09:00:00Z")
+        v2      <- as(f.tenant)(_.changeStatus(a.id, Publish, approver))
+        _       <- setPolicy(f, f.classId, yearly)
+        work    <- review(f.tenant)(_.pendingWork)
+        _       <- check(f.tenant)
+        old     <- dueOn(f.tenant, v1.id)
+        current <- dueOn(f.tenant, v2.id)
+        outside <- dueOn(other.tenant, foreign._2.id)
+      yield assertTrue(
+        work.withoutDate == List(v2.id),
+        old.isEmpty,
+        current.contains(LocalDate.of(2027, 2, 1)),
+        outside.isEmpty
       )
     }
   ).provideShared(env) @@ TestAspect.sequential

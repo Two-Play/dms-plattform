@@ -240,5 +240,43 @@ object DocumentClassApiSpec extends ZIOSpecDefault:
           )
         )
       )
+    },
+    test("a subclass inherits review settings by default, shows them in force and can have its own") {
+      def view(response: (Status, String)) = response._2.fromJson[DocumentClassView].toOption.map(_.review)
+      def post(path: String, body: String) =
+        call(admin, "POST", s"/api/v1/admin/document-classes$path", Some(body))
+      for
+        root <- post(
+          "",
+          """{"key":"guideline","label":"Guideline","fields":[],"review":{"intervalMonths":12,"leadDays":30}}"""
+        )
+        id = root._2.fromJson[DocumentClassView].toOption.map(_.id).get
+        child <- post("", s"""{"key":"guideline-it","label":"IT","fields":[],"parentId":"$id"}""")
+        childId = child._2.fromJson[DocumentClassView].toOption.map(_.id).get
+        own <- post(
+          s"/$childId/versions",
+          """{"label":"IT","fields":[],"review":{"intervalMonths":6,"leadDays":10}}"""
+        )
+        back <- post(s"/$childId/versions", """{"label":"IT","fields":[],"review":{"inherited":true}}""")
+        both <- post(
+          s"/$childId/versions",
+          """{"label":"IT","fields":[],"review":{"intervalMonths":6,"inherited":true}}"""
+        )
+        rootInherits <- post(
+          "",
+          """{"key":"loose","label":"Loose","fields":[],"review":{"inherited":true}}"""
+        )
+        versions <- call(admin, "GET", s"/api/v1/admin/document-classes/$childId")
+        list = versions._2.fromJson[List[DocumentClassView]].toOption.toList.flatten
+      yield assertTrue(
+        view(child).contains(ReviewSettingsView(None, 60, true, Some(12), 30)),
+        view(own).contains(ReviewSettingsView(Some(6), 10, false, Some(6), 10)),
+        view(back).contains(ReviewSettingsView(None, 60, true, Some(12), 30)),
+        both._1 == Status.UnprocessableEntity,
+        rootInherits._1 == Status.UnprocessableEntity,
+        // Old versions show what they stored; what is in force is the same for all of them.
+        list.map(_.review.intervalMonths) == List(None, Some(6), None),
+        list.map(_.review.effectiveIntervalMonths).distinct == List(Some(12))
+      )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

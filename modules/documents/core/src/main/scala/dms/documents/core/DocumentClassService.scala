@@ -34,8 +34,8 @@ final case class FieldDraft(
   * @param parentVersion
   *   the parent's profile version to inherit from; default: the parent's latest version
   * @param review
-  *   periodic review settings (US-07.1); default: those of the previous version, or none and 60 days lead
-  *   time for a new class
+  *   periodic review settings (US-07.1); default: those of the previous version; for a new class those of its
+  *   parent, or without parent none and 60 days lead time for a new class
   */
 final case class ClassDraft(
     label: String,
@@ -121,7 +121,7 @@ final class DocumentClassService(audit: AuditTrail):
             draft.label,
             draft.description,
             draft.fields,
-            draft.review.getOrElse(ReviewPolicy.default)
+            draft.review.getOrElse(if parent.isDefined then ReviewPolicy.inherit else ReviewPolicy.default)
           )
           _ <- reviewProblems(cls)
           _ <- resolve(cls)
@@ -140,7 +140,8 @@ final class DocumentClassService(audit: AuditTrail):
       actor: UserId
   ): IO[MetadataError, DocumentClassVersion] =
     for
-      next <- sqlEither {
+      before <- sql(MetadataStore.effectiveReviewPolicy(id))
+      next   <- sqlEither {
         for
           latest    <- MetadataStore.latestClassVersion(id).toRight(classNotFound(id))
           parentRef <- latest.parent.fold(noParent(draft))(p =>
@@ -160,12 +161,22 @@ final class DocumentClassService(audit: AuditTrail):
       }
       _ <- sql(MetadataStore.insertClassVersion(next, actor.value))
         .mapError(conflict(s"class ${next.key} was changed concurrently"))
-      _ <- recordClass("document-class.version-created", next, actor)
+      _     <- recordClass("document-class.version-created", next, actor)
+      after <- sql(MetadataStore.effectiveReviewPolicy(id))
+      _     <- ZIO.when(before.map(_.intervalMonths) != after.map(_.intervalMonths))(
+        intervalChanged(next, before.flatMap(_.intervalMonths), after.flatMap(_.intervalMonths), actor)
+      )
     yield next
 
-  /** The periodic review settings of a class: those of its latest version (US-07.1). */
+  /** The periodic review settings in force for a class: those of its latest version, or of the nearest
+    * ancestor if it inherits them (US-07.1, ADR 0068).
+    */
   def reviewPolicy(id: DocumentClassId): IO[MetadataError, ReviewPolicy] =
-    sql(MetadataStore.latestClassVersion(id)).someOrFail(classNotFound(id)).map(_.review)
+    sql(MetadataStore.effectiveReviewPolicy(id)).someOrFail(classNotFound(id))
+
+  /** The periodic review settings in force for every class. */
+  def reviewPolicies: IO[MetadataError, Map[DocumentClassId, ReviewPolicy]] =
+    sql(MetadataStore.effectiveReviewPolicies())
 
   /** The retention rule of every class, own and effective (inherited from the nearest ancestor), in key order
     * (DMS-133).
@@ -254,6 +265,27 @@ final class DocumentClassService(audit: AuditTrail):
       )
     )
 
+  /** Records that the interval in force changed and asks for the open review dates to be computed again, in
+    * the transaction of the change (ADR 0068).
+    */
+  private def intervalChanged(
+      cls: DocumentClassVersion,
+      previous: Option[Int],
+      next: Option[Int],
+      actor: UserId
+  ) =
+    record(
+      actor,
+      "document-class.review-interval-changed",
+      AuditObject("document-class", Some(cls.classId.value), Some(cls.version.toString)),
+      Json.Obj(
+        "key"                    -> Json.Str(cls.key.value),
+        "previousIntervalMonths" -> previous.fold(Json.Null)(Json.Num(_)),
+        "intervalMonths"         -> next.fold(Json.Null)(Json.Num(_)),
+        "inherited"              -> Json.Bool(cls.review.inherited)
+      )
+    ) *> ReviewJobs.requestRecalculation(cls.classId, cls.version).mapError(MetadataError.Database(_))
+
   private def recordClass(action: String, cls: DocumentClassVersion, actor: UserId) =
     record(
       actor,
@@ -266,7 +298,8 @@ final class DocumentClassService(audit: AuditTrail):
         "fields"        -> cls.fields.toJsonAST.getOrElse(Json.Null),
         "review"        -> Json.Obj(
           "intervalMonths" -> cls.review.intervalMonths.fold(Json.Null)(Json.Num(_)),
-          "leadDays"       -> Json.Num(cls.review.leadDays)
+          "leadDays"       -> Json.Num(cls.review.leadDays),
+          "inherited"      -> Json.Bool(cls.review.inherited)
         )
       )
     )
@@ -299,7 +332,8 @@ object DocumentClassService:
     case other                                                 => other
 
   private def reviewProblems(cls: DocumentClassVersion): Either[MetadataError, Unit] =
-    val problems = cls.review.problems
+    val problems = cls.review.problems ++
+      Option.when(cls.review.inherited && cls.parent.isEmpty)("a root class has nothing to inherit").toList
     Either.cond(problems.isEmpty, (), MetadataError.Invalid(problems))
 
   private def noParent(draft: ClassDraft): Either[MetadataError, Option[ClassRef]] =
