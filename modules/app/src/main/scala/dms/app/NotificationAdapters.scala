@@ -5,7 +5,7 @@ import dms.archive.core.LegalHoldService
 import dms.authz.{Action, Authorizer, Groups, Policy, Role, RoleAssignments, Subject}
 import dms.db.Db
 import dms.db.queue.OutboxEvent
-import dms.documents.{DocumentStatus, Publication}
+import dms.documents.{DocumentStatus, DocumentVersion, Publication}
 import dms.documents.core.{DocumentError, DocumentService, ReviewService}
 import dms.identity.{TenantOrganizations, UserDirectory}
 import dms.kernel.{DocumentId, TenantId, UserId}
@@ -48,13 +48,15 @@ import scala.util.Try
   *   - `legal-hold.created`, `legal-hold.released`: tenant-wide records managers
   *   - `document.rendition-dead`, `document.publication-dead` (DMS-142, ADR 0058): the document's owner
   *     (without owner: the version's author) and the tenant-wide records managers, or the tenant
-  *     administrators if there are none. Each audience gets the link it can reach; nothing is sent if the
-  *     version does not wait any more (rejected, withdrawn, published in the meantime)
+  *     administrators if there are none; of a publication also those who approved the version, who can
+  *     withdraw it (DMS-148). Each audience gets the link it can reach; nothing is sent if the version does
+  *     not wait any more (rejected, withdrawn, published in the meantime)
   */
 final class PlatformNotificationEvents(
     documents: DocumentService,
     roles: RoleAssignments,
-    holds: LegalHoldService
+    holds: LegalHoldService,
+    workflow: Option[ApprovalWorkflow] = None
 ) extends NotificationEvents:
   import PlatformNotificationEvents.*
 
@@ -320,6 +322,7 @@ final class PlatformNotificationEvents(
       ZIO
         .foreach(waiting) { (d, v) =>
           val responsible = d.document.ownerId.getOrElse(v.createdBy)
+          val base        = DocumentApi.resource(event.tenant, d, v)
           def notice(recipients: List[UserId], extra: (String, String)*) =
             Notice(
               kind,
@@ -329,43 +332,41 @@ final class PlatformNotificationEvents(
               Map("version" -> v.label) ++ reason.map("reason" -> _) ++ extra
             )
           for
-            managers <- recordsManagers
-            admins   <- if managers.isEmpty then tenantAdministrators else ZIO.succeed(Nil)
-            held     <- roles.forUser(responsible).mapError(_.toString)
-            now      <- Clock.instant
-            // The named owner is not always able to retry (holding the owner role is required), so the text
-            // must not promise it. Owner and author pass confidentiality whatever their groups are.
-            mayRetry = Policy
-              .decide(
-                Subject(responsible, event.tenant, held),
-                retry,
-                DocumentApi.resource(event.tenant, d, v),
-                now
-              )
-              .isPermitted
-            // Withdrawing is the way out if a retry cannot help; only a publication has it (ADR 0061).
-            mayWithdraw = Policy
-              .decide(
-                Subject(responsible, event.tenant, held),
-                Action.Withdraw,
-                DocumentApi.resource(event.tenant, d, v),
-                now
-              )
-              .isPermitted
+            managers  <- recordsManagers
+            admins    <- if managers.isEmpty then tenantAdministrators else ZIO.succeed(Nil)
+            approvers <- if rendition then ZIO.succeed(Set.empty[UserId]) else approversOf(d.document.id, v)
+            now       <- Clock.instant
+            resource = base.copy(approvedBy = approvers)
+            // Neither the owner nor an approver is always able to retry or withdraw (both depend on the roles
+            // held), so the text must not promise it. Owner and author pass confidentiality whatever their groups.
+            personal <- ZIO.foreach(
+              (responsible :: approvers.toList.sortBy(_.value)).distinct.diff(managers ++ admins)
+            ) { user =>
+              roles.forUser(user).mapError(_.toString).map { held =>
+                val subject = Subject(user, event.tenant, held)
+                notice(
+                  List(user),
+                  "audience" -> NotificationTemplates.Audience.Owner,
+                  "canRetry" -> Policy.decide(subject, retry, resource, now).isPermitted.toString,
+                  // Withdrawing is the way out if a retry cannot help; only a publication has it (ADR 0061).
+                  "canWithdraw" -> Policy.decide(subject, Action.Withdraw, resource, now).isPermitted.toString
+                )
+              }
+            }
           yield List(
             // Someone in two audiences gets the link of the list, which needs no reading permission.
             notice(managers, "audience" -> NotificationTemplates.Audience.Records),
-            notice(admins, "audience"   -> NotificationTemplates.Audience.Admin),
-            notice(
-              List(responsible).diff(managers ++ admins),
-              "audience"    -> NotificationTemplates.Audience.Owner,
-              "canRetry"    -> mayRetry.toString,
-              "canWithdraw" -> mayWithdraw.toString
-            )
-          ).filter(_.recipients.nonEmpty)
+            notice(admins, "audience"   -> NotificationTemplates.Audience.Admin)
+          ).filter(_.recipients.nonEmpty) ++ personal
         }
         .map(_.toList.flatten)
     }
+
+  /** Who approved a version; the final approver is on the version even without the workflow. */
+  private def approversOf(document: DocumentId, v: DocumentVersion): IO[String, Set[UserId]] =
+    ZIO
+      .foreach(workflow)(_.cases(document).mapError(_.describe))
+      .map(_.fold(Set.empty[UserId])(DocumentApi.approversOf(_, v.id)) ++ v.releasedBy)
 
   /** The `deputies` of a workflow event: deputy and the principal they stand in for. */
   private def deputiesOf(payload: Json.Obj): List[(UserId, String)] =
@@ -553,7 +554,7 @@ object PlatformNotifications:
           .unless(smtp.enabled)
       yield NotificationJobs(
         db,
-        PlatformNotificationEvents(documents, roles, holds),
+        PlatformNotificationEvents(documents, roles, holds, Some(workflow)),
         PolicyNotificationDocuments(documents, workflow, authz, roles, groups),
         DirectoryRecipients(directory, orgs),
         SmtpMailSender(smtp),

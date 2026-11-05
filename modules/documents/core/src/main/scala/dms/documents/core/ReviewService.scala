@@ -41,10 +41,11 @@ final case class ReviewWork(
   * stays valid until the draft is published) or [[withdraw]] (the version goes out of force; other versions,
   * e.g. an approved one waiting for its valid-from date, are not affected).
   *
-  * A revision that never takes effect (withdrawn before its valid-from date, discarded as a draft) leaves the
-  * decision of its task as it is, and a new open task of the same version and review date takes over
-  * ([[ReviewService.reopenFor]], DMS-145, ADR 0061). The withdrawal and the discarding do that in their own
-  * transaction; the periodic check picks up what they could not reach ([[reopen]]).
+  * A revision that does not replace the version (withdrawn before its valid-from date, discarded as a draft,
+  * published for another validity scope) leaves the decision of its task as it is, and a new open task of the
+  * same version and review date takes over ([[ReviewService.reopenFor]], ADR 0061, ADR 0063). The withdrawal,
+  * the discarding and the publication do that in their own transaction; the periodic check picks up what they
+  * could not reach ([[reopen]]).
   *
   * Every method must run inside `Db.transact(tenant)`; every change is recorded in the audit trail and
   * published to the outbox in the same transaction. Authorization is the caller's job: decisions are the
@@ -336,10 +337,11 @@ object ReviewService:
   /** Audit action and outbox event of a task opened again (DMS-145, ADR 0061). */
   val Reopened: String = "document.review-task-reopened"
 
-  /** Opens the tasks decided as revised with `revision` again, in the transaction that ended it: it was
-    * withdrawn before it took effect or discarded as a draft, so their versions still need a decision for the
-    * same review date. There can be several, one per valid version: a revision can be linked to the task of
-    * each validity scope. Tasks whose version is not valid any more or has another review date stay closed.
+  /** Opens the tasks decided as revised with `revision` again, in the transaction that settled it: it was
+    * withdrawn before it took effect, discarded as a draft or published for another scope, so their versions
+    * still need a decision for the same review date. There can be several, one per valid version: a revision
+    * can be linked to the task of each validity scope. Tasks whose version is not valid any more or has
+    * another review date stay closed.
     */
   private[core] def reopenFor(audit: AuditTrail, revision: UUID): IO[DocumentError, List[ReviewTask]] =
     sql(ReviewStore.lostToRevision(Some(revision)))

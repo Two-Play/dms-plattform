@@ -149,6 +149,23 @@ object RequirednessSpec extends ZIOSpecDefault:
             Validation.checkSubmission(requiring(Set(Withdrawn)), filled, Draft) == Right(InReview)
           )
         },
+        test("a system field the platform never sets blocks it, one it still sets does not (DMS-148)") {
+          val numbered = profile.copy(fields =
+            profile.fields.map(f =>
+              if f.key.value == CoreFields.DocumentNumber then f.copy(requiredIn = Set(Published)) else f
+            )
+          )
+          assertTrue(
+            blockedBy(numbered, filled) ==
+              List(CoreFields.DocumentNumber -> IssueKind.MissingRequired(Published)),
+            Validation.checkSubmission(
+              numbered,
+              filled + (CoreFields.DocumentNumber -> V.Text("P-1")),
+              Draft
+            ) ==
+              Right(InReview)
+          )
+        },
         test("what the caller adds is reported with the rest, once per field") {
           val extra = FieldIssue("contractPartner", "Partner", IssueKind.MissingRequired(Approved))
           val other = FieldIssue("termMonths", "Term", IssueKind.MissingRequired(Approved))

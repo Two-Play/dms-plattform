@@ -1807,9 +1807,9 @@ final class DocumentService(
               }
           case LifecycleEvent.Submit =>
             Validation.checkSubmission(profile, values, current.status, computedInputs)
-          // Stopping an approved version never depends on its values: they are frozen, and a class can name
+          // Stopping a submitted version never depends on its values: they are frozen, and a class can name
           // `Withdrawn` among the statuses a field is required in. It would be the way out that fails.
-          case LifecycleEvent.Withdraw if withdrawalReason.isDefined =>
+          case LifecycleEvent.Withdraw if current.status != DocumentStatus.Draft =>
             Lifecycle.transition(current.status, event).left.map(TransitionBlocked.NotAllowed(_))
           case other => Validation.checkTransition(profile, values, current.status, other))
         .mapError {
@@ -1851,6 +1851,10 @@ final class DocumentService(
         .filterOrFail(identity)(changedConcurrently(current))
         .mapError(conflict(s"document ${document.id.value} already has a valid version in this scope"))
       _ <- ZIO.foreachDiscard(reviewDueOn)(d => sql(ReviewStore.setDueOn(current.id, d)))
+      // A revision for another scope replaced nothing: the version under review still needs a decision (ADR 0063).
+      _ <- ZIO.when(current.status == DocumentStatus.Approved && target == DocumentStatus.Published)(
+        ReviewService.reopenFor(audit, current.id)
+      )
       // Who must acknowledge is fixed by the class's settings at publication (DMS-100, ADR 0048).
       _ <- ZIO.when(
         current.status == DocumentStatus.Approved && target == DocumentStatus.Published &&

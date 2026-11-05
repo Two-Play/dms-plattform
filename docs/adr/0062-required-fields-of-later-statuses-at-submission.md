@@ -62,8 +62,7 @@ Not covered:
 ## Follow-ups
 
 - Must be done: user confirms this ADR (status → Accepted).
-- Should: explain in the class editor that requiredness after the review applies at submission.
-- Should: the other points of DMS-147 are filed as DMS-148: `System` fields, `Withdrawn`, a revision in another validity scope, approvers of a dead publication, task chain in the evidence report.
+- Done in DMS-148 (ADR 0063): `System` fields, `Withdrawn`, a revision in another validity scope, approvers of a dead publication, task chain in the evidence report, and the rule in the API description (the interface has no class editor).
 
 ## Reversibility
 

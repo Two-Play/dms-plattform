@@ -63,6 +63,9 @@ object CoreFields:
   def requiredByValues(values: Map[String, MetadataValue], status: DocumentStatus): Set[String] =
     if isRestricted(values) && fromReview.contains(status) then Set(AllowedGroups) else Set.empty
 
+  /** System fields the platform fills in after the review, so they cannot be expected at submission. */
+  val SetAfterReview: Set[String] = Set("renditionChecksum")
+
   private val fromDraft  = Requiredness.always
   private val fromReview = Requiredness.from(InReview)
 

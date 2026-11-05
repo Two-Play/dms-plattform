@@ -281,7 +281,7 @@ object EvidenceReportLayout:
           v.reviews.map(t =>
             List(
               t.dueOn.toString,
-              t.status,
+              reviewStatus(t, v.reviews),
               t.decidedAt.fold("–")(d => s"${at(d)} by ${t.decidedBy.getOrElse("")}"),
               t.nextDueOn.fold("–")(_.toString),
               t.comment.getOrElse("–")
@@ -344,6 +344,13 @@ object EvidenceReportLayout:
     )
     add("</body>\n</html>\n")
     out.toString
+
+  /** The status of a review task, naming the decided task it opened again (ADR 0061). */
+  private[app] def reviewStatus(task: EvidenceReview, all: List[EvidenceReview]): String =
+    task.reopens
+      .flatMap(id => all.find(_.taskId == id))
+      .flatMap(_.decidedAt)
+      .fold(task.status)(d => s"${task.status} (reopens the task decided ${at(d)})")
 
   private def yesNo(b: Boolean): String = if b then "yes" else "no"
 

@@ -15,12 +15,13 @@ import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
 import dms.archive.core.LegalHoldService
 import dms.db.queue.OutboxEvent
 import dms.db.{Db, DbConfig, DbError, Jsonb, Migrations}
-import dms.documents.DocumentStatus
+import dms.documents.{DocumentStatus, Publication}
 import dms.documents.core.*
 import dms.identity.*
 import dms.integration.{JobRunner, WorkerConfig}
 import dms.kernel.{DocumentId, TemplateId, TenantId, UserId}
 import dms.notifications.DocumentRef
+import dms.notifications.core.NotificationTemplates
 import dms.search.SearchDocument
 import dms.templates.*
 import dms.templates.core.ContentJson.given
@@ -717,6 +718,33 @@ object PublicationApiSpec extends ZIOSpecDefault:
         forReader.isEmpty,
         forReaders.isEmpty,
         webhook.isEmpty
+      )
+    },
+    test("those who approved a version hear of its dead publication, with the way out (DMS-148)") {
+      for
+        created <- scheduledVersion(owner)
+        (doc, v2) = created
+        service  <- ZIO.service[DocumentService]
+        roles    <- ZIO.service[RoleAssignments]
+        workflow <- ZIO.service[ApprovalWorkflow]
+        audit    <- ZIO.service[AuditTrail]
+        db       <- ZIO.service[Db]
+        events = PlatformNotificationEvents(service, roles, LegalHoldService(audit), Some(workflow))
+        dead   = OutboxEvent(
+          1L,
+          tenantId,
+          "document",
+          doc.id,
+          Publication.DeadEvent,
+          Jsonb(s"""{"documentId":"${doc.id}","versionId":"${v2.id}","reason":"invalid"}"""),
+          None,
+          0
+        )
+        notices <- db.transact(tenantId)(events.describe(dead))
+        personal = notices.filter(_.params.get("audience").contains(NotificationTemplates.Audience.Owner))
+      yield assertTrue(
+        personal.flatMap(_.recipients).toSet == Set(owner, approver),
+        personal.find(_.recipients == List(approver)).exists(_.params.get("canWithdraw").contains("true"))
       )
     },
     test("the publication job gets there first: the withdrawal is told so") {
