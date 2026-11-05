@@ -4828,6 +4828,7 @@ export interface components {
       intervalMonths?: number
       /** Format: int32 */
       leadDays?: number
+      inherited?: boolean
     }
     /** ReviewSettingsView */
     ReviewSettingsView: {
@@ -4835,6 +4836,11 @@ export interface components {
       intervalMonths?: number
       /** Format: int32 */
       leadDays: number
+      inherited: boolean
+      /** Format: int32 */
+      effectiveIntervalMonths?: number
+      /** Format: int32 */
+      effectiveLeadDays: number
     }
     /** ReviewTaskView */
     ReviewTaskView: {

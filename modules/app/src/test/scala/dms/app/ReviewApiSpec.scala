@@ -617,8 +617,8 @@ object ReviewApiSpec extends ZIOSpecDefault:
         )
       yield assertTrue(
         created._1 == Status.Created,
-        cls.review == ReviewSettingsView(Some(24), 30),
-        as[DocumentClassView](kept).review == ReviewSettingsView(Some(24), 30),
+        cls.review == ReviewSettingsView(Some(24), 30, false, Some(24), 30),
+        as[DocumentClassView](kept).review == ReviewSettingsView(Some(24), 30, false, Some(24), 30),
         invalid._1 == Status.UnprocessableEntity,
         byOwner._1 == Status.Forbidden
       )

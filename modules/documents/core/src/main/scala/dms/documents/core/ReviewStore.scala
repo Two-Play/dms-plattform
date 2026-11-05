@@ -54,31 +54,125 @@ private[core] object ReviewStore:
       leadDays: Int
   ) derives DbCodec
 
+  /** A valid version whose review date is computed again, with the settings in force for its class. */
+  final case class DateRow(
+      versionId: UUID,
+      documentId: UUID,
+      dueOn: Option[LocalDate],
+      intervalMonths: Option[Int],
+      leadDays: Int
+  ) derives DbCodec:
+    def policy: ReviewPolicy = ReviewPolicy(intervalMonths, leadDays)
+
   /** The review state of a version, locked: status, review date and the lead time of its class. */
   def lockVersion(id: UUID)(using DbTx): Option[Candidate] =
-    sql"""select v.id, v.document_id, v.status, v.review_due_on, c.review_lead_days
+    sql"""select v.id, v.document_id, v.status, v.review_due_on, c.lead_days
           from dms.document_version v
           join dms.document d on d.id = v.document_id
-          cross join lateral (select review_lead_days from dms.document_class_version cv
-                              where cv.class_id = d.class_id order by cv.version desc limit 1) c
+          cross join lateral dms.class_review_policy(d.class_id) c
           where v.id = $id and v.review_due_on is not null
           for update of v"""
       .query[Candidate]
       .run()
       .headOption
 
+  /** A valid version and the settings in force for its class, locked. */
+  def lockValidVersion(id: UUID)(using DbTx): Option[DateRow] =
+    sql"""select v.id, v.document_id, v.review_due_on, c.interval_months, c.lead_days
+          from dms.document_version v
+          join dms.document d on d.id = v.document_id
+          cross join lateral dms.class_review_policy(d.class_id) c
+          where v.id = $id and v.status in ('Published', 'ReviewDue')
+          for update of v""".query[DateRow].run().headOption
+
+  /** Valid versions without a review date whose class has an interval: versions published before V18 and
+    * versions of classes that got an interval later (ADR 0068).
+    */
+  def withoutDate()(using DbTx): List[UUID] =
+    sql"""with policy as materialized (
+                 select c.id as class_id, p.interval_months
+                 from dms.document_class c cross join lateral dms.class_review_policy(c.id) p)
+          select v.id
+          from dms.document_version v
+          join dms.document d on d.id = v.document_id
+          join policy p on p.class_id = d.class_id
+          where v.status in ('Published', 'ReviewDue') and v.review_due_on is null
+            and p.interval_months is not null
+          order by v.id""".query[UUID].run().toList
+
+  /** Valid versions of the classes a change of `id`'s review settings reaches: the class itself and the
+    * subclasses that inherit them through an unbroken line.
+    */
+  def reachedBy(id: UUID)(using DbTx): List[UUID] =
+    sql"""with recursive reached (class_id, depth) as (
+                 select c.id, 0 from dms.document_class c where c.id = $id
+                 union all
+                 select c.id, r.depth + 1
+                 from dms.document_class c
+                 join reached r on c.parent_id = r.class_id
+                 cross join lateral (select * from dms.document_class_version cv
+                                     where cv.class_id = c.id order by cv.version desc limit 1) latest
+                 where dms.class_version_inherits_review(latest) and r.depth < 64)
+          select v.id
+          from dms.document_version v
+          join dms.document d on d.id = v.document_id
+          join reached r on r.class_id = d.class_id
+          where v.status in ('Published', 'ReviewDue')
+          order by v.id""".query[UUID].run().toList
+
+  /** The open review task of a version. */
+  def openTaskId(version: UUID)(using DbTx): Option[UUID] =
+    sql"select id from dms.document_review where version_id = $version and status = 'Open'"
+      .query[UUID]
+      .run()
+      .headOption
+
+  /** When the version was last recertified. */
+  def lastRecertified(version: UUID)(using DbTx): Option[Instant] =
+    sql"""select decided_at from dms.document_review
+          where version_id = $version and status = 'Recertified' order by decided_at desc limit 1"""
+      .query[OffsetDateTime]
+      .run()
+      .headOption
+      .map(_.toInstant)
+
+  /** Whether the owner decided a task of the version for `dueOn`. */
+  def decidedFor(version: UUID, dueOn: LocalDate)(using DbTx): Boolean =
+    sql"""select count(*) from dms.document_review
+          where version_id = $version and due_on = $dueOn and status in ('Recertified', 'Revised', 'Withdrawn')"""
+      .query[Long]
+      .run()
+      .head > 0
+
+  /** Records what a class's change did to a version; `false` if that was recorded before. */
+  def insertRecalculation(
+      classId: UUID,
+      classVersion: Int,
+      version: UUID,
+      previous: Option[LocalDate],
+      next: Option[LocalDate],
+      reason: Option[String]
+  )(using DbTx): Boolean =
+    val outcome = if next.isDefined then "Moved" else "Kept"
+    sql"""insert into dms.document_review_recalculation
+            (tenant_id, class_id, class_version, version_id, outcome, previous_due_on, next_due_on, reason)
+          values (dms.current_tenant(), $classId, $classVersion, $version, $outcome, $previous, $next, $reason)
+          on conflict do nothing""".update.run() == 1
+
   /** Valid versions whose review task is due on `today` (lead time of the class reached) and does not exist
     * yet for their current review date.
     */
   def tasksToOpen(today: LocalDate)(using DbTx): List[Candidate] =
-    sql"""select v.id, v.document_id, v.status, v.review_due_on, c.review_lead_days
+    sql"""with policy as materialized (
+                 select c.id as class_id, p.lead_days
+                 from dms.document_class c cross join lateral dms.class_review_policy(c.id) p)
+          select v.id, v.document_id, v.status, v.review_due_on, c.lead_days
           from dms.document_version v
           join dms.document d on d.id = v.document_id
-          cross join lateral (select review_lead_days from dms.document_class_version cv
-                              where cv.class_id = d.class_id order by cv.version desc limit 1) c
+          join policy c on c.class_id = d.class_id
           where v.status in ('Published', 'ReviewDue')
             and v.review_due_on is not null
-            and v.review_due_on - c.review_lead_days <= $today
+            and v.review_due_on - c.lead_days <= $today
             and not exists (select 1 from dms.document_review r
                             where r.version_id = v.id and r.due_on = v.review_due_on)
           order by v.review_due_on, v.id"""

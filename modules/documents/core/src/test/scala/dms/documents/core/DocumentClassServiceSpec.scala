@@ -367,7 +367,193 @@ object DocumentClassServiceSpec extends ZIOSpecDefault:
           case _                               => false
         },
         plain.review == ReviewPolicy.default,
-        events.head.details.value.replace(" ", "").contains("""{"intervalMonths":12,"leadDays":30}""")
+        events.head.details.value
+          .replace(" ", "")
+          .contains("""{"intervalMonths":12,"leadDays":30,"inherited":false}""")
+      )
+    },
+    test("a subclass inherits the review settings of the nearest ancestor that has its own") {
+      val yearly = ReviewPolicy(Some(12), 30)
+      for
+        e    <- ZIO.service[Env]
+        t    <- newTenant(e.owner)
+        root <- as(t)(
+          _.createClass("root", None, ClassDraft("Root", None, Nil, review = Some(yearly)), admin)
+        )
+        child <- as(t)(_.createClass("child", Some(root.classId), ClassDraft("Child", None, Nil), admin))
+        leaf  <- as(t)(_.createClass("leaf", Some(child.classId), ClassDraft("Leaf", None, Nil), admin))
+        own   <- as(t)(
+          _.createClass(
+            "own",
+            Some(child.classId),
+            ClassDraft("Own", None, Nil, review = Some(ReviewPolicy(Some(6), 10))),
+            admin
+          )
+        )
+        optOut <- as(t)(
+          _.createClass(
+            "none",
+            Some(root.classId),
+            ClassDraft("None", None, Nil, review = Some(ReviewPolicy())),
+            admin
+          )
+        )
+        before <- as(t)(_.reviewPolicies)
+        // The ancestors count with their latest version, not with the pinned parent version.
+        _ <- as(t)(
+          _.newClassVersion(
+            root.classId,
+            ClassDraft("Root", None, Nil, review = Some(ReviewPolicy(Some(24), 45))),
+            admin
+          )
+        )
+        changed <- as(t)(_.reviewPolicy(leaf.classId))
+        kept    <- as(t)(_.newClassVersion(child.classId, ClassDraft("Child (v2)", None, Nil), admin))
+        back    <- as(t)(
+          _.newClassVersion(
+            own.classId,
+            ClassDraft("Own (v2)", None, Nil, review = Some(ReviewPolicy.inherit)),
+            admin
+          )
+        )
+        again <- as(t)(_.reviewPolicy(own.classId))
+      yield assertTrue(
+        child.review == ReviewPolicy.inherit,
+        before(child.classId) == yearly,
+        before(leaf.classId) == yearly,
+        before(own.classId) == ReviewPolicy(Some(6), 10),
+        before(optOut.classId) == ReviewPolicy(),
+        changed == ReviewPolicy(Some(24), 45),
+        kept.review == ReviewPolicy.inherit,
+        back.review == ReviewPolicy.inherit,
+        again == ReviewPolicy(Some(24), 45)
+      )
+    },
+    test("a root class cannot inherit, and inherited settings have no values of their own") {
+      for
+        e    <- ZIO.service[Env]
+        t    <- newTenant(e.owner)
+        root <- as(t)(
+          _.createClass(
+            "root",
+            None,
+            ClassDraft("Root", None, Nil, review = Some(ReviewPolicy.inherit)),
+            admin
+          )
+        ).either
+        plain <- as(t)(_.createClass("plain", None, ClassDraft("Plain", None, Nil), admin))
+        mixed <- as(t)(
+          _.createClass(
+            "mixed",
+            Some(plain.classId),
+            ClassDraft("Mixed", None, Nil, review = Some(ReviewPolicy(Some(12), inherited = true))),
+            admin
+          )
+        ).either
+        stored <- e.app
+          .transact(t)(
+            Db.sql(
+              sql"""insert into dms.document_class_version
+                      (tenant_id, class_id, version, label, review_inherited, created_by)
+                    values (${t.value}, ${plain.classId.value}, 2, 'Plain', true, 'admin')""".update.run()
+            )
+          )
+          .either
+      yield assertTrue(
+        root.left.exists(_.isInstanceOf[MetadataError.Invalid]),
+        mixed.left.exists(_.isInstanceOf[MetadataError.Invalid]),
+        stored.isLeft
+      )
+    },
+    test("a subclass version from before V46 inherits only if it never set anything") {
+      def legacy(t: TenantId, id: DocumentClassId, interval: Option[Int], lead: Int) =
+        ZIO.serviceWithZIO[Env](
+          _.app.transact(t)(
+            Db.sql(
+              sql"""insert into dms.document_class_version
+                      (tenant_id, class_id, version, parent_version, label, review_interval_months,
+                       review_lead_days, created_by)
+                    values (${t.value}, ${id.value}, 2, 1, 'Legacy', $interval, $lead, 'admin')""".update
+                .run()
+            )
+          )
+        )
+      for
+        e    <- ZIO.service[Env]
+        t    <- newTenant(e.owner)
+        root <- as(t)(
+          _.createClass(
+            "root",
+            None,
+            ClassDraft("Root", None, Nil, review = Some(ReviewPolicy(Some(12), 30))),
+            admin
+          )
+        )
+        unset    <- as(t)(_.createClass("unset", Some(root.classId), ClassDraft("Unset", None, Nil), admin))
+        lead     <- as(t)(_.createClass("lead", Some(root.classId), ClassDraft("Lead", None, Nil), admin))
+        interval <- as(t)(_.createClass("own", Some(root.classId), ClassDraft("Own", None, Nil), admin))
+        _        <- legacy(t, unset.classId, None, 60)
+        _        <- legacy(t, lead.classId, None, 20)
+        _        <- legacy(t, interval.classId, Some(6), 60)
+        policies <- as(t)(_.reviewPolicies)
+        latest   <- as(t)(_.classVersions(unset.classId))
+      yield assertTrue(
+        policies(unset.classId) == ReviewPolicy(Some(12), 30),
+        policies(lead.classId) == ReviewPolicy(None, 20),
+        policies(interval.classId) == ReviewPolicy(Some(6), 60),
+        latest.last.review == ReviewPolicy.inherit
+      )
+    },
+    test(
+      "a change of the interval in force asks for a recalculation once, in the transaction of the change"
+    ) {
+      def jobs(owner: Db, t: TenantId) =
+        owner.transactSystem(
+          Db.sql(
+            sql"""select count(*) from dms.job
+                  where tenant_id = ${t.value} and kind = ${ReviewJobs.RecalculationKind}"""
+              .query[Long]
+              .run()
+              .head
+          )
+        )
+      def change(id: DocumentClassId, review: ReviewPolicy) =
+        (t: TenantId) =>
+          as(t)(_.newClassVersion(id, ClassDraft("Class", None, Nil, review = Some(review)), admin))
+      for
+        e    <- ZIO.service[Env]
+        t    <- newTenant(e.owner)
+        _    <- e.audit.set(Nil)
+        root <- as(t)(
+          _.createClass(
+            "root",
+            None,
+            ClassDraft("Root", None, Nil, review = Some(ReviewPolicy(Some(12), 30))),
+            admin
+          )
+        )
+        child <- as(t)(_.createClass("child", Some(root.classId), ClassDraft("Child", None, Nil), admin))
+        none  <- jobs(e.owner, t)
+        _     <- change(root.classId, ReviewPolicy(Some(12), 20))(t)
+        lead  <- jobs(e.owner, t)
+        _     <- change(root.classId, ReviewPolicy(Some(24), 20))(t)
+        one   <- jobs(e.owner, t)
+        // The child's own value equals the inherited one: nothing changes in force.
+        _       <- change(child.classId, ReviewPolicy(Some(24), 60))(t)
+        same    <- jobs(e.owner, t)
+        _       <- change(child.classId, ReviewPolicy.inherit)(t)
+        same2   <- jobs(e.owner, t)
+        _       <- change(child.classId, ReviewPolicy(Some(6), 60))(t)
+        changed <- jobs(e.owner, t)
+        events  <- e.audit.get
+      yield assertTrue(
+        none == 0L,
+        lead == 0L,
+        one == 1L,
+        same == 1L,
+        same2 == 1L,
+        changed == 2L,
+        events.count(_.action == "document-class.review-interval-changed") == 2
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

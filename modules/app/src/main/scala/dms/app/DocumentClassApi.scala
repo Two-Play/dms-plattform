@@ -83,12 +83,18 @@ final case class FieldBindingView(
 
 /** Periodic review settings of a class (US-07.1). */
 final case class ReviewSettingsView(
-    /** Review cycle in months (1 to 120): a version is reviewed this long after it became valid. Empty: no
-      * periodic review unless a document sets its `nextReview` date.
+    /** Own review cycle of this class version in months (1 to 120): a version is reviewed this long after it
+      * became valid. Empty: no periodic review unless a document sets its `nextReview` date, or inherited.
       */
     intervalMonths: Option[Int],
-    /** Days before the review date the owner gets the review task (0 to 365). */
-    leadDays: Int
+    /** Own days before the review date the owner gets the review task (0 to 365). */
+    leadDays: Int,
+    /** This class version takes the settings of the nearest ancestor that has its own. */
+    inherited: Boolean,
+    /** The review cycle in force for the class now, its own or inherited. */
+    effectiveIntervalMonths: Option[Int],
+    /** The lead time in force for the class now, its own or inherited. */
+    effectiveLeadDays: Int
 ) derives JsonCodec,
       Schema
 
@@ -97,7 +103,11 @@ final case class ReviewSettingsChange(
     /** Review cycle in months (1 to 120); omitted: no periodic review unless a document sets `nextReview`. */
     intervalMonths: Option[Int],
     /** Days before the review date the owner gets the review task (0 to 365); default 60. */
-    leadDays: Option[Int]
+    leadDays: Option[Int],
+    /** Take both settings from the nearest ancestor that has its own, also when they change there; the class
+      * then sets neither. Not for a root class. Default false.
+      */
+    inherited: Option[Boolean]
 ) derives JsonCodec,
       Schema
 
@@ -122,7 +132,7 @@ final case class CreateDocumentClass(
     label: String,
     description: Option[String],
     fields: List[FieldBindingView],
-    /** Periodic review settings; default: no interval, 60 days lead time. */
+    /** Periodic review settings; default: inherited below a parent, else no interval, 60 days lead time. */
     review: Option[ReviewSettingsChange]
 ) derives JsonCodec,
       Schema
@@ -277,7 +287,7 @@ object DocumentClassApi:
       .out(jsonBody[List[DocumentClassView]])
       .description("Latest version of every document class")
       .tag("Configuration")
-      .serverLogic(p => _ => configure(p)(_.listClasses).map(_.map(classView)))
+      .serverLogic(p => _ => configure(p)(withPolicies(_)(_.listClasses)).map(classViews))
 
   val getClass: ZServerEndpoint[Env, Any] =
     SecuredApi.base.get
@@ -285,7 +295,9 @@ object DocumentClassApi:
       .out(jsonBody[List[DocumentClassView]])
       .description("All profile versions of a document class, oldest first")
       .tag("Configuration")
-      .serverLogic(p => id => configure(p)(_.classVersions(DocumentClassId(id))).map(_.map(classView)))
+      .serverLogic(p =>
+        id => configure(p)(withPolicies(_)(_.classVersions(DocumentClassId(id)))).map(classViews)
+      )
 
   val createClass: ZServerEndpoint[Env, Any] =
     SecuredApi.base.post
@@ -299,21 +311,23 @@ object DocumentClassApi:
           bindings(req.fields)
             .flatMap(fields =>
               configure(p)(
-                _.createClass(
-                  req.key,
-                  req.parentId.map(DocumentClassId(_)),
-                  ClassDraft(
-                    req.label,
-                    req.description,
-                    fields,
-                    req.parentVersion,
-                    req.review.map(reviewPolicy)
-                  ),
-                  p.userId
+                withPolicies(_)(
+                  _.createClass(
+                    req.key,
+                    req.parentId.map(DocumentClassId(_)),
+                    ClassDraft(
+                      req.label,
+                      req.description,
+                      fields,
+                      req.parentVersion,
+                      req.review.map(reviewPolicy)
+                    ),
+                    p.userId
+                  ).map(List(_))
                 )
               )
             )
-            .map(classView)
+            .map(classViews(_).head)
       )
 
   val newClassVersion: ZServerEndpoint[Env, Any] =
@@ -323,7 +337,8 @@ object DocumentClassApi:
       .out(statusCode(StatusCode.Created).and(jsonBody[DocumentClassView]))
       .description(
         "Creates the next profile version of a document class. Existing documents keep their profile version; " +
-          "the review settings of the latest version apply to all documents of the class."
+          "the review settings of the latest version apply to all documents of the class and of the subclasses " +
+          "that inherit them; a changed interval reaches open review dates."
       )
       .tag("Configuration")
       .serverLogic(p =>
@@ -331,20 +346,22 @@ object DocumentClassApi:
           bindings(req.fields)
             .flatMap(fields =>
               configure(p)(
-                _.newClassVersion(
-                  DocumentClassId(id),
-                  ClassDraft(
-                    req.label,
-                    req.description,
-                    fields,
-                    req.parentVersion,
-                    req.review.map(reviewPolicy)
-                  ),
-                  p.userId
+                withPolicies(_)(
+                  _.newClassVersion(
+                    DocumentClassId(id),
+                    ClassDraft(
+                      req.label,
+                      req.description,
+                      fields,
+                      req.parentVersion,
+                      req.review.map(reviewPolicy)
+                    ),
+                    p.userId
+                  ).map(List(_))
                 )
               )
             )
-            .map(classView)
+            .map(classViews(_).head)
       )
 
   val getProfile: ZServerEndpoint[Env, Any] =
@@ -462,7 +479,18 @@ object DocumentClassApi:
       d.editable
     )
 
-  private def classView(c: DocumentClassVersion): DocumentClassView =
+  /** Class versions with the review settings in force for each class. */
+  private def withPolicies(service: DocumentClassService)(
+      f: DocumentClassService => IO[MetadataError, List[DocumentClassVersion]]
+  ): IO[MetadataError, (List[DocumentClassVersion], Map[DocumentClassId, ReviewPolicy])] =
+    f(service).zip(service.reviewPolicies)
+
+  private def classViews(
+      classes: (List[DocumentClassVersion], Map[DocumentClassId, ReviewPolicy])
+  ): List[DocumentClassView] =
+    classes._1.map(c => classView(c, classes._2.getOrElse(c.classId, c.review)))
+
+  private def classView(c: DocumentClassVersion, effective: ReviewPolicy): DocumentClassView =
     DocumentClassView(
       c.classId.value,
       c.key.value,
@@ -472,11 +500,21 @@ object DocumentClassApi:
       c.label,
       c.description,
       c.fields.map(b => FieldBindingView(b.key.value, b.version, statuses(b.requiredIn))),
-      ReviewSettingsView(c.review.intervalMonths, c.review.leadDays)
+      ReviewSettingsView(
+        c.review.intervalMonths,
+        c.review.leadDays,
+        c.review.inherited,
+        effective.intervalMonths,
+        effective.leadDays
+      )
     )
 
   private def reviewPolicy(change: ReviewSettingsChange): ReviewPolicy =
-    ReviewPolicy(change.intervalMonths, change.leadDays.getOrElse(ReviewPolicy.DefaultLeadDays))
+    ReviewPolicy(
+      change.intervalMonths,
+      change.leadDays.getOrElse(ReviewPolicy.DefaultLeadDays),
+      change.inherited.getOrElse(false)
+    )
 
   private def profileView(p: MetadataProfile): ProfileView =
     ProfileView(

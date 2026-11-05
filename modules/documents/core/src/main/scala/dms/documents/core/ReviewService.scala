@@ -23,14 +23,18 @@ import java.util.UUID
   *   published versions whose review date has come
   * @param toReopen
   *   tasks decided as revised whose revision never took effect and that nothing reopened yet
+  * @param withoutDate
+  *   valid versions without a review date whose class has an interval
   */
 final case class ReviewWork(
     obsolete: List[UUID],
     toOpen: List[UUID],
     reviewDue: List[UUID],
-    toReopen: List[UUID] = Nil
+    toReopen: List[UUID] = Nil,
+    withoutDate: List[UUID] = Nil
 ):
-  def isEmpty: Boolean = obsolete.isEmpty && toOpen.isEmpty && reviewDue.isEmpty && toReopen.isEmpty
+  def isEmpty: Boolean =
+    obsolete.isEmpty && toOpen.isEmpty && reviewDue.isEmpty && toReopen.isEmpty && withoutDate.isEmpty
 
 /** Periodic review and recertification of valid versions (business concept 6.2, US-07.1, ADR 0030).
   *
@@ -46,6 +50,10 @@ final case class ReviewWork(
   * same version and review date takes over ([[ReviewService.reopenFor]], ADR 0061, ADR 0063). The withdrawal,
   * the discarding and the publication do that in their own transaction; the periodic check picks up what they
   * could not reach ([[reopen]]).
+  *
+  * The review date of a valid version is computed again when it has none although its class has an interval
+  * ([[scheduleMissing]]) and when the interval in force of its class changes ([[recalculate]]); the rules are
+  * [[Review.recalculated]] (ADR 0068).
   *
   * Every method must run inside `Db.transact(tenant)`; every change is recorded in the audit trail and
   * published to the outbox in the same transaction. Authorization is the caller's job: decisions are the
@@ -69,7 +77,8 @@ final class ReviewService(audit: AuditTrail, documents: DocumentService, classes
           ReviewStore.obsoleteTasks(),
           ReviewStore.tasksToOpen(day).map(_.versionId),
           ReviewStore.reviewDateReached(day),
-          ReviewStore.lostToRevision(None).map(_.id)
+          ReviewStore.lostToRevision(None).map(_.id),
+          ReviewStore.withoutDate()
         )
       )
     )
@@ -144,6 +153,139 @@ final class ReviewService(audit: AuditTrail, documents: DocumentService, classes
             Json.Obj("versionStatus" -> Json.Str(version.fold("")(_.toString)))
           ).asSome
     yield closed
+
+  /** Gives a valid version without review date its date under the settings in force for its class. Backfills
+    * the versions from before V18, whose class had no interval then. Idempotent: a version with a date is
+    * left alone.
+    */
+  def scheduleMissing(versionId: UUID): IO[DocumentError, Option[ReviewDateChange]] =
+    reschedule(versionId, None)
+
+  /** The valid versions a change of the review settings of class `id` reaches. */
+  def reachedBy(id: UUID): IO[DocumentError, List[UUID]] = sql(ReviewStore.reachedBy(id))
+
+  /** Computes the review date of a valid version again after version `classVersion` of class `classId`
+    * changed the interval in force. Every outcome but "unchanged" is recorded once per class version and
+    * document version, in `dms.document_review_recalculation` and in the audit trail; tasks already decided
+    * are not touched. Idempotent.
+    */
+  def recalculate(
+      versionId: UUID,
+      classId: UUID,
+      classVersion: Int
+  ): IO[DocumentError, Option[ReviewDateChange]] =
+    reschedule(versionId, Some(ClassChange(classId, classVersion)))
+
+  /** A decision locks its task before the version, so this takes the locks in the same order: first the open
+    * task, then the version, under whose lock no task can open.
+    */
+  private def reschedule(
+      versionId: UUID,
+      cause: Option[ClassChange]
+  ): IO[DocumentError, Option[ReviewDateChange]] =
+    for
+      locked <- sql(ReviewStore.openTaskId(versionId).flatMap(ReviewStore.lockTask))
+      row    <- sql(ReviewStore.lockValidVersion(versionId))
+      open   <- sql(ReviewStore.openTaskId(versionId))
+      task = locked.filter(_.isOpen)
+      _ <- ZIO.when(open != task.map(_.id))(
+        ZIO.fail(DocumentError.Conflict(s"the review task of version $versionId changed concurrently"))
+      )
+      change <- row.filter(r => cause.isDefined || r.dueOn.isEmpty) match
+        case None    => ZIO.none
+        case Some(r) =>
+          for
+            state  <- dateState(r, task.isDefined)
+            day    <- today
+            result <- Review.recalculated(state, r.policy, day) match
+              case ReviewDateChange.Unchanged    => ZIO.none
+              case moved: ReviewDateChange.Moved =>
+                moveDate(r, moved, task, cause).map(Option.when(_)(moved))
+              case kept: ReviewDateChange.Kept =>
+                keepDate(r, kept, cause).map(Option.when(_)(kept))
+          yield result
+    yield change
+
+  private def dateState(row: ReviewStore.DateRow, openTask: Boolean): IO[DocumentError, ReviewDateState] =
+    for
+      zone    <- documents.tenantZone
+      day     <- today
+      details <- documents.get(DocumentId(row.documentId))
+      version <- ZIO
+        .fromOption(details.versions.find(_.id == row.versionId))
+        .orElseFail(DocumentError.NotFound(s"document version ${row.versionId} does not exist"))
+      recertified <- sql(ReviewStore.lastRecertified(row.versionId))
+      decided     <- sql(row.dueOn.exists(ReviewStore.decidedFor(row.versionId, _)))
+    yield ReviewDateState(
+      row.dueOn,
+      version.validFrom.orElse(version.publishedAt.map(LocalDate.ofInstant(_, zone))).getOrElse(day),
+      DocumentService.nextReview(version),
+      recertified.map(LocalDate.ofInstant(_, zone)),
+      openTask,
+      decided
+    )
+
+  /** Moves the review date. An open task ends: the guard keeps the date of a task, so a new task takes over
+    * at once. A date that has come is marked at once, too. `false` if this change was recorded before.
+    */
+  private def moveDate(
+      row: ReviewStore.DateRow,
+      moved: ReviewDateChange.Moved,
+      task: Option[ReviewTask],
+      cause: Option[ClassChange]
+  ): IO[DocumentError, Boolean] =
+    sql(firstRecord(row, cause, Some(moved.to), None)).tap(first =>
+      ZIO.when(first)(
+        for
+          now <- Clock.instant
+          _   <- ZIO.foreachDiscard(task)(t =>
+            decide(
+              t.copy(status = ReviewStatus.Obsolete, decidedAt = Some(now)),
+              ReviewActor,
+              Json.Obj("reason" -> Json.Str("review-date-moved"), "nextDueOn" -> Json.Str(moved.to.toString))
+            )
+          )
+          _ <- sql(ReviewStore.setDueOn(row.versionId, moved.to)).filterOrFail(identity)(
+            DocumentError.Conflict(s"version ${row.versionId} is not valid any more")
+          )
+          _ <- recordedDate(
+            audit,
+            DateChanged,
+            row,
+            cause,
+            Json.Obj(
+              "previousDueOn" -> row.dueOn.fold(Json.Null)(d => Json.Str(d.toString)),
+              "nextDueOn"     -> Json.Str(moved.to.toString),
+              "computedDueOn" -> Json.Str(moved.computed.toString)
+            )
+          )
+          _ <- openTask(row.versionId)
+          _ <- markReviewDue(row.versionId)
+        yield ()
+      )
+    )
+
+  /** Records why the date stays; `false` if that was recorded before. */
+  private def keepDate(
+      row: ReviewStore.DateRow,
+      kept: ReviewDateChange.Kept,
+      cause: Option[ClassChange]
+  ): IO[DocumentError, Boolean] =
+    sql(firstRecord(row, cause, None, Some(kept.reason.toString))).tap(first =>
+      ZIO.when(first)(
+        recordedDate(
+          audit,
+          DateKept,
+          row,
+          cause,
+          Json.Obj(
+            "dueOn"         -> row.dueOn.fold(Json.Null)(d => Json.Str(d.toString)),
+            "computedDueOn" -> kept.computed.fold(Json.Null)(d => Json.Str(d.toString)),
+            "reason"        -> Json.Str(kept.reason.toString)
+          )
+        )
+      )
+    )
 
   /** Open tasks of valid versions with a review date up to `until` and the deadline notices published for
     * them, for the deadline check (DMS-141, ADR 0057).
@@ -337,6 +479,50 @@ object ReviewService:
   /** Audit action and outbox event of a task opened again (DMS-145, ADR 0061). */
   val Reopened: String = "document.review-task-reopened"
 
+  /** Audit action and outbox event of a review date set or moved outside a decision (ADR 0068). */
+  val DateChanged: String = "document.review-date-changed"
+
+  /** Audit action and outbox event of a review date that stays against a new interval (ADR 0068). */
+  val DateKept: String = "document.review-date-kept"
+
+  /** The class version that changed the interval in force. */
+  private final case class ClassChange(classId: UUID, classVersion: Int)
+
+  /** Whether this is the first record of the outcome; without a class change there is no record. */
+  private def firstRecord(
+      row: ReviewStore.DateRow,
+      cause: Option[ClassChange],
+      next: Option[LocalDate],
+      reason: Option[String]
+  )(using DbTx): Boolean =
+    cause.forall(c =>
+      ReviewStore.insertRecalculation(c.classId, c.classVersion, row.versionId, row.dueOn, next, reason)
+    )
+
+  /** Records a review date set or kept outside a decision, with its cause and the interval applied. */
+  private def recordedDate(
+      audit: AuditTrail,
+      action: String,
+      row: ReviewStore.DateRow,
+      cause: Option[ClassChange],
+      details: Json.Obj
+  ) =
+    recordedVersion(
+      audit,
+      ReviewActor,
+      action,
+      DocumentId(row.documentId),
+      row.versionId,
+      details.merge(
+        Json.Obj(
+          "trigger"        -> Json.Str(cause.fold("missing-date")(_ => "class-change")),
+          "classId"        -> cause.fold(Json.Null)(c => Json.Str(c.classId.toString)),
+          "classVersion"   -> cause.fold(Json.Null)(c => Json.Num(c.classVersion)),
+          "intervalMonths" -> row.intervalMonths.fold(Json.Null)(Json.Num(_))
+        )
+      )
+    )
+
   /** Opens the tasks decided as revised with `revision` again, in the transaction that settled it: it was
     * withdrawn before it took effect, discarded as a draft or published for another scope, so their versions
     * still need a decision for the same review date. There can be several, one per valid version: a revision
@@ -396,14 +582,31 @@ object ReviewService:
       task: ReviewTask,
       details: Json.Obj
   ) =
+    recordedVersion(
+      audit,
+      actor,
+      action,
+      task.documentId,
+      task.versionId,
+      details.merge(Json.Obj("taskId" -> Json.Str(task.id.toString)))
+    )
+
+  /** Records an event of a version in the audit trail and the outbox (event type = audit action). */
+  private def recordedVersion(
+      audit: AuditTrail,
+      actor: UserId,
+      action: String,
+      document: DocumentId,
+      version: UUID,
+      details: Json.Obj
+  ) =
     val platform = DocumentService.isPlatform(actor)
     for
-      label <- sql(ReviewStore.versionLabel(task.versionId))
+      label <- sql(ReviewStore.versionLabel(version))
       payload = details.merge(
         Json.Obj(
-          "taskId"     -> Json.Str(task.id.toString),
-          "documentId" -> Json.Str(task.documentId.value.toString),
-          "versionId"  -> Json.Str(task.versionId.toString)
+          "documentId" -> Json.Str(document.value.toString),
+          "versionId"  -> Json.Str(version.toString)
         )
       )
       _ <- audit
@@ -411,14 +614,14 @@ object ReviewService:
           AuditEvent(
             Actor(actor.value, if platform then ActorKind.Technical else ActorKind.Person),
             action,
-            AuditObject("document", Some(task.documentId.value), label),
+            AuditObject("document", Some(document.value), label),
             if platform then Channel.Automation else Channel.Api,
             Jsonb(payload.toJson)
           )
         )
         .mapError(DocumentError.Database(_))
       _ <- Outbox
-        .publish("document", task.documentId.value, action, Jsonb(payload.toJson))
+        .publish("document", document.value, action, Jsonb(payload.toJson))
         .mapError(DocumentError.Database(_))
     yield ()
 

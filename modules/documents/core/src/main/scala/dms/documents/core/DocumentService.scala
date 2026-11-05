@@ -1914,9 +1914,7 @@ final class DocumentService(
     for
       policy <- classes.reviewPolicy(document.classId).mapError(metadataError)
       zone   <- sql(DocumentStore.tenantZone)
-      values     = v.metadataSnapshot.fold(v.metadata)(_.values)
-      nextReview = values.get(NextReviewField).collect { case MetadataValue.Date(d) => d }
-    yield Review.dueOn(v.validFrom.getOrElse(LocalDate.ofInstant(now, zone)), nextReview, policy)
+    yield Review.dueOn(v.validFrom.getOrElse(LocalDate.ofInstant(now, zone)), nextReview(v), policy)
 
   /** A version is never published before 00:00 of its valid-from date in the tenant's time zone (DMS-45); the
     * publication job publishes it then.
@@ -2093,8 +2091,15 @@ object DocumentService:
   private val StatusField     = "status"
   private val OwnerField      = "owner"
   private val NextReviewField = "nextReview"
-  private val UnitField       = "organizationalUnit"
-  private val Sha256          = "[0-9a-f]{64}".r
+
+  /** The `nextReview` value a version was approved with. */
+  private[core] def nextReview(v: DocumentVersion): Option[LocalDate] =
+    v.metadataSnapshot
+      .fold(v.metadata)(_.values)
+      .get(NextReviewField)
+      .collect { case MetadataValue.Date(d) => d }
+  private val UnitField = "organizationalUnit"
+  private val Sha256    = "[0-9a-f]{64}".r
 
   /** Longest accepted reason of a deviation request. */
   val MaxReasonLength: Int = 4000

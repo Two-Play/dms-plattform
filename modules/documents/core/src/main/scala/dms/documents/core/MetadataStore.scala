@@ -56,12 +56,12 @@ private[core] object MetadataStore:
     )
 
   private type ClassRow =
-    (UUID, String, Int, Option[UUID], Option[Int], String, Option[String], Jsonb, Option[Int], Int)
+    (UUID, String, Int, Option[UUID], Option[Int], String, Option[String], Jsonb, Option[Int], Int, Boolean)
 
   /** The latest version of every class. */
   def latestClasses()(using DbTx): List[DocumentClassVersion] =
     sql"""select distinct on (c.key) c.id, c.key, v.version, c.parent_id, v.parent_version, v.label, v.description, v.fields,
-                 v.review_interval_months, v.review_lead_days
+                 v.review_interval_months, v.review_lead_days, dms.class_version_inherits_review(v)
           from dms.document_class_version v join dms.document_class c on c.id = v.class_id
           order by c.key, v.version desc"""
       .query[ClassRow]
@@ -71,13 +71,13 @@ private[core] object MetadataStore:
 
   def classVersions(id: DocumentClassId)(using DbTx): List[DocumentClassVersion] =
     sql"""select c.id, c.key, v.version, c.parent_id, v.parent_version, v.label, v.description, v.fields,
-                 v.review_interval_months, v.review_lead_days
+                 v.review_interval_months, v.review_lead_days, dms.class_version_inherits_review(v)
           from dms.document_class_version v join dms.document_class c on c.id = v.class_id
           where c.id = ${id.value} order by v.version""".query[ClassRow].run().map(toClass).toList
 
   def classVersion(id: DocumentClassId, version: Int)(using DbTx): Option[DocumentClassVersion] =
     sql"""select c.id, c.key, v.version, c.parent_id, v.parent_version, v.label, v.description, v.fields,
-                 v.review_interval_months, v.review_lead_days
+                 v.review_interval_months, v.review_lead_days, dms.class_version_inherits_review(v)
           from dms.document_class_version v join dms.document_class c on c.id = v.class_id
           where c.id = ${id.value} and v.version = $version"""
       .query[ClassRow]
@@ -87,7 +87,7 @@ private[core] object MetadataStore:
 
   def latestClassVersion(id: DocumentClassId)(using DbTx): Option[DocumentClassVersion] =
     sql"""select c.id, c.key, v.version, c.parent_id, v.parent_version, v.label, v.description, v.fields,
-                 v.review_interval_months, v.review_lead_days
+                 v.review_interval_months, v.review_lead_days, dms.class_version_inherits_review(v)
           from dms.document_class_version v join dms.document_class c on c.id = v.class_id
           where c.id = ${id.value} order by v.version desc limit 1"""
       .query[ClassRow]
@@ -107,10 +107,27 @@ private[core] object MetadataStore:
   def insertClassVersion(cls: DocumentClassVersion, createdBy: String)(using DbTx): Int =
     sql"""insert into dms.document_class_version
             (tenant_id, class_id, version, parent_version, label, description, fields, review_interval_months,
-             review_lead_days, created_by)
+             review_lead_days, review_inherited, created_by)
           values (dms.current_tenant(), ${cls.classId.value}, ${cls.version}, ${cls.parent.map(_.version)},
                   ${cls.label}, ${cls.description}, ${Jsonb(cls.fields.toJson)}, ${cls.review.intervalMonths},
-                  ${cls.review.leadDays}, $createdBy)""".update.run()
+                  ${cls.review.leadDays}, ${cls.review.inherited}, $createdBy)""".update.run()
+
+  /** The review settings in force for a class, its own or those of the nearest ancestor (ADR 0068). */
+  def effectiveReviewPolicy(id: DocumentClassId)(using DbTx): Option[ReviewPolicy] =
+    sql"select interval_months, lead_days from dms.class_review_policy(${id.value})"
+      .query[(Option[Int], Int)]
+      .run()
+      .headOption
+      .map(ReviewPolicy(_, _))
+
+  /** The review settings in force for every class. */
+  def effectiveReviewPolicies()(using DbTx): Map[DocumentClassId, ReviewPolicy] =
+    sql"""select c.id, p.interval_months, p.lead_days
+          from dms.document_class c cross join lateral dms.class_review_policy(c.id) p"""
+      .query[(UUID, Option[Int], Int)]
+      .run()
+      .map((id, interval, leadDays) => DocumentClassId(id) -> ReviewPolicy(interval, leadDays))
+      .toMap
 
   /** The own retention rule assignments of all classes (DMS-133, V37). */
   def retentionAssignments()(using DbTx): List[(UUID, String, String, java.time.Instant)] =
@@ -189,7 +206,20 @@ private[core] object MetadataStore:
       .headOption
 
   private def toClass(row: ClassRow): DocumentClassVersion =
-    val (id, key, version, parentId, parentVersion, label, description, fields, interval, leadDays) = row
+    val (
+      id,
+      key,
+      version,
+      parentId,
+      parentVersion,
+      label,
+      description,
+      fields,
+      interval,
+      leadDays,
+      inherited
+    ) =
+      row
     DocumentClassVersion(
       DocumentClassId(id),
       ClassKey.unsafe(key),
@@ -198,7 +228,7 @@ private[core] object MetadataStore:
       label,
       description,
       decode[List[FieldBinding]](fields, s"fields of class $key version $version"),
-      ReviewPolicy(interval, leadDays)
+      ReviewPolicy(interval, leadDays, inherited)
     )
 
   private def decode[A: JsonDecoder](json: Jsonb, what: String): A =

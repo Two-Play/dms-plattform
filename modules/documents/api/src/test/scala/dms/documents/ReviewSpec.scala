@@ -71,5 +71,88 @@ object ReviewSpec extends ZIOSpecDefault:
         ReviewPolicy(None, 366).problems.size == 1,
         ReviewPolicy(Some(120), 365).problems.isEmpty
       )
+    },
+    test("a review date moves with the interval and never before today") {
+      val today = LocalDate.of(2026, 3, 1)
+      val state = ReviewDateState(Some(LocalDate.of(2027, 1, 1)), validFrom)
+      assertTrue(
+        Review.recalculated(state, yearly, today) == ReviewDateChange.Unchanged,
+        Review.recalculated(state, ReviewPolicy(Some(24)), today) ==
+          ReviewDateChange.Moved(LocalDate.of(2028, 1, 1), LocalDate.of(2028, 1, 1)),
+        Review.recalculated(state, ReviewPolicy(Some(1)), today) ==
+          ReviewDateChange.Moved(today, LocalDate.of(2026, 2, 1))
+      )
+    },
+    test("the document's next review date still shortens the cycle when the interval changes") {
+      val date  = LocalDate.of(2026, 6, 1)
+      val state = ReviewDateState(Some(date), validFrom, Some(date))
+      assertTrue(
+        Review.recalculated(state, ReviewPolicy(Some(24)), validFrom) == ReviewDateChange.Unchanged
+      )
+    },
+    test("a version without a date gets one, and without an interval stays without") {
+      val state = ReviewDateState(None, validFrom)
+      val today = LocalDate.of(2028, 3, 1)
+      assertTrue(
+        Review.recalculated(state, yearly, validFrom) ==
+          ReviewDateChange.Moved(LocalDate.of(2027, 1, 1), LocalDate.of(2027, 1, 1)),
+        Review.recalculated(state, yearly, today) ==
+          ReviewDateChange.Moved(today, LocalDate.of(2027, 1, 1)),
+        Review.recalculated(state, ReviewPolicy(), today) == ReviewDateChange.Unchanged
+      )
+    },
+    test("a reached review date stays in both directions, also on the day itself") {
+      val due   = LocalDate.of(2027, 1, 1)
+      val state = ReviewDateState(Some(due), validFrom, openTask = true)
+      val later = ReviewPolicy(Some(24))
+      assertTrue(
+        Review.recalculated(state, later, due) ==
+          ReviewDateChange.Kept(ReviewDateKept.Overdue, Some(LocalDate.of(2028, 1, 1))),
+        Review.recalculated(state, later, due.plusDays(40)) ==
+          ReviewDateChange.Kept(ReviewDateKept.Overdue, Some(LocalDate.of(2028, 1, 1))),
+        Review.recalculated(state, ReviewPolicy(Some(6)), due) ==
+          ReviewDateChange.Kept(ReviewDateKept.Overdue, Some(LocalDate.of(2026, 7, 1)))
+      )
+    },
+    test("a date a task was decided for stays") {
+      val state = ReviewDateState(Some(LocalDate.of(2027, 1, 1)), validFrom, decided = true)
+      assertTrue(
+        Review.recalculated(state, ReviewPolicy(Some(6)), validFrom) ==
+          ReviewDateChange.Kept(ReviewDateKept.Decided, Some(LocalDate.of(2026, 7, 1)))
+      )
+    },
+    test("a recertified date counts from the recertification and only moves earlier") {
+      val day   = LocalDate.of(2026, 11, 10)
+      val state = ReviewDateState(Some(LocalDate.of(2027, 6, 1)), validFrom, recertifiedOn = Some(day))
+      assertTrue(
+        Review.recalculated(state, ReviewPolicy(Some(24)), day) ==
+          ReviewDateChange.Kept(ReviewDateKept.Recertified, Some(LocalDate.of(2028, 11, 10))),
+        Review.recalculated(state, ReviewPolicy(Some(3)), day) ==
+          ReviewDateChange.Moved(LocalDate.of(2027, 2, 10), LocalDate.of(2027, 2, 10))
+      )
+    },
+    test("with an open task a date only moves earlier") {
+      val state = ReviewDateState(Some(LocalDate.of(2027, 1, 1)), validFrom, openTask = true)
+      val today = LocalDate.of(2026, 11, 10)
+      assertTrue(
+        Review.recalculated(state, ReviewPolicy(Some(24)), today) ==
+          ReviewDateChange.Kept(ReviewDateKept.OpenTask, Some(LocalDate.of(2028, 1, 1))),
+        Review.recalculated(state, ReviewPolicy(Some(11)), today) ==
+          ReviewDateChange.Moved(LocalDate.of(2026, 12, 1), LocalDate.of(2026, 12, 1))
+      )
+    },
+    test("removing the interval keeps the date") {
+      val state = ReviewDateState(Some(LocalDate.of(2027, 1, 1)), validFrom)
+      assertTrue(
+        Review.recalculated(state, ReviewPolicy(), validFrom) ==
+          ReviewDateChange.Kept(ReviewDateKept.NoInterval, None)
+      )
+    },
+    test("inherited settings have no values of their own") {
+      assertTrue(
+        ReviewPolicy.inherit.problems.isEmpty,
+        ReviewPolicy(Some(12), inherited = true).problems.nonEmpty,
+        ReviewPolicy(None, 30, inherited = true).problems.nonEmpty
+      )
     }
   )
