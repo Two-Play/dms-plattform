@@ -16,21 +16,21 @@ A legal hold suspends the destruction of the documents it covers until it is rel
 
 ### API (`dms.app.LegalHoldApi`)
 
-All endpoints require `ManageRetention` (records manager) for the whole tenant; every document put under a hold also requires `ManageRetention` on the document (scope, confidentiality), otherwise nothing is stored (403).
+All endpoints require `ManageRetention` (records manager) for the whole tenant. A legal hold is always possible (DMS-156, ADR 0082): putting a document under a hold needs no clearance for any of its versions, because it reveals nothing and protects at once. Taking a single document out needs `ManageRetention` on every governing version as well (ADR 0072).
 
 | Method | Path | Behaviour |
 |---|---|---|
 | POST | `/api/v1/legal-holds` | `{name, reason, matterReference?, documentIds?, searchFilter?}` → 201 hold with `addedDocumentIds`. 422 without name or reason. |
 | GET | `/api/v1/legal-holds?status=active\|released\|all` | Holds, latest first (default active). |
-| GET | `/api/v1/legal-holds/{id}` | Hold with its documents (`documentId`, `title` if the caller may manage the document, `addedVia`, `reason`, `addedBy`, `addedAt`). |
+| GET | `/api/v1/legal-holds/{id}` | Hold with its documents (`documentId`, `title`, `addedVia`, `reason`, `addedBy`, `addedAt`, `removable`). `title` is the document's for someone cleared for every version, else what a version they are cleared for states (`Versioning.naming`), else absent. `removable`: the caller may take the document out. |
 | POST | `/api/v1/legal-holds/{id}/documents` | `{reason, documentIds?, searchFilter?}`; documents already covered are skipped. 422 without reason or documents, 409 `released`. |
-| POST | `/api/v1/legal-holds/search-preview` | Search filter → `{total, documents: [{documentId, title, documentNumber?, manageable, underLegalHold}], fingerprint}`: the distinct documents of all hits, for review before confirming (DMS-106). |
-| POST | `/api/v1/legal-holds/{id}/documents/{documentId}/remove` | `{reason}`; 422 without reason, 404 if the hold does not cover the document, 409 `released`. Needs `ManageRetention` on the document as well. |
+| POST | `/api/v1/legal-holds/search-preview` | Search filter → `{total, documents: [{documentId, title, documentNumber?, manageable, underLegalHold}], fingerprint}`: the distinct documents of all hits, for review before confirming (DMS-106). `title` is the hit's, a version the caller may read; `manageable: false` means only someone cleared can take the document out again, it refuses nothing. |
+| POST | `/api/v1/legal-holds/{id}/documents/{documentId}/remove` | `{reason}`; 422 without reason, 404 if the hold does not cover the document, 409 `released`. Needs `ManageRetention` on every governing version of the document as well. |
 | POST | `/api/v1/legal-holds/{id}/release` | `{reason}`; 422 without reason, 409 `released` if released before. |
 
 `searchFilter` = `{q?, class?, status?, lang?, expectedCount, expectedFingerprint?}`: the parameters of `GET /api/v1/search` plus the hit count (`total`) the caller confirms and, optionally, the `fingerprint` of the preview they reviewed (SHA-256 over the sorted document ids). The server re-runs the search as the caller and puts the documents of all hits under the hold; `409 result_changed` if it finds a different number or, with the fingerprint, other documents now, `422 too_many_documents` above 1000 hits. Lists mark held documents for every reader: `legalHold` in `GET /api/v1/documents`, the search hits and the library items (no hold details). The document view (`GET /api/v1/documents/{id}`) shows `legalHold` and, for callers with `ManageRetention` on the document, `legalHolds` (`id`, `name`, `matterReference`, `createdAt`).
 
-Tests: `LegalHoldServiceSpec` (PostgreSQL and SeaweedFS: service, RLS, history guards, destruction guard, object legal hold), `LegalHoldApiSpec` in `app` (HTTP, authorization, reasons, search-result hold with OpenSearch, several holds and release; DMS-106: preview and fingerprint, removal, list markers without hold names).
+Tests: `LegalHoldServiceSpec` (PostgreSQL and SeaweedFS: service, RLS, history guards, destruction guard, object legal hold), `LegalHoldApiSpec` in `app` (HTTP, authorization, reasons, search-result hold with OpenSearch, several holds and release; DMS-106: preview and fingerprint, removal, list markers without hold names; DMS-156: a hold past a stricter draft and past every version, nothing of them in any response).
 
 ## Retention, destruction and clean-up (DMS-82, ADR 0054)
 

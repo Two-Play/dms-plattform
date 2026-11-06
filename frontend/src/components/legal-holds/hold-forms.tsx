@@ -53,7 +53,7 @@ export function ReasonField({
 /** The documents a search would put under a hold, for the records manager to review. */
 export function SearchPreview({ preview }: { preview: HoldSearchPreview }) {
   const documents = preview.documents ?? []
-  const outside = documents.some((d) => !d.manageable)
+  const lasting = documents.some((d) => !d.manageable)
   return (
     <div className="grid gap-2" data-testid="hold-search-preview">
       <p className="text-sm" role="status">
@@ -61,8 +61,8 @@ export function SearchPreview({ preview }: { preview: HoldSearchPreview }) {
           ? t('legalHolds.search.none')
           : t('legalHolds.search.summary', { count: preview.total, documents: documents.length })}
       </p>
-      {outside && (
-        <p role="alert" className="flex gap-2 text-sm text-destructive">
+      {lasting && (
+        <p className="flex gap-2 text-sm text-muted-foreground">
           <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           {t('legalHolds.search.notManageableText')}
         </p>
@@ -89,7 +89,7 @@ export function SearchPreview({ preview }: { preview: HoldSearchPreview }) {
                   <Badge variant="secondary">{t('legalHolds.search.held')}</Badge>
                 )}
                 {!d.manageable && (
-                  <Badge variant="destructive">{t('legalHolds.search.notManageable')}</Badge>
+                  <Badge variant="outline">{t('legalHolds.search.notManageable')}</Badge>
                 )}
               </li>
             ))}

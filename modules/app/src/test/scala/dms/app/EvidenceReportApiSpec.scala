@@ -754,6 +754,18 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         changeableNow
       )
     },
+    test("without a version, the retention is that of the open version, else of what stands (DMS-156)") {
+      def shown(path: String) = call(author, "GET", path).map(as[DocumentRetentionView](_).versionId)
+      for
+        doc  <- publishedDocument("Regelfall AG")
+        next <- nextVersion(doc.id)
+        path = s"/api/v1/documents/${doc.id}/retention"
+        whileOpen <- shown(path)
+        _         <- neverValid(next)
+        stands    <- shown(path)
+        named     <- shown(s"$path?version=$next")
+      yield assertTrue(whileOpen == next, stands == doc.current.id, named == next)
+    },
     test(
       "a version is destroyed only by someone cleared for it, whatever the latest version says (DMS-155)"
     ) {

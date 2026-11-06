@@ -18,9 +18,9 @@ Deputies (DMS-49, ADR 0028 and addendum to ADR 0018): `Authorizer.onBehalfOf(sub
 
 Document resources and search (DMS-51/52, ADR 0029 and addendum to ADR 0018): `DocumentResource(tenant, document, classPath, version, participants)` builds the `Resource` of a version from the document and its field values (`organizationalUnit`, `confidentiality`, optional `allowedGroups`); the document API and the search indexer use it, and the search's permission filter mirrors `Policy` on these attributes. `ConfigurationArea.Search` covers rebuilding the search index.
 
-Legal holds (DMS-56, ADR 0031 and addendum to ADR 0018): `ManageRetention` (records managers, matrix row "Retention / legal hold") covers legal holds. Hold-level operations check it on the tenant resource (records manager for the whole tenant), each document put under a hold on its `DocumentResource`.
+Legal holds (DMS-56, ADR 0031 and addendum to ADR 0018): `ManageRetention` (records managers, matrix row "Retention / legal hold") covers legal holds. All operations check it on the tenant resource (records manager for the whole tenant). Putting a document under a hold needs nothing more (DMS-156, ADR 0082); taking one out checks it on the document's governing versions as well.
 
-Rights on a document as a whole (DMS-155, ADR 0072): retention, legal holds and evidence reports ask on every version of `Versioning.governing` (the valid versions and what is on its way into force), not on the latest one, which may be a version that never took effect. Destruction asks on each named version as well, an evidence report for clearance on every version it shows (`Authorizer.checkCleared`).
+Rights on a document as a whole (DMS-155, ADR 0072): retention, taking a document out of a legal hold and evidence reports ask on every version of `Versioning.governing` (the valid versions and what is on its way into force), not on the latest one, which may be a version that never took effect. Destruction asks on each named version as well, an evidence report for clearance on every version it shows (`Authorizer.checkCleared`).
 
 Single module without an `api`/`core` split.
 

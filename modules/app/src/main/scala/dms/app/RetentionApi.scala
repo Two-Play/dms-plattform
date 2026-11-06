@@ -552,7 +552,9 @@ object RetentionApi:
     SecuredApi.base.get
       .in("api" / "v1" / "documents" / path[UUID]("id").description("Document id") / "retention")
       .in(
-        query[Option[UUID]]("version").description("Version id; default: the open or latest readable version")
+        query[Option[UUID]]("version").description(
+          "Version id; default: the open readable version, else the readable version that stands"
+        )
       )
       .out(jsonBody[DocumentRetentionView])
       .description(
@@ -572,7 +574,8 @@ object RetentionApi:
         "Sets the retention rule of the document instead of the rule of its class: the open draft gets it at once, " +
           "every later version keeps it (DMS-133). Without a rule the document follows its class again. Versions in " +
           "review or approved keep their rule. 422 for an unknown rule, 404 for a discarded or destroyed document. " +
-          "Audited. Requires the records manager role. Returns the open or latest version's retention."
+          "Audited. Requires the records manager role. Returns the retention of the open version, else of the " +
+          "version that stands."
       )
       .tag("Retention")
       .serverLogic(p =>
@@ -625,8 +628,9 @@ object RetentionApi:
 
   private type Failure = DestructionError | DocumentError | AccessDenied
 
-  /** The retention view of a version the caller may read (default: the open or latest readable version);
-    * without `requireRead` of the open or latest version.
+  /** The retention view of a version the caller may read (default: the open readable version, else the one
+    * that stands of them, so not a latest version that never took effect, ADR 0082); without `requireRead` of
+    * any version.
     */
   private def retentionOf(
       p: Principal,
@@ -649,7 +653,9 @@ object RetentionApi:
                 .orElseFail(DocumentError.NotFound(s"version $v of document ${id.value} does not exist"))
                 .tap(v => ctx.checkRead(details, v))
             case None =>
-              ZIO.succeed(readable.find(v => Versioning.isOpen(v.status)).getOrElse(readable.last))
+              ZIO.succeed(
+                readable.find(v => Versioning.isOpen(v.status)).getOrElse(Versioning.governing(readable).last)
+              )
           rules     <- destruction.rules.mapError(fromDestruction)
           classRule <- classes
             .effectiveRetentionRule(details.document.classId)

@@ -344,7 +344,8 @@ object FileDocumentApi:
       .description(
         "Downloads the original of a file document version unchanged (e.g. the Word file as uploaded), as " +
           "attachment with its SHA-256 as Repr-Digest and ETag; requires reading the version. 404 if the version " +
-          "has no file. The stored object is checked against the recorded SHA-256 before it is sent."
+          "has no file. The stored object is checked against the recorded SHA-256 before it is sent. The file " +
+          "name of a version out of force says so, as for filled files; the bytes do not change."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -360,7 +361,7 @@ object FileDocumentApi:
             digest = Sha256.fromHex(file.sha256).fold(_ => "", d => s"sha-256=:${d.base64}:")
           yield (
             file.contentType,
-            AttachmentApi.contentDisposition(file.name),
+            AttachmentApi.contentDisposition(WordFilling.fileName(file.name, found._2)),
             file.size,
             s"\"${file.sha256}\"",
             digest,

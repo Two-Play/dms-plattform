@@ -214,6 +214,7 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
       Headers(Header.Authorization.Bearer(token(user)), Header.ContentType(MediaType.application.json))
     val request = method match
       case "POST" => Request.post(url, Body.fromString(body.getOrElse("{}"))).addHeaders(headers)
+      case "PUT"  => Request.put(url, Body.fromString(body.getOrElse("{}"))).addHeaders(headers)
       case _      => Request.get(url).addHeaders(headers)
     ZIO.scoped(routes.runZIO(request)).flatMap(r => r.body.asString.map(b => (r.status, b)).orDie)
 
@@ -320,6 +321,17 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
       )
     )
 
+  /** Gives the document a title as a draft could before ADR 0074. */
+  private def retitle(doc: UUID, title: String) =
+    setup.await.flatMap(
+      _.owner.transactSystem(
+        Db.sql {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          sql"update dms.document set title = $title where id = $doc".update.run()
+        }
+      )
+    )
+
   /** Makes `version` one that was approved and withdrawn before it took effect (ADR 0059). */
   private def neverValid(version: UUID) =
     setup.await.flatMap(
@@ -395,7 +407,7 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
         docAudit.contains(("document.legal-hold-set", Some("Litigation pending")))
       )
     },
-    test("only records managers for the whole tenant manage holds; documents need their scope too") {
+    test("only records managers for the whole tenant manage holds") {
       for
         doc     <- validDocument("Liefervertrag Süd")
         byRead  <- create(reader, hold("Reader", List(doc.id)))
@@ -416,12 +428,11 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
           s"/api/v1/legal-holds/${created.id}/documents",
           Some(s"""{"reason":"x","documentIds":["${UUID.randomUUID()}"]}""")
         )
-        missing  <- call(records, "GET", s"/api/v1/legal-holds/${UUID.randomUUID()}")
-        secret   <- confidentialDraft("Vergleichsentwurf")
-        denied   <- create(records, hold("Confidential", List(doc.id, secret.id)))
-        nothing  <- call(records, "GET", "/api/v1/legal-holds").map(as[List[LegalHoldView]])
-        draft    <- create(records, hold("Draft", List(doc.id))).map(as[LegalHoldView])
-        bySecret <- document(author, secret.id)
+        missing <- call(records, "GET", s"/api/v1/legal-holds/${UUID.randomUUID()}")
+        partly  <- create(records, hold("Partly unknown", List(doc.id, UUID.randomUUID())))
+        nothing <- call(records, "GET", "/api/v1/legal-holds").map(as[List[LegalHoldView]])
+        free    <- document(reader, doc.id)
+        draft   <- create(records, hold("Draft", List(doc.id))).map(as[LegalHoldView])
       yield assertTrue(
         byRead._1 == Status.Forbidden,
         byHr._1 == Status.Forbidden,
@@ -431,14 +442,14 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
         rel._1 == Status.Forbidden,
         unknown._1 == Status.NotFound,
         missing._1 == Status.NotFound,
-        // confidential and outside the records manager's groups: nothing is stored
-        denied._1 == Status.Forbidden,
-        !nothing.exists(_.name == "Confidential"),
-        !bySecret.legalHold,
+        // one document does not exist: nothing is stored
+        partly._1 == Status.NotFound,
+        !nothing.exists(_.name == "Partly unknown"),
+        !free.legalHold,
         draft.documentCount == 1
       )
     },
-    test("the rights on a held document follow what stands for it, not its latest version (DMS-155)") {
+    test("taking a document out of a hold follows what stands for it, not its latest version (DMS-155)") {
       def add(hold: UUID, doc: UUID) =
         call(
           records,
@@ -468,7 +479,7 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
           Some("""{"changeKind":"Major","reason":"Revised"}""")
         ).map(as[DocumentVersionView](_).id)
         valid = doc.current.id
-        // A confidential draft is on its way: its title may be the document's, it still decides.
+        // A confidential draft is on its way: it stops no hold (DMS-156), but it decides who may undo one.
         _             <- rewrite(next, "Confidential")
         stricterDraft <- create(records, hold("Quartal A", List(doc.id)))
         stricterList  <- manageable("Quartalszahlen")
@@ -484,18 +495,158 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
         wider        <- create(records, hold("Quartal C", List(doc.id)))
         widerAdded   <- add(held.id, doc.id)
         widerRemoved <- remove(held.id, doc.id)
+        ofLatest     <- titleIn(held.id, doc.id)
+        _            <- rewrite(next, "Confidential")
         hidden       <- titleIn(held.id, doc.id)
       yield assertTrue(
-        stricterDraft._1 == Status.Forbidden,
+        stricterDraft._1 == Status.Created,
         stricterList == List(false),
         shown.contains("Vergleich Quartalszahlen"),
         now == List(true),
         removed._1 == Status.Ok,
         added._1 == Status.Ok,
-        wider._1 == Status.Forbidden,
-        widerAdded._1 == Status.Forbidden,
+        wider._1 == Status.Created,
+        widerAdded._1 == Status.Ok,
         widerRemoved._1 == Status.Forbidden,
+        ofLatest.contains("Vergleich Quartalszahlen"),
         hidden.isEmpty
+      )
+    },
+    test("a stricter draft does not delay a hold, and the hold shows nothing of the draft (DMS-156)") {
+      val secret                                   = "Projekt Nachtfalke"
+      val unit                                     = "Geheimstab"
+      def add(user: UserId, hold: UUID, doc: UUID) =
+        call(
+          user,
+          "POST",
+          s"/api/v1/legal-holds/$hold/documents",
+          Some(s"""{"reason":"Same matter","documentIds":["$doc"]}""")
+        )
+      def preview(user: UserId) =
+        call(user, "POST", "/api/v1/legal-holds/search-preview", Some("""{"q":"Kranich"}"""))
+      def leaks(response: (Status, String)) = response._2.contains(secret) || response._2.contains(unit)
+      for
+        doc <- validDocument("Rahmenvertrag Kranich")
+        // The author starts a version and makes it confidential, with a title of its own.
+        _ <- call(
+          author,
+          "POST",
+          s"/api/v1/documents/${doc.id}/versions",
+          Some("""{"changeKind":"Major","reason":"Revised"}""")
+        )
+        saved <- call(
+          author,
+          "PUT",
+          s"/api/v1/documents/${doc.id}/draft",
+          Some(s"""{"title":"$secret","values":${values(unit, "Confidential")}}""")
+        )
+        searched <- preview(records)
+        found = as[HoldSearchPreviewView](searched)
+        fromSearch <- create(
+          records,
+          s"""{"name":"Kranich Suche","reason":"Dispute","searchFilter":{"q":"Kranich",
+             |"expectedCount":${found.total},"expectedFingerprint":"${found.fingerprint}"}}""".stripMargin
+        )
+        named <- create(records, hold("Kranich", List(doc.id)))
+        later <- create(records, hold("Kranich später", Nil)).map(as[LegalHoldView])
+        added <- add(records, later.id, doc.id)
+        held = as[LegalHoldView](named)
+        single  <- call(records, "GET", s"/api/v1/legal-holds/${held.id}")
+        listed  <- call(records, "GET", "/api/v1/legal-holds?status=all")
+        view    <- call(records, "GET", s"/api/v1/documents/${doc.id}")
+        removed <- call(
+          records,
+          "POST",
+          s"/api/v1/legal-holds/${held.id}/documents/${doc.id}/remove",
+          Some("""{"reason":"Added by mistake"}""")
+        )
+        // A draft saved before ADR 0074 may have changed the document's title.
+        _       <- retitle(doc.id, secret)
+        renamed <- call(records, "GET", s"/api/v1/legal-holds/${held.id}")
+        _       <- retitle(doc.id, "Rahmenvertrag Kranich")
+        // The role stays what it takes.
+        byAuthor    <- create(author, hold("Autor", List(doc.id)))
+        addByAuthor <- add(author, later.id, doc.id)
+        byOwner     <- create(owner, hold("Owner", List(doc.id)))
+        byHr        <- add(recordsHr, later.id, doc.id)
+        byReader    <- preview(reader)
+        forAuthor   <- document(author, doc.id)
+        holdAudit   <- auditActions(held.id)
+        addAudit    <- auditActions(later.id)
+        docAudit    <- auditActions(doc.id)
+        entry = as[LegalHoldView](single).documents.toList.flatten
+      yield assertTrue(
+        saved._1 == Status.Ok,
+        // The preview names the hit, a version the caller may read, and says a hold can be set.
+        searched._1 == Status.Ok,
+        found.documents.map(d => (d.title, d.manageable)) == List(("Rahmenvertrag Kranich", false)),
+        !leaks(searched),
+        fromSearch._1 == Status.Created,
+        !leaks(fromSearch),
+        named._1 == Status.Created,
+        !leaks(named),
+        held.addedDocumentIds.contains(List(doc.id)),
+        added._1 == Status.Ok,
+        !leaks(added),
+        as[LegalHoldView](added).addedDocumentIds.contains(List(doc.id)),
+        // The title of the version the records manager is cleared for, and no way to undo the hold.
+        entry.map(d => (d.title, d.removable)) == List((Some("Rahmenvertrag Kranich"), false)),
+        !leaks(single),
+        !leaks(listed),
+        !leaks(view),
+        as[DocumentView](view).legalHold,
+        removed._1 == Status.Forbidden,
+        !leaks(removed),
+        !leaks(renamed),
+        as[LegalHoldView](renamed).documents.toList.flatten.map(_.title) ==
+          List(Some("Rahmenvertrag Kranich")),
+        byAuthor._1 == Status.Forbidden,
+        addByAuthor._1 == Status.Forbidden,
+        byOwner._1 == Status.Forbidden,
+        byHr._1 == Status.Forbidden,
+        byReader._1 == Status.Forbidden,
+        // Whoever made the draft stricter sees that it did not help.
+        forAuthor.legalHold,
+        holdAudit == List(("legal-hold.created", Some("Litigation pending"))),
+        addAudit == List(
+          ("legal-hold.created", Some("Litigation pending")),
+          ("legal-hold.documents-added", Some("Same matter"))
+        ),
+        docAudit.count(_ == ("document.legal-hold-set", Some("Litigation pending"))) == 1,
+        docAudit.contains(("document.legal-hold-set", Some("Same matter"))),
+        docAudit.contains(("document.legal-hold-set", Some("Dispute")))
+      )
+    },
+    test("a document the records manager is cleared for in no version goes under a hold unnamed (DMS-156)") {
+      for
+        draft   <- confidentialDraft("Vergleichsentwurf Reiher")
+        valid   <- validDocument("Geschäftsführervertrag Reiher")
+        _       <- rewrite(valid.current.id, "Confidential")
+        created <- create(records, hold("Matter 7", List(draft.id, valid.id)))
+        id = as[LegalHoldView](created).id
+        single  <- call(records, "GET", s"/api/v1/legal-holds/$id")
+        removed <- call(
+          records,
+          "POST",
+          s"/api/v1/legal-holds/$id/documents/${draft.id}/remove",
+          Some("""{"reason":"Added by mistake"}""")
+        )
+        released   <- release(records, id)
+        afterwards <- document(author, draft.id)
+        audit      <- auditActions(draft.id)
+      yield assertTrue(
+        created._1 == Status.Created,
+        !created._2.contains("Vergleichsentwurf"),
+        !created._2.contains("Geschäftsführervertrag"),
+        as[LegalHoldView](single).documents.toList.flatten.map(d => (d.title, d.removable)) ==
+          List((None, false), (None, false)),
+        !single._2.contains("Vergleichsentwurf"),
+        !single._2.contains("Geschäftsführervertrag"),
+        removed._1 == Status.Forbidden,
+        // Only someone cleared takes a single document out; ending the hold as a whole stays possible.
+        released._1 == Status.Ok,
+        !afterwards.legalHold,
+        audit.contains(("document.legal-hold-set", Some("Litigation pending")))
       )
     },
     test("setting, adding and releasing require a reason (422)") {

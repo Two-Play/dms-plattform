@@ -38,6 +38,7 @@ const failed = (status: number, body: unknown): Reply =>
 const docA = '11111111-1111-4111-8111-111111111111'
 const docB = '22222222-2222-4222-8222-222222222222'
 const docC = '33333333-3333-4333-8333-333333333333'
+const docD = '44444444-4444-4444-8444-444444444444'
 
 const assignment = (organizationalUnit?: string) => ({
   role: 'RecordsManager',
@@ -85,6 +86,7 @@ const detail: LegalHold = {
       reason: 'Lawsuit filed',
       addedBy: 'records-1',
       addedAt: '2026-10-20T09:00:00Z',
+      removable: true,
     },
     {
       documentId: docB,
@@ -93,6 +95,7 @@ const detail: LegalHold = {
       reason: 'Same supplier',
       addedBy: 'records-1',
       addedAt: '2026-10-21T09:00:00Z',
+      removable: true,
       removedAt: '2026-10-22T09:00:00Z',
       removedBy: 'records-1',
       removalReason: 'Added by mistake',
@@ -103,6 +106,16 @@ const detail: LegalHold = {
       reason: 'Board minutes',
       addedBy: 'records-2',
       addedAt: '2026-10-21T10:00:00Z',
+      removable: false,
+    },
+    {
+      documentId: docD,
+      title: 'Framework agreement',
+      addedVia: 'Document',
+      reason: 'Same dispute',
+      addedBy: 'records-1',
+      addedAt: '2026-10-21T11:00:00Z',
+      removable: false,
     },
   ],
 }
@@ -267,7 +280,8 @@ describe('legal holds page', () => {
     const table = await screen.findByRole('table', {
       name: 'Documents of the legal hold, with who added or removed them and why',
     })
-    const [first, second, third] = within(table).getAllByRole('row').slice(1) as [
+    const [first, second, third, fourth] = within(table).getAllByRole('row').slice(1) as [
+      HTMLElement,
       HTMLElement,
       HTMLElement,
       HTMLElement,
@@ -279,6 +293,9 @@ describe('legal holds page', () => {
     expect(within(second).queryByRole('button')).not.toBeInTheDocument()
     expect(within(third).getByText('Document not visible to you')).toBeInTheDocument()
     expect(within(third).queryByRole('button')).not.toBeInTheDocument()
+    // A title of a version the caller is cleared for, past one they are not: they cannot undo the hold.
+    expect(within(fourth).getByRole('link', { name: 'Framework agreement' })).toBeInTheDocument()
+    expect(within(fourth).queryByRole('button')).not.toBeInTheDocument()
     expect(screen.getByText('1 document under this hold')).toBeInTheDocument()
   })
 
@@ -380,6 +397,41 @@ describe('legal holds page', () => {
         },
       },
     })
+  })
+
+  it('sets a hold past a version the caller is not cleared for, and says what that means', async () => {
+    const stricter: HoldSearchPreview = {
+      ...preview,
+      documents: [
+        {
+          documentId: docB,
+          title: 'Supply contract South',
+          manageable: false,
+          underLegalHold: false,
+        },
+      ],
+    }
+    const { user } = renderAt('/legal-holds?hold=hold-1', (p) =>
+      p === '/api/v1/legal-holds/search-preview'
+        ? ok(stricter)
+        : ok({ ...activeHold, addedDocumentIds: [docB] }),
+    )
+    await user.click(await screen.findByRole('button', { name: 'Add documents' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText('Search text'), 'supply')
+    await user.click(within(dialog).getByRole('button', { name: 'Check search' }))
+
+    const list = await within(dialog).findByRole('list', { name: 'Documents of the search' })
+    expect(within(list).getByText('Removal needs clearance')).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(/only someone cleared can take them out one by one/),
+    ).toBeInTheDocument()
+    await user.type(within(dialog).getByLabelText('Reason *'), 'Same supplier')
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Put 1 document under legal hold' }),
+    )
+
+    expect(await screen.findByText('1 document put under legal hold.')).toBeInTheDocument()
   })
 
   it('adds named documents from pasted links', async () => {

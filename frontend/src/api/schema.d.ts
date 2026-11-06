@@ -1080,7 +1080,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description Downloads the original of a file document version unchanged (e.g. the Word file as uploaded), as attachment with its SHA-256 as Repr-Digest and ETag; requires reading the version. 404 if the version has no file. The stored object is checked against the recorded SHA-256 before it is sent. */
+    /** @description Downloads the original of a file document version unchanged (e.g. the Word file as uploaded), as attachment with its SHA-256 as Repr-Digest and ETag; requires reading the version. 404 if the version has no file. The stored object is checked against the recorded SHA-256 before it is sent. The file name of a version out of force says so, as for filled files; the bytes do not change. */
     get: operations['getApiV1DocumentsIdVersionsVersionidFile']
     put?: never
     post?: never
@@ -2060,7 +2060,7 @@ export interface paths {
     /** @description The legal holds of the tenant, the latest first. Requires the records manager role. */
     get: operations['getApiV1Legal-holds']
     put?: never
-    /** @description Sets a legal hold for a matter: name and reason are required (422). Documents can be named (`documentIds`) and/or taken from a search (`searchFilter`: the parameters of the search plus `expectedCount`, the hit count the caller confirmed; 409 result_changed if the search finds a different number now, 422 too_many_documents above 1000 hits). Documents can also be added later. Requires the records manager role for the whole tenant and for every document. */
+    /** @description Sets a legal hold for a matter: name and reason are required (422). Documents can be named (`documentIds`) and/or taken from a search (`searchFilter`: the parameters of the search plus `expectedCount`, the hit count the caller confirmed; 409 result_changed if the search finds a different number now, 422 too_many_documents above 1000 hits). Documents can also be added later. Requires the records manager role for the whole tenant; no clearance for the documents is needed, and the response names them by id only. */
     post: operations['postApiV1Legal-holds']
     delete?: never
     options?: never
@@ -2077,7 +2077,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description The documents a search would put under a hold (DMS-106): the search runs as the caller, as when the hold is set; `expectedCount` is ignored. Returns the hit count, the distinct documents (whether the caller may manage each and whether a hold covers it already) and a `fingerprint` to confirm exactly these documents with `expectedFingerprint`. 422 too_many_documents above 1000 hits. Requires the records manager role for the whole tenant. */
+    /** @description The documents a search would put under a hold (DMS-106): the search runs as the caller, as when the hold is set; `expectedCount` is ignored. Returns the hit count, the distinct documents (the title of the hit, a version the caller may read; whether they could take the document out of a hold again; whether a hold covers it already) and a `fingerprint` to confirm exactly these documents with `expectedFingerprint`. 422 too_many_documents above 1000 hits. Requires the records manager role for the whole tenant. */
     post: operations['postApiV1Legal-holdsSearch-preview']
     delete?: never
     options?: never
@@ -2092,7 +2092,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description A legal hold with its documents: who added them how and why. Titles are shown for documents the caller may manage. Requires the records manager role. */
+    /** @description A legal hold with its documents: who added them how and why. A title is shown only if the caller is cleared for the version it comes from, and `removable` says whether they may take the document out. Requires the records manager role. */
     get: operations['getApiV1Legal-holdsId']
     put?: never
     post?: never
@@ -2111,7 +2111,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Puts further documents under an active hold, named or from a confirmed search (as on creation); a reason is required (422). Documents the hold covers already are skipped; `addedDocumentIds` lists the new ones. 409 released if the hold was released. */
+    /** @description Puts further documents under an active hold, named or from a confirmed search (as on creation); a reason is required (422). Documents the hold covers already are skipped; `addedDocumentIds` lists the new ones. 409 released if the hold was released. No clearance for the documents is needed. */
     post: operations['postApiV1Legal-holdsIdDocuments']
     delete?: never
     options?: never
@@ -2128,7 +2128,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Takes a single document out of an active hold (DMS-106), e.g. one added by mistake; a reason is required (422). The entry stays in the hold's history with the removal; the document is no longer under legal hold unless another active hold covers it. 404 if the hold does not cover the document, 409 released if the hold was released. Requires the records manager role for the whole tenant and for the document. */
+    /** @description Takes a single document out of an active hold (DMS-106), e.g. one added by mistake; a reason is required (422). The entry stays in the hold's history with the removal; the document is no longer under legal hold unless another active hold covers it. 404 if the hold does not cover the document, 409 released if the hold was released. Requires the records manager role for the whole tenant and clearance for every version that stands for the document. */
     post: operations['postApiV1Legal-holdsIdDocumentsDocumentidRemove']
     delete?: never
     options?: never
@@ -2230,7 +2230,7 @@ export interface paths {
     }
     /** @description The retention rule of a document version with name and period, where it comes from (the class, records management), the rule of the class and the rule set for the document (DMS-133). Requires reading the version. */
     get: operations['getApiV1DocumentsIdRetention']
-    /** @description Sets the retention rule of the document instead of the rule of its class: the open draft gets it at once, every later version keeps it (DMS-133). Without a rule the document follows its class again. Versions in review or approved keep their rule. 422 for an unknown rule, 404 for a discarded or destroyed document. Audited. Requires the records manager role. Returns the open or latest version's retention. */
+    /** @description Sets the retention rule of the document instead of the rule of its class: the open draft gets it at once, every later version keeps it (DMS-133). Without a rule the document follows its class again. Versions in review or approved keep their rule. 422 for an unknown rule, 404 for a discarded or destroyed document. Audited. Requires the records manager role. Returns the retention of the open version, else of the version that stands. */
     put: operations['putApiV1DocumentsIdRetention']
     post?: never
     delete?: never
@@ -4197,6 +4197,7 @@ export interface components {
       addedBy: string
       /** Format: date-time */
       addedAt: string
+      removable: boolean
       /** Format: date-time */
       removedAt?: string
       removedBy?: string
@@ -12250,7 +12251,7 @@ export interface operations {
   getApiV1DocumentsIdRetention: {
     parameters: {
       query?: {
-        /** @description Version id; default: the open or latest readable version */
+        /** @description Version id; default: the open readable version, else the readable version that stands */
         version?: string
       }
       header?: never

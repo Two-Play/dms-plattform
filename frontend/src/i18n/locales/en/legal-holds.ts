@@ -107,9 +107,9 @@ export const legalHolds = {
     }),
     previewCaption: 'Documents of the search',
     held: 'Under legal hold',
-    notManageable: 'Outside your scope',
+    notManageable: 'Removal needs clearance',
     notManageableText:
-      'You may not manage legal holds of some of these documents. Narrow the search to leave them out.',
+      'You are not cleared for every version of some of these documents. You can put them under legal hold, but only someone cleared can take them out one by one.',
     none: 'The search finds no documents.',
     changed: 'Change the search and check it again.',
     resultChanged:

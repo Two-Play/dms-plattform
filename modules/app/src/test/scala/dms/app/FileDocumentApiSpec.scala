@@ -707,16 +707,19 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
         _ <- approve(doc.id)
         path = s"/api/v1/documents/${doc.id}/versions/${doc.current.id}"
         approved  <- call(author, "GET", s"$path/filled.docx")
+        original  <- call(author, "GET", s"$path/file")
         withdrawn <- call(
           owner,
           "POST",
           s"$path/withdraw",
           Some(WithdrawVersion("Falscher Kunde").toJson)
         )
-        filled <- call(author, "GET", s"$path/filled.docx")
-        other  <- call(author, "GET", s"$path/filled")
-        fields <- call(author, "GET", s"$path/word-fields").map(as[WordFieldsView])
-        copy   <- call(author, "GET", s"$path/copy.pdf")
+        // The original says it by its name as well, and stays what was uploaded (DMS-156).
+        originalOut <- call(author, "GET", s"$path/file")
+        filled      <- call(author, "GET", s"$path/filled.docx")
+        other       <- call(author, "GET", s"$path/filled")
+        fields      <- call(author, "GET", s"$path/word-fields").map(as[WordFieldsView])
+        copy        <- call(author, "GET", s"$path/copy.pdf")
         // What the document page shows and what the archive holds (DMS-155).
         preview   <- call(author, "GET", s"$path/preview.pdf")
         archive   <- call(author, "GET", s"$path/rendition")
@@ -735,6 +738,14 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
         archive.header("Content-Disposition").exists(_.endsWith("-never-valid.pdf\"")),
         part(approved.body.toArray, "word/document.xml").contains("Freigegeben"),
         !approved.header("Content-Disposition").exists(_.contains("gezogen")),
+        original.status == Status.Ok,
+        !original.header("Content-Disposition").exists(_.contains("gezogen")),
+        originalOut.status == Status.Ok,
+        originalOut
+          .header("Content-Disposition")
+          .exists(_.contains("%28Zur%C3%BCckgezogen%2C%20nie%20g%C3%BCltig%29.docx")),
+        originalOut.body.toArray.sameElements(original.body.toArray),
+        originalOut.header("ETag") == original.header("ETag"),
         filled
           .header("Content-Disposition")
           .exists(_.contains("%28Zur%C3%BCckgezogen%2C%20nie%20g%C3%BCltig%29.docx")),

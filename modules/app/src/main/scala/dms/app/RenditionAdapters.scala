@@ -189,7 +189,10 @@ object DocumentRenditions:
 
   /** The title of a version: its `title` field, else the document's title. */
   def title(details: DocumentDetails, v: DocumentVersion): String =
-    text(v.metadata, "title").getOrElse(details.document.title)
+    ownTitle(v).getOrElse(details.document.title)
+
+  /** What the `title` field of a version says, without falling back on the document. */
+  def ownTitle(v: DocumentVersion): Option[String] = text(v.metadata, "title")
 
   /** The stand-alone HTML page of a version (templates module): its content resolved with its field values,
     * in its language. The archive rendition is printed from it; the stable address of the current version

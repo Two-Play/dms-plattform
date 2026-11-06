@@ -856,7 +856,7 @@ function HoldDetail({ holdId, search }: { holdId: string; search: LegalHoldsPage
                 <DocumentRow
                   key={`${d.documentId}-${String(i)}`}
                   document={d}
-                  removable={active && !d.removedAt && d.title !== undefined}
+                  removable={active && !d.removedAt && d.removable}
                   onRemove={() => {
                     setRemoving(d)
                   }}
