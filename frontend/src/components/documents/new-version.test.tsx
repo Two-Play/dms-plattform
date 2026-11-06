@@ -289,9 +289,7 @@ describe('New version on the document page (DMS-103)', () => {
       }),
     )
     await user.click(screen.getByRole('button', { name: 'Start version' }))
-    expect(
-      await screen.findByText(/not started: version 2\.0-draft\.1 is still Draft/),
-    ).toHaveAttribute('role', 'alert')
+    expect(await screen.findByRole('alert')).toHaveTextContent('The version was not started:')
     expect(post).toHaveBeenCalledWith('/api/v1/documents/{id}/versions', {
       params: { path: { id: documentId } },
       body: { changeKind: 'Major', reason: 'Rule 7 rewritten' },
@@ -373,9 +371,7 @@ describe('Change summary of a draft (DMS-103)', () => {
 
     await user.type(field, 'Typo in rule 5')
     await user.click(within(card).getByRole('button', { name: 'Save summary' }))
-    expect(
-      await within(card).findByText(/Not saved: version 1\.2-draft\.1 is InReview/),
-    ).toHaveAttribute('role', 'alert')
+    expect(await within(card).findByRole('alert')).toHaveTextContent('Not saved:')
     expect(within(card).getByLabelText('Change summary *')).toBeInTheDocument()
   })
 

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { BellRing, LayoutGrid, Library, List, Sparkles, X } from 'lucide-react'
+import { BellRing, Check, LayoutGrid, Library, List, Sparkles, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { useApiClient } from '@/api/context'
 import {
@@ -226,9 +226,14 @@ function FacetGroup({
               onClick={() => {
                 onToggle(v.value)
               }}
-              className="flex min-h-8 w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-muted aria-pressed:bg-secondary aria-pressed:font-medium"
+              className="flex min-h-8 w-full items-center justify-between gap-2 rounded-md border border-transparent px-2 py-1 text-left text-sm hover:bg-muted aria-pressed:bg-secondary aria-pressed:font-medium aria-pressed:border-primary"
             >
-              <span>{label(v)}</span>
+              <span className="flex min-w-0 items-center gap-1">
+                {selected.includes(v.value) && (
+                  <Check aria-hidden="true" className="size-3.5 shrink-0" />
+                )}
+                {label(v)}
+              </span>
               <span className="text-xs text-muted-foreground tabular-nums">{v.count}</span>
             </button>
           </li>

@@ -342,6 +342,39 @@ describe('task inbox', () => {
     })
   })
 
+  it('moves focus to the row that took the place of a decided task, then to the heading', async () => {
+    const { user } = renderAt('/tasks')
+    const [approval] = await rows()
+
+    await user.click(within(must(approval)).getByRole('button', { name: 'Vote…' }))
+    await user.click(within(await screen.findByRole('dialog')).getByLabelText('Approve'))
+    await user.click(screen.getByRole('button', { name: 'Cast vote' }))
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: 'Service contract ACME' })).toHaveFocus()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Vote…' }))
+    await user.click(within(await screen.findByRole('dialog')).getByLabelText('Approve'))
+    await user.click(screen.getByRole('button', { name: 'Cast vote' }))
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'My tasks' })).toHaveFocus()
+    })
+  })
+
+  it('returns focus to the button when the dialog is cancelled', async () => {
+    const { user } = renderAt('/tasks')
+    const [approval] = await rows()
+    const vote = within(must(approval)).getByRole('button', { name: 'Vote…' })
+
+    await user.click(vote)
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }),
+    )
+    await waitFor(() => {
+      expect(vote).toHaveFocus()
+    })
+  })
+
   it('says why someone who changed the version cannot vote (DMS-159)', async () => {
     state.voteReplies.push(() =>
       failed(403, { code: 'segregation_of_duties', message: 'four-eyes rule' }),
@@ -532,6 +565,9 @@ describe('task inbox', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Cast vote' }))
 
     expect(await screen.findByText('Vote recorded: Approve.')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 1 })).toHaveFocus()
+    })
     expect(post).toHaveBeenCalledWith('/api/v1/workflow/tasks/{taskId}/votes', {
       params: { path: { taskId: 'review-contract' } },
       body: { decision: 'Approve', reason: undefined },

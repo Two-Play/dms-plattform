@@ -27,10 +27,9 @@ import { Label } from '@/components/ui/label'
 import { t } from '@/i18n'
 import { formatDateTime, formatFileSize } from '@/i18n/format'
 import { toast } from '@/lib/toast'
-
-function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
-}
+import { InlineError } from '@/components/shared/error-state'
+import { UserFacingError } from '@/api/errors'
+import { errorText } from '@/components/shared/error-messages'
 
 /**
  * The Word file of a Word template version (DMS-115): download, replace while the version is a draft, and
@@ -81,7 +80,7 @@ export function WordTemplatePanel({
       toast(t('word.file.uploaded'))
       await refresh()
     } catch (e) {
-      setProblem(t('word.file.uploadFailed', { message: message(e) }))
+      setProblem(t('word.file.uploadFailed', { message: errorText(e) }))
     } finally {
       setProgress(undefined)
     }
@@ -155,9 +154,10 @@ export function WordTemplatePanel({
             </p>
           )}
           {download.error && (
-            <p role="alert" className="text-destructive">
-              {t('word.file.downloadFailed', { message: download.error.message })}
-            </p>
+            <InlineError
+              error={download.error}
+              text={t('word.file.downloadFailed', { message: errorText(download.error) })}
+            />
           )}
         </CardContent>
       </Card>
@@ -290,9 +290,10 @@ export function WordTemplatePanel({
             </Button>
           )}
           {save.error && (
-            <p role="alert" className="text-sm text-destructive">
-              {t('word.templates.fieldsFailed', { message: save.error.message })}
-            </p>
+            <InlineError
+              error={save.error}
+              text={t('word.templates.fieldsFailed', { message: errorText(save.error) })}
+            />
           )}
           <WordFieldHelp />
         </CardContent>
@@ -503,7 +504,7 @@ export function NewWordTemplateCard({
 
   const create = useMutation({
     mutationFn: async () => {
-      if (!chosen || !file) throw new Error(t('word.templates.notDocx'))
+      if (!chosen || !file) throw new UserFacingError(t('word.templates.notDocx'))
       const created = await createTemplate(client, {
         name: name.trim(),
         description: description.trim() || undefined,
@@ -581,9 +582,10 @@ export function NewWordTemplateCard({
               ))}
             </select>
             {classes.error && (
-              <p role="alert" className="text-sm text-destructive">
-                {t('word.templates.classesFailed', { message: message(classes.error) })}
-              </p>
+              <InlineError
+                error={classes.error}
+                text={t('word.templates.classesFailed', { message: errorText(classes.error) })}
+              />
             )}
           </div>
           <div className="space-y-1.5">
@@ -604,7 +606,7 @@ export function NewWordTemplateCard({
           </div>
           {(problem ?? create.error) && (
             <p role="alert" className="text-sm text-destructive">
-              {problem ?? t('word.templates.createFailed', { message: message(create.error) })}
+              {problem ?? t('word.templates.createFailed', { message: errorText(create.error) })}
             </p>
           )}
           <WordFieldHelp />

@@ -4,7 +4,7 @@ import { plural } from '@/i18n/core'
 export const docPanels = {
   workflow: {
     title: 'Review and approval',
-    description: 'The workflow started when the document was submitted.',
+    description: 'The workflow starts when the document is submitted.',
     loading: 'Loading the workflow',
     notSubmitted: 'Not submitted yet.',
     earlierVersion: 'an earlier version',

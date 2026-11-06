@@ -39,16 +39,15 @@ import { LanguageSelect, selectClass } from './document-workspace'
 import { DocumentEditor } from './new-document-page'
 import { WordFieldHelp } from './word-field-help'
 import { WordFieldInput, WordFieldValue } from './word-field-input'
+import { InlineError, TechnicalDetail } from '@/components/shared/error-state'
+import { UserFacingError } from '@/api/errors'
+import { errorText } from '@/components/shared/error-messages'
 
 const STEPS = ['file', 'fields', 'preview', 'purpose'] as const
 type Step = (typeof STEPS)[number]
 type Purpose = 'document' | 'template'
 
 const convertible = new Set<string>(CONVERTIBLE_EXTENSIONS)
-
-function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
-}
 
 /** The file name without its extension, as default title or template name. */
 function baseName(name: string): string {
@@ -142,7 +141,7 @@ export function UploadWizard({
         <FileStep
           heading={heading}
           busy={analyse.isPending}
-          error={analyse.error ? message(analyse.error) : undefined}
+          error={analyse.error ? errorText(analyse.error) : undefined}
           onChoose={(chosen) => {
             analyse.mutate(chosen)
           }}
@@ -559,7 +558,8 @@ function PreviewStep({
         {preview.isPending && <LoadingState label={t('upload.preview.loading')} rows={6} />}
         {preview.isError && (
           <div role="alert" className="space-y-2 text-destructive">
-            <p>{t('upload.preview.failed', { message: preview.error.message })}</p>
+            <p>{t('upload.preview.failed', { message: errorText(preview.error) })}</p>
+            <TechnicalDetail error={preview.error} />
             <Button size="sm" variant="outline" onClick={() => void preview.refetch()}>
               {t('upload.preview.retry')}
             </Button>
@@ -727,7 +727,7 @@ function AsDocument({
       if (hasManual) await saveWordValues(client, documentId, values)
       toast(t('upload.document.created'))
     } catch (e) {
-      toast(t('upload.document.fileFailed', { message: message(e) }), 'error')
+      toast(t('upload.document.fileFailed', { message: errorText(e) }), 'error')
     }
     await queryClient.invalidateQueries({ queryKey: ['documents'] })
   }
@@ -793,9 +793,10 @@ function AsDocument({
             <p className="text-xs text-muted-foreground">{t('upload.document.noClasses')}</p>
           )}
           {classes.error && (
-            <p role="alert" className="text-destructive">
-              {t('upload.document.prepareFailed', { message: message(classes.error) })}
-            </p>
+            <InlineError
+              error={classes.error}
+              text={t('upload.document.prepareFailed', { message: errorText(classes.error) })}
+            />
           )}
         </div>
         <LanguageSelect value={language} onChange={setLanguage} />
@@ -806,9 +807,10 @@ function AsDocument({
         </Button>
       </div>
       {prepare.error && (
-        <p role="alert" className="text-destructive">
-          {t('upload.document.prepareFailed', { message: prepare.error.message })}
-        </p>
+        <InlineError
+          error={prepare.error}
+          text={t('upload.document.prepareFailed', { message: errorText(prepare.error) })}
+        />
       )}
     </form>
   )
@@ -836,7 +838,7 @@ function AsTemplate({
   const chosen = classes.data?.find((c) => c.id === source)
   const create = useMutation({
     mutationFn: async () => {
-      if (!chosen) throw new Error(t('upload.template.chooseClass'))
+      if (!chosen) throw new UserFacingError(t('upload.template.chooseClass'))
       const created = await createTemplate(client, {
         name: name.trim(),
         description: description.trim() || undefined,
@@ -912,9 +914,10 @@ function AsTemplate({
         </Button>
       </div>
       {create.error && (
-        <p role="alert" className="text-destructive">
-          {t('upload.template.failed', { message: create.error.message })}
-        </p>
+        <InlineError
+          error={create.error}
+          text={t('upload.template.failed', { message: errorText(create.error) })}
+        />
       )}
     </form>
   )

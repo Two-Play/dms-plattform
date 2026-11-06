@@ -19,6 +19,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
 import { formatPlainDate } from '@/i18n/format'
 import type { ReviewDecision } from './inbox-items'
+import { InlineError } from '@/components/shared/error-state'
 
 interface FormProps {
   task: ReviewTask
@@ -98,11 +99,7 @@ function RecertifyForm({ task, onDone, onCancel }: FormProps) {
           }}
         />
       </div>
-      {mutation.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {mutation.error.message}
-        </p>
-      )}
+      {mutation.isError && <InlineError error={mutation.error} />}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>
           {t('common.cancel')}
@@ -177,11 +174,7 @@ function ReviseForm({ task, onDone, onCancel }: FormProps) {
           {error ?? t('tasks.reviewDialog.summaryHint')}
         </p>
       </div>
-      {mutation.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {mutation.error.message}
-        </p>
-      )}
+      {mutation.isError && <InlineError error={mutation.error} />}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>
           {t('common.cancel')}
@@ -241,11 +234,7 @@ function WithdrawForm({ task, onDone, onCancel }: FormProps) {
           {reasonError ? t('tasks.reviewDialog.reasonMissing') : t('tasks.reviewDialog.reasonHint')}
         </p>
       </div>
-      {mutation.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {mutation.error.message}
-        </p>
-      )}
+      {mutation.isError && <InlineError error={mutation.error} />}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>
           {t('common.cancel')}
@@ -266,12 +255,15 @@ export function ReviewDialog({
   decision,
   onClose,
   onDone,
+  onCloseAutoFocus,
 }: {
   /** The task to decide on; the dialog is open while it is set. */
   task: ReviewTask | undefined
   decision: ReviewDecision
   onClose: () => void
   onDone: (task: ReviewTask) => void
+  /** A decision removes the task and the button that opened the dialog: the caller says where focus goes. */
+  onCloseAutoFocus: (event: Event) => void
 }) {
   return (
     <Dialog
@@ -281,7 +273,7 @@ export function ReviewDialog({
       }}
     >
       {task && (
-        <DialogContent>
+        <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
           <DialogHeader>
             <DialogTitle>
               {t(

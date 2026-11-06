@@ -124,5 +124,6 @@ export const docNumber: Translation<typeof en.docNumber> = {
   reasonMissing: 'Bitte eine Begründung eingeben.',
   submit: 'Nummer vergeben',
   submitting: 'Wird vergeben …',
+  conflict: 'Diese Nummer ist bereits vergeben, oder das Dokument wurde inzwischen geändert.',
   assigned: 'Dokumentnummer {number} vergeben.',
 }

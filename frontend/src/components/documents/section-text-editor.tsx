@@ -26,6 +26,8 @@ import { UnsavedChangesGuard } from '@/components/templates/editor/unsaved-chang
 import { Button } from '@/components/ui/button'
 import { t } from '@/i18n'
 import { toast } from '@/lib/toast'
+import { InlineError } from '@/components/shared/error-state'
+import { errorText } from '@/components/shared/error-messages'
 
 type StoredBlocks = NonNullable<Section['blocks']>
 
@@ -57,10 +59,10 @@ function blocksKey(blocks: EditorBlock[]): string {
 function saveFailure(error: Error): string {
   if (error instanceof ApiRequestError) {
     if (error.status === 403) return t('deviations.edit.forbidden')
-    if (error.status === 409) return t('deviations.edit.conflict', { message: error.message })
-    if (error.status === 422) return t('deviations.edit.invalid', { message: error.message })
+    if (error.status === 409) return t('deviations.edit.conflict')
+    if (error.status === 422) return t('deviations.edit.invalid', { message: errorText(error) })
   }
-  return t('deviations.edit.failed', { message: error.message })
+  return t('deviations.edit.failed', { message: errorText(error) })
 }
 
 export interface SectionTextEditorProps {
@@ -247,13 +249,11 @@ export function SectionTextEditor({
             </div>
           )}
           {save.isError && !changedElsewhere && (
-            <p role="alert" className="text-sm text-destructive">
-              {saveFailure(save.error)}
-            </p>
+            <InlineError error={save.error} text={saveFailure(save.error)} />
           )}
           {standard.isError && (
             <p className="text-xs text-muted-foreground">
-              {t('deviations.edit.restoreUnavailable', { message: standard.error.message })}
+              {t('deviations.edit.restoreUnavailable', { message: errorText(standard.error) })}
             </p>
           )}
           <div className="flex flex-wrap items-center gap-2">

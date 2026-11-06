@@ -208,11 +208,7 @@ export function EvidenceReportAction({ documentId }: { documentId: string }) {
           </div>
         </div>
       )}
-      {error && (
-        <p role="alert" className="text-destructive">
-          {error.message}
-        </p>
-      )}
+      {error && <InlineError error={error} />}
       <EarlierReports documentId={documentId} />
     </div>
   )

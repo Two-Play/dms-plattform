@@ -51,7 +51,9 @@ export function VersionHistory({ documentId, shownId }: { documentId: string; sh
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t('docPanels.history.title')}</CardTitle>
+        <CardTitle>
+          <h2>{t('docPanels.history.title')}</h2>
+        </CardTitle>
         <CardDescription>{t('docPanels.history.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

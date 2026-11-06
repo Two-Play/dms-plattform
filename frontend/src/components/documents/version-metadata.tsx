@@ -100,7 +100,9 @@ export function VersionMetadata({
   return (
     <Card data-testid="version-metadata">
       <CardHeader>
-        <CardTitle>{t('docs.meta.title')}</CardTitle>
+        <CardTitle>
+          <h2>{t('docs.meta.title')}</h2>
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
         <dl className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-4 gap-y-2 text-sm">

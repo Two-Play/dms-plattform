@@ -5,6 +5,8 @@ import { Badge } from '@/components/ui/badge'
 import { t } from '@/i18n'
 // The document stylesheet shared with the PDF rendering (modules/templates, DMS-39).
 import '@dms-document/document.css'
+import { InlineError } from '@/components/shared/error-state'
+import { issueText } from '@/components/shared/error-messages'
 
 interface DocumentPreviewProps {
   preview: Preview | undefined
@@ -25,7 +27,7 @@ function MissingList({
   if (missing.length === 0) return null
   return (
     <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
-      <p className="font-medium text-destructive">
+      <p className="font-medium text-destructive-foreground">
         {t('docs.preview.missing', { count: missing.length })}
       </p>
       <ul className="mt-1 flex flex-wrap gap-1.5">
@@ -33,7 +35,7 @@ function MissingList({
           <li key={m.field}>
             <button
               type="button"
-              className="rounded border border-destructive/40 px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
+              className="rounded border border-destructive/40 px-1.5 py-0.5 text-xs text-destructive-foreground hover:bg-destructive/10"
               onClick={() => {
                 onFocusField(m.field)
               }}
@@ -88,7 +90,7 @@ function TemplateIssues({ issues }: { issues: PreviewIssue[] }) {
       className="rounded-lg border border-destructive/40 p-3 text-sm text-destructive"
     >
       {general.map((i) => (
-        <p key={`${i.code}:${i.message}`}>{i.message}</p>
+        <p key={`${i.code}:${i.message}`}>{issueText(i)}</p>
       ))}
     </div>
   )
@@ -123,10 +125,10 @@ export function DocumentPreview({ preview, updating, error, onFocusField }: Docu
         </div>
       </div>
       {error && (
-        <p role="alert" className="flex items-center gap-2 text-sm text-destructive">
-          <AlertTriangle className="size-4" aria-hidden="true" />
-          {error.message}
-        </p>
+        <div className="flex items-start gap-2 text-destructive">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <InlineError error={error} className="min-w-0" />
+        </div>
       )}
       {preview && (
         <>

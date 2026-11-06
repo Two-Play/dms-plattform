@@ -18,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { RenditionStatusNotice } from './rendition-status'
 import { StatusBadge } from './status-badge'
 import { statusLabel } from './status-label'
+import { pageHeading, useReturnFocus } from '@/lib/return-focus'
 
 /** The deadline of an open task (DMS-87), marked when it has passed. */
 function DueDate({ dueAt }: { dueAt: string }) {
@@ -153,12 +154,15 @@ function MyOpenTasks({ documentId, title }: { documentId: string; title: string 
   const myTasks = useQuery(myTasksQuery(client))
   const [voting, setVoting] = useState<{ task: WorkflowTask; initial?: VoteDraft }>()
   const open = (myTasks.data ?? []).filter((task) => task.documentId === documentId)
+  // A vote removes the task and its button.
+  const focusReturn = useReturnFocus(pageHeading)
   return (
     <>
       <PendingVoteNotice
         tasks={open}
         titleOf={() => title}
         onRepeat={(task, pending) => {
+          focusReturn.remember()
           setVoting({ task, initial: { decision: pending.decision, reason: pending.reason } })
         }}
       />
@@ -174,6 +178,7 @@ function MyOpenTasks({ documentId, title }: { documentId: string; title: string 
           <Button
             size="sm"
             onClick={() => {
+              focusReturn.remember()
               setVoting({ task })
             }}
           >
@@ -185,6 +190,7 @@ function MyOpenTasks({ documentId, title }: { documentId: string; title: string 
         task={voting?.task}
         documentTitle={title}
         initial={voting?.initial}
+        onCloseAutoFocus={focusReturn.restore}
         onClose={() => {
           setVoting(undefined)
         }}
@@ -214,7 +220,9 @@ export function WorkflowPanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t('docPanels.workflow.title')}</CardTitle>
+        <CardTitle>
+          <h2>{t('docPanels.workflow.title')}</h2>
+        </CardTitle>
         <CardDescription>{t('docPanels.workflow.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">

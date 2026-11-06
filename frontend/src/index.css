@@ -10,6 +10,8 @@
  * `:root` holds the light theme, `.dark` the dark theme (class on <html>). The @theme block
  * maps them to Tailwind utilities (bg-primary, rounded-lg, font-sans, ...).
  * Brand color: deep blue (hue 262); everything else neutral.
+ * `--destructive-foreground` is destructive text on a destructive tint; `--input` is the border of form
+ * controls and keeps 3:1 against the page (WCAG 1.4.11).
  */
 
 @theme inline {
@@ -31,6 +33,7 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -67,12 +70,13 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.52 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.48 0.19 27.325);
   --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --input: oklch(0.62 0 0);
   --ring: oklch(0.62 0.14 262);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
@@ -106,8 +110,9 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.78 0.13 22.216);
   --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  --input: oklch(1 0 0 / 40%);
   --ring: oklch(0.556 0 0);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
@@ -126,7 +131,7 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
   }
   body {
     @apply bg-background text-foreground;
@@ -140,6 +145,16 @@
     /* Keeps focused or scrolled-to elements clear of the sticky header (WCAG 2.4.11). */
     scroll-padding-top: 4.5rem;
   }
+}
+
+/*
+ * The focus indicator of everything reachable by keyboard: 3:1 against the page in both themes (WCAG 2.4.11).
+ * Outside the layers, so it also wins over the `outline-none` of the primitives. Targets of programmatic
+ * focus (`tabindex="-1"`: headings, menu items) have their own treatment.
+ */
+:focus-visible:not([tabindex='-1']) {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 /* The draft preview names locked sections (DMS-84). Only here: the document stylesheet keeps print unmarked. */

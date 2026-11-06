@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/card'
 import { t } from '@/i18n'
 import { useDocumentTitle } from '@/lib/document-title'
+import { InlineError } from '@/components/shared/error-state'
 
 interface SignInSearch {
   redirect?: string
@@ -41,11 +42,7 @@ function SignInPage() {
           <CardDescription>{t('auth.intro')}</CardDescription>
         </CardHeader>
         <CardContent>
-          {auth.error && (
-            <p role="alert" className="text-sm text-destructive">
-              {t('auth.signInFailedWith', { message: auth.error.message })}
-            </p>
-          )}
+          {auth.error && <InlineError error={auth.error} text={t('auth.signInFailed')} />}
         </CardContent>
         <CardFooter>
           <Button

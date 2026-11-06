@@ -1,9 +1,9 @@
 import { queryOptions } from '@tanstack/react-query'
 import type { ApiClient } from './client'
-import { requestError } from './errors'
+import { partnerRequestError } from './errors'
 import type { components } from './schema'
 
-export { ApiRequestError, UNAVAILABLE_MESSAGE } from './errors'
+export { ApiRequestError } from './errors'
 
 export type Partner = components['schemas']['PartnerView']
 export type ReferenceField = components['schemas']['ReferenceFieldView']
@@ -24,7 +24,7 @@ export function partnerSearchQuery(client: ApiClient, query: string) {
         signal,
       })
       if (!response.ok || !data) {
-        throw requestError(
+        throw partnerRequestError(
           response,
           error,
           `Searching partners failed with HTTP ${response.status}`,

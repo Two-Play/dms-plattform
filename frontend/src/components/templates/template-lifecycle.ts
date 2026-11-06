@@ -6,6 +6,7 @@ import type {
   TemplateVersion,
 } from '@/api/template-admin'
 import { t } from '@/i18n'
+import { errorText } from '@/components/shared/error-messages'
 
 /** A status change offered on a version, mirroring `TemplateLifecycle` in the backend. */
 export interface StatusAction {
@@ -53,19 +54,13 @@ export function locationLabel(l: ContentLocation): string {
 
 /** User-facing message for a failed status change, content save or test run. */
 export function errorMessage(error: Error): string {
-  if (!(error instanceof ApiRequestError)) return error.message
-  switch (error.code) {
-    case 'segregation_of_duties':
-      return t('templates.errors.fourEyes', { message: error.message })
-    case 'forbidden':
-      return t('templates.errors.forbidden', { message: error.message })
-    case 'lifecycle':
-      return t('templates.errors.lifecycle', { message: error.message })
-    case 'conflict':
-      return t('templates.errors.conflict', { message: error.message })
-    default:
-      return error.message
+  if (error instanceof ApiRequestError && error.code === 'segregation_of_duties') {
+    return t('templates.errors.fourEyes')
   }
+  if (error instanceof ApiRequestError && error.code === 'lifecycle') {
+    return t('templates.errors.lifecycle')
+  }
+  return errorText(error)
 }
 
 /** The content as the editor shows it: indented JSON. */

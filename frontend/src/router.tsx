@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { createRouter, type RouterHistory } from '@tanstack/react-router'
 import type { AuthContextProps } from 'react-oidc-context'
 import { NotFoundPage } from '@/components/not-found-page'
+import { RouteErrorPage } from '@/components/route-error-page'
 import { routeTree } from './routeTree.gen'
 
 /** Values every route can read in `beforeLoad`/`loader` and via `useRouteContext`. */
@@ -18,6 +19,7 @@ export function createAppRouter(queryClient: QueryClient, history?: RouterHistor
     context: { auth: undefined as unknown as AuthContextProps, queryClient },
     defaultPreload: 'intent',
     defaultNotFoundComponent: NotFoundPage,
+    defaultErrorComponent: RouteErrorPage,
     scrollRestoration: true,
   })
 }

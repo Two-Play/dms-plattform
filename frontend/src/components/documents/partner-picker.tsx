@@ -2,10 +2,8 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useApiClient } from '@/api/context'
 import {
-  ApiRequestError,
   MIN_QUERY_LENGTH,
   partnerSearchQuery,
-  UNAVAILABLE_MESSAGE,
   type Partner,
   type ReferenceField,
 } from '@/api/partners'
@@ -14,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { t } from '@/i18n'
 import { Label } from '@/components/ui/label'
 import { useDebouncedValue } from '@/lib/use-debounced-value'
+import { errorText } from '@/components/shared/error-messages'
 
 /** Delay after the last keystroke before the partner master is searched. */
 export const SEARCH_DEBOUNCE_MS = 300
@@ -39,15 +38,7 @@ export function PartnerPicker({ reference, selected, onSelect }: PartnerPickerPr
     enabled: searching && query.trim().length >= MIN_QUERY_LENGTH,
   })
   const id = `reference-${reference.key}`
-  const unavailable =
-    search.error instanceof ApiRequestError && search.error.partnerDirectoryUnavailable
-  const errorMessage = search.error
-    ? unavailable
-      ? search.error.message === UNAVAILABLE_MESSAGE || !search.error.message
-        ? t('errors.partnerUnavailable')
-        : search.error.message
-      : search.error.message
-    : undefined
+  const errorMessage = search.error ? errorText(search.error) : undefined
 
   if (selected && !searching) {
     return (

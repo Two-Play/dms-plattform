@@ -122,5 +122,6 @@ export const docNumber = {
   reasonMissing: 'Enter the reason.',
   submit: 'Assign number',
   submitting: 'Assigning …',
+  conflict: 'This number is already assigned, or the document has changed in the meantime.',
   assigned: 'Document number {number} assigned.',
 } as const

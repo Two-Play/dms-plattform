@@ -40,9 +40,7 @@ export function GroupPicker({ id, value, onChange, invalid, describedBy }: Group
             )
           }}
         />
-        <p className="text-xs text-muted-foreground">
-          {t('docs.groups.loadFailed', { message: groups.error.message })}
-        </p>
+        <p className="text-xs text-muted-foreground">{t('docs.groups.loadFailed')}</p>
       </div>
     )
   }

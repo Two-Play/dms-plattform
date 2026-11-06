@@ -60,12 +60,12 @@ export const docs = {
     fromPartnerMaster: 'From the partner master',
     titleMissing: 'Enter a title before saving the draft.',
     correctFirst: 'Correct the marked fields first.',
-    correctAndSave: '{message} Correct the marked fields and save again.',
-    correct: '{message} Correct the marked fields.',
+    correctAndSave: 'Correct the marked fields and save again.',
+    correct: 'Correct the marked fields.',
     conflictSaved:
-      'The draft could not be saved: {message} It may have been submitted or changed elsewhere; reload the page to see its current state.',
+      'The draft could not be saved. It may have been submitted or changed elsewhere; reload the page to see its current state.',
     conflictSubmitted:
-      'The draft could not be submitted: {message} It may have been submitted or changed elsewhere; reload the page to see its current state.',
+      'The draft could not be submitted. It may have been submitted or changed elsewhere; reload the page to see its current state.',
     notTakenOver: '{label} was not taken over: {message}',
     draftSaved: 'Draft saved',
     submitted: 'Submitted for review',
@@ -210,7 +210,7 @@ export const docs = {
   },
   groups: {
     perLine: 'One group key per line',
-    loadFailed: 'The list of groups could not be loaded ({message}); enter the group keys.',
+    loadFailed: 'The list of groups could not be loaded; enter the group keys.',
     none: 'There are no access groups yet. A tenant administrator creates them.',
     unknown: '(unknown group)',
   },

@@ -208,7 +208,7 @@ describe('Partner master on the new document page', () => {
     const user = await chooseTemplate()
 
     await user.type(screen.getByRole('searchbox'), 'nord')
-    const alert = await screen.findByText(unavailable)
+    const alert = await screen.findByText(/^The partner master is not reachable right now\./)
     expect(alert).toHaveAttribute('role', 'alert')
 
     await user.type(screen.getByLabelText(/^Title\*?$/), 'Contract')

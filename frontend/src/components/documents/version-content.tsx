@@ -32,7 +32,9 @@ export function VersionContent({
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2">
         <div className="space-y-1.5">
-          <CardTitle>{t('docs.view.content')}</CardTitle>
+          <CardTitle>
+            <h2>{t('docs.view.content')}</h2>
+          </CardTitle>
           {content.data && (
             <CardDescription>
               {content.data.draftMarking ? t('docs.view.draftHint') : t('docs.view.frozenHint')}

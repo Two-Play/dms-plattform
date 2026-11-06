@@ -21,6 +21,8 @@ import { UserName } from '@/components/shared/user-name'
 import { t, tOptional } from '@/i18n'
 import { formatDate } from '@/i18n/format'
 import { toast } from '@/lib/toast'
+import { InlineError } from '@/components/shared/error-state'
+import { errorText } from '@/components/shared/error-messages'
 
 /** A failed withdrawal in the caller's language: the codes tell who won a race with the publication. */
 function failure(error: Error): string {
@@ -28,9 +30,9 @@ function failure(error: Error): string {
     if (error.status === 403) return t('withdrawVersion.forbidden')
     const known = error.code ? tOptional(`withdrawVersion.refused.${error.code}`) : undefined
     if (known !== undefined) return known
-    if (error.status === 409) return t('withdrawVersion.conflict', { message: error.message })
+    if (error.status === 409) return t('withdrawVersion.conflict', { message: errorText(error) })
   }
-  return t('withdrawVersion.failed', { message: error.message })
+  return t('withdrawVersion.failed', { message: errorText(error) })
 }
 
 function WithdrawForm({
@@ -107,11 +109,7 @@ function WithdrawForm({
           {error ?? t('withdrawVersion.reasonHint')}
         </p>
       </div>
-      {withdraw.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {failure(withdraw.error)}
-        </p>
-      )}
+      {withdraw.isError && <InlineError error={withdraw.error} text={failure(withdraw.error)} />}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>
           {t('common.cancel')}

@@ -19,7 +19,7 @@ import {
   type UploadFile,
   type WordField,
 } from '@/api/word'
-import { ErrorState } from '@/components/shared/error-state'
+import { ErrorState, InlineError } from '@/components/shared/error-state'
 import { LoadingState } from '@/components/shared/states'
 import { UserName } from '@/components/shared/user-name'
 import { Badge } from '@/components/ui/badge'
@@ -32,12 +32,9 @@ import { toast } from '@/lib/toast'
 import { UseAsTemplate } from './use-as-template'
 import { WordFieldHelp } from './word-field-help'
 import { WordFieldInput, WordFieldValue } from './word-field-input'
+import { errorText } from '@/components/shared/error-messages'
 
 const convertible = new Set<string>(CONVERTIBLE_EXTENSIONS)
-
-function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
-}
 
 /**
  * The content of a file document version (DMS-115): its original with download, upload of a new file while
@@ -91,7 +88,7 @@ export function FileContentPanel({
       toast(t('word.file.uploaded'))
       void queryClient.invalidateQueries({ queryKey: ['documents', documentId] })
     } catch (e) {
-      setUploadError(t('word.file.uploadFailed', { message: message(e) }))
+      setUploadError(t('word.file.uploadFailed', { message: errorText(e) }))
     } finally {
       setProgress(undefined)
     }
@@ -101,7 +98,9 @@ export function FileContentPanel({
     <div className="space-y-6" data-testid="file-content">
       <Card>
         <CardHeader>
-          <CardTitle>{t('word.file.title')}</CardTitle>
+          <CardTitle>
+            <h2>{t('word.file.title')}</h2>
+          </CardTitle>
           <CardDescription>
             {editable ? t('word.file.descriptionDraft') : t('word.file.description')}
           </CardDescription>
@@ -192,9 +191,10 @@ export function FileContentPanel({
             </p>
           )}
           {download.error && (
-            <p role="alert" className="text-destructive">
-              {t('word.file.downloadFailed', { message: download.error.message })}
-            </p>
+            <InlineError
+              error={download.error}
+              text={t('word.file.downloadFailed', { message: errorText(download.error) })}
+            />
           )}
         </CardContent>
       </Card>
@@ -245,7 +245,9 @@ function WordFieldsCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t('word.fields.title')}</CardTitle>
+        <CardTitle>
+          <h2>{t('word.fields.title')}</h2>
+        </CardTitle>
         <CardDescription>
           {canEdit ? t('word.fields.description') : t('word.fields.readOnly')}
         </CardDescription>
@@ -283,9 +285,10 @@ function WordFieldsCard({
               </Button>
             )}
             {save.error && (
-              <p role="alert" className="text-sm text-destructive">
-                {t('word.fields.failed', { message: save.error.message })}
-              </p>
+              <InlineError
+                error={save.error}
+                text={t('word.fields.failed', { message: errorText(save.error) })}
+              />
             )}
           </form>
         )}
@@ -368,7 +371,9 @@ function PdfPreview({ documentId, version }: { documentId: string; version: Docu
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2">
         <div className="space-y-1.5">
-          <CardTitle>{t('word.file.preview')}</CardTitle>
+          <CardTitle>
+            <h2>{t('word.file.preview')}</h2>
+          </CardTitle>
           <CardDescription>
             {isOpenVersion(version) ? t('word.file.previewDraft') : t('word.file.previewApproved')}
           </CardDescription>
@@ -389,9 +394,10 @@ function PdfPreview({ documentId, version }: { documentId: string; version: Docu
         <CardContent>
           {preview.isPending && <LoadingState label={t('word.file.previewLoading')} rows={6} />}
           {preview.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {t('word.file.previewFailed', { message: preview.error.message })}
-            </p>
+            <InlineError
+              error={preview.error}
+              text={t('word.file.previewFailed', { message: errorText(preview.error) })}
+            />
           )}
           {url && (
             <iframe

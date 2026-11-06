@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { CalendarClock, Download, Search, X } from 'lucide-react'
+import { CalendarClock, Check, Download, Search, X } from 'lucide-react'
 import { useState, type SyntheticEvent } from 'react'
 import { useApiClient } from '@/api/context'
 import {
@@ -133,7 +133,7 @@ function FacetGroup({
       : values
   return (
     <section aria-label={title} className="space-y-1">
-      <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{title}</h3>
+      <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{title}</h2>
       <ul className="space-y-0.5">
         {shown.map((v) => (
           <li key={v.value}>
@@ -143,9 +143,12 @@ function FacetGroup({
               onClick={() => {
                 onToggle(v.value)
               }}
-              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-muted aria-pressed:bg-secondary aria-pressed:font-medium"
+              className="flex w-full items-center justify-between gap-2 rounded-md border border-transparent px-2 py-1 text-left text-sm hover:bg-muted aria-pressed:bg-secondary aria-pressed:font-medium aria-pressed:border-primary"
             >
-              <span>{label(v.value)}</span>
+              <span className="flex min-w-0 items-center gap-1">
+                {selected === v.value && <Check aria-hidden="true" className="size-3.5 shrink-0" />}
+                {label(v.value)}
+              </span>
               <span className="text-xs text-muted-foreground tabular-nums">{v.count}</span>
             </button>
           </li>
@@ -226,7 +229,9 @@ function SearchResults({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>{t('search.unavailableTitle')}</CardTitle>
+          <CardTitle>
+            <h2>{t('search.unavailableTitle')}</h2>
+          </CardTitle>
           <CardDescription>{t('search.unavailableText')}</CardDescription>
         </CardHeader>
       </Card>
@@ -354,7 +359,9 @@ function ValidAtResults({
       <Card>
         <CardHeader className="flex flex-wrap items-start justify-between gap-2">
           <div className="space-y-1">
-            <CardTitle>{t('search.validOnTitle', { date: formatDate(validOn) })}</CardTitle>
+            <CardTitle>
+              <h2>{t('search.validOnTitle', { date: formatDate(validOn) })}</h2>
+            </CardTitle>
             <CardDescription>
               {result.data
                 ? t('search.validOnTextZone', { zone: result.data.timeZone })

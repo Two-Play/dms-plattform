@@ -84,7 +84,8 @@ export const deviations: Translation<typeof en.deviations> = {
     confirming: 'Wird beantragt …',
     done: 'Abweichung für {section} beantragt',
     forbidden: 'Sie dürfen für dieses Dokument keine Abweichungen beantragen.',
-    conflict: 'Die Abweichung wurde nicht beantragt: {message} Die Liste wurde aktualisiert.',
+    conflict:
+      'Die Abweichung wurde nicht beantragt: Der Stand hat sich geändert. Die Liste wurde aktualisiert.',
     failed: 'Die Abweichung wurde nicht beantragt: {message}',
   },
   withdraw: {
@@ -99,12 +100,13 @@ export const deviations: Translation<typeof en.deviations> = {
     confirming: 'Wird zurückgezogen …',
     done: 'Antrag für {section} zurückgezogen',
     forbidden: 'Sie dürfen Abweichungsanträge dieses Dokuments nicht zurückziehen.',
-    conflict: 'Der Antrag wurde nicht zurückgezogen: {message} Die Liste wurde aktualisiert.',
+    conflict:
+      'Der Antrag wurde nicht zurückgezogen: Der Stand hat sich geändert. Die Liste wurde aktualisiert.',
     failed: 'Der Antrag wurde nicht zurückgezogen: {message}',
   },
   edit: {
     action: 'Text bearbeiten',
-    actionFor: 'Text von {section} bearbeiten',
+    actionFor: 'Text bearbeiten: {section}',
     title: 'Text von {section} bearbeiten',
     hint: 'Gespeicherte Änderungen erscheinen im Abweichungsbericht und werden im zusätzlichen Prüfschritt geprüft. Titel und Position des Abschnitts bleiben unverändert.',
     blocks: 'Text von {section}',
@@ -121,7 +123,7 @@ export const deviations: Translation<typeof en.deviations> = {
     restoreUnavailable:
       'Der Standardtext konnte nicht geladen werden und lässt sich deshalb gerade nicht wiederherstellen: {message}',
     conflict:
-      'Der Text wurde nicht gespeichert: {message} Die Seite wurde aktualisiert; Ihr Text ist noch da.',
+      'Der Text wurde nicht gespeichert: Der Stand hat sich geändert. Die Seite wurde aktualisiert; Ihr Text ist noch da.',
     forbidden: 'Sie dürfen diesen Entwurf nicht ändern. Ihr Text ist noch da.',
     invalid: 'Der Text wurde nicht gespeichert: {message} Ihr Text ist noch da.',
     failed: 'Der Text wurde nicht gespeichert: {message} Ihr Text ist noch da.',

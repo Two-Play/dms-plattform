@@ -228,7 +228,7 @@ describe('Deviations panel on a draft', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Send request' }))
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(
-      'The deviation was not requested: Something broke.',
+      'The deviation was not requested:',
     )
     expect(within(dialog).getByLabelText('Reason')).toHaveValue('Affiliates')
 
@@ -261,7 +261,7 @@ describe('Deviations panel on a draft', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Send request' }))
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(
-      'already has an active deviation request The list has been updated.',
+      'the state has changed. The list has been updated.',
     )
     await waitFor(() => {
       expect(loads).toBeGreaterThan(1)
@@ -336,7 +336,7 @@ describe('Deviations panel on a draft', () => {
     expect(dialog).toHaveTextContent('You can request a deviation for this section again later.')
     await user.click(within(dialog).getByRole('button', { name: 'Withdraw' }))
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(
-      'The request was not withdrawn: already withdrawn.',
+      'The request was not withdrawn:',
     )
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     await waitFor(() => {

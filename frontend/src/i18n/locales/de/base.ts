@@ -26,7 +26,7 @@ export const shell: Translation<typeof en.shell> = {
   search: 'Dokumente durchsuchen',
   searchPlaceholder: 'Dokumente durchsuchen …',
   openTasks: plural({ one: '{count} offene Aufgabe', other: '{count} offene Aufgaben' }),
-  userMenu: 'Benutzermenü',
+  userMenu: '{name}, Benutzermenü',
   signedInUser: 'Angemeldete Person',
   deputies: 'Stellvertretungen',
   signOut: 'Abmelden',
@@ -60,7 +60,6 @@ export const auth: Translation<typeof en.auth> = {
     'Dokumenten- und Vorlagenverwaltung mit Freigabe-Workflows und revisionssicherer Archivierung.',
   signIn: 'Anmelden',
   signInFailed: 'Anmeldung fehlgeschlagen',
-  signInFailedWith: 'Anmeldung fehlgeschlagen: {message}',
   noSignIn: 'Keine Anmeldung im Gange',
   signingIn: 'Anmeldung läuft …',
 }
@@ -151,8 +150,100 @@ export const errors: Translation<typeof en.errors> = {
     description: 'Bitte erneut versuchen. Besteht das Problem weiter, den Support kontaktieren.',
     inline: 'Ein Fehler ist aufgetreten. Bitte erneut versuchen.',
   },
-  partnerUnavailable:
-    'Der Partnerstamm ist gerade nicht erreichbar. Der Entwurf lässt sich ohne Partner speichern; der Partner kann später gewählt werden.',
+  technicalDetails: 'Technische Details',
+  page: {
+    title: 'Diese Seite konnte nicht angezeigt werden',
+    text: 'Beim Öffnen dieser Seite ist etwas schiefgelaufen. Versuchen Sie es erneut oder laden Sie die Seite neu, wenn das Problem bestehen bleibt.',
+    updateTitle: 'Eine neue Version ist verfügbar',
+    updateText:
+      'Die Anwendung wurde aktualisiert, während Sie gearbeitet haben. Laden Sie die Seite neu, um fortzufahren.',
+  },
+  codes: {
+    acknowledgement_not_requested: 'Für diese Version ist keine Lesebestätigung angefordert.',
+    already_acknowledged: 'Sie haben das Lesen dieser Version bereits bestätigt.',
+    attachment_blocked: 'Dateien dieses Typs können nicht angehängt werden.',
+    attachment_infected: 'Der Virenscanner hat in dieser Datei eine Bedrohung gefunden.',
+    attachment_integrity: 'Diese Anlage ist beschädigt und kann nicht gelesen werden.',
+    attachment_too_large: 'Diese Datei ist zu groß, um angehängt zu werden.',
+    body_too_large: 'Die Anfrage ist zu groß.',
+    database_error:
+      'Die Anfrage konnte nicht abgeschlossen werden. Bitte versuchen Sie es gleich noch einmal.',
+    file_not_convertible: 'Dateien dieses Typs können nicht als PDF/A archiviert werden.',
+    file_type_mismatch: 'Der Inhalt dieser Datei passt nicht zu ihrem Dateityp.',
+    four_eyes: 'Das muss jemand anderes bestätigen: Es gilt das Vier-Augen-Prinzip.',
+    incomplete: 'Es fehlen Pflichtangaben.',
+    invalid_docx: 'Diese Datei ist kein lesbares Word-Dokument.',
+    invalid_office_file: 'Diese Datei ist kein lesbares Office-Dokument.',
+    invalid_upload:
+      'Dieser Upload kann nicht verwendet werden. Bitte laden Sie die Datei erneut hoch.',
+    invalid_values: 'Einige Werte sind ungültig. Bitte die markierten Felder prüfen.',
+    lifecycle: 'Dieser Schritt ist im aktuellen Status nicht möglich.',
+    no_recipient: 'Für diese Benachrichtigung ist niemand erreichbar.',
+    nothing_open: 'Es gibt keine offenen Lesebestätigungen.',
+    not_overdue: 'Diese Rezertifizierung ist nicht mehr überfällig.',
+    not_opened: 'Öffnen Sie das Dokument, bevor Sie das Lesen bestätigen.',
+    notice_too_soon: 'Eine Benachrichtigung dieser Art wurde vor weniger als 24 Stunden gesendet.',
+    office_file_too_complex:
+      'Diese Datei ist zu groß oder zu komplex für die Verarbeitung. Teilen Sie sie auf oder entfernen Sie nicht benötigte Inhalte und laden Sie sie erneut hoch.',
+    partner_directory_invalid_response:
+      'Der Partnerstamm ist gerade nicht erreichbar. Der Entwurf lässt sich ohne Partner speichern; der Partner kann später gewählt werden.',
+    partner_directory_unavailable:
+      'Der Partnerstamm ist gerade nicht erreichbar. Der Entwurf lässt sich ohne Partner speichern; der Partner kann später gewählt werden.',
+    pdf_limit_reached:
+      'Gerade werden zu viele PDFs erzeugt. Bitte versuchen Sie es gleich noch einmal.',
+    publication_not_failed:
+      'Die Veröffentlichung ist nicht fehlgeschlagen; es gibt nichts zu wiederholen.',
+    purpose_required: 'Bitte geben Sie den Zweck dieses Zugriffs an.',
+    reauthentication_required: 'Bitte melden Sie sich erneut an, um diese Aktion zu bestätigen.',
+    released: 'Diese Version ist freigegeben und kann nicht mehr geändert werden.',
+    reminder_too_soon: 'Es wurde gerade erst erinnert. Bitte versuchen Sie es später noch einmal.',
+    report_removed: 'Der Inhalt dieses Berichts wurde nach Ablauf der Aufbewahrung entfernt.',
+    rendering_failed: 'Das Dokument konnte nicht erzeugt werden.',
+    rendering_unavailable:
+      'Das PDF kann gerade nicht erzeugt werden. Bitte versuchen Sie es gleich noch einmal.',
+    rendition_not_failed: 'Das Erzeugen ist nicht fehlgeschlagen; es gibt nichts zu wiederholen.',
+    rendition_integrity: 'Die archivierte Datei ist beschädigt und kann nicht gelesen werden.',
+    report_integrity: 'Der gespeicherte Bericht ist beschädigt und kann nicht gelesen werden.',
+    result_changed: 'Das Suchergebnis hat sich geändert. Bitte prüfen Sie es erneut.',
+    scanner_unavailable:
+      'Der Virenscanner ist gerade nicht erreichbar. Bitte versuchen Sie es gleich noch einmal.',
+    scope_required:
+      'Dieses Dokument gilt in mehreren Geltungsbereichen. Bitte wählen Sie einen aus.',
+    search_error:
+      'Die Suche konnte nicht abgeschlossen werden. Bitte versuchen Sie es gleich noch einmal.',
+    search_unavailable:
+      'Die Suche ist gerade nicht verfügbar. Bitte versuchen Sie es gleich noch einmal.',
+    segregation_of_duties:
+      'Es gilt das Vier-Augen-Prinzip: Sie können nicht über eine Version entscheiden, an der Sie selbst gearbeitet haben.',
+    storage_error:
+      'Die Datei konnte nicht gespeichert oder gelesen werden. Bitte versuchen Sie es gleich noch einmal.',
+    storage_unavailable:
+      'Der Dateispeicher ist gerade nicht erreichbar. Bitte versuchen Sie es gleich noch einmal.',
+    too_many_documents:
+      'Diese Suche findet zu viele Dokumente. Bitte schränken Sie sie ein und versuchen Sie es erneut.',
+    unauthorized_deviations: 'Gesperrte Abschnitte wurden ohne aktiven Abweichungsantrag geändert.',
+    unavailable: 'Der Dienst ist ausgelastet. Bitte versuchen Sie es gleich noch einmal.',
+    unknown_entry: 'Diesen Partner gibt es im Partnerstamm nicht.',
+    unknown_organization: 'Ihre Organisation ist nicht registriert.',
+    user_directory_unavailable:
+      'Personen können gerade nicht gesucht werden. Bitte versuchen Sie es gleich noch einmal.',
+    withdrawn: 'Diese Version wurde zurückgezogen.',
+    workflow_error:
+      'Die Prüfung konnte nicht fortgesetzt werden. Bitte versuchen Sie es gleich noch einmal.',
+  },
+  issues: {
+    access_groups_widened: 'Nur der Eigentümer des Dokuments kann Zugriffsgruppen hinzufügen.',
+    confidentiality_lowered:
+      'Eine neue Version darf nicht weniger vertraulich sein als die Version, von der sie ausgeht.',
+    missing_required: 'Dieses Feld ist erforderlich.',
+    not_editable: 'Dieses Feld setzt die Plattform; es kann nicht eingegeben werden.',
+    pattern_mismatch: 'Der Wert hat nicht das erwartete Format.',
+    retired_option: 'Diese Option ist nicht mehr verfügbar.',
+    unknown_currency: 'Diese Währung ist nicht zugelassen.',
+    unknown_field: 'Dieses Feld gehört nicht zur Dokumentklasse.',
+    unknown_option: 'Das ist keine Option dieses Felds.',
+    wrong_type: 'Der Wert hat den falschen Typ.',
+  },
 }
 
 export const status: Translation<typeof en.status> = {

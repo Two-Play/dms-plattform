@@ -1,3 +1,4 @@
+import { pageHeading } from '@/lib/return-focus'
 import { toast } from '@/lib/toast'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState, type ReactNode } from 'react'
@@ -46,6 +47,8 @@ import {
   type FormInputs,
 } from './field-values'
 import { PartnerPicker } from './partner-picker'
+import { TechnicalDetail } from '@/components/shared/error-state'
+import { errorText, issueText } from '@/components/shared/error-messages'
 
 /** Delay after the last change before the preview is requested. */
 export const PREVIEW_DEBOUNCE_MS = 300
@@ -83,10 +86,6 @@ function focusField(key: string) {
   document.getElementById(fieldControlId(key))?.focus()
 }
 
-function message(e: unknown): string {
-  return e instanceof Error ? e.message : String(e)
-}
-
 /** What the last save left on the server: the draft and the entries taken over into it. */
 interface Saved {
   documentId: string
@@ -102,6 +101,8 @@ type SaveState =
   | {
       kind: 'failed'
       message: string
+      /** What the server answered, for the technical detail. */
+      error?: unknown
       missing?: FieldIssue[]
       hint?: string
       /** Sections that break the edit rules of the template (ADR 0069): `field` is the section id. */
@@ -112,11 +113,11 @@ type SaveState =
 const NO_RETENTION_RULE = 'no_retention_rule'
 
 /** A field computed fields need names them in the language of the UI (ADR 0065). */
-function issueMessage(issue: FieldIssue): string {
+function issueMessage(issue: Pick<FieldIssue, 'code' | 'message' | 'computedFields'>): string {
   const computed = (issue.computedFields ?? []).map((c) => c.label)
   return computed.length > 0
     ? t('docs.workspace.computedMissing', { fields: computed.join(', ') })
-    : issue.message
+    : issueText(issue)
 }
 
 /** Why a section blocks the submission, in the language of the UI. */
@@ -180,12 +181,6 @@ function withInitial(
   for (const [key, value] of Object.entries(initial ?? {}))
     if (value !== undefined && key in inputs) inputs[key] = value
   return inputs
-}
-
-function conflictMessage(e: ApiRequestError, action: 'saved' | 'submitted'): string {
-  return action === 'saved'
-    ? t('docs.workspace.conflictSaved', { message: e.message })
-    : t('docs.workspace.conflictSubmitted', { message: e.message })
 }
 
 /**
@@ -274,7 +269,7 @@ export function DocumentWorkspace({
   for (const issue of preview.data?.issues ?? []) {
     const key = issue.field
     if (key !== undefined && JSON.stringify(sent[key]) === JSON.stringify(values[key])) {
-      serverErrors[key] = issue.message
+      serverErrors[key] = issueMessage(issue)
     }
   }
   for (const [key, issue] of Object.entries(rejected)) {
@@ -337,14 +332,11 @@ export function DocumentWorkspace({
     } catch (e) {
       if (e instanceof ApiRequestError && e.issues.length > 0) {
         reject(e.issues, values)
-        setSaveState({
-          kind: 'failed',
-          message: t('docs.workspace.correctAndSave', { message: e.message }),
-        })
+        setSaveState({ kind: 'failed', message: t('docs.workspace.correctAndSave'), error: e })
       } else if (e instanceof ApiRequestError && e.status === 409) {
-        setSaveState({ kind: 'failed', message: conflictMessage(e, 'saved') })
+        setSaveState({ kind: 'failed', message: t('docs.workspace.conflictSaved'), error: e })
       } else {
-        setSaveState({ kind: 'failed', message: message(e) })
+        setSaveState({ kind: 'failed', message: errorText(e), error: e })
       }
       return undefined
     }
@@ -366,7 +358,7 @@ export function DocumentWorkspace({
         setSaved(current)
       } catch (e) {
         warnings.push(
-          t('docs.workspace.notTakenOver', { label: reference.label, message: message(e) }),
+          t('docs.workspace.notTakenOver', { label: reference.label, message: errorText(e) }),
         )
       }
     }
@@ -398,6 +390,10 @@ export function DocumentWorkspace({
       setSaveState({ kind: 'saved', label: submitted.version })
       toast(t('docs.workspace.submitted'))
       onSubmitted?.(documentId, submitted)
+      // The form with the submit button gives way to the document.
+      requestAnimationFrame(() => {
+        pageHeading()?.focus()
+      })
     } catch (e) {
       if (e instanceof ApiRequestError && e.code === UNAUTHORIZED_DEVIATIONS) {
         setSaveState({
@@ -424,21 +420,20 @@ export function DocumentWorkspace({
         })
       } else if (e instanceof ApiRequestError && e.issues.length > 0) {
         reject(e.issues, values)
-        setSaveState({
-          kind: 'failed',
-          message: t('docs.workspace.correct', { message: e.message }),
-        })
+        setSaveState({ kind: 'failed', message: t('docs.workspace.correct'), error: e })
       } else if (e instanceof ApiRequestError && e.code === 'invalid') {
         setSaveState({
           kind: 'failed',
-          message: t('docs.workspace.invalid', { message: e.message }),
+          message: t('docs.workspace.invalid', { message: errorText(e) }),
+          error: e,
         })
       } else if (e instanceof ApiRequestError && e.status === 409) {
-        setSaveState({ kind: 'failed', message: conflictMessage(e, 'submitted') })
+        setSaveState({ kind: 'failed', message: t('docs.workspace.conflictSubmitted'), error: e })
       } else {
         setSaveState({
           kind: 'failed',
-          message: t('docs.workspace.submitFailed', { message: message(e) }),
+          message: t('docs.workspace.submitFailed', { message: errorText(e) }),
+          error: e,
         })
       }
     }
@@ -524,6 +519,7 @@ export function DocumentWorkspace({
               <div role="alert" className="text-destructive">
                 <p>{saveState.message}</p>
                 {saveState.hint && <p className="mt-1">{saveState.hint}</p>}
+                <TechnicalDetail error={saveState.error} className="mt-1" />
                 {saveState.sections && saveState.sections.length > 0 && (
                   <ul className="mt-1 list-disc pl-4" data-testid="blocked-sections">
                     {saveState.sections.map((issue) => (

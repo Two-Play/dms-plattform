@@ -508,12 +508,11 @@ function NoticeDialog({
                   : t('compliance.notice.reasonHint', { max: MAX_REASON })}
               </p>
             </div>
-            {refusal ? (
-              <p role="alert" className="text-sm text-destructive">
-                {t(`compliance.notice.${refusal}`)}
-              </p>
-            ) : (
-              mutation.isError && <InlineError error={mutation.error} />
+            {mutation.isError && (
+              <InlineError
+                error={mutation.error}
+                text={refusal ? t(`compliance.notice.${refusal}`) : undefined}
+              />
             )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={close}>

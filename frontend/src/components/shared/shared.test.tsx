@@ -1,9 +1,10 @@
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { ApiRequestError } from '@/api/errors'
+import { ApiRequestError, UserFacingError } from '@/api/errors'
+import { setLocale } from '@/i18n'
 import { toast } from '@/lib/toast'
-import { errorKind, errorText } from './error-messages'
+import { errorDetail, errorKind, errorText, issueText } from './error-messages'
 import { ErrorState, InlineError } from './error-state'
 import { Toaster } from './toaster'
 
@@ -27,10 +28,36 @@ describe('errorKind', () => {
 })
 
 describe('errorText', () => {
-  it('prefers the backend message', () => {
-    expect(errorText(new ApiRequestError(422, 'The title is too long.'))).toBe(
-      'The title is too long.',
+  it('never shows the English message of the backend', () => {
+    const error = new ApiRequestError(422, 'The title is too long.')
+    expect(errorText(error)).toBe('The request could not be processed. Check the entered values.')
+    expect(errorDetail(error)).toBe('The title is too long.')
+  })
+
+  it.each([
+    ['segregation_of_duties', 'Vier-Augen-Prinzip'],
+    ['unauthorized_deviations', 'Abweichungsantrag'],
+    ['office_file_too_complex', 'zu groß oder zu komplex'],
+    ['pdf_limit_reached', 'zu viele PDFs'],
+    ['search_unavailable', 'Suche'],
+    ['notice_too_soon', '24 Stunden'],
+    ['report_removed', 'Aufbewahrung'],
+  ])('translates the code %s', (code, text) => {
+    setLocale('de')
+    expect(errorText(new ApiRequestError(422, 'server text', code))).toContain(text)
+  })
+
+  it('says a body-less 502 or 503 is a server problem, without naming the partner master', () => {
+    setLocale('de')
+    const error = new ApiRequestError(503, 'Casting the vote failed with HTTP 503')
+    expect(errorText(error)).toBe(
+      'Auf dem Server ist ein Fehler aufgetreten. Bitte gleich erneut versuchen.',
     )
+  })
+
+  it('keeps a message the client wrote for the user', () => {
+    expect(errorText(new UserFacingError('Choose a class.'))).toBe('Choose a class.')
+    expect(errorDetail(new UserFacingError('Choose a class.'))).toBeUndefined()
   })
 
   it('replaces generic fallbacks with a friendly text', () => {
@@ -40,7 +67,41 @@ describe('errorText', () => {
   })
 })
 
+describe('issueText', () => {
+  it('translates the issues of a new version and keeps what it does not know', () => {
+    setLocale('de')
+    expect(issueText({ code: 'confidentiality_lowered', message: 'x' })).toContain('vertraulich')
+    expect(issueText({ code: 'access_groups_widened', message: 'x' })).toContain('Eigentümer')
+    expect(issueText({ code: 'out_of_range', message: 'at most 5' })).toBe('at most 5')
+  })
+})
+
+describe('InlineError', () => {
+  it('keeps the message of the backend in collapsed technical details', () => {
+    setLocale('de')
+    render(<InlineError error={new ApiRequestError(409, 'version 2 is InReview')} />)
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('Inzwischen geändert')
+    expect(screen.getByText('version 2 is InReview')).not.toBeVisible()
+    expect(screen.getByText('Technische Details')).toBeVisible()
+  })
+
+  it('takes the text of the caller', () => {
+    render(<InlineError error={new ApiRequestError(500, 'x failed with HTTP 500')} text="Mine" />)
+    expect(screen.getByRole('alert')).toHaveTextContent(/^Mine$/)
+  })
+})
+
 describe('ErrorState', () => {
+  it('does not add the reason phrase of a refused request', () => {
+    setLocale('de')
+    render(<ErrorState error={new ApiRequestError(403, 'Forbidden')} />)
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('Keine Berechtigung')
+    expect(alert).not.toHaveTextContent('Forbidden')
+    expect(screen.queryByText('Technische Details')).not.toBeInTheDocument()
+  })
+
   it('explains the error and retries', async () => {
     const retry = vi.fn()
     render(
@@ -65,7 +126,7 @@ describe('ErrorState', () => {
       />,
     )
     expect(screen.getByRole('alert')).toHaveTextContent('This document does not exist.')
-    expect(screen.getByText('document does not exist')).toBeInTheDocument()
+    expect(screen.getByText('document does not exist')).not.toBeVisible()
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument()
   })
 

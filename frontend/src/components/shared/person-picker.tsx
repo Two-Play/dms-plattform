@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { t } from '@/i18n'
 import { useDebouncedValue } from '@/lib/use-debounced-value'
+import { errorText } from '@/components/shared/error-messages'
 
 /** Delay after the last keystroke before the directory is searched. */
 export const PERSON_SEARCH_DEBOUNCE_MS = 250
@@ -199,7 +200,8 @@ export function PersonPicker({
     if (personQuery(text) === undefined) status = t('people.hint', { count: MIN_PERSON_QUERY })
     else if (pending) status = t('people.searching')
     else if (loadingMore) status = t('people.loadingMore')
-    else if (search.isError) status = unavailable ? t('people.unavailable') : search.error.message
+    else if (search.isError)
+      status = unavailable ? t('people.unavailable') : errorText(search.error)
     else if (search.isSuccess && rows === 0) {
       status = t('people.none', { query: debounced.trim() })
     } else if (search.isSuccess && hits.length < total) {

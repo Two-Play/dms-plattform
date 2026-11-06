@@ -16,6 +16,7 @@ import { getLocale, t } from '@/i18n'
 import { errorMessage, locationLabel } from './template-lifecycle'
 // The document stylesheet shared with the PDF rendering (modules/templates, DMS-39).
 import '@dms-document/document.css'
+import { InlineError } from '@/components/shared/error-state'
 
 function outcomes(values: boolean[] | undefined): string {
   const v = values ?? []
@@ -218,11 +219,7 @@ function Results({ run }: { run: TestRun }) {
               <h3 className="font-medium">{current.name}</h3>
               <Badge variant="destructive">{t('docs.preview.draftLabel')}</Badge>
             </div>
-            {current.error && (
-              <p role="alert" className="text-sm text-destructive">
-                {current.error}
-              </p>
-            )}
+            {current.error && <InlineError error={current.error} text={current.error} />}
             {(current.missingRequired ?? []).length > 0 && (
               <p className="text-xs text-muted-foreground">
                 {t('templates.test.missing', { list: (current.missingRequired ?? []).join(', ') })}
@@ -273,7 +270,7 @@ export function TestModePanel({
             onChange={(e) => {
               setLanguage(e.target.value === 'de' ? 'de' : 'en')
             }}
-            className="h-8 rounded-md border bg-background px-2 text-sm"
+            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
           >
             <option value="en">{t('templates.test.english')}</option>
             <option value="de">{t('templates.test.german')}</option>
@@ -294,11 +291,7 @@ export function TestModePanel({
           {t('templates.page.saveFirst')}
         </p>
       )}
-      {test.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {errorMessage(test.error)}
-        </p>
-      )}
+      {test.isError && <InlineError error={test.error} text={errorMessage(test.error)} />}
       {test.data && <Results key={test.submittedAt} run={test.data} />}
     </div>
   )

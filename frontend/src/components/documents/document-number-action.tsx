@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Hash } from 'lucide-react'
 import { useId, useState, type SyntheticEvent } from 'react'
 import { useApiClient } from '@/api/context'
+import { ApiRequestError } from '@/api/errors'
 import { assignDocumentNumber } from '@/api/number-ranges'
 import { Button } from '@/components/ui/button'
 import {
@@ -17,6 +18,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
 import { toast } from '@/lib/toast'
+import { InlineError } from '@/components/shared/error-state'
 
 /** Document numbers as the backend accepts them (`DocumentNumber.validate`). */
 export const documentNumberPattern = /^[\p{L}\p{N}][\p{L}\p{N}._-]{0,63}$/u
@@ -103,9 +105,14 @@ function AssignNumberForm({
         )}
       </div>
       {assign.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {assign.error.message}
-        </p>
+        <InlineError
+          error={assign.error}
+          text={
+            assign.error instanceof ApiRequestError && assign.error.status === 409
+              ? t('docNumber.conflict')
+              : undefined
+          }
+        />
       )}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>

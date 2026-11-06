@@ -67,10 +67,8 @@ export const templates = {
   },
   errors: {
     fourEyes:
-      'Four-eyes principle: a version can only be released by a template designer who neither created nor changed it. {message}',
-    forbidden: 'You are not allowed to do this. {message}',
-    lifecycle: 'This status change is not possible: {message}',
-    conflict: '{message} Reload the page to see the current state.',
+      'Four-eyes principle: a version can only be released by a template designer who neither created nor changed it.',
+    lifecycle: 'This status change is not possible.',
   },
   fields: {
     loading: 'Loading the fields',
