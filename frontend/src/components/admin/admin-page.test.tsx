@@ -489,7 +489,7 @@ describe('user menu', () => {
   it('links to the deputies page', async () => {
     const { router, user } = renderAt('/admin')
     await membersTable()
-    await user.click(screen.getByRole('button', { name: 'User menu' }))
+    await user.click(screen.getByRole('button', { name: /user menu/ }))
     await user.click(await screen.findByRole('menuitem', { name: 'Deputies' }))
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/deputies')

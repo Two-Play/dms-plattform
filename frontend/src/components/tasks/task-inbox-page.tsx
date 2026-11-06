@@ -1,7 +1,7 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { CheckCircle2 } from 'lucide-react'
-import { Fragment, useState, type ReactNode } from 'react'
+import { Fragment, useRef, useState, type ReactNode } from 'react'
 import {
   acknowledge,
   markOpened,
@@ -23,6 +23,7 @@ import { roleLabel } from '@/components/shared/role-label'
 import { UserName, UserNames } from '@/components/shared/user-name'
 import { t } from '@/i18n'
 import { formatDate, formatDateTime, formatPlainDate } from '@/i18n/format'
+import { useReturnFocus } from '@/lib/return-focus'
 import { toast } from '@/lib/toast'
 import {
   acknowledgementItem,
@@ -41,7 +42,7 @@ import { VoteDialog, type VoteDraft } from './vote-dialog'
 function ItemDate({ item, overdue }: { item: InboxItem; overdue: boolean }) {
   if (item.kind === 'ReviewDate') {
     return (
-      <span className={overdue ? 'font-medium text-destructive' : undefined}>
+      <span className={overdue ? 'font-medium text-destructive-foreground' : undefined}>
         {t(overdue ? 'tasks.reviewOverdueSince' : 'tasks.reviewDue', {
           date: formatPlainDate(item.review.dueOn),
         })}
@@ -50,7 +51,7 @@ function ItemDate({ item, overdue }: { item: InboxItem; overdue: boolean }) {
   }
   if (item.dueAt !== undefined) {
     return (
-      <span className={overdue ? 'font-medium text-destructive' : undefined}>
+      <span className={overdue ? 'font-medium text-destructive-foreground' : undefined}>
         {t(overdue ? 'tasks.overdueSince' : 'tasks.due', { date: formatDateTime(item.dueAt) })}
       </span>
     )
@@ -128,7 +129,7 @@ function AcknowledgementActions({
   const error = open.error ?? confirm.error
   return (
     <div className="flex flex-col items-start gap-1 sm:items-end">
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button
           size="sm"
           variant="outline"
@@ -319,6 +320,14 @@ export function TaskInboxPage() {
   const overdueCount = items.filter((i) => isOverdue(i, now)).length
   const titleOf = (task: WorkflowTask) => documents.get(task.documentId)?.title
   const loading = tasks.isPending || acknowledgements.isPending || reviews.isPending
+  const listHeading = useRef<HTMLHeadingElement>(null)
+  const list = useRef<HTMLUListElement>(null)
+  // A decision removes its row: focus moves to the row that took its place, the last one or the heading.
+  const focusReturn = useReturnFocus((index) => {
+    const rows = list.current?.children
+    const row = rows?.[Math.min(index, rows.length - 1)]
+    return row?.querySelector<HTMLElement>('a[href], button:not(:disabled)') ?? listHeading.current
+  })
 
   return (
     <div className="space-y-6">
@@ -328,13 +337,18 @@ export function TaskInboxPage() {
           tasks={tasks.data}
           titleOf={titleOf}
           onRepeat={(task, pending) => {
+            focusReturn.remember()
             setVoting({ task, initial: { decision: pending.decision, reason: pending.reason } })
           }}
         />
       )}
       <Card>
         <CardHeader>
-          <CardTitle>{t('tasks.myTasks')}</CardTitle>
+          <CardTitle>
+            <h2 ref={listHeading} tabIndex={-1} className="outline-none">
+              {t('tasks.myTasks')}
+            </h2>
+          </CardTitle>
           <CardDescription>
             {loading
               ? t('common.loading')
@@ -366,16 +380,18 @@ export function TaskInboxPage() {
             />
           )}
           {items.length > 0 && (
-            <ul aria-label={t('tasks.listLabel')} className="space-y-2">
-              {items.map((item) => (
+            <ul ref={list} aria-label={t('tasks.listLabel')} className="space-y-2">
+              {items.map((item, index) => (
                 <InboxRow
                   key={item.key}
                   item={item}
                   now={now}
                   onVote={(task) => {
+                    focusReturn.remember(index)
                     setVoting({ task })
                   }}
                   onReview={(review, decision) => {
+                    focusReturn.remember(index)
                     setDeciding({ review, decision })
                   }}
                   onDone={toast}
@@ -388,6 +404,7 @@ export function TaskInboxPage() {
       <ReviewDialog
         task={deciding?.review}
         decision={deciding?.decision ?? 'recertify'}
+        onCloseAutoFocus={focusReturn.restore}
         onClose={() => {
           setDeciding(undefined)
         }}
@@ -410,6 +427,7 @@ export function TaskInboxPage() {
         task={voting?.task}
         documentTitle={voting && titleOf(voting.task)}
         initial={voting?.initial}
+        onCloseAutoFocus={focusReturn.restore}
         onClose={() => {
           setVoting(undefined)
         }}

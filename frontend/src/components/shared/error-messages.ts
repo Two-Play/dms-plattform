@@ -1,5 +1,5 @@
-import { ApiRequestError, UNAVAILABLE_MESSAGE } from '@/api/errors'
-import { t } from '@/i18n'
+import { ApiRequestError, UserFacingError, type FieldIssue } from '@/api/errors'
+import { t, tOptional } from '@/i18n'
 
 /** What went wrong, from the user's point of view. */
 export type ErrorKind =
@@ -45,14 +45,21 @@ export function errorKind(error: unknown): ErrorKind {
 /** Messages the API helpers build when the backend sent no message of its own. */
 const GENERIC_MESSAGE = /failed with HTTP \d+$/
 
+/** Reason phrases of a proxy or framework: the user-facing texts already say the same. */
+const REASON_PHRASE =
+  /^(bad request|unauthorized|forbidden|not found|conflict|unprocessable entity|too many requests|internal server error|bad gateway|service unavailable|gateway timeout)\.?$/i
+
 /**
- * The backend's own message, if it sent a meaningful one; generic fallbacks and technical fetch
- * errors are left out because the user-facing texts already say the same.
+ * What the backend said, for the collapsed technical details. Its messages are English and written for
+ * support: `errorText` is what the user reads. Generic fallbacks, reason phrases and technical fetch
+ * errors are left out because they add nothing.
  */
 export function errorDetail(error: unknown): string | undefined {
-  if (!(error instanceof Error) || error instanceof TypeError) return undefined
+  if (!(error instanceof Error) || error instanceof TypeError || error instanceof UserFacingError) {
+    return undefined
+  }
   const message = error.message.trim()
-  if (message === '' || GENERIC_MESSAGE.test(message) || message === UNAVAILABLE_MESSAGE) {
+  if (message === '' || GENERIC_MESSAGE.test(message) || REASON_PHRASE.test(message)) {
     return undefined
   }
   return message
@@ -63,7 +70,20 @@ export function isRetryable(kind: ErrorKind): boolean {
   return kind !== 'forbidden' && kind !== 'notFound' && kind !== 'invalid'
 }
 
-/** A one-line text for errors of actions (save, vote, ...): the backend's message or a friendly one. */
+/** The text for an error code of the backend, if the catalogs know the code. */
+export function codeText(error: unknown): string | undefined {
+  return error instanceof ApiRequestError && error.code !== undefined
+    ? tOptional(`errors.codes.${error.code}`)
+    : undefined
+}
+
+/** A one-line text for errors of actions (save, vote, ...), in the language of the user. */
 export function errorText(error: unknown): string {
-  return errorDetail(error) ?? errorTexts(errorKind(error)).inline
+  if (error instanceof UserFacingError) return error.message
+  return codeText(error) ?? errorTexts(errorKind(error)).inline
+}
+
+/** What is wrong with a field, in the language of the user if the catalogs know the issue. */
+export function issueText(issue: Pick<FieldIssue, 'code' | 'message'>): string {
+  return tOptional(`errors.issues.${issue.code}`) ?? issue.message
 }

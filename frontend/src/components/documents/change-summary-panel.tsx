@@ -12,10 +12,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
 import { toast } from '@/lib/toast'
 import { changeKindLabel, isFirstVersion } from './version-labels'
+import { InlineError } from '@/components/shared/error-state'
+import { errorText } from '@/components/shared/error-messages'
 
 function failure(error: Error): string {
   if (error instanceof ApiRequestError && error.status === 403) return t('changeSummary.forbidden')
-  return t('changeSummary.failed', { message: error.message })
+  return t('changeSummary.failed', { message: errorText(error) })
 }
 
 function SummaryForm({
@@ -90,11 +92,7 @@ function SummaryForm({
           {error ?? t('changeSummary.hint')}
         </p>
       </div>
-      {save.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {failure(save.error)}
-        </p>
-      )}
+      {save.isError && <InlineError error={save.error} text={failure(save.error)} />}
       <div className="flex flex-wrap gap-2">
         <Button type="submit" size="sm" disabled={save.isPending}>
           {save.isPending ? t('changeSummary.saving') : t('changeSummary.save')}
@@ -129,7 +127,9 @@ export function ChangeSummaryPanel({
   return (
     <Card data-testid="change-summary">
       <CardHeader>
-        <CardTitle>{t('changeSummary.title')}</CardTitle>
+        <CardTitle>
+          <h2>{t('changeSummary.title')}</h2>
+        </CardTitle>
         <CardDescription>
           {t('changeSummary.kind', { kind: changeKindLabel(version.changeKind) })}
         </CardDescription>

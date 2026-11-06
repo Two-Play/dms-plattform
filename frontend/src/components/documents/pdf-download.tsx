@@ -7,6 +7,8 @@ import type { DocumentVersionView } from '@/api/partners'
 import { downloadVersionDocx, downloadVersionPdf, pdfKind } from '@/api/version-view'
 import { Button } from '@/components/ui/button'
 import { t } from '@/i18n'
+import { InlineError } from '@/components/shared/error-state'
+import { errorText } from '@/components/shared/error-messages'
 
 /**
  * "Download PDF" for a version (DMS-112): the draft PDF of an open version (generated from its last saved
@@ -21,7 +23,7 @@ function failure(error: Error): string {
     error.status === 429 &&
     error.retryAfterSeconds !== undefined
     ? t('docs.pdf.limited', { seconds: error.retryAfterSeconds })
-    : t('docs.pdf.failed', { message: error.message })
+    : t('docs.pdf.failed', { message: errorText(error) })
 }
 
 export function PdfDownload({
@@ -116,15 +118,12 @@ export function PdfDownload({
         <span>{hint}</span>
         {wordExport && <span className="block">{t('docs.pdf.wordHint')}</span>}
       </p>
-      {download.error && (
-        <p role="alert" className="text-destructive">
-          {failure(download.error)}
-        </p>
-      )}
+      {download.error && <InlineError error={download.error} text={failure(download.error)} />}
       {word.error && (
-        <p role="alert" className="text-destructive">
-          {t('docs.pdf.wordFailed', { message: word.error.message })}
-        </p>
+        <InlineError
+          error={word.error}
+          text={t('docs.pdf.wordFailed', { message: errorText(word.error) })}
+        />
       )}
     </div>
   )

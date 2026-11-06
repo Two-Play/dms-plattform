@@ -281,7 +281,7 @@ describe('Upload document wizard (DMS-127)', () => {
     )
     await user.upload(screen.getByLabelText('File'), docx())
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      /The file cannot be used: the file is not a readable Word document/,
+      /The file cannot be used: This file is not a readable Word document/,
     )
   })
 

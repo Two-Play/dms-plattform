@@ -4,6 +4,7 @@ import { useAuth } from 'react-oidc-context'
 import type { SignInState } from '@/auth/oidc'
 import { safeReturnTo } from '@/auth/return-to'
 import { FullPageMessage } from '@/components/full-page-message'
+import { TechnicalDetail } from '@/components/shared/error-state'
 import { Button } from '@/components/ui/button'
 import { t } from '@/i18n'
 
@@ -29,7 +30,7 @@ function CallbackPage() {
   if (auth.error) {
     return (
       <FullPageMessage title={t('auth.signInFailed')}>
-        <p className="text-muted-foreground">{auth.error.message}</p>
+        <TechnicalDetail error={auth.error} />
         <Button asChild>
           <Link to="/sign-in">{t('common.retry')}</Link>
         </Button>

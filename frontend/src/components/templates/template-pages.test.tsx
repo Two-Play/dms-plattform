@@ -358,7 +358,7 @@ describe('Template page', () => {
 
     const alert = await within(dialog).findByRole('alert')
     expect(alert).toHaveTextContent('Four-eyes principle')
-    expect(alert).toHaveTextContent('designer-2 created or changed this version')
+    expect(alert).not.toHaveTextContent('designer-2 created or changed this version')
   })
 
   it('tells the creator of a version in testing that someone else has to release it', async () => {
@@ -378,7 +378,7 @@ describe('Template page', () => {
     await user.click(await screen.findByRole('button', { name: 'Back to draft' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'version 2 was changed concurrently. Reload the page',
+      'This was changed in the meantime. Reload to see the current state.',
     )
   })
 

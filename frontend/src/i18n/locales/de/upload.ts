@@ -23,8 +23,6 @@ export const upload: Translation<typeof en.upload> = {
     choose: 'Datei',
     analysing: 'Felder werden gelesen …',
     failed: 'Die Datei kann nicht verwendet werden: {message}',
-    tooComplex:
-      'Diese Datei ist zu groß oder zu komplex, um sie zu verarbeiten. Teilen Sie sie auf oder entfernen Sie nicht benötigte Inhalte und laden Sie sie erneut hoch.',
     notConvertible: 'Dateien vom Typ .{extension} können nicht als PDF/A archiviert werden.',
     chosen: '{name} · {size}',
     checksum: 'SHA-256 {sha}',
@@ -78,7 +76,7 @@ export const upload: Translation<typeof en.upload> = {
       'Die Datei und die in den vorigen Schritten eingegebenen Werte werden mit dem Entwurf gespeichert; die Dokumentnummer wird beim Anlegen vergeben.',
     created: 'Dokument mit Ihrer Datei angelegt.',
     fileFailed:
-      'Das Dokument wurde angelegt, die Datei aber nicht übernommen: {message}. Laden Sie sie auf der Dokumentseite hoch.',
+      'Das Dokument wurde angelegt, die Datei aber nicht übernommen: {message} Laden Sie sie auf der Dokumentseite hoch.',
   },
   template: {
     name: 'Name der Vorlage',

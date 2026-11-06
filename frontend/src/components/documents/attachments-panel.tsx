@@ -45,6 +45,7 @@ import { Input } from '@/components/ui/input'
 import { t } from '@/i18n'
 import { formatDateTime, formatFileSize } from '@/i18n/format'
 import { toast } from '@/lib/toast'
+import { errorText } from '@/components/shared/error-messages'
 
 const icons: Record<FileKind, LucideIcon> = {
   pdf: FileText,
@@ -83,15 +84,15 @@ function uploadError(error: unknown, maxSize: number): string {
       case 'attachment_too_large':
         return t('docPanels.attachments.tooLarge', { max: formatFileSize(maxSize) })
       case 'attachment_blocked':
-        return t('docPanels.attachments.blocked', { message: error.message })
+        return t('docPanels.attachments.blocked', { message: errorText(error) })
       case 'attachment_infected':
         return t('docPanels.attachments.infected')
       case 'scanner_unavailable':
         return t('docPanels.attachments.scannerUnavailable')
       default:
         if (error.status === 409)
-          return t('docPanels.attachments.conflict', { message: error.message })
-        return error.message
+          return t('docPanels.attachments.conflict', { message: errorText(error) })
+        return errorText(error)
     }
   }
   return t('docPanels.attachments.uploadFailed')
@@ -171,9 +172,11 @@ export function AttachmentsPanel({
   return (
     <Card data-testid="attachments">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Paperclip className="size-4" aria-hidden />
-          {t('docPanels.attachments.title')}
+        <CardTitle>
+          <h2 className="flex items-center gap-2">
+            <Paperclip className="size-4" aria-hidden />
+            {t('docPanels.attachments.title')}
+          </h2>
         </CardTitle>
         <CardDescription>
           {editable

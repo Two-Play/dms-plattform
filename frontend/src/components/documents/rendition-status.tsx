@@ -29,7 +29,7 @@ export function RetryRenditionButton({
       await invalidateRendition(queryClient, documentId)
     },
     onError: (error) => {
-      toast(retryFailure(error))
+      toast(retryFailure(error), 'error')
     },
   })
   return (

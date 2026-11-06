@@ -101,7 +101,7 @@ describe('German UI (DMS-110)', () => {
     const user = renderApp('/tasks')
     await screen.findByRole('heading', { name: 'Aufgaben', level: 1 })
 
-    await user.click(screen.getByRole('button', { name: 'Benutzermenü' }))
+    await user.click(screen.getByRole('button', { name: /Benutzermenü/ }))
     await user.click(screen.getByRole('menuitemradio', { name: 'English' }))
 
     expect(await screen.findByRole('heading', { name: 'Tasks', level: 1 })).toBeInTheDocument()

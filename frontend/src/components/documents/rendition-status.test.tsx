@@ -148,8 +148,12 @@ describe('Rendition status on the document page (DMS-93)', () => {
     )
     await user.click(await screen.findByRole('button', { name: 'Retry now' }))
     await waitFor(() => {
-      expect(getToasts().map((t) => t.message)).toContain(
-        'The rendering cannot be retried: already done',
+      expect(getToasts()).toContainEqual(
+        expect.objectContaining({
+          message:
+            'The rendering cannot be retried: The rendering has not failed, so there is nothing to retry.',
+          variant: 'error',
+        }),
       )
     })
   })

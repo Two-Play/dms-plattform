@@ -143,7 +143,7 @@ describe('home dashboard (DMS-109)', () => {
 
     expect(await screen.findByRole('heading', { name: 'Welcome, author' })).toBeInTheDocument()
     expect(document.title).toBe('Home · DMS')
-    expect(screen.getByRole('button', { name: 'User menu' })).toHaveTextContent('author')
+    expect(screen.getByRole('button', { name: /user menu/ })).toHaveTextContent('author')
   })
 
   it('shows open tasks, read confirmations, drafts and recently published documents', async () => {

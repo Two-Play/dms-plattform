@@ -13,7 +13,7 @@ import {
 } from '@/api/deviations'
 import { ApiRequestError } from '@/api/errors'
 import type { DocumentVersionView } from '@/api/partners'
-import { ErrorState } from '@/components/shared/error-state'
+import { ErrorState, InlineError } from '@/components/shared/error-state'
 import { EmptyState, LoadingState } from '@/components/shared/states'
 import { UserName } from '@/components/shared/user-name'
 import { Badge } from '@/components/ui/badge'
@@ -34,6 +34,7 @@ import { formatDateTime } from '@/i18n/format'
 import { toast } from '@/lib/toast'
 import { changeText, locationText, lockedSectionId } from './deviation-labels'
 import type { SectionTextEditorProps } from './section-text-editor'
+import { errorText } from '@/components/shared/error-messages'
 
 /** A locked section of the version, or the section a request names, with what the panel shows for it. */
 interface LockedSection {
@@ -62,9 +63,9 @@ function WithName({ text, id }: { text: string; id: string }) {
 function failure(error: Error, action: 'request' | 'withdraw'): string {
   if (error instanceof ApiRequestError) {
     if (error.status === 403) return t(`deviations.${action}.forbidden`)
-    if (error.status === 409) return t(`deviations.${action}.conflict`, { message: error.message })
+    if (error.status === 409) return t(`deviations.${action}.conflict`)
   }
-  return t(`deviations.${action}.failed`, { message: error.message })
+  return t(`deviations.${action}.failed`, { message: errorText(error) })
 }
 
 function focusSection(sectionId: string) {
@@ -165,9 +166,7 @@ function RequestForm({ documentId, section, onDone }: FormProps) {
         </p>
       </div>
       {request.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {failure(request.error, 'request')}
-        </p>
+        <InlineError error={request.error} text={failure(request.error, 'request')} />
       )}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onDone}>
@@ -211,9 +210,7 @@ function WithdrawForm({
   return (
     <form onSubmit={submit} className="grid gap-4" noValidate>
       {withdraw.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {failure(withdraw.error, 'withdraw')}
-        </p>
+        <InlineError error={withdraw.error} text={failure(withdraw.error, 'withdraw')} />
       )}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onDone}>
@@ -602,7 +599,9 @@ export function DeviationsPanel({
     <Card data-testid="deviations-panel">
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2">
         <div className="space-y-1.5">
-          <CardTitle>{t('deviations.title')}</CardTitle>
+          <CardTitle>
+            <h2>{t('deviations.title')}</h2>
+          </CardTitle>
           <CardDescription>
             {editable ? t('deviations.draftHint') : t('deviations.versionHint')}
           </CardDescription>

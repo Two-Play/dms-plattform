@@ -68,10 +68,8 @@ export const templates: Translation<typeof en.templates> = {
   },
   errors: {
     fourEyes:
-      'Vier-Augen-Prinzip: Eine Version kann nur von einem Vorlagen-Designer freigegeben werden, der sie weder erstellt noch geändert hat. {message}',
-    forbidden: 'Für diese Aktion fehlt die Berechtigung. {message}',
-    lifecycle: 'Dieser Statuswechsel ist nicht möglich: {message}',
-    conflict: '{message} Seite neu laden, um den aktuellen Stand zu sehen.',
+      'Vier-Augen-Prinzip: Eine Version kann nur von einem Vorlagen-Designer freigegeben werden, der sie weder erstellt noch geändert hat.',
+    lifecycle: 'Dieser Statuswechsel ist nicht möglich.',
   },
   fields: {
     loading: 'Felder werden geladen',

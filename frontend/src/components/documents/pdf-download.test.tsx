@@ -54,11 +54,11 @@ describe('a download over the limit (DMS-118)', () => {
     )
   })
 
-  it("shows the backend's message when no usable time came with the answer", async () => {
+  it('explains the limit in general when no usable time came with the answer', async () => {
     renderDownload('Draft', false, answering(429, limited, { 'Retry-After': 'soon' }))
     await userEvent.click(screen.getByRole('button', { name: 'Download PDF' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'The PDF could not be downloaded: You have requested too many PDFs.',
+      'The PDF could not be downloaded: Too many PDFs are being produced right now.',
     )
   })
 })

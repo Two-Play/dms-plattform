@@ -22,8 +22,6 @@ export const upload = {
     analysing: 'Reading the fields…',
     failed: 'The file cannot be used: {message}',
     notConvertible: 'Files of type .{extension} cannot be archived as PDF/A.',
-    tooComplex:
-      'This file is too large or too complex to be processed. Split it or remove content it does not need, then upload it again.',
     chosen: '{name} · {size}',
     checksum: 'SHA-256 {sha}',
     filledBefore:
@@ -75,7 +73,7 @@ export const upload = {
       'The file and the values entered in the previous steps are saved with the draft; the document number is assigned when it is created.',
     created: 'Document created with your file.',
     fileFailed:
-      'The document was created, but the file was not taken over: {message}. Upload it on the document page.',
+      'The document was created, but the file was not taken over: {message} Upload it on the document page.',
   },
   template: {
     name: 'Name of the template',

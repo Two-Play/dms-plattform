@@ -89,7 +89,7 @@ describe('document number on the document page (DMS-113)', () => {
     await user.type(number, 'VTR-TAKEN')
     await user.type(screen.getByLabelText('Reason *'), 'duplicate')
     await user.click(screen.getByRole('button', { name: 'Assign number' }))
-    expect(await screen.findByText(/already assigned/)).toHaveAttribute('role', 'alert')
+    expect(await screen.findByRole('alert')).toHaveTextContent('This number is already assigned')
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 

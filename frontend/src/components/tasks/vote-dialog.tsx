@@ -27,6 +27,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
+import { InlineError } from '@/components/shared/error-state'
 
 export interface VoteDraft {
   decision: VoteDecision
@@ -147,9 +148,10 @@ function VoteForm({ task, initial, onVoted, onCancel }: VoteFormProps) {
         </div>
       ) : (
         vote.isError && (
-          <p role="alert" className="text-sm text-destructive">
-            {isFourEyesRefusal(vote.error) ? t('tasks.voteDialog.fourEyes') : vote.error.message}
-          </p>
+          <InlineError
+            error={vote.error}
+            text={isFourEyesRefusal(vote.error) ? t('tasks.voteDialog.fourEyes') : undefined}
+          />
         )
       )}
       <DialogFooter>
@@ -171,6 +173,7 @@ export function VoteDialog({
   initial,
   onClose,
   onVoted,
+  onCloseAutoFocus,
 }: {
   /** The task to vote on; the dialog is open while it is set. */
   task: WorkflowTask | undefined
@@ -179,6 +182,8 @@ export function VoteDialog({
   initial?: VoteDraft
   onClose: () => void
   onVoted: (task: WorkflowTask, decision: VoteDecision) => void
+  /** A vote can remove the button that opened the dialog: the caller says where focus goes. */
+  onCloseAutoFocus: (event: Event) => void
 }) {
   return (
     <Dialog
@@ -188,7 +193,7 @@ export function VoteDialog({
       }}
     >
       {task && (
-        <DialogContent>
+        <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
           <DialogHeader>
             <DialogTitle>
               {t('tasks.voteDialog.title', {

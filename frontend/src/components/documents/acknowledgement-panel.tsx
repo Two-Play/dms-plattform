@@ -58,7 +58,9 @@ export function AcknowledgementPanel({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t('docPanels.acknowledgement.title')}</CardTitle>
+        <CardTitle>
+          <h2>{t('docPanels.acknowledgement.title')}</h2>
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         {state.isPending && (

@@ -25,7 +25,7 @@ export function DataTable<T>({
   className?: string
 }) {
   return (
-    <div className={cn('overflow-x-auto', className)}>
+    <div className={cn('relative overflow-x-auto', className)}>
       <table className="w-full text-sm">
         <caption className="sr-only">{caption}</caption>
         <thead className="text-left text-xs text-muted-foreground">

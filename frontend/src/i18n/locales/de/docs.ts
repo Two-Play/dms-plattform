@@ -61,12 +61,12 @@ export const docs: Translation<typeof en.docs> = {
     fromPartnerMaster: 'Aus dem Partnerstamm',
     titleMissing: 'Vor dem Speichern einen Titel eingeben.',
     correctFirst: 'Bitte zuerst die markierten Felder korrigieren.',
-    correctAndSave: '{message} Bitte die markierten Felder korrigieren und erneut speichern.',
-    correct: '{message} Bitte die markierten Felder korrigieren.',
+    correctAndSave: 'Bitte die markierten Felder korrigieren und erneut speichern.',
+    correct: 'Bitte die markierten Felder korrigieren.',
     conflictSaved:
-      'Der Entwurf konnte nicht gespeichert werden: {message} Möglicherweise wurde er an anderer Stelle eingereicht oder geändert; Seite neu laden, um den aktuellen Stand zu sehen.',
+      'Der Entwurf konnte nicht gespeichert werden. Möglicherweise wurde er an anderer Stelle eingereicht oder geändert; Seite neu laden, um den aktuellen Stand zu sehen.',
     conflictSubmitted:
-      'Der Entwurf konnte nicht eingereicht werden: {message} Möglicherweise wurde er an anderer Stelle eingereicht oder geändert; Seite neu laden, um den aktuellen Stand zu sehen.',
+      'Der Entwurf konnte nicht eingereicht werden. Möglicherweise wurde er an anderer Stelle eingereicht oder geändert; Seite neu laden, um den aktuellen Stand zu sehen.',
     notTakenOver: '{label} wurde nicht übernommen: {message}',
     draftSaved: 'Entwurf gespeichert',
     submitted: 'Zur Prüfung eingereicht',
@@ -214,7 +214,7 @@ export const docs: Translation<typeof en.docs> = {
   groups: {
     perLine: 'Ein Gruppenschlüssel pro Zeile',
     loadFailed:
-      'Die Gruppenliste konnte nicht geladen werden ({message}); bitte die Gruppenschlüssel eingeben.',
+      'Die Gruppenliste konnte nicht geladen werden; bitte die Gruppenschlüssel eingeben.',
     none: 'Es gibt noch keine Zugriffsgruppen. Die Mandanten-Administration legt sie an.',
     unknown: '(unbekannte Gruppe)',
   },

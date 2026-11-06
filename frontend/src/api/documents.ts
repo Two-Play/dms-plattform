@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query'
 import type { ApiClient } from './client'
-import { requestError } from './errors'
+import { partnerRequestError, requestError } from './errors'
 import type { DocumentVersionView, DocumentView } from './partners'
 import type { components } from './schema'
 import type { DocumentLanguage, MetadataValue } from './templates'
@@ -193,7 +193,7 @@ export async function applyReference(
     body: { entryId },
   })
   if (!response.ok || !data) {
-    throw requestError(
+    throw partnerRequestError(
       response,
       error,
       `Taking the partner over failed with HTTP ${response.status}`,
@@ -212,7 +212,11 @@ export async function removeReference(
     params: { path: { id, key } },
   })
   if (!response.ok || !data) {
-    throw requestError(response, error, `Removing the partner failed with HTTP ${response.status}`)
+    throw partnerRequestError(
+      response,
+      error,
+      `Removing the partner failed with HTTP ${response.status}`,
+    )
   }
   return data
 }

@@ -20,6 +20,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { t, tOptional } from '@/i18n'
 import { toast } from '@/lib/toast'
 import { nextLabels } from './version-labels'
+import { InlineError } from '@/components/shared/error-state'
+import { errorText } from '@/components/shared/error-messages'
 
 const OPEN_STATUSES = new Set(['Draft', 'InReview', 'InApproval'])
 
@@ -27,9 +29,9 @@ const OPEN_STATUSES = new Set(['Draft', 'InReview', 'InApproval'])
 function failure(error: Error): string {
   if (error instanceof ApiRequestError) {
     if (error.status === 403) return t('newVersion.forbidden')
-    if (error.status === 409) return t('newVersion.conflict', { message: error.message })
+    if (error.status === 409) return t('newVersion.conflict', { message: errorText(error) })
   }
-  return t('newVersion.failed', { message: error.message })
+  return t('newVersion.failed', { message: errorText(error) })
 }
 
 function NewVersionForm({
@@ -160,11 +162,7 @@ function NewVersionForm({
           {error ?? t('newVersion.summaryHint')}
         </p>
       </div>
-      {start.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {failure(start.error)}
-        </p>
-      )}
+      {start.isError && <InlineError error={start.error} text={failure(start.error)} />}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>
           {t('common.cancel')}

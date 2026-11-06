@@ -455,7 +455,7 @@ describe('Document page with a draft', () => {
     await user.clear(term())
     await user.type(term(), '24')
 
-    await user.click(screen.getByRole('button', { name: 'User menu' }))
+    await user.click(screen.getByRole('button', { name: /user menu/ }))
     await user.click(await screen.findByRole('menuitemradio', { name: 'Deutsch' }))
     const dialog = await screen.findByRole('dialog', { name: 'Switch the language?' })
     await user.click(within(dialog).getByRole('button', { name: 'Keep this language' }))
@@ -463,7 +463,7 @@ describe('Document page with a draft', () => {
     expect(getLocale()).toBe('en')
     expect(term()).toHaveValue('24')
 
-    await user.click(screen.getByRole('button', { name: 'User menu' }))
+    await user.click(screen.getByRole('button', { name: /user menu/ }))
     await user.click(await screen.findByRole('menuitemradio', { name: 'Deutsch' }))
     await user.click(await screen.findByRole('button', { name: 'Discard and switch' }))
     expect(getLocale()).toBe('de')
@@ -475,7 +475,7 @@ describe('Document page with a draft', () => {
       expect(term()).toHaveValue('12')
     })
 
-    await user.click(screen.getByRole('button', { name: 'User menu' }))
+    await user.click(screen.getByRole('button', { name: /user menu/ }))
     await user.click(await screen.findByRole('menuitemradio', { name: 'Deutsch' }))
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -681,9 +681,7 @@ describe('Document page with a draft', () => {
     })
 
     await user.click(screen.getByRole('button', { name: 'Submit for review' }))
-    expect(await findStatusAlert()).toHaveTextContent(
-      'The draft could not be submitted: The version is already in review.',
-    )
+    expect(await findStatusAlert()).toHaveTextContent('The draft could not be submitted.')
     expect(statusAlert()).toHaveTextContent('reload the page')
 
     await user.click(screen.getByRole('button', { name: 'Submit for review' }))
@@ -735,7 +733,7 @@ describe('Document page with a draft', () => {
       )
     })
 
-    await user.click(await screen.findByRole('button', { name: 'Edit text of Liability' }))
+    await user.click(await screen.findByRole('button', { name: 'Edit text: Liability' }))
     const text = await screen.findByRole('textbox', { name: 'Paragraph text' })
     await user.click(text)
     document.getSelection()?.collapse(text, text.childNodes.length)

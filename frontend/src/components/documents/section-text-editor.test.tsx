@@ -183,7 +183,7 @@ const row = (title: string) => {
   return found
 }
 
-const editButton = () => screen.getByRole('button', { name: 'Edit text of Liability' })
+const editButton = () => screen.getByRole('button', { name: 'Edit text: Liability' })
 
 async function openEditor(user: UserEvent) {
   await user.click(editButton())
@@ -216,7 +216,7 @@ describe('Text of a locked section', () => {
     expect(
       within(row('Parties')).queryByRole('button', { name: /Edit text/ }),
     ).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Edit text of Terms' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Edit text: Terms' })).not.toBeInTheDocument()
   })
 
   it('cannot be edited on a version that is no draft', async () => {
@@ -312,7 +312,7 @@ describe('Text of a locked section', () => {
     await user.click(saveButton())
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'The text was not saved: Unknown placeholder. Your text is still here.',
+      'The text was not saved: The request could not be processed. Check the entered values. Your text is still here.',
     )
     expect(screen.getByRole('textbox', { name: 'Paragraph text' })).toHaveTextContent('Capped.')
 
@@ -347,7 +347,7 @@ describe('Text of a locked section', () => {
     await user.click(saveButton())
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'The draft was saved in the meantime. The page has been updated; your text is still here.',
+      'the state has changed. The page has been updated; your text is still here.',
     )
     // The refresh brings the new working state; this section is as it was.
     act(() => {
@@ -573,7 +573,7 @@ describe('Text of a locked section', () => {
     await renderPanel()
     await userEvent
       .setup()
-      .click(screen.getByRole('button', { name: 'Text von Liability bearbeiten' }))
+      .click(screen.getByRole('button', { name: 'Text bearbeiten: Liability' }))
     expect(
       await screen.findByRole('heading', { name: 'Text von Liability bearbeiten' }),
     ).toBeInTheDocument()

@@ -254,9 +254,9 @@ describe('Discard draft on the document page (DMS-129)', () => {
 
     await user.clear(reason)
     await user.click(within(dialog).getByRole('button', { name: 'Discard draft' }))
-    expect(
-      await within(dialog).findByText(/not discarded: version 1\.0-draft\.2 is InReview/),
-    ).toHaveAttribute('role', 'alert')
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'The draft was not discarded: This was changed in the meantime.',
+    )
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 

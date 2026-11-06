@@ -103,9 +103,12 @@ export function RenditionFailuresPanel() {
                     <td className="py-1.5 pr-3">
                       {renditionCause(f.lastError)}
                       {f.lastError && (
-                        <div className="break-words font-mono text-xs text-muted-foreground">
-                          {f.lastError.message}
-                        </div>
+                        <details className="text-xs text-muted-foreground">
+                          <summary className="cursor-pointer">
+                            {t('renditions.technicalDetail')}
+                          </summary>
+                          <p className="mt-1 break-words font-mono">{f.lastError.message}</p>
+                        </details>
                       )}
                     </td>
                     <td className="py-1.5">

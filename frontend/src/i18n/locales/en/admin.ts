@@ -41,7 +41,7 @@ export const groups = {
   adding: 'Adding…',
   add: 'Add member',
   noMembers: 'The group has no members yet.',
-  noMembersText: 'Add members by their user id.',
+  noMembersText: 'Add members with the person search.',
   membersCaption: 'Members of {group}, current ones first',
   user: 'User',
   addedCol: 'Added',

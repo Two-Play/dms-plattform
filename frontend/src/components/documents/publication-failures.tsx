@@ -18,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { t } from '@/i18n'
 import { formatDateTime } from '@/i18n/format'
 import { toast } from '@/lib/toast'
+import { errorText } from '@/components/shared/error-messages'
 
 function publicationCause(error: PublicationError | undefined): string {
   const code = publicationErrorCode(error)
@@ -27,9 +28,9 @@ function publicationCause(error: PublicationError | undefined): string {
 function retryFailure(error: Error): string {
   if (error instanceof ApiRequestError) {
     if (error.status === 403) return t('publications.retryForbidden')
-    if (error.status === 409) return t('publications.retryConflict', { message: error.message })
+    if (error.status === 409) return t('publications.retryConflict', { message: errorText(error) })
   }
-  return t('publications.retryFailed', { message: error.message })
+  return t('publications.retryFailed', { message: errorText(error) })
 }
 
 /** Requeues a failed publication; the caller's permission is decided by the backend (`canRetry`). */
@@ -51,7 +52,7 @@ function RetryPublicationButton({
       await invalidatePublication(queryClient, documentId)
     },
     onError: (error) => {
-      toast(retryFailure(error))
+      toast(retryFailure(error), 'error')
     },
   })
   return (
@@ -205,9 +206,12 @@ export function PublicationFailuresPanel() {
                     <td className="py-1.5 pr-3">
                       {publicationCause(f.lastError)}
                       {f.lastError && (
-                        <div className="break-words font-mono text-xs text-muted-foreground">
-                          {f.lastError.message}
-                        </div>
+                        <details className="text-xs text-muted-foreground">
+                          <summary className="cursor-pointer">
+                            {t('publications.technicalDetail')}
+                          </summary>
+                          <p className="mt-1 break-words font-mono">{f.lastError.message}</p>
+                        </details>
                       )}
                     </td>
                     <td className="py-1.5">

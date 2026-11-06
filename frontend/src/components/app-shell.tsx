@@ -39,6 +39,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Toaster } from '@/components/shared/toaster'
 import { NotificationBell } from '@/components/notifications/notification-bell'
+import { InAppShell } from '@/components/in-app-shell'
 import { useOpenTaskCount } from '@/components/tasks/use-open-task-count'
 import { Input } from '@/components/ui/input'
 import { currentTheme, setTheme, type Theme } from '@/lib/theme'
@@ -124,7 +125,7 @@ function UserMenu() {
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="gap-2 px-2" aria-label={t('shell.userMenu')}>
+          <Button variant="ghost" className="gap-2 px-2" aria-label={t('shell.userMenu', { name })}>
             <Avatar className="size-7">
               <AvatarFallback>{initials(name) || '?'}</AvatarFallback>
             </Avatar>
@@ -380,7 +381,9 @@ export function AppShell() {
           className="min-w-0 flex-1 p-4 focus:outline-none md:p-8"
         >
           <div className="mx-auto w-full max-w-7xl">
-            <Outlet />
+            <InAppShell value={true}>
+              <Outlet />
+            </InAppShell>
           </div>
         </main>
       </div>

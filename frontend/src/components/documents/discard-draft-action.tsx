@@ -19,14 +19,16 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
 import { toast } from '@/lib/toast'
+import { InlineError } from '@/components/shared/error-state'
+import { errorText } from '@/components/shared/error-messages'
 
 /** A failed discard in the caller's language, with the backend's message where it explains the cause. */
 function failure(error: Error): string {
   if (error instanceof ApiRequestError) {
     if (error.status === 403) return t('discardDraft.forbidden')
-    if (error.status === 409) return t('discardDraft.conflict', { message: error.message })
+    if (error.status === 409) return t('discardDraft.conflict', { message: errorText(error) })
   }
-  return t('discardDraft.failed', { message: error.message })
+  return t('discardDraft.failed', { message: errorText(error) })
 }
 
 /** A draft of the first version (1.0) has no valid version to fall back to: the document goes with it. */
@@ -105,11 +107,7 @@ function DiscardForm({ document, onCancel }: { document: DocumentView; onCancel:
             : t('discardDraft.reasonHint')}
         </p>
       </div>
-      {discard.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {failure(discard.error)}
-        </p>
-      )}
+      {discard.isError && <InlineError error={discard.error} text={failure(discard.error)} />}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onCancel}>
           {t('common.cancel')}

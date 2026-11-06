@@ -82,7 +82,7 @@ export const deviations = {
     confirming: 'Requesting…',
     done: 'Deviation requested for {section}',
     forbidden: 'You may not request deviations for this document.',
-    conflict: 'The deviation was not requested: {message} The list has been updated.',
+    conflict: 'The deviation was not requested: the state has changed. The list has been updated.',
     failed: 'The deviation was not requested: {message}',
   },
   withdraw: {
@@ -97,12 +97,12 @@ export const deviations = {
     confirming: 'Withdrawing…',
     done: 'Request for {section} withdrawn',
     forbidden: 'You may not withdraw deviation requests of this document.',
-    conflict: 'The request was not withdrawn: {message} The list has been updated.',
+    conflict: 'The request was not withdrawn: the state has changed. The list has been updated.',
     failed: 'The request was not withdrawn: {message}',
   },
   edit: {
     action: 'Edit text',
-    actionFor: 'Edit text of {section}',
+    actionFor: 'Edit text: {section}',
     title: 'Edit the text of {section}',
     hint: 'Saved changes are listed in the deviation report and checked in the additional review step. Title and position of the section stay as they are.',
     blocks: 'Text of {section}',
@@ -119,7 +119,7 @@ export const deviations = {
     restoreUnavailable:
       'The standard text could not be loaded, so it cannot be restored right now: {message}',
     conflict:
-      'The text was not saved: {message} The page has been updated; your text is still here.',
+      'The text was not saved: the state has changed. The page has been updated; your text is still here.',
     forbidden: 'You may not change this draft. Your text is still here.',
     invalid: 'The text was not saved: {message} Your text is still here.',
     failed: 'The text was not saved: {message} Your text is still here.',

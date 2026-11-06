@@ -1,4 +1,4 @@
-import { ErrorState } from '@/components/shared/error-state'
+import { ErrorState, InlineError } from '@/components/shared/error-state'
 import {
   BreadcrumbCurrent,
   Breadcrumbs,
@@ -193,15 +193,9 @@ function StatusActions({
       {version.status === 'Testing' && isContributor && (
         <p className="text-xs text-muted-foreground">{t('templates.page.fourEyes')}</p>
       )}
-      {error && dialog === undefined && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      {error && dialog === undefined && <InlineError error={error} text={error} />}
       {newVersion.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          {errorMessage(newVersion.error)}
-        </p>
+        <InlineError error={newVersion.error} text={errorMessage(newVersion.error)} />
       )}
       <ReleaseDialog
         version={version}
@@ -228,11 +222,7 @@ function StatusActions({
             </DialogTitle>
             <DialogDescription>{t('templates.page.deprecateText')}</DialogDescription>
           </DialogHeader>
-          {error && dialog === 'Deprecated' && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
+          {error && dialog === 'Deprecated' && <InlineError error={error} text={error} />}
           <DialogFooter>
             <Button
               variant="outline"

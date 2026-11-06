@@ -1,12 +1,18 @@
-import { t } from '@/i18n'
 import type { components } from './schema'
 
 export type ApiErrorBody = components['schemas']['ApiError']
 export type FieldIssue = components['schemas']['IssueView']
 
-/** Shown when the partner master cannot answer and the backend sent no message. */
-export const UNAVAILABLE_MESSAGE =
-  'The partner master is not reachable right now. You can save the draft without the partner and pick it later.'
+/**
+ * An error whose message is already written for the user, in their language: a check of the client
+ * inside an action, not an answer of the backend.
+ */
+export class UserFacingError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'UserFacingError'
+  }
+}
 
 /**
  * A failed API call with the backend's error code, message and field issues, if it sent them, and the
@@ -31,14 +37,6 @@ export class ApiRequestError extends Error {
     this.code = code
     this.issues = issues
     this.retryAfterSeconds = retryAfterSeconds
-  }
-
-  /** The partner master is down or answered with something unusable (503/502). */
-  get partnerDirectoryUnavailable(): boolean {
-    return (
-      this.code === 'partner_directory_unavailable' ||
-      this.code === 'partner_directory_invalid_response'
-    )
   }
 }
 
@@ -69,21 +67,26 @@ function retryAfter(response: Response): number | undefined {
 /** The error of a failed call, with the backend's code, message and issues if it sent an `ApiError`. */
 export function requestError(response: Response, raw: unknown, fallback: string): ApiRequestError {
   const body = errorBody(raw)
-  if (response.status === 502 || response.status === 503) {
-    return new ApiRequestError(
-      response.status,
-      body?.message ?? UNAVAILABLE_MESSAGE,
-      body?.code ?? 'partner_directory_unavailable',
-    )
-  }
-  // The size or structure of a file, wherever it is read; the backend's message is technical (DMS-160).
-  const message =
-    body?.code === 'office_file_too_complex' ? t('upload.file.tooComplex') : body?.message
   return new ApiRequestError(
     response.status,
-    message ?? fallback,
+    body?.message ?? fallback,
     body?.code,
     body?.issues,
     retryAfter(response),
   )
+}
+
+/**
+ * The error of a call to a partner endpoint. Only there does a 502 or 503 without an `ApiError`, from a
+ * proxy in front of the backend, mean that the partner master is out of reach.
+ */
+export function partnerRequestError(
+  response: Response,
+  raw: unknown,
+  fallback: string,
+): ApiRequestError {
+  const error = requestError(response, raw, fallback)
+  return (response.status === 502 || response.status === 503) && error.code === undefined
+    ? new ApiRequestError(response.status, fallback, 'partner_directory_unavailable')
+    : error
 }

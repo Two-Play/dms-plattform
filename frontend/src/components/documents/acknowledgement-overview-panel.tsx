@@ -423,7 +423,9 @@ export function AcknowledgementOverviewPanel({ documentId }: { documentId: strin
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t('ackOverview.title')}</CardTitle>
+        <CardTitle>
+          <h2>{t('ackOverview.title')}</h2>
+        </CardTitle>
         <CardDescription>{t('ackOverview.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">

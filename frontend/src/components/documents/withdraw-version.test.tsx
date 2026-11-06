@@ -247,9 +247,9 @@ describe('Withdraw an approved version on the document page (DMS-143)', () => {
     const dialog = screen.getByRole('dialog', { name: 'Withdraw version 2.0?' })
     await user.type(within(dialog).getByLabelText('Reason'), 'Approved by mistake')
     await user.click(within(dialog).getByRole('button', { name: 'Withdraw version' }))
-    expect(
-      await within(dialog).findByText(/it was published first and is valid now/),
-    ).toHaveAttribute('role', 'alert')
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      /it was published first and is valid now/,
+    )
   })
 
   it('tells a first version leaves the document without a valid version, in German as well', async () => {
@@ -296,10 +296,7 @@ describe('Withdraw an approved version on the document page (DMS-143)', () => {
     const dialog = screen.getByRole('dialog', { name: 'Withdraw version 2.0?' })
     await user.type(within(dialog).getByLabelText('Reason'), 'A required field is empty')
     await user.click(within(dialog).getByRole('button', { name: 'Withdraw version' }))
-    expect(await within(dialog).findByText(/it is being published/)).toHaveAttribute(
-      'role',
-      'alert',
-    )
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(/it is being published/)
   })
 
   it('marks a withdrawn version on its own page', async () => {

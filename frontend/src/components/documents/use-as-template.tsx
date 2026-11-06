@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { t } from '@/i18n'
 import { toast } from '@/lib/toast'
+import { InlineError } from '@/components/shared/error-state'
+import { errorText } from '@/components/shared/error-messages'
 
 /**
  * "Use as template" (DMS-127): a template designer makes a new Word template draft from the Word file of a
@@ -121,9 +123,10 @@ export function UseAsTemplate({
         </Button>
       </div>
       {create.error && (
-        <p role="alert" className="text-sm text-destructive">
-          {t('upload.fromVersion.failed', { message: create.error.message })}
-        </p>
+        <InlineError
+          error={create.error}
+          text={t('upload.fromVersion.failed', { message: errorText(create.error) })}
+        />
       )}
     </form>
   )

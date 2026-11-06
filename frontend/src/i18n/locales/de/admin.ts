@@ -43,7 +43,7 @@ export const groups: Translation<typeof en.groups> = {
   adding: 'Wird hinzugefügt …',
   add: 'Mitglied hinzufügen',
   noMembers: 'Die Gruppe hat noch keine Mitglieder.',
-  noMembersText: 'Mitglieder über ihre Benutzer-ID hinzufügen.',
+  noMembersText: 'Mitglieder über die Personensuche hinzufügen.',
   membersCaption: 'Mitglieder von {group}, aktuelle zuerst',
   user: 'Person',
   addedCol: 'Hinzugefügt',
