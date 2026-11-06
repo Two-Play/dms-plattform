@@ -1,6 +1,6 @@
 package dms.audit.core
 
-import com.augustnagro.magnum.DbTx
+import com.augustnagro.magnum.{DbTx, sql}
 import com.dimafeng.testcontainers.PostgreSQLContainer
 import dms.audit.*
 import dms.db.{Db, DbConfig, DbError, Jsonb, Migrations}
@@ -108,6 +108,39 @@ object AuditTrailSpec extends ZIOSpecDefault:
   private def tamperEvents(statements: DbTx ?=> Unit) = tamper("audit_event", "audit_event_guard")(statements)
 
   private def newTenantZ: ZIO[Env, DbError, TenantId] = ZIO.serviceWithZIO[Env](e => newTenant(e.owner))
+
+  private def evidence(e: Env, maxAge: Duration = AuditEvidenceLive.PrefixMaxAge): AuditEvidence =
+    AuditEvidenceLive(e.app, e.trail, None, maxAge)
+
+  private def about(objectId: UUID, tenant: TenantId): ZIO[Env, DbError, AuditRecordId] =
+    ZIO.serviceWithZIO[Env](e =>
+      e.app.transact(tenant)(
+        e.trail.record(event(0).copy(target = AuditObject("document", Some(objectId), Some("1.0"))))
+      )
+    )
+
+  /** A chain of 6 entries, anchored at 5 and fully verified: the prefix ends at 5. */
+  private def verifiedChain: ZIO[Env, DbError | TimestampError, TenantId] =
+    for
+      e <- ZIO.service[Env]
+      t <- newTenantZ
+      _ <- recordMany(5, t)
+      _ <- e.anchoring.anchor(t)
+      _ <- record(6, t)
+      _ <- evidence(e).verifyFully(t)
+    yield t
+
+  private def runs(tenant: TenantId): ZIO[Env, DbError, List[Boolean]] =
+    ZIO.serviceWithZIO[Env](
+      _.owner.transactSystem(
+        Db.sql(
+          sql"""select ok from dms.audit_verification_run where tenant_id = ${tenant.value} order by id"""
+            .query[Boolean]
+            .run()
+            .toList
+        )
+      )
+    )
 
   def spec = suite("AuditTrail")(
     test("every entry links to its predecessor and the chain verifies") {
@@ -314,6 +347,168 @@ object AuditTrailSpec extends ZIOSpecDefault:
         truncated.violation.map(v => (v.chainSeq, v.kind)) == Some((3L, Violation.Kind.MissingEntry)),
         forged.violation.map(v => (v.chainSeq, v.kind)) == Some((2L, Violation.Kind.AnchorMismatch))
       )
+    },
+    test("a report reads only what follows the verified prefix, which ends at an anchor (ADR 0077)") {
+      for
+        e     <- ZIO.service[Env]
+        t     <- verifiedChain
+        _     <- recordMany(2, t)
+        state <- evidence(e).integrity(t, UUID.randomUUID())
+        all   <- runs(t)
+      yield assertTrue(
+        state.verification.ok,
+        state.verification.trustedPrefix.map(_.untilSeq).contains(5L),
+        state.verification.entriesChecked == 3L,
+        state.verification.anchorsChecked == 1,
+        state.verification.headSeq.contains(8L),
+        // the shortcut is no full verification: it records no run
+        all == List(true)
+      )
+    },
+    test("tampering below the prefix is found by the regular full verification and closes the shortcut") {
+      for
+        e <- ZIO.service[Env]
+        t <- verifiedChain
+        _ <- tamperEvents(
+          execute(
+            s"update dms.audit_event set reason = 'forged' where tenant_id = '${t.value}' and chain_seq = 2"
+          )
+        )
+        before <- evidence(e).integrity(t, UUID.randomUUID())
+        full   <- evidence(e).verifyFully(t)
+        after  <- evidence(e).integrity(t, UUID.randomUUID())
+        all    <- runs(t)
+      yield assertTrue(
+        // the limit ADR 0077 accepts: until the next full verification, for entries of other objects
+        before.verification.ok,
+        full.verification.violation.map(v => (v.chainSeq, v.kind)) ==
+          Some((2L, Violation.Kind.HashMismatch)),
+        after.verification.trustedPrefix.isEmpty,
+        after.verification.violation.map(_.chainSeq).contains(2L),
+        all == List(true, false, false)
+      )
+    },
+    test("the entries a report prints are read again below the prefix") {
+      val document = UUID.randomUUID()
+      for
+        e     <- ZIO.service[Env]
+        t     <- newTenantZ
+        _     <- recordMany(1, t)
+        _     <- about(document, t)
+        _     <- recordMany(3, t)
+        _     <- e.anchoring.anchor(t)
+        _     <- evidence(e).verifyFully(t)
+        clean <- evidence(e).integrity(t, document)
+        _     <- tamperEvents(
+          execute(
+            s"update dms.audit_event set reason = 'forged' where tenant_id = '${t.value}' and chain_seq = 2"
+          )
+        )
+        changed <- evidence(e).integrity(t, document)
+        // A rewritten hash no longer matches the link of the next entry.
+        other   <- verifiedChain
+        _       <- about(document, other)
+        chainOf <- chain(other)
+        seq = chainOf.last.entry.chainSeq
+      yield assertTrue(
+        clean.verification.trustedPrefix.isDefined,
+        changed.verification.trustedPrefix.isEmpty,
+        changed.verification.violation.map(v => (v.chainSeq, v.kind)) ==
+          Some((2L, Violation.Kind.HashMismatch)),
+        seq == 7L
+      )
+    },
+    test("the prefix is not trusted if the anchored entry, the anchor or its token changed") {
+      for
+        e       <- ZIO.service[Env]
+        entry   <- verifiedChain
+        token   <- verifiedChain
+        removed <- verifiedChain
+        _       <- tamperEvents(
+          execute(
+            s"""update dms.audit_event set hash = sha256(hash)
+               |where tenant_id = '${entry.value}' and chain_seq = 5""".stripMargin
+          )
+        )
+        _ <- tamper("audit_anchor", "audit_anchor_guard")(
+          execute(
+            s"""update dms.audit_anchor
+               |set tsa_token = set_byte(tsa_token, length(tsa_token) - 1, 255 - get_byte(tsa_token, length(tsa_token) - 1))
+               |where tenant_id = '${token.value}'""".stripMargin
+          )
+        )
+        _ <- ZIO.serviceWithZIO[Env](
+          _.owner.transactSystem(
+            Db.sql {
+              execute("set local session_replication_role = replica")
+              execute(s"delete from dms.audit_anchor where tenant_id = '${removed.value}'")
+            }
+          )
+        )
+        changed <- evidence(e).integrity(entry, UUID.randomUUID())
+        forged  <- evidence(e).integrity(token, UUID.randomUUID())
+        gone    <- evidence(e).integrity(removed, UUID.randomUUID())
+      yield assertTrue(
+        changed.verification.trustedPrefix.isEmpty,
+        !changed.verification.ok,
+        forged.verification.trustedPrefix.isEmpty,
+        forged.verification.violation.map(_.kind).contains(Violation.Kind.AnchorMismatch),
+        // Without its anchor the prefix is not trusted; the whole chain is read, and it is intact.
+        gone.verification.trustedPrefix.isEmpty,
+        gone.verification.entriesChecked == 6L
+      )
+    },
+    test("a violation after the prefix ends in a recorded full verification") {
+      for
+        e <- ZIO.service[Env]
+        t <- verifiedChain
+        _ <- tamperEvents(
+          execute(
+            s"update dms.audit_event set reason = 'forged' where tenant_id = '${t.value}' and chain_seq = 6"
+          )
+        )
+        state <- evidence(e).integrity(t, UUID.randomUUID())
+        all   <- runs(t)
+      yield assertTrue(
+        state.verification.trustedPrefix.isEmpty,
+        state.verification.violation.map(v => (v.chainSeq, v.kind)) ==
+          Some((6L, Violation.Kind.HashMismatch)),
+        all == List(true, false)
+      )
+    },
+    test("without an anchor or a recent full verification the whole chain is read") {
+      for
+        e        <- ZIO.service[Env]
+        plain    <- newTenantZ
+        _        <- recordMany(3, plain)
+        _        <- evidence(e).verifyFully(plain)
+        unsealed <- evidence(e).integrity(plain, UUID.randomUUID())
+        t        <- verifiedChain
+        stale    <- evidence(e, Duration.Zero).integrity(t, UUID.randomUUID())
+        all      <- runs(t)
+      yield assertTrue(
+        unsealed.verification.trustedPrefix.isEmpty,
+        unsealed.verification.entriesChecked == 3L,
+        stale.verification.trustedPrefix.isEmpty,
+        stale.verification.entriesChecked == 6L,
+        all == List(true, true)
+      )
+    },
+    test("verification runs are limited to the tenant and cannot be changed by the application") {
+      for
+        e   <- ZIO.service[Env]
+        t   <- verifiedChain
+        own <- e.app.transact(t)(
+          Db.sql(sql"select count(*) from dms.audit_verification_run".query[Long].run().head)
+        )
+        foreign <- e.app.transact(TenantId.random())(
+          Db.sql(sql"select count(*) from dms.audit_verification_run".query[Long].run().head)
+        )
+        deleted <- e.app.transact(t)(Db.sql(sql"delete from dms.audit_verification_run".update.run())).either
+        changed <- e.app
+          .transact(t)(Db.sql(sql"update dms.audit_verification_run set ok = true".update.run()))
+          .either
+      yield assertTrue(own == 1L, foreign == 0L, deleted.isLeft, changed.isLeft)
     },
     test("tokens from a TSA outside the trust anchors are rejected") {
       ZIO.scoped(

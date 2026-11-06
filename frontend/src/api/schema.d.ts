@@ -185,7 +185,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Creates the next profile version of a document class. Existing documents keep their profile version; the review settings of the latest version apply to all documents of the class. */
+    /** @description Creates the next profile version of a document class. Existing documents keep their profile version; the review settings of the latest version apply to all documents of the class and of the subclasses that inherit them; a changed interval reaches open review dates. */
     post: operations['postApiV1AdminDocument-classesIdVersions']
     delete?: never
     options?: never
@@ -893,7 +893,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Records a deviation request for a locked section of the draft's template: with a reason, the section's standard text may be changed; the change then needs the additional review step. One active request per section (409); unknown or editable sections and empty reasons are rejected (422). Returns the draft's deviation report. */
+    /** @description Records a deviation request for a locked section of the draft's template, which gives the version the additional review step even before the text changes: with a reason, the section's standard text may be changed; the change then needs the additional review step. One active request per section (409); unknown or editable sections and empty reasons are rejected (422). Returns the draft's deviation report. */
     post: operations['postApiV1DocumentsIdDeviation-requests']
     delete?: never
     options?: never
@@ -1481,40 +1481,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/v1/documents/{id}/versions/{versionId}/preview': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** @description Live preview while changing a draft: like the preview of a template, but from the saved content of the draft, with the values entered so far. Nothing is stored. 409 if the version is not a draft. Requires ReadDocument on the version. */
-    post: operations['postApiV1DocumentsIdVersionsVersionidPreview']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/v1/documents/{id}/versions/{versionId}/standard-text': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** @description The locked sections of the template of a version, with the text they have there: what restores a section that deviates. Requires ReadDocument on the version. */
-    get: operations['getApiV1DocumentsIdVersionsVersionidStandard-text']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/v1/documents/{id}/versions/{versionId}/html': {
     parameters: {
       query?: never
@@ -1575,6 +1541,40 @@ export interface paths {
     }
     /** @description A structured version as Word document (DOCX), converted on demand by the conversion worker from the same page as the PDFs: open versions are marked "Draft – not valid", approved versions name the archived rendition as authoritative. Not stored; the download is audited. 409 for file documents (download the original) and for withdrawn drafts, 503 without conversion worker. Requires ReadDocument on the version. */
     get: operations['getApiV1DocumentsIdVersionsVersionidDocument.docx']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Live preview while changing a draft: like the preview of a template, but from the saved content of the draft, with the values entered so far. Nothing is stored. 409 if the version is not a draft. Requires ReadDocument on the version. */
+    post: operations['postApiV1DocumentsIdVersionsVersionidPreview']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/standard-text': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The locked sections of the template of a version, with the text they have there: what restores a section that deviates. Requires ReadDocument on the version. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidStandard-text']
     put?: never
     post?: never
     delete?: never
@@ -2394,6 +2394,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/compliance/documents-without-owner': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Documents with a valid version in the caller's scope that have no owner, by title */
+    get: operations['getApiV1ComplianceDocuments-without-owner']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/compliance/deviations': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Valid versions in the caller's scope that deviate from locked sections of their template (standard clauses), the most deviations first. */
+    get: operations['getApiV1ComplianceDeviations']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open/export': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description The list of who has not acknowledged the version as CSV for spreadsheets (user id and display name): the same rights, purpose and reason as the list, and recorded in the audit trail like every access to it. */
+    post: operations['postApiV1ComplianceAcknowledgementsDocumentidVersionidOpenExport']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open': {
     parameters: {
       query?: never
@@ -2405,6 +2456,40 @@ export interface paths {
     put?: never
     /** @description Who has not acknowledged the version yet (purpose limitation, ADR 0036): for compliance officers in scope and the document's owner, with a stated purpose and reason (403 purpose_required otherwise). Purpose and reason are sent in the request body (POST) and recorded in the audit trail with every access, which is why this is not a GET. 422 if the version does not require acknowledgement. */
     post: operations['postApiV1ComplianceAcknowledgementsDocumentidVersionidOpen']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/compliance/exports/{list}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description A list of the cockpit as CSV for spreadsheets: UTF-8 with byte order mark, semicolon-separated, with the same rights, scope and filters as the list on the screen; text that a spreadsheet would run as a formula starts with an apostrophe. Every export is recorded in the audit trail, which is why this is a POST. */
+    post: operations['postApiV1ComplianceExportsList']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/compliance/overdue-reviews/{documentId}/{versionId}/notices': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Reminds the owner of an overdue review (and the owner's deputies) or escalates it (also to the escalation targets of the deadline policy; without any, the compliance officers in scope, else the administrators). For compliance officers in scope. At most once per version, kind and 24 hours, for all officers together (429 notice_too_soon). 422 not_overdue if the review is not overdue, no_recipient if nobody can be reached, invalid without kind or reason. The reason is recorded in the audit trail, not sent. */
+    post: operations['postApiV1ComplianceOverdue-reviewsDocumentidVersionidNotices']
     delete?: never
     options?: never
     head?: never
@@ -2428,6 +2513,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/evidence-reports': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The evidence reports of a document, the latest first, also those whose content was removed after their retention ended. For whoever may create a report of the document now (ADR 0072, 0077). */
+    get: operations['getApiV1DocumentsIdEvidence-reports']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/{id}/evidence-reports/{reportFile}': {
     parameters: {
       query?: never
@@ -2435,7 +2537,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description An evidence report as PDF/A-2b, printed from the registered JSON; every page names the report id and the SHA-256 of the JSON form. Requires the auditor or records manager role. */
+    /** @description An evidence report as PDF/A-2b, printed from the registered JSON; every page names the report id and the SHA-256 of the JSON form. Requires the auditor or records manager role. 410 report_removed once its retention ended. */
     get: operations['getApiV1DocumentsIdEvidence-reportsReportfile']
     put?: never
     post?: never
@@ -2452,7 +2554,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description The JSON form of an evidence report, byte for byte as registered: its SHA-256 is the report checksum (also sent as Repr-Digest and ETag). Requires the auditor or records manager role. */
+    /** @description The JSON form of an evidence report, byte for byte as registered: its SHA-256 is the report checksum (also sent as Repr-Digest and ETag). Requires the auditor or records manager role. 410 report_removed once its retention ended. */
     get: operations['getApiV1DocumentsIdEvidence-reportsReportid']
     put?: never
     post?: never
@@ -3197,6 +3299,23 @@ export interface components {
       /** Format: date-time */
       releasedAt?: string
     }
+    /** ComplianceNoticeRequest */
+    ComplianceNoticeRequest: {
+      kind?: string
+      reason?: string
+    }
+    /** ComplianceNoticeView */
+    ComplianceNoticeView: {
+      /** Format: uuid */
+      versionId: string
+      kind: string
+      /** Format: date-time */
+      sentAt: string
+      /** Format: int32 */
+      recipients: number
+      /** Format: date-time */
+      nextNoticeAt: string
+    }
     /** ComplianceOverviewView */
     ComplianceOverviewView: {
       /** Format: date */
@@ -3207,6 +3326,12 @@ export interface components {
       overdueByOwner?: components['schemas']['OwnerCountView'][]
       acknowledgements: components['schemas']['RateView']
       acknowledgementsByUnit?: components['schemas']['UnitRateView'][]
+      /** Format: int32 */
+      documentsWithoutOwner: number
+      /** Format: int32 */
+      versionsWithDeviations: number
+      /** Format: int32 */
+      deviations: number
     }
     /** ComponentView */
     ComponentView: {
@@ -3549,6 +3674,20 @@ export interface components {
       | components['schemas']['TextDeleted']
       | components['schemas']['TextInserted']
       | components['schemas']['TextReplaced']
+    /** DeviationFigureView */
+    DeviationFigureView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title: string
+      versionLabel: string
+      classPath?: string[]
+      unit?: string
+      owner?: string
+      /** Format: int32 */
+      deviations: number
+    }
     /** DeviationRequestView */
     DeviationRequestView: {
       /** Format: uuid */
@@ -3782,6 +3921,31 @@ export interface components {
       /** Format: double */
       threshold: number
       exceedsThreshold: boolean
+    }
+    /** EvidenceReportEntryView */
+    EvidenceReportEntryView: {
+      /** Format: uuid */
+      id: string
+      /** Format: uuid */
+      documentId: string
+      /** Format: date-time */
+      createdAt: string
+      createdBy: string
+      sha256: string
+      format: string
+      integrityStatus?: string
+      /** Format: date-time */
+      removedAt?: string
+      jsonUrl?: string
+      pdfUrl?: string
+    }
+    /** EvidenceReportPageView */
+    EvidenceReportPageView: {
+      items?: components['schemas']['EvidenceReportEntryView'][]
+      /** Format: int32 */
+      total: number
+      /** Format: int32 */
+      nextOffset?: number
     }
     /** EvidenceReportView */
     EvidenceReportView: {
@@ -4393,6 +4557,10 @@ export interface components {
       dueOn: string
       /** Format: int64 */
       daysOverdue: number
+      /** Format: date-time */
+      nextReminderAt?: string
+      /** Format: date-time */
+      nextEscalationAt?: string
     }
     /** OwnedAcknowledgementView */
     OwnedAcknowledgementView: {
@@ -5421,6 +5589,19 @@ export interface components {
       unit?: string
       rate: components['schemas']['RateView']
     }
+    /** UnownedDocumentView */
+    UnownedDocumentView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title: string
+      versionLabel: string
+      classPath?: string[]
+      unit?: string
+      /** Format: date-time */
+      publishedAt?: string
+    }
     /** UnreadCountView */
     UnreadCountView: {
       /** Format: int32 */
@@ -5645,6 +5826,8 @@ export interface components {
       open: number
       /** Format: double */
       rate?: number
+      /** Format: date-time */
+      nextReminderAt?: string
     }
     /** VoteView */
     VoteView: {
@@ -9948,92 +10131,6 @@ export interface operations {
       }
     }
   }
-  postApiV1DocumentsIdVersionsVersionidPreview: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document id */
-        id: string
-        /** @description Version id */
-        versionId: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['PreviewRequest']
-      }
-    }
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['PreviewView']
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: body */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
-  'getApiV1DocumentsIdVersionsVersionidStandard-text': {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        /** @description Document id */
-        id: string
-        /** @description Version id */
-        versionId: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['StandardTextView']
-        }
-      }
-      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/plain': string
-        }
-      }
-      default: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ApiError']
-        }
-      }
-    }
-  }
   getApiV1DocumentsIdVersionsVersionidHtml: {
     parameters: {
       query?: never
@@ -10208,6 +10305,92 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: query parameter changelog, Invalid value for: query parameter attachments */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1DocumentsIdVersionsVersionidPreview: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PreviewRequest']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsIdVersionsVersionidStandard-text': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StandardTextView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
       400: {
         headers: {
           [name: string]: unknown
@@ -11143,7 +11326,7 @@ export interface operations {
           'application/json': components['schemas']['PartnerView'][]
         }
       }
-      /** @description Invalid value for: query parameter q, Invalid value for: query parameter offset, Invalid value for: query parameter limit */
+      /** @description Invalid value for: query parameter q, Invalid value for: query parameter limit */
       400: {
         headers: {
           [name: string]: unknown
@@ -12429,6 +12612,119 @@ export interface operations {
       }
     }
   }
+  'getApiV1ComplianceDocuments-without-owner': {
+    parameters: {
+      query?: {
+        /** @description Organizational unit; empty for versions without unit; absent for all */
+        unit?: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['UnownedDocumentView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  getApiV1ComplianceDeviations: {
+    parameters: {
+      query?: {
+        /** @description Organizational unit; empty for versions without unit; absent for all */
+        unit?: string
+        /** @description Owner's user id; empty for documents without owner */
+        owner?: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeviationFigureView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1ComplianceAcknowledgementsDocumentidVersionidOpenExport: {
+    parameters: {
+      query?: {
+        /** @description Language of the column names: de or en */
+        lang?: string
+      }
+      header?: never
+      path: {
+        /** @description Document id */
+        documentId: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    /** @description Required: purpose (escalation or reminder) and reason (up to 500 characters), as for the list. */
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PersonsAccessRequest']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          [name: string]: unknown
+        }
+        content: {
+          'text/csv; charset=UTF-8': string
+        }
+      }
+      /** @description Invalid value for: path parameter documentId, Invalid value for: path parameter versionId, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   postApiV1ComplianceAcknowledgementsDocumentidVersionidOpen: {
     parameters: {
       query?: never
@@ -12475,6 +12771,101 @@ export interface operations {
       }
     }
   }
+  postApiV1ComplianceExportsList: {
+    parameters: {
+      query?: {
+        /** @description Organizational unit; empty for versions without unit; absent for all */
+        unit?: string
+        /** @description Owner's user id; empty for documents without owner */
+        owner?: string
+        /** @description Document id */
+        document?: string
+        /** @description Language of the column names: de or en */
+        lang?: string
+      }
+      header?: never
+      path: {
+        /** @description overdue-reviews, acknowledgements, documents-without-owner or deviations */
+        list: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          'Content-Disposition': string
+          [name: string]: unknown
+        }
+        content: {
+          'text/csv; charset=UTF-8': string
+        }
+      }
+      /** @description Invalid value for: query parameter document */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1ComplianceOverdue-reviewsDocumentidVersionidNotices': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        documentId: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ComplianceNoticeRequest']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ComplianceNoticeView']
+        }
+      }
+      /** @description Invalid value for: path parameter documentId, Invalid value for: path parameter versionId, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   'postApiV1DocumentsIdEvidence-report': {
     parameters: {
       query?: never
@@ -12496,6 +12887,50 @@ export interface operations {
         }
       }
       /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsIdEvidence-reports': {
+    parameters: {
+      query?: {
+        /** @description Reports per page, 1 to 100; default 20 */
+        limit?: number
+        /** @description Reports to skip; default 0 */
+        offset?: number
+      }
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['EvidenceReportPageView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: query parameter limit, Invalid value for: query parameter offset */
       400: {
         headers: {
           [name: string]: unknown

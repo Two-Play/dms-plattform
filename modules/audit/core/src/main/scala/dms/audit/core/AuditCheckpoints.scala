@@ -63,21 +63,25 @@ final class AuditCheckpoints(db: Db, trail: AuditTrail, store: ObjectStore, conf
     * Older checkpoints are covered implicitly: the chain must contain the newest one unchanged.
     */
   def verify(tenant: TenantId): IO[DbError | StorageError, VerificationReport] =
-    trail.verify(tenant).flatMap { report =>
-      if !report.ok then ZIO.succeed(report)
-      else
-        newestKey(tenant).flatMap {
-          case None      => ZIO.succeed(report)
-          case Some(key) =>
-            for
-              versions    <- store.versions(key)
-              checkpoints <- ZIO.foreach(versions)(v => readCheckpoint(key, v.versionId))
-              violation   <- ZIO.foldLeft(checkpoints)(Option.empty[Violation])((found, cp) =>
-                found.fold(compare(tenant, report, cp))(v => ZIO.some(v))
-              )
-            yield report.copy(violation = violation)
-        }
-    }
+    trail.verify(tenant).flatMap(compared(tenant, _))
+
+  /** Compares the result of a chain verification, whole or after a verified prefix, with the newest
+    * checkpoint. A report that already names a violation stays as it is.
+    */
+  def compared(tenant: TenantId, report: VerificationReport): IO[DbError | StorageError, VerificationReport] =
+    if !report.ok then ZIO.succeed(report)
+    else
+      newestKey(tenant).flatMap {
+        case None      => ZIO.succeed(report)
+        case Some(key) =>
+          for
+            versions    <- store.versions(key)
+            checkpoints <- ZIO.foreach(versions)(v => readCheckpoint(key, v.versionId))
+            violation   <- ZIO.foldLeft(checkpoints)(Option.empty[Violation])((found, cp) =>
+              found.fold(compare(tenant, report, cp))(v => ZIO.some(v))
+            )
+          yield report.copy(violation = violation)
+      }
 
   /** Chain position of the newest checkpoint of `tenant`, if any. */
   def newestSeq(tenant: TenantId): IO[StorageError, Option[Long]] =

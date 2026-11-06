@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-10-29, implemented in DMS-110; addendum DMS-111: people picker; search and paging changed by ADR 0067, DMS-125) |
+| Status | Accepted (2026-10-29, implemented in DMS-110; addendum DMS-111: people picker; search and paging changed by ADR 0067, DMS-125; decision 6 amended for the evidence report PDF by [0077](0077-evidence-report-prefix-retention-and-cockpit-actions.md), DMS-108) |
 | Date | 2026-10-29 |
 | Decided by | Philippe |
 

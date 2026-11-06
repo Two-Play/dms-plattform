@@ -190,21 +190,45 @@ object AuditCheckpointsSpec extends ZIOSpecDefault:
         env <- ZIO.service[Env]
         t   <- newTenant
         _   <- record(2, t)
-        jobs = AuditJobs(env.app, None, env.checkpoints, AuditScheduleConfig(checkpointInterval = 5.minutes))
-        now  = java.time.Instant.parse("2026-11-02T09:01:00Z")
+        jobs = AuditJobs(
+          env.app,
+          None,
+          env.checkpoints,
+          AuditEvidenceLive(env.app, env.trail, Some(env.checkpoints)),
+          AuditScheduleConfig(checkpointInterval = 5.minutes)
+        )
+        now = java.time.Instant.parse("2026-11-02T09:01:00Z")
         first   <- jobs.tick(now)
         second  <- jobs.tick(now.plusSeconds(60)) // another instance, same 5-minute window
         claimed <- JobQueue.claim(env.app, "test-worker", jobs.handlers.keySet, 100, 1.minute)
         mine = claimed.filter(_.tenant.contains(t))
         _       <- ZIO.foreachDiscard(mine)(job => jobs.handlers(job.kind)(job).mapError(RuntimeException(_)))
         written <- env.store.listKeys(s"audit-checkpoints/${t.value}/")
+        runs    <- env.app.transact(t)(Db.sql(ChainStore.newestRun(t.value)))
       yield assertTrue(
-        first >= 1,
+        first >= 2,
         second == 0,
-        mine.map(_.kind) == List(AuditJobs.CheckpointKind),
+        mine.map(_.kind).toSet == Set(AuditJobs.CheckpointKind, AuditJobs.VerifyKind),
+        mine.size == 2,
+        runs.exists(_._2), // the daily full verification ran and found the chain intact
         written == List(f"audit-checkpoints/${t.value}/${2L}%020d"),
         !jobs.handlers.contains(AuditJobs.AnchorKind) // no trusted TSA configured: anchoring is not scheduled
       )
+    },
+    test("a report after a verified prefix still sees a cut tail through the checkpoint") {
+      for
+        env <- ZIO.service[Env]
+        t   <- newTenant
+        _   <- record(3, t)
+        _   <- env.checkpoints.write(t)
+        _   <- env.owner.transactSystem(
+          Db.sql {
+            execute("set local session_replication_role = replica")
+            execute(s"delete from dms.audit_event where tenant_id = '${t.value}' and chain_seq = 3")
+          }
+        )
+        report <- env.trail.verify(t).flatMap(env.checkpoints.compared(t, _))
+      yield assertTrue(report.violation.map(_.kind).contains(Violation.Kind.CheckpointMismatch))
     },
     test("checkpoint format round-trips and rejects unknown formats") {
       val cp = Checkpoint(TenantId.random(), 7L, "a" * 64, java.time.Instant.parse("2026-10-28T12:00:00Z"))

@@ -4,7 +4,7 @@
  */
 export interface CompliancePageSearch {
   /** Which list is shown below the key figures. */
-  view?: 'reviews' | 'acknowledgements'
+  view?: 'reviews' | 'acknowledgements' | 'unowned' | 'deviations'
   unit?: string
   owner?: string
   /** Document id: the acknowledgement rates of one document. */
@@ -18,12 +18,18 @@ function value(raw: unknown): string | undefined {
 
 /** Reads the search parameters of `/compliance`, dropping what is missing or malformed. */
 export function parseCompliancePageSearch(raw: Record<string, unknown>): CompliancePageSearch {
-  const view = raw.view === 'reviews' || raw.view === 'acknowledgements' ? raw.view : undefined
+  const view =
+    raw.view === 'reviews' ||
+    raw.view === 'acknowledgements' ||
+    raw.view === 'unowned' ||
+    raw.view === 'deviations'
+      ? raw.view
+      : undefined
   const document = value(raw.document)
   const search: CompliancePageSearch = {
     view,
     unit: view ? value(raw.unit) : undefined,
-    owner: view === 'reviews' ? value(raw.owner) : undefined,
+    owner: view === 'reviews' || view === 'deviations' ? value(raw.owner) : undefined,
     document: view === 'acknowledgements' && document ? document : undefined,
   }
   return Object.fromEntries(Object.entries(search).filter(([, v]) => v !== undefined))

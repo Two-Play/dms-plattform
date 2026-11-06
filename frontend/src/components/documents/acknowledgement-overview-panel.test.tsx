@@ -234,6 +234,22 @@ describe('Acknowledgement overview for owners (DMS-100)', () => {
     expect(csv).toBe('Name;User;Status;At\r\n"Doe; ""Jane""";u1;Offen;')
   })
 
+  it('does not let a name become a formula in a spreadsheet', () => {
+    const csv = recipientsCsv(
+      {
+        ...recipients,
+        recipients: [
+          { userId: '-u1', displayName: '=HYPERLINK("x")', status: 'open' },
+          { userId: 'u2', displayName: ' @name', status: 'open' },
+        ],
+      },
+      { name: 'Name', userId: 'User', status: 'Status', acknowledgedAt: 'At' },
+      () => 'Open',
+    )
+    expect(csv).toContain(`"'=HYPERLINK(""x"")";'-u1;`)
+    expect(csv).toContain(`' @name;u2;`)
+  })
+
   it('speaks German', async () => {
     setLocale('de')
     renderPanel()

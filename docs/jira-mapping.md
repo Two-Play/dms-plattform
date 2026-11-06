@@ -209,3 +209,5 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | – | DMS-165 | Bug | Backlog (MVP) | – | UX review: numbers parsed wrongly, drafts without protection, testing unsaved templates |
 | – | DMS-166 | Task | Backlog (MVP) | – | UX review: error texts, error boundary, dialogs, focus, contrast |
 | – | DMS-167 | Task | Backlog (MVP) | – | UX review: document page order, 375 px, status tones, paged lists, consistency |
+| – | DMS-168 | Bug | Backlog (MVP) | – | DMS-165: multiple amounts, numbers rounded on display, further unprotected forms |
+| – | DMS-169 | Task | Backlog (MVP) | – | DMS-108: report audit violations, orphaned documents, retention of reports, notice digest |

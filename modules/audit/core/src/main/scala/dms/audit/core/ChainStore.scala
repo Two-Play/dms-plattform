@@ -18,6 +18,18 @@ final case class StoredAnchor(
     token: Array[Byte]
 )
 
+/** A full verification of a chain, as recorded in `dms.audit_verification_run` (ADR 0077).
+  *
+  * @param prefix
+  *   position and hash of the anchor up to which a report need not read the chain again
+  */
+final case class VerificationRun(
+    verifiedAt: Instant,
+    report: dms.audit.VerificationReport,
+    checkpointProblem: Option[String],
+    prefix: Option[(Long, Array[Byte])]
+)
+
 /** JDBC access to the audit tables. Runs on the connection of the current transaction (via `Db.sql`). */
 private[core] object ChainStore:
 
@@ -77,11 +89,12 @@ private[core] object ChainStore:
       ps.setObject(17, e.correlationId.orNull)
     }(_.getLong(1)).head
 
-  /** Streams the tenant's chain in order to `f` until it returns false. */
-  def foreachEntry(tenant: UUID)(f: StoredEntry => Boolean)(using tx: DbTx): Unit =
-    Using.resource(tx.connection.prepareStatement(selectEntries)) { ps =>
+  /** Streams the tenant's chain after position `after` in order to `f` until it returns false. */
+  def foreachEntry(tenant: UUID, after: Long = 0L)(f: StoredEntry => Boolean)(using tx: DbTx): Unit =
+    Using.resource(tx.connection.prepareStatement(selectEntriesAfter)) { ps =>
       ps.setFetchSize(500)
       ps.setObject(1, tenant)
+      ps.setLong(2, after)
       Using.resource(ps.executeQuery()) { rs =>
         var continue = true
         while continue && rs.next() do continue = f(readEntry(rs))
@@ -105,13 +118,80 @@ private[core] object ChainStore:
       (rs.getLong(1), rs.getObject(2, classOf[OffsetDateTime]).toInstant, rs.getString(3))
     ).headOption
 
-  def anchors(tenant: UUID)(using DbTx): Vector[StoredAnchor] =
+  /** The anchors of the tenant from position `from` on. */
+  def anchors(tenant: UUID, from: Long = 0L)(using DbTx): Vector[StoredAnchor] =
     query(
       """select anchored_until_seq, chain_head_hash, tsa_url, tsa_token from dms.audit_anchor
-        |where tenant_id = ? order by anchored_until_seq""".stripMargin
-    )(_.setObject(1, tenant))(rs =>
-      StoredAnchor(rs.getLong(1), rs.getBytes(2), rs.getString(3), rs.getBytes(4))
-    )
+        |where tenant_id = ? and anchored_until_seq >= ? order by anchored_until_seq""".stripMargin
+    ) { ps =>
+      ps.setObject(1, tenant)
+      ps.setLong(2, from)
+    }(rs => StoredAnchor(rs.getLong(1), rs.getBytes(2), rs.getString(3), rs.getBytes(4)))
+
+  /** The newest anchor up to position `until`: its position and hash. */
+  def newestAnchorUpTo(tenant: UUID, until: Long)(using DbTx): Option[(Long, Array[Byte])] =
+    query(
+      """select anchored_until_seq, chain_head_hash from dms.audit_anchor
+        |where tenant_id = ? and anchored_until_seq <= ?
+        |order by anchored_until_seq desc limit 1""".stripMargin
+    ) { ps =>
+      ps.setObject(1, tenant)
+      ps.setLong(2, until)
+    }(rs => (rs.getLong(1), rs.getBytes(2))).headOption
+
+  /** Whether every anchor up to position `until` still has the hash of its entry. */
+  def anchorsMatchEntries(tenant: UUID, until: Long)(using DbTx): Boolean =
+    query(
+      """select count(*) from dms.audit_anchor a
+        |left join dms.audit_event e on e.tenant_id = a.tenant_id and e.chain_seq = a.anchored_until_seq
+        |where a.tenant_id = ? and a.anchored_until_seq <= ? and e.hash is distinct from a.chain_head_hash""".stripMargin
+    ) { ps =>
+      ps.setObject(1, tenant)
+      ps.setLong(2, until)
+    }(_.getLong(1)).head == 0L
+
+  /** The `prev_hash` of the entries at `positions`. */
+  def prevHashes(tenant: UUID, positions: Vector[Long])(using tx: DbTx): Map[Long, Array[Byte]] =
+    query("select chain_seq, prev_hash from dms.audit_event where tenant_id = ? and chain_seq = any(?)") {
+      ps =>
+        ps.setObject(1, tenant)
+        ps.setArray(2, tx.connection.createArrayOf("bigint", positions.map(Long.box).toArray[AnyRef]))
+    }(rs => rs.getLong(1) -> rs.getBytes(2)).toMap
+
+  /** Records a full verification. */
+  def insertRun(tenant: UUID, run: VerificationRun)(using DbTx): Unit =
+    query(
+      """insert into dms.audit_verification_run (tenant_id, verified_at, ok, entries_checked, anchors_checked,
+        |  head_seq, violation_seq, violation_kind, violation_detail, checkpoint_problem, prefix_seq, prefix_hash)
+        |values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        |returning id""".stripMargin
+    ) { ps =>
+      ps.setObject(1, tenant)
+      ps.setObject(2, OffsetDateTime.ofInstant(run.verifiedAt, ZoneOffset.UTC))
+      ps.setBoolean(3, run.report.ok)
+      ps.setLong(4, run.report.entriesChecked)
+      ps.setInt(5, run.report.anchorsChecked)
+      ps.setObject(6, run.report.headSeq.map(Long.box).orNull, java.sql.Types.BIGINT)
+      ps.setObject(7, run.report.violation.map(v => Long.box(v.chainSeq)).orNull, java.sql.Types.BIGINT)
+      ps.setString(8, run.report.violation.map(_.kind.toString).orNull)
+      ps.setString(9, run.report.violation.map(_.detail).orNull)
+      ps.setString(10, run.checkpointProblem.orNull)
+      ps.setObject(11, run.prefix.map(p => Long.box(p._1)).orNull, java.sql.Types.BIGINT)
+      ps.setBytes(12, run.prefix.map(_._2).orNull)
+    }(_.getLong(1)): Unit
+
+  /** The newest full verification of the tenant: when it ran, whether it was intact, and its prefix. */
+  def newestRun(tenant: UUID)(using DbTx): Option[(Instant, Boolean, Option[(Long, Array[Byte])])] =
+    query(
+      """select verified_at, ok, prefix_seq, prefix_hash from dms.audit_verification_run
+        |where tenant_id = ? order by id desc limit 1""".stripMargin
+    )(_.setObject(1, tenant)) { rs =>
+      val at   = rs.getObject(1, classOf[OffsetDateTime]).toInstant
+      val ok   = rs.getBoolean(2)
+      val seq  = rs.getLong(3)
+      val none = rs.wasNull()
+      (at, ok, Option.unless(none)((seq, rs.getBytes(4))))
+    }.headOption
 
   /** Stores an anchor; returns false if the position was already anchored (concurrent anchoring run). */
   def insertAnchor(tenant: UUID, anchor: StoredAnchor, tsaTime: Instant)(using DbTx): Boolean =
@@ -136,6 +216,8 @@ private[core] object ChainStore:
       |from dms.audit_event""".stripMargin
 
   private val selectEntries = selectColumns + " where tenant_id = ? order by chain_seq"
+
+  private val selectEntriesAfter = selectColumns + " where tenant_id = ? and chain_seq > ? order by chain_seq"
 
   private def readEntry(rs: ResultSet): StoredEntry =
     StoredEntry(

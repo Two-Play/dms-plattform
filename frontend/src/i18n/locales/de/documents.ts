@@ -50,6 +50,14 @@ export const docPanels: Translation<typeof en.docPanels> = {
     checksum: 'SHA-256 {sha}',
     downloadPdf: 'PDF herunterladen',
     downloadJson: 'JSON herunterladen',
+    downloadPdfOf: 'Bericht vom {date} als PDF herunterladen',
+    downloadJsonOf: 'Bericht vom {date} als JSON herunterladen',
+    earlier: 'Frühere Berichte',
+    loading: 'Frühere Berichte werden geladen',
+    none: 'Für dieses Dokument wurde noch kein Bericht erstellt.',
+    more: 'Mehr anzeigen',
+    removed:
+      'Inhalt am {date} nach Ablauf der Aufbewahrung entfernt; die Prüfsumme bleibt prüfbar.',
   },
   attachments: {
     title: 'Anlagen',

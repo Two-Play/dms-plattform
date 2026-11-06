@@ -260,6 +260,7 @@ object Main extends ZIOAppDefault:
           WordTemplateService.layer,
           EvidenceReportApi.auditEvidence(cfg.audit),
           EvidenceReportStore.layer,
+          ComplianceNoticeAudience.layer,
           ZLayer.succeed(cfg.library),
           ZLayer.succeed(cfg.onDemandPdf),
           OnDemandPdfLimits.layer,

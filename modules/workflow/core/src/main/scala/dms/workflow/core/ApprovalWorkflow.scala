@@ -618,12 +618,13 @@ final class ApprovalWorkflow(
       document: DocumentId,
       version: UUID,
       stage: DeadlineStage,
-      policy: DeadlinePolicy
+      policy: DeadlinePolicy,
+      excluding: Set[UserId] = Set.empty
   ): IO[WorkflowError, DeadlineAudience] =
     for
       subject  <- documents.subject(document, version)
       deputies <- if stage == DeadlineStage.Reminder then ZIO.succeed(Nil) else ownerDeputies(subject)
-      others = (people: List[UserId]) => people.filterNot(subject.owner.contains)
+      others = (people: List[UserId]) => people.filterNot(u => subject.owner.contains(u) || excluding(u))
       targets <-
         if stage != DeadlineStage.Escalated then ZIO.succeed(Nil)
         else

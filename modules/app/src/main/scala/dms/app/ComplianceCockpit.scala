@@ -4,7 +4,7 @@ import dms.authz.DocumentResource
 import dms.documents.DocumentStatus
 import dms.documents.core.CurrentVersion
 
-import java.time.LocalDate
+import java.time.{Instant, LocalDate}
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
@@ -16,8 +16,21 @@ object ComplianceCockpit:
 
   /** A valid version with its organizational unit (core field) and, if it asks for acknowledgement, the size
     * of its audience and how many of them acknowledged it.
+    *
+    * @param deviations
+    *   how many deviations from locked sections its stored report holds (ADR 0022)
+    * @param lastReminder
+    *   when readers were last reminded by hand (ADR 0048)
+    * @param lastNotices
+    *   when the last notice of each kind went out from the cockpit (ADR 0077)
     */
-  final case class Entry(version: CurrentVersion, acknowledgement: Option[Rate]):
+  final case class Entry(
+      version: CurrentVersion,
+      acknowledgement: Option[Rate],
+      deviations: Int = 0,
+      lastReminder: Option[Instant] = None,
+      lastNotices: Map[String, Instant] = Map.empty
+  ):
     def unit: Option[String]  = DocumentResource.organizationalUnit(version.metadata)
     def owner: Option[String] = version.document.ownerId.map(_.value)
 
@@ -74,6 +87,19 @@ object ComplianceCockpit:
       .flatMap(e => e.acknowledgement.map(e -> _))
       .filter((e, _) => matches(unit, e.unit) && document.forall(_ == e.version.document.id.value))
       .sortBy((e, r) => (-r.open, e.version.document.title, e.version.versionId.toString))
+
+  /** One valid version per document without owner, filtered by unit, by title (business concept 16). */
+  def withoutOwner(entries: List[Entry], unit: Option[String]): List[Entry] =
+    entries
+      .filter(e => e.owner.isEmpty && matches(unit, e.unit))
+      .distinctBy(_.version.document.id)
+      .sortBy(e => (e.version.document.title, e.version.versionId.toString))
+
+  /** Versions that deviate from locked sections, filtered by unit and owner, the most deviations first. */
+  def deviationList(entries: List[Entry], unit: Option[String], owner: Option[String]): List[Entry] =
+    entries
+      .filter(e => e.deviations > 0 && matches(unit, e.unit) && matches(owner, e.owner))
+      .sortBy(e => (-e.deviations, e.version.document.title, e.version.versionId.toString))
 
   /** Overdue versions, filtered by unit and owner, the longest overdue first. */
   def overdueList(

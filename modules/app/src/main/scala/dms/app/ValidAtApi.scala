@@ -219,11 +219,15 @@ object ValidAtApi:
           v.approvedAt.fold("")(at)
         )
       )
+      table(header, rows)
+
+    /** A whole file. Cells that come from people must have gone through [[text]]. */
+    def table(header: List[String], rows: List[List[String]]): String =
       Bom + (header :: rows).map(_.map(cell).mkString(";")).mkString("", "\r\n", "\r\n")
 
-    /** Neutralizes values a spreadsheet would evaluate as a formula. */
+    /** Neutralizes values a spreadsheet would evaluate as a formula, also behind leading spaces. */
     def text(value: String): String =
-      if value.headOption.exists(c => "=+-@\t\r".contains(c)) then s"'$value" else value
+      if value.dropWhile(_ == ' ').headOption.exists(c => "=+-@\t\r".contains(c)) then s"'$value" else value
 
     /** Quotes a cell that contains a separator, quote or line break (RFC 4180). */
     def cell(value: String): String =

@@ -40,6 +40,8 @@ import scala.util.Try
   *   - `document.review-task-reopened` (DMS-145, ADR 0061): the document's owner
   *   - `document.review-task-due-soon`, `-overdue`, `-escalated` (DMS-141): the owner, the owner's deputies
   *     when overdue, the escalation targets when escalated
+  *   - `document.compliance-notice` (DMS-108, ADR 0077): what a compliance officer sent from the cockpit: the
+  *     owner and the owner's deputies, the escalation targets of an escalation
   *   - `workflow.returned`: author and owner (changes requested or rejected)
   *   - `workflow.approved`: author and owner, without the approver
   *   - `workflow.participant-missing`: the tenant administrators
@@ -158,6 +160,17 @@ final class PlatformNotificationEvents(
               payload,
               document,
               params("taskId", "dueOn")
+            )
+          )
+        case ComplianceNotices.Event =>
+          ZIO.succeed(
+            deadlineNotices(
+              s"review.compliance-${text("kind").getOrElse(ComplianceNotices.Reminder)}",
+              users("recipients"),
+              users("escalatedTo"),
+              payload,
+              document,
+              params("dueOn")
             )
           )
         case "workflow.returned" =>
@@ -518,6 +531,7 @@ object PlatformNotificationEvents:
     "document.review-task-due-soon",
     "document.review-task-overdue",
     "document.review-task-escalated",
+    ComplianceNotices.Event,
     "workflow.returned",
     "workflow.approved",
     "workflow.participant-missing",

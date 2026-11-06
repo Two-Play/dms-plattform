@@ -60,8 +60,16 @@ trait AuditEvidence:
   /** The entries about `objectId` (`object_id`), in chain order. Must run inside `Db.transact(tenant)`. */
   def entriesOf(objectId: UUID): IO[DbError, List[RecordedEntry]]
 
-  /** Verifies the chain of `tenant` including its newest checkpoint, in transactions of its own. */
-  def integrity(tenant: TenantId): IO[DbError, ChainIntegrity]
+  /** The state of the chain of `tenant` for a report about `objectId`, in transactions of its own: what
+    * follows the verified prefix of the last full verification, including the newest checkpoint (ADR 0077).
+    * Whenever the prefix cannot be used or something is wrong, this is the result of [[verifyFully]].
+    */
+  def integrity(tenant: TenantId, objectId: UUID): IO[DbError, ChainIntegrity]
+
+  /** Verifies the whole chain of `tenant` including its newest checkpoint and records the run, whatever it
+    * finds; the regular integrity check (ADR 0017, 0077).
+    */
+  def verifyFully(tenant: TenantId): IO[DbError, ChainIntegrity]
 
 /** A generated evidence report as registered (migration V21).
   *
@@ -78,9 +86,37 @@ final case class StoredEvidenceReport(
     sha256: String
 )
 
-/** The registry of generated evidence reports (ADR 0034): insert-only, so a report can be downloaded and
-  * verified again later. Every method must run inside `Db.transact(tenant)`.
+/** A registry entry without its payload, for lists (ADR 0077).
+  *
+  * @param integrityStatus
+  *   the status the report states; gone with the payload
+  * @param removedAt
+  *   when the payload was removed after its retention ended; the checksum stays
+  */
+final case class EvidenceReportEntry(
+    id: UUID,
+    documentId: UUID,
+    format: Int,
+    createdAt: Instant,
+    createdBy: String,
+    sha256: String,
+    integrityStatus: Option[String],
+    removedAt: Option[Instant]
+)
+
+/** The registry of generated evidence reports (ADR 0034): a report can be downloaded and verified again until
+  * its retention ended (ADR 0077); only then its payload goes, the entry stays. Every method must run inside
+  * `Db.transact(tenant)`.
   */
 trait EvidenceReportRegistry:
   def register(report: StoredEvidenceReport): IO[DbError, Unit]
+
+  /** A report with its payload; `None` also once the payload is removed, see [[entry]]. */
   def find(id: UUID): IO[DbError, Option[StoredEvidenceReport]]
+
+  def entry(id: UUID): IO[DbError, Option[EvidenceReportEntry]]
+
+  /** The entries of a document, the latest first. */
+  def entries(document: UUID, limit: Int, offset: Int): IO[DbError, List[EvidenceReportEntry]]
+
+  def count(document: UUID): IO[DbError, Int]

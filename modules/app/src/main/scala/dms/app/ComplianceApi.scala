@@ -6,9 +6,10 @@ import dms.authz.*
 import dms.db.{Db, DbError, Jsonb}
 import dms.documents.*
 import dms.documents.core.*
-import dms.identity.{Authenticator, Principal}
-import dms.kernel.DocumentId
-import sttp.model.StatusCode
+import dms.identity.{Authenticator, Principal, TenantOrganizations, UserDirectory}
+import dms.kernel.{DocumentId, UserId}
+import dms.workflow.core.WorkflowError
+import sttp.model.{Header, MediaType, StatusCode}
 import sttp.tapir.Schema
 import sttp.tapir.json.zio.jsonBody
 import sttp.tapir.ztapir.*
@@ -16,6 +17,7 @@ import zio.*
 import zio.json.*
 import zio.json.ast.Json
 
+import java.nio.charset.StandardCharsets
 import java.time.{Instant, LocalDate}
 import java.util.UUID
 
@@ -43,7 +45,12 @@ final case class ComplianceOverviewView(
     overdueByUnit: List[UnitCountView],
     overdueByOwner: List[OwnerCountView],
     acknowledgements: RateView,
-    acknowledgementsByUnit: List[UnitRateView]
+    acknowledgementsByUnit: List[UnitRateView],
+    /** Documents with a valid version that have no owner (business concept 16). */
+    documentsWithoutOwner: Int,
+    /** Valid versions that deviate from locked sections of their template, and their deviations in total. */
+    versionsWithDeviations: Int,
+    deviations: Int
 ) derives JsonCodec,
       Schema
 
@@ -59,7 +66,59 @@ final case class OverdueReviewView(
     /** Published, or ReviewDue once the review check ran. */
     status: String,
     dueOn: LocalDate,
-    daysOverdue: Long
+    daysOverdue: Long,
+    /** When the next reminder to the owner is possible; empty: now. */
+    nextReminderAt: Option[Instant] = None,
+    /** When the next escalation is possible; empty: now. */
+    nextEscalationAt: Option[Instant] = None
+) derives JsonCodec,
+      Schema
+
+/** A document with a valid version but without owner: nobody answers for it. */
+final case class UnownedDocumentView(
+    documentId: UUID,
+    versionId: UUID,
+    title: String,
+    versionLabel: String,
+    classPath: List[String],
+    unit: Option[String],
+    publishedAt: Option[Instant]
+) derives JsonCodec,
+      Schema
+
+/** A valid version that deviates from locked sections of its template (standard clauses, ADR 0022). */
+final case class DeviationFigureView(
+    documentId: UUID,
+    versionId: UUID,
+    title: String,
+    versionLabel: String,
+    classPath: List[String],
+    unit: Option[String],
+    owner: Option[String],
+    deviations: Int
+) derives JsonCodec,
+      Schema
+
+/** What a compliance officer sends about an overdue review. Both are optional in the JSON so that a missing
+  * one is answered as such rather than as a decoding failure.
+  */
+final case class ComplianceNoticeRequest(
+    /** `reminder` (the owner and their deputies) or `escalation` (also the escalation targets). */
+    kind: Option[String] = None,
+    /** Why it is sent, 1 to 500 characters; recorded in the audit trail, not sent to anyone. */
+    reason: Option[String] = None
+) derives JsonCodec,
+      Schema
+
+/** A notice that was sent. */
+final case class ComplianceNoticeView(
+    versionId: UUID,
+    kind: String,
+    sentAt: Instant,
+    /** How many people it reaches. */
+    recipients: Int,
+    /** When the next notice of this kind about the version is possible. */
+    nextNoticeAt: Instant
 ) derives JsonCodec,
       Schema
 
@@ -76,7 +135,9 @@ final case class VersionRateView(
     audience: Int,
     acknowledged: Int,
     open: Int,
-    rate: Option[Double]
+    rate: Option[Double],
+    /** When the next manual reminder of the readers is possible; empty: now. */
+    nextReminderAt: Option[Instant] = None
 ) derives JsonCodec,
       Schema
 
@@ -116,10 +177,14 @@ final case class OpenAcknowledgementsView(
   * Names of readers who have not acknowledged a version are purpose-limited (business concept 10.2): only
   * with `ViewAcknowledgementPersons` (compliance officers, the document's owner) and a stated purpose and
   * reason, recorded in the audit trail together with the access.
+  *
+  * From the cockpit a compliance officer also reminds the owner of an overdue review or escalates it, at most
+  * once per version, kind and 24 hours ([[ComplianceNotices]]), and exports every list as CSV: the same
+  * decisions as the screen, built on the server so that the export is recorded in the audit trail (ADR 0077).
   */
 object ComplianceApi:
   type Env = Authenticator & Db & Authorizer & RoleAssignments & Groups & DocumentService &
-    AcknowledgementService & AuditTrail
+    AcknowledgementService & AuditTrail & ComplianceNoticeAudience & TenantOrganizations & UserDirectory
 
   /** Why names of readers are looked at (purpose limitation): escalating open acknowledgements to the
     * responsible management, or reminding the readers.
@@ -135,11 +200,22 @@ object ComplianceApi:
   /** The audit action recorded whenever names of readers were shown. */
   val PersonsViewed = "compliance.acknowledgement-persons-viewed"
 
+  /** The audit action recorded whenever a list left the cockpit as a file. */
+  val ListExported = "compliance.list-exported"
+
+  /** The lists that can be exported, by the name in the path. */
+  private val OverdueReviews       = "overdue-reviews"
+  private val AcknowledgementRates = "acknowledgements"
+  private val WithoutOwner         = "documents-without-owner"
+  private val Deviations           = "deviations"
+
   private val base = "api" / "v1" / "compliance"
 
   private val unitQuery = query[Option[String]]("unit").description(
     "Organizational unit; empty for versions without unit; absent for all"
   )
+
+  private val language = query[Option[String]]("lang").description("Language of the column names: de or en")
 
   val overview: ZServerEndpoint[Env, Any] =
     SecuredApi.base.get
@@ -153,16 +229,20 @@ object ComplianceApi:
       .tag("Compliance")
       .serverLogic(p =>
         _ =>
-          cockpit(p, withRates = true) { (today, entries) =>
+          cockpit(p, Needs(rates = true, deviations = true)) { (_, today, entries) =>
             val overdue          = entries.filter(e => ComplianceCockpit.overdue(e.version, today))
             val (versions, rate) = ComplianceCockpit.total(entries)
+            val deviating        = entries.filter(_.deviations > 0)
             ComplianceOverviewView(
               today,
               overdue.size,
               ComplianceCockpit.countBy(overdue)(_.unit).map(UnitCountView.apply),
               ComplianceCockpit.countBy(overdue)(_.owner).map(OwnerCountView.apply),
               rateView(versions, rate),
-              ComplianceCockpit.ratesByUnit(entries).map((unit, n, r) => UnitRateView(unit, rateView(n, r)))
+              ComplianceCockpit.ratesByUnit(entries).map((unit, n, r) => UnitRateView(unit, rateView(n, r))),
+              ComplianceCockpit.withoutOwner(entries, None).size,
+              deviating.size,
+              deviating.map(_.deviations).sum
             )
           }
       )
@@ -177,25 +257,8 @@ object ComplianceApi:
       .tag("Compliance")
       .serverLogic(p =>
         (unit, owner) =>
-          cockpit(p, withRates = false)((today, entries) =>
-            ComplianceCockpit
-              .overdueList(entries, today, unit, owner)
-              .flatMap(e =>
-                e.version.reviewDueOn.map(due =>
-                  OverdueReviewView(
-                    e.version.document.id.value,
-                    e.version.versionId,
-                    e.version.document.title,
-                    e.version.label,
-                    e.version.classPath,
-                    e.unit,
-                    e.owner,
-                    e.version.status.toString,
-                    due,
-                    ComplianceCockpit.daysOverdue(e.version, today)
-                  )
-                )
-              )
+          cockpit(p, Needs(notices = true))((now, today, entries) =>
+            overdueViews(now, today, entries, unit, owner)
           )
       )
 
@@ -212,26 +275,32 @@ object ComplianceApi:
       .tag("Compliance")
       .serverLogic(p =>
         (unit, document) =>
-          cockpit(p, withRates = true)((_, entries) =>
-            ComplianceCockpit
-              .acknowledgementList(entries, unit, document)
-              .map((e, r) =>
-                VersionRateView(
-                  e.version.document.id.value,
-                  e.version.versionId,
-                  e.version.document.title,
-                  e.version.label,
-                  e.version.classPath,
-                  e.unit,
-                  e.owner,
-                  e.version.publishedAt,
-                  r.audience,
-                  r.acknowledged,
-                  r.open,
-                  r.share
-                )
-              )
-          )
+          cockpit(p, Needs(rates = true))((now, _, entries) => rateViews(now, entries, unit, document))
+      )
+
+  val documentsWithoutOwner: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(base / WithoutOwner)
+      .in(unitQuery)
+      .out(jsonBody[List[UnownedDocumentView]])
+      .description("Documents with a valid version in the caller's scope that have no owner, by title")
+      .tag("Compliance")
+      .serverLogic(p => unit => cockpit(p, Needs())((_, _, entries) => unownedViews(entries, unit)))
+
+  val deviations: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(base / Deviations)
+      .in(unitQuery)
+      .in(query[Option[String]]("owner").description("Owner's user id; empty for documents without owner"))
+      .out(jsonBody[List[DeviationFigureView]])
+      .description(
+        "Valid versions in the caller's scope that deviate from locked sections of their template (standard " +
+          "clauses), the most deviations first."
+      )
+      .tag("Compliance")
+      .serverLogic(p =>
+        (unit, owner) =>
+          cockpit(p, Needs(deviations = true))((_, _, entries) => deviationViews(entries, unit, owner))
       )
 
   val openAcknowledgements: ZServerEndpoint[Env, Any] =
@@ -259,12 +328,189 @@ object ComplianceApi:
         (documentId, versionId, body) => persons(p, documentId, versionId, body.purpose, body.reason)
       )
 
+  val openAcknowledgementsExport: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.post
+      .in(
+        base / "acknowledgements" / path[UUID]("documentId").description("Document id") /
+          path[UUID]("versionId").description("Version id") / "open" / "export"
+      )
+      .in(
+        jsonBody[PersonsAccessRequest].description(
+          s"Required: purpose (escalation or reminder) and reason (up to $MaxReasonLength characters), as for the list."
+        )
+      )
+      .in(language)
+      .out(header(Header.contentType(MediaType.TextCsv.charset(StandardCharsets.UTF_8))))
+      .out(header[String]("Content-Disposition"))
+      .out(byteArrayBody)
+      .description(
+        "The list of who has not acknowledged the version as CSV for spreadsheets (user id and display name): the " +
+          "same rights, purpose and reason as the list, and recorded in the audit trail like every access to it."
+      )
+      .tag("Compliance")
+      .serverLogic(p =>
+        (documentId, versionId, body, lang) =>
+          for
+            view  <- persons(p, documentId, versionId, body.purpose, body.reason, exported = true)
+            names <- VersionViewApi.displayNames(p, view.open.map(UserId(_)).toSet)
+            table = ComplianceCsv.persons(lang, view.open.map(id => (id, names.get(UserId(id)))))
+          yield (attachment(s"open-acknowledgements-$versionId"), bytes(table))
+      )
+
+  val exportList: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.post
+      .in(
+        base / "exports" / path[String]("list").description(
+          s"$OverdueReviews, $AcknowledgementRates, $WithoutOwner or $Deviations"
+        )
+      )
+      .in(unitQuery)
+      .in(query[Option[String]]("owner").description("Owner's user id; empty for documents without owner"))
+      .in(query[Option[UUID]]("document").description("Document id"))
+      .in(language)
+      .out(header(Header.contentType(MediaType.TextCsv.charset(StandardCharsets.UTF_8))))
+      .out(header[String]("Content-Disposition"))
+      .out(byteArrayBody)
+      .description(
+        "A list of the cockpit as CSV for spreadsheets: UTF-8 with byte order mark, semicolon-separated, with the " +
+          "same rights, scope and filters as the list on the screen; text that a spreadsheet would run as a formula " +
+          "starts with an apostrophe. Every export is recorded in the audit trail, which is why this is a POST."
+      )
+      .tag("Compliance")
+      .serverLogic(p => (list, unit, owner, document, lang) => exportOf(p, list, unit, owner, document, lang))
+
+  val sendNotice: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.post
+      .in(
+        base / "overdue-reviews" / path[UUID]("documentId").description("Document id") /
+          path[UUID]("versionId").description("Version id") / "notices"
+      )
+      .in(jsonBody[ComplianceNoticeRequest])
+      .out(statusCode(StatusCode.Created).and(jsonBody[ComplianceNoticeView]))
+      .description(
+        "Reminds the owner of an overdue review (and the owner's deputies) or escalates it (also to the escalation " +
+          "targets of the deadline policy; without any, the compliance officers in scope, else the administrators). " +
+          "For compliance officers in scope. At most once per version, kind and 24 hours, for all officers together " +
+          "(429 notice_too_soon). 422 not_overdue if the review is not overdue, no_recipient if nobody can be " +
+          "reached, invalid without kind or reason. The reason is recorded in the audit trail, not sent."
+      )
+      .tag("Compliance")
+      .serverLogic(p => (documentId, versionId, body) => notice(p, documentId, versionId, body))
+
   def endpoints: List[ZServerEndpoint[Env, Any]] =
-    List(overview, overdueReviews, acknowledgements, openAcknowledgements)
+    List(
+      overview,
+      overdueReviews,
+      acknowledgements,
+      documentsWithoutOwner,
+      deviations,
+      openAcknowledgementsExport,
+      openAcknowledgements,
+      exportList,
+      sendNotice
+    )
 
   private final case class PurposeRequired(message: String)
+  private final case class Refused(status: StatusCode, code: String, message: String)
 
-  private type Failure = DocumentError | AccessDenied | DbError | AcknowledgementError | PurposeRequired
+  private type Failure = DocumentError | AccessDenied | DbError | AcknowledgementError | WorkflowError |
+    PurposeRequired | Refused
+
+  /** What a list needs besides the valid versions the caller may monitor; each costs queries. */
+  private final case class Needs(
+      rates: Boolean = false,
+      deviations: Boolean = false,
+      notices: Boolean = false
+  )
+
+  private def overdueViews(
+      now: Instant,
+      today: LocalDate,
+      entries: List[Entry],
+      unit: Option[String],
+      owner: Option[String]
+  ): List[OverdueReviewView] =
+    ComplianceCockpit
+      .overdueList(entries, today, unit, owner)
+      .flatMap(e =>
+        e.version.reviewDueOn.map(due =>
+          OverdueReviewView(
+            e.version.document.id.value,
+            e.version.versionId,
+            e.version.document.title,
+            e.version.label,
+            e.version.classPath,
+            e.unit,
+            e.owner,
+            e.version.status.toString,
+            due,
+            ComplianceCockpit.daysOverdue(e.version, today),
+            ComplianceNotices.next(e.lastNotices.get(ComplianceNotices.Reminder), now),
+            ComplianceNotices.next(e.lastNotices.get(ComplianceNotices.Escalation), now)
+          )
+        )
+      )
+
+  private def rateViews(
+      now: Instant,
+      entries: List[Entry],
+      unit: Option[String],
+      document: Option[UUID]
+  ): List[VersionRateView] =
+    ComplianceCockpit
+      .acknowledgementList(entries, unit, document)
+      .map((e, r) =>
+        VersionRateView(
+          e.version.document.id.value,
+          e.version.versionId,
+          e.version.document.title,
+          e.version.label,
+          e.version.classPath,
+          e.unit,
+          e.owner,
+          e.version.publishedAt,
+          r.audience,
+          r.acknowledged,
+          r.open,
+          r.share,
+          e.lastReminder.map(_.plus(AcknowledgementReminders.ManualInterval)).filter(now.isBefore)
+        )
+      )
+
+  private def unownedViews(entries: List[Entry], unit: Option[String]): List[UnownedDocumentView] =
+    ComplianceCockpit
+      .withoutOwner(entries, unit)
+      .map(e =>
+        UnownedDocumentView(
+          e.version.document.id.value,
+          e.version.versionId,
+          e.version.document.title,
+          e.version.label,
+          e.version.classPath,
+          e.unit,
+          e.version.publishedAt
+        )
+      )
+
+  private def deviationViews(
+      entries: List[Entry],
+      unit: Option[String],
+      owner: Option[String]
+  ): List[DeviationFigureView] =
+    ComplianceCockpit
+      .deviationList(entries, unit, owner)
+      .map(e =>
+        DeviationFigureView(
+          e.version.document.id.value,
+          e.version.versionId,
+          e.version.document.title,
+          e.version.label,
+          e.version.classPath,
+          e.unit,
+          e.owner,
+          e.deviations
+        )
+      )
 
   private def rateView(versions: Int, r: Rate) =
     RateView(versions, r.audience, r.acknowledged, r.open, r.share)
@@ -280,48 +526,222 @@ object ComplianceApi:
       v.metadata
     )
 
-  /** Runs `f` over the valid versions the caller may monitor, with acknowledgement rates if `withRates`;
-    * denied unless the caller holds an active compliance officer assignment.
+  /** The compliance officer role is what opens the cockpit. */
+  private def requireOfficer(subject: Subject, now: Instant): IO[AccessDenied, Unit] =
+    ZIO
+      .unless(subject.assignments.exists(a => a.role == Role.ComplianceOfficer && a.isActiveAt(now)))(
+        ZIO.fail(
+          AccessDenied(
+            Action.MonitorCompliance,
+            "the compliance cockpit requires the compliance officer role"
+          )
+        )
+      )
+      .unit
+
+  /** Runs `f` over the valid versions the caller may monitor, with what `needs` names; denied unless the
+    * caller holds an active compliance officer assignment.
     */
-  private def cockpit[A](p: Principal, withRates: Boolean)(
-      f: (LocalDate, List[Entry]) => A
+  private def cockpit[A](p: Principal, needs: Needs)(
+      f: (Instant, LocalDate, List[Entry]) => A
   ): ZIO[Env, (StatusCode, ApiError), A] =
-    inTransaction(p) { subject =>
-      for
-        now <- Clock.instant
-        _   <- ZIO.unless(
-          subject.assignments.exists(a => a.role == Role.ComplianceOfficer && a.isActiveAt(now))
-        )(
-          ZIO.fail(
-            AccessDenied(
-              Action.MonitorCompliance,
-              "the compliance cockpit requires the compliance officer role"
+    inTransaction(p)(subject => entries(p, subject, needs).map(f.tupled))
+
+  private def entries(
+      p: Principal,
+      subject: Subject,
+      needs: Needs
+  ): ZIO[Env, Failure, (Instant, LocalDate, List[Entry])] =
+    for
+      now       <- Clock.instant
+      _         <- requireOfficer(subject, now)
+      documents <- ZIO.service[DocumentService]
+      zone      <- documents.tenantZone
+      valid     <- documents.currentlyValid
+      visible = valid
+        .map(v => v -> resource(p.tenantId, v))
+        .filter((_, r) => Policy.decide(subject, Action.MonitorCompliance, r, now).isPermitted)
+      ids = visible.map(_._1.versionId).toSet
+      deviations <- if needs.deviations then documents.deviationCounts(ids) else ZIO.succeed(Map.empty)
+      notices    <- if needs.notices then ComplianceNotices.latest(ids) else ZIO.succeed(Map.empty)
+      rates      <-
+        if !needs.rates then ZIO.succeed((_: CurrentVersion, _: Resource) => Option.empty[Rate])
+        else
+          for
+            readers      <- Recipients.population(now, p.tenantId)
+            acknowledged <- ZIO.serviceWithZIO[AcknowledgementService](_.acknowledgersOfValid)
+            audiences    <- ZIO.serviceWithZIO[AcknowledgementService](_.audiencesOfValid)
+          yield (v: CurrentVersion, r: Resource) =>
+            Option.when(v.requiresAcknowledgement) {
+              val audience = readers.readers(r, Recipients.filterOf(audiences.get(v.versionId)))
+              Rate(audience.size, acknowledged.getOrElse(v.versionId, Set.empty).count(audience.contains))
+            }
+      reminders <-
+        if needs.rates then ZIO.serviceWithZIO[AcknowledgementService](_.lastManualReminders(ids))
+        else ZIO.succeed(Map.empty[UUID, Instant])
+    yield (
+      now,
+      LocalDate.ofInstant(now, zone),
+      visible.map((v, r) =>
+        Entry(
+          v,
+          rates(v, r),
+          deviations.getOrElse(v.versionId, 0),
+          reminders.get(v.versionId),
+          ComplianceNotices.Kinds.flatMap(k => notices.get((v.versionId, k)).map(k -> _)).toMap
+        )
+      )
+    )
+
+  /** A list as a file: read and recorded in one transaction, so that nothing leaves without a record; names
+    * come afterwards, as the directory is another system (ADR 0037).
+    */
+  private def exportOf(
+      p: Principal,
+      list: String,
+      unit: Option[String],
+      owner: Option[String],
+      document: Option[UUID],
+      lang: Option[String]
+  ): ZIO[Env, (StatusCode, ApiError), (String, Array[Byte])] =
+    def rows[A](needs: Needs)(
+        select: (Instant, LocalDate, List[Entry]) => List[A]
+    ): ZIO[Env, (StatusCode, ApiError), List[A]] =
+      inTransaction(p) { subject =>
+        for
+          found <- entries(p, subject, needs)
+          rows = select.tupled(found)
+          _ <- recordExport(p, list, unit, owner, document, rows.size)
+        yield rows
+      }
+    def named(owners: List[Option[String]]) =
+      VersionViewApi
+        .displayNames(p, owners.flatten.map(UserId(_)).toSet)
+        .map(names => (id: String) => names.get(UserId(id)))
+    val table = list match
+      case OverdueReviews =>
+        for
+          found <- rows(Needs())(overdueViews(_, _, _, unit, owner))
+          names <- named(found.map(_.owner))
+        yield ComplianceCsv.overdueReviews(lang, found, names)
+      case AcknowledgementRates =>
+        for
+          found <- rows(Needs(rates = true))((now, _, all) => rateViews(now, all, unit, document))
+          names <- named(found.map(_.owner))
+        yield ComplianceCsv.acknowledgements(lang, found, names)
+      case WithoutOwner =>
+        rows(Needs())((_, _, all) => unownedViews(all, unit)).map(ComplianceCsv.withoutOwner(lang, _))
+      case Deviations =>
+        for
+          found <- rows(Needs(deviations = true))((_, _, all) => deviationViews(all, unit, owner))
+          names <- named(found.map(_.owner))
+        yield ComplianceCsv.deviations(lang, found, names)
+      case other =>
+        ZIO.fail((StatusCode.NotFound, ApiError("not_found", s"the cockpit has no list '$other'")))
+    table.map(csv => (attachment(s"compliance-$list"), bytes(csv)))
+
+  private def recordExport(
+      p: Principal,
+      list: String,
+      unit: Option[String],
+      owner: Option[String],
+      document: Option[UUID],
+      rows: Int
+  ): ZIO[Env, DbError, Unit] =
+    val filters = unit.map("unit" -> Json.Str(_)).toList ++ owner.map("owner" -> Json.Str(_)) ++
+      document.map(d => "document" -> Json.Str(d.toString))
+    ZIO
+      .serviceWithZIO[AuditTrail](
+        _.record(
+          AuditEvent(
+            Actor(p.userId.value, ActorKind.Person),
+            ListExported,
+            AuditObject("compliance-list"),
+            Channel.Api,
+            Jsonb(
+              Json
+                .Obj(
+                  (List("list" -> Json.Str(list), "format" -> Json.Str("csv"), "rows" -> Json.Num(rows)) ++
+                    filters)*
+                )
+                .toJson
             )
           )
         )
+      )
+      .unit
+
+  private def attachment(name: String): String = s"""attachment; filename="$name.csv""""
+
+  private def bytes(csv: String): Array[Byte] = csv.getBytes(StandardCharsets.UTF_8)
+
+  /** Reminds or escalates an overdue review; see [[ComplianceNotices]]. */
+  private def notice(
+      p: Principal,
+      documentId: UUID,
+      versionId: UUID,
+      body: ComplianceNoticeRequest
+  ): ZIO[Env, (StatusCode, ApiError), ComplianceNoticeView] =
+    def invalid(message: String) = Refused(StatusCode.UnprocessableEntity, "invalid", message)
+    inTransaction(p) { subject =>
+      for
+        now  <- Clock.instant
+        _    <- requireOfficer(subject, now)
+        kind <- ZIO
+          .fromOption(body.kind.map(_.trim.toLowerCase).filter(ComplianceNotices.Kinds))
+          .orElseFail(invalid("State the kind of notice (reminder or escalation)."))
+        why <- ZIO
+          .fromOption(body.reason.map(_.trim).filter(r => r.nonEmpty && r.length <= MaxReasonLength))
+          .orElseFail(
+            invalid(
+              s"State the reason (1 to $MaxReasonLength characters); it is recorded in the audit trail."
+            )
+          )
         documents <- ZIO.service[DocumentService]
-        zone      <- documents.tenantZone
-        valid     <- documents.currentlyValid
-        visible = valid
-          .map(v => v -> resource(p.tenantId, v))
-          .filter((_, r) => Policy.decide(subject, Action.MonitorCompliance, r, now).isPermitted)
-        entries <-
-          if !withRates then ZIO.succeed(visible.map((v, _) => Entry(v, None)))
-          else
-            for
-              readers      <- Recipients.population(now, p.tenantId)
-              acknowledged <- ZIO.serviceWithZIO[AcknowledgementService](_.acknowledgersOfValid)
-              audiences    <- ZIO.serviceWithZIO[AcknowledgementService](_.audiencesOfValid)
-            yield visible.map { (v, r) =>
-              Entry(
-                v,
-                Option.when(v.requiresAcknowledgement) {
-                  val audience = readers.readers(r, Recipients.filterOf(audiences.get(v.versionId)))
-                  Rate(audience.size, acknowledged.getOrElse(v.versionId, Set.empty).count(audience.contains))
-                }
-              )
-            }
-      yield f(LocalDate.ofInstant(now, zone), entries)
+        valid     <- documents.validVersion(versionId)
+        version   <- ZIO
+          .fromOption(valid.find(_.document.id.value == documentId))
+          .orElseFail(DocumentError.NotFound(s"document $documentId has no valid version $versionId"))
+        _ <- ZIO.serviceWithZIO[Authorizer](
+          _.check(subject, Action.MonitorCompliance, resource(p.tenantId, version))
+        )
+        zone <- documents.tenantZone
+        _    <- ZIO.unless(ComplianceCockpit.overdue(version, LocalDate.ofInstant(now, zone)))(
+          ZIO.fail(
+            Refused(
+              StatusCode.UnprocessableEntity,
+              "not_overdue",
+              s"the review of ${version.label} is not overdue"
+            )
+          )
+        )
+        escalate = kind == ComplianceNotices.Escalation
+        audience <- ZIO.serviceWithZIO[ComplianceNoticeAudience](
+          _.of(version.document.id, versionId, escalate, p.userId)
+        )
+        reached = ComplianceNotices.people(audience, p.userId)
+        _ <- ZIO.when(reached.isEmpty || (escalate && audience.escalatedTo.isEmpty))(
+          ZIO.fail(
+            Refused(
+              StatusCode.UnprocessableEntity,
+              "no_recipient",
+              if escalate then "nobody can be reached beyond the owner"
+              else "the document has no owner to remind"
+            )
+          )
+        )
+        target = ComplianceNotices.Target(version.document.id, versionId, version.label, version.reviewDueOn)
+        sent <- ComplianceNotices.send(target, kind, audience, p.userId, why)
+        at   <- ZIO
+          .fromEither(sent)
+          .mapError(next =>
+            Refused(
+              StatusCode.TooManyRequests,
+              "notice_too_soon",
+              s"a notice of this kind about ${version.label} went out less than 24 hours ago; next at $next"
+            )
+          )
+      yield ComplianceNoticeView(versionId, kind, at, reached.size, at.plus(ComplianceNotices.Interval))
     }
 
   private def persons(
@@ -329,7 +749,8 @@ object ComplianceApi:
       documentId: UUID,
       versionId: UUID,
       purpose: Option[String],
-      reason: Option[String]
+      reason: Option[String],
+      exported: Boolean = false
   ): ZIO[Env, (StatusCode, ApiError), OpenAcknowledgementsView] =
     inTransaction(p) { subject =>
       for
@@ -377,9 +798,11 @@ object ComplianceApi:
               Jsonb(
                 Json
                   .Obj(
-                    "versionId" -> Json.Str(versionId.toString),
-                    "purpose"   -> Json.Str(stated.toString),
-                    "open"      -> Json.Num(open.size)
+                    (List(
+                      "versionId" -> Json.Str(versionId.toString),
+                      "purpose"   -> Json.Str(stated.toString),
+                      "open"      -> Json.Num(open.size)
+                    ) ++ Option.when(exported)("format" -> Json.Str("csv")))*
                   )
                   .toJson
               ),
@@ -408,8 +831,186 @@ object ComplianceApi:
       result <- db.transact(p.tenantId)(authz.subject(p).flatMap(f))
     yield result).mapError {
       case PurposeRequired(m)      => (StatusCode.Forbidden, ApiError("purpose_required", m))
+      case Refused(status, c, m)   => (status, ApiError(c, m))
+      case e: WorkflowError        => WorkflowApi.toResponse(e)
       case e: AccessDenied         => DocumentApi.toResponse(e)
       case e: DbError              => DocumentApi.toResponse(e)
       case e: DocumentError        => DocumentApi.toResponse(e)
       case e: AcknowledgementError => AcknowledgementApi.toResponse(e)
     }
+
+/** The lists of the cockpit as CSV (ADR 0077), through the same cells as the "valid on" list: everything that
+  * comes from people goes through [[ValidAtApi.Csv.text]], so a title or a name cannot become a formula. User
+  * ids stay in the files, as the stable identifier (ADR 0037), with the display name in a column of its own.
+  */
+private[app] object ComplianceCsv:
+  import ValidAtApi.Csv
+
+  private def german(lang: Option[String]): Boolean = lang.exists(_.trim.toLowerCase.startsWith("de"))
+
+  private def pick(lang: Option[String])(de: String*)(en: String*): List[String] =
+    (if german(lang) then de else en).toList
+
+  private def text(value: Option[String]): String = value.fold("")(Csv.text)
+
+  private def path(classPath: List[String]): String = Csv.text(classPath.mkString("/"))
+
+  private def owner(id: Option[String], names: String => Option[String]): List[String] =
+    List(text(id), text(id.flatMap(names)))
+
+  def overdueReviews(
+      lang: Option[String],
+      rows: List[OverdueReviewView],
+      names: String => Option[String]
+  ): String =
+    Csv.table(
+      pick(lang)(
+        "Dokument-ID",
+        "Titel",
+        "Klasse",
+        "Version",
+        "Status",
+        "Einheit",
+        "Eigentümer (Benutzer-ID)",
+        "Eigentümer (Name)",
+        "Überprüfung fällig am",
+        "Tage überfällig"
+      )(
+        "Document id",
+        "Title",
+        "Class",
+        "Version",
+        "Status",
+        "Unit",
+        "Owner (user id)",
+        "Owner (name)",
+        "Review date",
+        "Days overdue"
+      ),
+      rows.map(r =>
+        List(
+          r.documentId.toString,
+          Csv.text(r.title),
+          path(r.classPath),
+          Csv.text(r.versionLabel),
+          r.status
+        ) ++
+          List(text(r.unit)) ++ owner(r.owner, names) ++ List(r.dueOn.toString, r.daysOverdue.toString)
+      )
+    )
+
+  def acknowledgements(
+      lang: Option[String],
+      rows: List[VersionRateView],
+      names: String => Option[String]
+  ): String =
+    Csv.table(
+      pick(lang)(
+        "Dokument-ID",
+        "Titel",
+        "Klasse",
+        "Version",
+        "Einheit",
+        "Eigentümer (Benutzer-ID)",
+        "Eigentümer (Name)",
+        "Veröffentlicht",
+        "Lesende",
+        "Bestätigt",
+        "Offen",
+        "Quote"
+      )(
+        "Document id",
+        "Title",
+        "Class",
+        "Version",
+        "Unit",
+        "Owner (user id)",
+        "Owner (name)",
+        "Published",
+        "Audience",
+        "Acknowledged",
+        "Open",
+        "Rate"
+      ),
+      rows.map(r =>
+        List(
+          r.documentId.toString,
+          Csv.text(r.title),
+          path(r.classPath),
+          Csv.text(r.versionLabel),
+          text(r.unit)
+        ) ++
+          owner(r.owner, names) ++ List(
+            r.publishedAt.fold("")(_.toString),
+            r.audience.toString,
+            r.acknowledged.toString,
+            r.open.toString,
+            r.rate.fold("")(_.toString)
+          )
+      )
+    )
+
+  def withoutOwner(lang: Option[String], rows: List[UnownedDocumentView]): String =
+    Csv.table(
+      pick(lang)("Dokument-ID", "Titel", "Klasse", "Version", "Einheit", "Veröffentlicht")(
+        "Document id",
+        "Title",
+        "Class",
+        "Version",
+        "Unit",
+        "Published"
+      ),
+      rows.map(r =>
+        List(
+          r.documentId.toString,
+          Csv.text(r.title),
+          path(r.classPath),
+          Csv.text(r.versionLabel),
+          text(r.unit),
+          r.publishedAt.fold("")(_.toString)
+        )
+      )
+    )
+
+  def deviations(
+      lang: Option[String],
+      rows: List[DeviationFigureView],
+      names: String => Option[String]
+  ): String =
+    Csv.table(
+      pick(lang)(
+        "Dokument-ID",
+        "Titel",
+        "Klasse",
+        "Version",
+        "Einheit",
+        "Eigentümer (Benutzer-ID)",
+        "Eigentümer (Name)",
+        "Abweichungen"
+      )(
+        "Document id",
+        "Title",
+        "Class",
+        "Version",
+        "Unit",
+        "Owner (user id)",
+        "Owner (name)",
+        "Deviations"
+      ),
+      rows.map(r =>
+        List(
+          r.documentId.toString,
+          Csv.text(r.title),
+          path(r.classPath),
+          Csv.text(r.versionLabel),
+          text(r.unit)
+        ) ++
+          owner(r.owner, names) ++ List(r.deviations.toString)
+      )
+    )
+
+  def persons(lang: Option[String], rows: List[(String, Option[String])]): String =
+    Csv.table(
+      pick(lang)("Benutzer-ID", "Name")("User id", "Name"),
+      rows.map((id, name) => List(Csv.text(id), text(name)))
+    )

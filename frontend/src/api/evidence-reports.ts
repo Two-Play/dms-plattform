@@ -1,3 +1,4 @@
+import { infiniteQueryOptions } from '@tanstack/react-query'
 import type { ApiClient } from './client'
 import { requestError } from './errors'
 import type { components } from './schema'
@@ -11,7 +12,45 @@ import { attachmentName } from './search'
 /** A created report: registry entry, integrity status and where to download it. */
 export type EvidenceReport = components['schemas']['EvidenceReportView']
 
+/** An earlier report; its content is gone once its retention ended, the checksum stays. */
+export type EvidenceReportEntry = components['schemas']['EvidenceReportEntryView']
+
+export type EvidenceReportPage = components['schemas']['EvidenceReportPageView']
+
 export type EvidenceReportFormat = 'pdf' | 'json'
+
+const PAGE_SIZE = 20
+
+export const evidenceReportsKey = (documentId: string) => ['evidence-reports', documentId]
+
+/**
+ * The earlier reports of a document, the latest first, or `null` when the caller may not see them
+ * (403): the rights follow what stands for the document now, not the role alone.
+ */
+export function evidenceReportsQuery(client: ApiClient, documentId: string) {
+  return infiniteQueryOptions({
+    queryKey: evidenceReportsKey(documentId),
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }): Promise<EvidenceReportPage | null> => {
+      const { data, error, response } = await client.GET(
+        '/api/v1/documents/{id}/evidence-reports',
+        {
+          params: { path: { id: documentId }, query: { limit: PAGE_SIZE, offset: pageParam } },
+        },
+      )
+      if (response.status === 403) return null
+      if (!response.ok || !data) {
+        throw requestError(
+          response,
+          error,
+          `Loading the evidence reports failed with HTTP ${response.status}`,
+        )
+      }
+      return data
+    },
+    getNextPageParam: (last) => last?.nextOffset ?? undefined,
+  })
+}
 
 /** Creates the evidence report of a document (POST /api/v1/documents/{id}/evidence-report). */
 export async function createEvidenceReport(
@@ -37,7 +76,7 @@ export async function createEvidenceReport(
  */
 export async function downloadEvidenceReport(
   client: ApiClient,
-  report: EvidenceReport,
+  report: Pick<EvidenceReport, 'id' | 'documentId'>,
   format: EvidenceReportFormat,
 ): Promise<void> {
   const { data, error, response } =

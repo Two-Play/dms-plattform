@@ -143,6 +143,8 @@ object NotificationTemplates:
     "review.task-due-soon",
     "review.task-overdue",
     "review.task-escalated",
+    "review.compliance-reminder",
+    "review.compliance-escalation",
     "acknowledgement.requested",
     "acknowledgement.reminder",
     "deputyship.created",
@@ -270,6 +272,20 @@ object NotificationTemplates:
             s"Die Überprüfung von $docDat ist seit ${date("dueOn")} überfällig. Bitte kümmern Sie sich darum oder sprechen Sie den Eigentümer an.$ownerDeputyDe",
           bodyEn =
             s"The review of $doc has been overdue since ${date("dueOn")}. Please take care of it or contact the owner.$ownerDeputyEn"
+        )(docLink)
+      case "review.compliance-reminder" =>
+        r(de = s"Compliance erinnert: $docShort", en = s"Reminder from compliance: $docShort")(
+          bodyDe =
+            s"Die Überprüfung von $docDat ist seit ${date("dueOn")} überfällig. Die Compliance bittet darum, sie zu entscheiden.$ownerDeputyDe",
+          bodyEn =
+            s"The review of $doc has been overdue since ${date("dueOn")}. Compliance asks for a decision.$ownerDeputyEn"
+        )(if params.contains("actingFor") then docLink else tasks)
+      case "review.compliance-escalation" =>
+        r(de = s"Eskalation durch Compliance: $docShort", en = s"Escalated by compliance: $docShort")(
+          bodyDe =
+            s"Die Compliance hat die überfällige Überprüfung von $docDat eskaliert (fällig ${date("dueOn")}). Bitte kümmern Sie sich darum oder sprechen Sie den Eigentümer an.$ownerDeputyDe",
+          bodyEn =
+            s"Compliance escalated the overdue review of $doc (due ${date("dueOn")}). Please take care of it or contact the owner.$ownerDeputyEn"
         )(docLink)
       case "acknowledgement.requested" =>
         r(de = s"Kenntnisnahme erforderlich: $docShort", en = s"Acknowledgement required: $docShort")(
