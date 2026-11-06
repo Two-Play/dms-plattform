@@ -611,5 +611,7 @@ object VersionViewApi:
       )
     case e @ (RenderingError.Invalid(_) | RenderingError.Rejected(_)) =>
       (StatusCode.UnprocessableEntity, ApiError("rendering_failed", e.describe))
+    case RenderingError.TooComplex(m) =>
+      (StatusCode.UnprocessableEntity, ApiError(OfficeProblem.TooComplexCode, m))
     case RenderingError.Database(e) => DocumentApi.toResponse(e)
     case e => (StatusCode.InternalServerError, ApiError("rendering_failed", e.describe))

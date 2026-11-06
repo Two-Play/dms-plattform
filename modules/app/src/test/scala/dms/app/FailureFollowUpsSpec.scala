@@ -23,6 +23,7 @@ object FailureFollowUpsSpec extends ZIOSpecDefault:
     RenderingError.Rejected("external resource"),
     RenderingError.NotArchivable(ValidationReport(ArchiveStandard.PdfA2b, compliant = false, "veraPDF", Nil)),
     RenderingError.Invalid("no content"),
+    RenderingError.TooComplex("too large"),
     RenderingError.Integrity("checksum"),
     RenderingError.Database(DbError.NoTransaction)
   )

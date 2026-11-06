@@ -26,6 +26,7 @@ export const renditions: Translation<typeof en.renditions> = {
     not_archivable:
       'Das PDF besteht die Prüfung gegen den Archivstandard (PDF/A-2b) nicht, z. B. wegen einer nicht eingebetteten Schrift.',
     invalid: 'Die Version kann in ihrem jetzigen Zustand nicht gerendert werden.',
+    too_complex: 'Die Originaldatei ist zu groß oder zu komplex, um ihre Felder zu füllen.',
     integrity: 'Eine gespeicherte Datei stimmt nicht mit ihrer Prüfsumme überein.',
     database: 'Die Datenbank war nicht erreichbar.',
     timeout: 'Das Erzeugen wurde nicht rechtzeitig fertig.',

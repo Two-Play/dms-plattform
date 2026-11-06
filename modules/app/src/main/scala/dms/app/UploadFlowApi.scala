@@ -170,7 +170,8 @@ object UploadFlowApi:
           "filled by the platform keeps its values in a custom XML part and custom properties), automatic " +
           "fields with the value known before creation (author, title, version, status). Requires the author, " +
           "owner or template designer role. 422 like the upload of an original (blocked, not convertible, " +
-          "content not fitting the extension, unreadable), 413 above the size limit."
+          "content not fitting the extension, unreadable, `office_file_too_complex` for a file too large or " +
+          "too complex to read), 413 above the size limit."
       )
       .tag("Uploads")
       .serverLogic(p =>
@@ -260,11 +261,9 @@ object UploadFlowApi:
                   .mapError(m => (StatusCode.UnprocessableEntity, ApiError("invalid", m)))
                 lang2 = languageOf(lang)
                 provided <- provisional(p, name, lang2)
-                filled   <- ZIO
-                  .fromEither(
-                    OfficeFields.fill(name, bytes, previewValues(fields, values, provided, lang2))
-                  )
-                  .mapError(m => VersionViewApi.toResponse(dms.rendering.core.RenderingError.Invalid(m)))
+                filled   <- OfficeGate(
+                  OfficeFields.fill(name, bytes, previewValues(fields, values, provided, lang2))
+                ).mapError(p => VersionViewApi.toResponse(FileVersions.failure("")(p)))
                 pdf <- ZIO
                   .serviceWithZIO[FileVersions](_.toPdf(Chunk.fromArray(filled), name))
                   .mapError(VersionViewApi.toResponse)
@@ -373,12 +372,10 @@ object UploadFlowApi:
       bytes: Array[Byte],
       fields: List[WordField]
   ): IO[(StatusCode, ApiError), (Boolean, Map[String, String])] =
-    ZIO
-      .fromEither(OfficeFields.recover(name, bytes))
-      .mapBoth(
-        m => (StatusCode.UnprocessableEntity, ApiError("invalid_docx", m)),
-        r => (r.filledByPlatform, OfficeFields.pick(fields, r, DocumentJson.readRows))
-      )
+    OfficeGate(OfficeFields.recover(name, bytes)).mapBoth(
+      OfficeProblem.response("invalid_docx"),
+      r => (r.filledByPlatform, OfficeFields.pick(fields, r, DocumentJson.readRows))
+    )
 
   private def languageOf(lang: Option[String]): String =
     lang.map(_.trim.toLowerCase(java.util.Locale.ROOT)).filter(_.startsWith("de")).fold("en")(_ => "de")

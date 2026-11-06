@@ -43,8 +43,6 @@ export const CONVERTIBLE_EXTENSIONS = [
   'ott',
   'rtf',
   'txt',
-  'html',
-  'htm',
   'xls',
   'xlsx',
   'xlsm',

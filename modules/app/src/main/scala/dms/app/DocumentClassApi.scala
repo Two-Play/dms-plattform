@@ -1,6 +1,6 @@
 package dms.app
 
-import dms.authz.{AccessDenied, Action, Authorizer, ConfigurationArea, Resource}
+import dms.authz.{AccessDenied, Action, Authorizer, ConfigurationArea, Resource, Role, Subject}
 import dms.db.{Db, DbError}
 import dms.documents.{DocumentStatus, ReviewPolicy}
 import dms.documents.core.{ClassDraft, DocumentClassService, FieldDraft, MetadataError}
@@ -215,7 +215,7 @@ final case class ValidationResult(
 
 /** Administration of document classes and field definitions (business concept 3.1, 3.2). The admin endpoints
   * require `Configure` on [[ConfigurationArea.DocumentClasses]] (tenant administrator); the validation
-  * endpoint is open to every signed-in user of the tenant.
+  * endpoint is for those who fill in metadata of the class.
   */
 object DocumentClassApi:
   type Env = Authenticator & Db & Authorizer & DocumentClassService
@@ -225,6 +225,9 @@ object DocumentClassApi:
   private val classPath  = admin / "document-classes"
   private val classId    = path[UUID]("id").description("Document class id")
   private val fieldKey   = path[String]("key").description("Stable field key, e.g. contractPartner")
+
+  /** Roles that fill in metadata: authors and owners in drafts, reviewers during the review (`EditDraft`). */
+  private val Filling: Set[Role] = Set(Role.Author, Role.Owner, Role.Reviewer)
 
   val listFields: ZServerEndpoint[Env, Any] =
     SecuredApi.base.get
@@ -375,8 +378,9 @@ object DocumentClassApi:
         (id, version) => configure(p)(_.profile(DocumentClassId(id), version)).map(profileView)
       )
 
-  /** For editors: which fields are missing or invalid for a target status (business concept 3.2). Open to
-    * every signed-in user of the tenant; profiles are tenant configuration, not document content.
+  /** For editors: which fields are missing or invalid for a target status (business concept 3.2). The check
+    * runs field formats the tenant defined, so it is limited to those who fill in metadata of the class
+    * (DMS-160, ADR 0076).
     */
   val validate: ZServerEndpoint[Env, Any] =
     SecuredApi.base.post
@@ -385,12 +389,13 @@ object DocumentClassApi:
       .out(jsonBody[ValidationResult])
       .description(
         "Validates metadata values against the class profile for a target status: required fields of that " +
-          "status, types and rules. Missing fields are reported with their stable key and label."
+          "status, types and rules. Missing fields are reported with their stable key and label. Requires " +
+          "the author, owner or reviewer role for the class, whatever the organizational unit; 403 otherwise."
       )
       .tag("Documents")
       .serverLogic(p =>
         (id, req) =>
-          inTenant(p)(
+          fillingIn(p, DocumentClassId(id), req.version)(
             _.validate(
               DocumentClassId(id),
               req.version,
@@ -436,15 +441,37 @@ object DocumentClassApi:
       )
     yield result).mapError(toResponse)
 
-  /** Runs `f` in a transaction of the caller's tenant without further authorization. */
-  private def inTenant[A](principal: Principal)(
+  /** Runs `f` in a transaction of the caller's tenant if the caller fills in metadata of the class. */
+  private def fillingIn[A](principal: Principal, id: DocumentClassId, version: Option[Int])(
       f: DocumentClassService => IO[MetadataError, A]
-  ): ZIO[Db & DocumentClassService, (StatusCode, ApiError), A] =
+  ): ZIO[Db & Authorizer & DocumentClassService, (StatusCode, ApiError), A] =
     (for
       db      <- ZIO.service[Db]
+      authz   <- ZIO.service[Authorizer]
       service <- ZIO.service[DocumentClassService]
-      result  <- db.transact(principal.tenantId)(f(service))
+      now     <- Clock.instant
+      result  <- db.transact(principal.tenantId)(
+        for
+          subject <- authz.subject(principal)
+          profile <- service.profile(id, version)
+          _       <- ZIO.unless(mayFillIn(subject, profile.classPath.map(_.value), now))(
+            ZIO.fail(
+              AccessDenied(Action.EditDraft, "checking metadata requires the author, owner or reviewer role")
+            )
+          )
+          value <- f(service)
+        yield value
+      )
     yield result).mapError(toResponse)
+
+  /** Whether the subject holds a role that fills in metadata for a class with the key path `keys`, whatever
+    * the organizational unit: a document of the class may not exist yet, and its unit is checked when it
+    * does.
+    */
+  private[app] def mayFillIn(subject: Subject, keys: List[String], now: java.time.Instant): Boolean =
+    subject.assignments.exists(a =>
+      a.isActiveAt(now) && Filling(a.role) && a.documentClass.forall(keys.contains)
+    )
 
   def toResponse(error: AccessDenied | DbError | MetadataError): (StatusCode, ApiError) = error match
     case AccessDenied(_, reason) =>

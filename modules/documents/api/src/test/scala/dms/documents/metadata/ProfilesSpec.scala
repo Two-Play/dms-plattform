@@ -139,6 +139,7 @@ object ProfilesSpec extends ZIOSpecDefault:
         val problems = List(
           partner.copy(label = " "),
           partner.copy(fieldType = FieldType.Text(pattern = Some("[unclosed"))),
+          partner.copy(fieldType = FieldType.Text(pattern = Some("(?=a)a"))),
           partner.copy(fieldType = FieldType.Number(Some(5), Some(1))),
           partner.copy(fieldType = FieldType.Amount(currencies = List("euro"))),
           partner.copy(fieldType = FieldType.Selection(List(SelectOption("a", "A"), SelectOption("a", "B")))),

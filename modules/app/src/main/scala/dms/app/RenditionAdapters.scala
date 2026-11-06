@@ -113,15 +113,13 @@ final class DocumentRenditions(
         val fill: Option[Map[UserId, String] => Chunk[Byte] => IO[RenderingError, Chunk[Byte]]] =
           Option.when(OfficeFields.fillable(file.name) && file.fields.nonEmpty)(people =>
             bytes =>
-              ZIO
-                .fromEither(
-                  OfficeFields.fill(
-                    file.name,
-                    bytes.toArray,
-                    WordFilling.values(details, v, file, people, Some(approval))
-                  )
+              OfficeGate(
+                OfficeFields.fill(
+                  file.name,
+                  bytes.toArray,
+                  WordFilling.values(details, v, file, people, Some(approval))
                 )
-                .mapBoth(m => RenderingError.Invalid(s"version ${v.label}: $m"), Chunk.fromArray)
+              ).mapBoth(FileVersions.failure(s"version ${v.label}: "), Chunk.fromArray)
           )
         currentTenant.flatMap(tenant => names(tenant, WordFilling.people(details, v, Some(approval)))).map {
           people =>

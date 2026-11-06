@@ -25,6 +25,7 @@ export const renditions = {
     not_archivable:
       'The PDF does not pass the check against the archive standard (PDF/A-2b), e.g. because of a font that is not embedded.',
     invalid: 'The version cannot be rendered in its current state.',
+    too_complex: 'The original file is too large or too complex to fill its fields.',
     integrity: 'A stored file does not match its checksum.',
     database: 'The database could not be reached.',
     timeout: 'The rendering did not finish in time.',

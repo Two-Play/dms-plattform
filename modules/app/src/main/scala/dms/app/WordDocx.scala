@@ -97,7 +97,7 @@ object WordDocx:
   private val Kind = "Word document (DOCX)"
 
   /** The fields of a DOCX in document order, each key once. */
-  def scan(docx: Array[Byte]): Either[String, List[WordField]] =
+  def scan(docx: Array[Byte]): Either[OfficeProblem, List[WordField]] =
     for
       entries <- OfficePackage.unzip(docx, "word/document.xml", Kind)
       parts   <- OfficePackage.parse(entries, FieldParts.matches, Kind)
@@ -106,14 +106,14 @@ object WordDocx:
       .distinctBy(_.key)
 
   /** The DOCX with `values` (by key, without the `dms:` prefix) filled into its fields as text. */
-  def fill(docx: Array[Byte], values: Map[String, String]): Either[String, Array[Byte]] =
+  def fill(docx: Array[Byte], values: Map[String, String]): Either[OfficeProblem, Array[Byte]] =
     fillValues(docx, values.map((k, v) => k -> FieldValue.Text(v)))
 
   /** The DOCX with `values` (by key, without the `dms:` prefix) filled into its fields. The values are also
     * written into the custom XML part and the custom document properties ([[WordFieldStore]], DMS-127); plain
     * text controls are bound to the custom XML part.
     */
-  def fillValues(docx: Array[Byte], values: Map[String, FieldValue]): Either[String, Array[Byte]] =
+  def fillValues(docx: Array[Byte], values: Map[String, FieldValue]): Either[OfficeProblem, Array[Byte]] =
     for
       entries <- OfficePackage.unzip(docx, "word/document.xml", Kind)
       parts   <- OfficePackage.parse(entries, FieldParts.matches, Kind)
@@ -129,7 +129,7 @@ object WordDocx:
     * the field. Fields of repeating sections are not read from the controls (their rows are in the custom XML
     * part).
     */
-  def recover(docx: Array[Byte]): Either[String, RecoveredValues] =
+  def recover(docx: Array[Byte]): Either[OfficeProblem, RecoveredValues] =
     for
       entries <- OfficePackage.unzip(docx, "word/document.xml", Kind)
       parts   <- OfficePackage.parse(entries, FieldParts.matches, Kind)
@@ -156,7 +156,7 @@ object WordDocx:
     * `\n`), without deleted text of tracked changes and without field codes. Empty paragraphs are left out.
     * Headers, footers and notes are not part of it.
     */
-  def paragraphs(docx: Array[Byte]): Either[String, List[WordParagraph]] =
+  def paragraphs(docx: Array[Byte]): Either[OfficeProblem, List[WordParagraph]] =
     for
       entries <- OfficePackage.unzip(docx, "word/document.xml", Kind)
       parts   <- OfficePackage.parse(entries.filter(_._1 == "word/document.xml"), FieldParts.matches, Kind)
@@ -165,7 +165,7 @@ object WordDocx:
   /** The plain text of a DOCX for the search index (DMS-121): the paragraphs of the main document part, then
     * those of headers, footers, footnotes and endnotes, one per line.
     */
-  def text(docx: Array[Byte]): Either[String, String] =
+  def text(docx: Array[Byte]): Either[OfficeProblem, String] =
     for
       entries <- OfficePackage.unzip(docx, "word/document.xml", Kind)
       parts   <- OfficePackage.parse(entries, FieldParts.matches, Kind)

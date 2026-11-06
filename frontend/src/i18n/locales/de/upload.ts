@@ -23,6 +23,8 @@ export const upload: Translation<typeof en.upload> = {
     choose: 'Datei',
     analysing: 'Felder werden gelesen …',
     failed: 'Die Datei kann nicht verwendet werden: {message}',
+    tooComplex:
+      'Diese Datei ist zu groß oder zu komplex, um sie zu verarbeiten. Teilen Sie sie auf oder entfernen Sie nicht benötigte Inhalte und laden Sie sie erneut hoch.',
     notConvertible: 'Dateien vom Typ .{extension} können nicht als PDF/A archiviert werden.',
     chosen: '{name} · {size}',
     checksum: 'SHA-256 {sha}',

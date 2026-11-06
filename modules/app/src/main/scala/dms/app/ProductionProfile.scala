@@ -59,6 +59,11 @@ object ProductionProfile:
         "dms.storage.accessKey, secretKey: are the keys of local development"
       ),
       refuse(
+        !config.conversion.outboundBlocked,
+        "dms.conversion.outboundBlocked: documents can make the conversion worker load external content; give " +
+          "it a network without outbound access and confirm with DMS_CONVERSION_OUTBOUND_BLOCKED=true (ADR 0076)"
+      ),
+      refuse(
         !config.retention.objectLock.enabled,
         "dms.retention.objectLock.enabled: approved versions need an object store with Object Lock (ADR 0016, 0055)"
       ),

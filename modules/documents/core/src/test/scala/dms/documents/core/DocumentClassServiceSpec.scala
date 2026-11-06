@@ -257,6 +257,72 @@ object DocumentClassServiceSpec extends ZIOSpecDefault:
         ownB.isRight
       )
     },
+    test("a format from before RE2 refuses new class versions, while old versions keep working (DMS-160)") {
+      val key    = FieldKey.unsafe("legacyCode")
+      val legacy = FieldDefinition(key, 1, "Code", None, FieldType.Text(pattern = Some("(?=A)[A-Z]+")))
+      val id     = DocumentClassId.random()
+      val old    = DocumentClassVersion(
+        id,
+        ClassKey.parse("legacy-old").toOption.get,
+        1,
+        None,
+        "Old",
+        None,
+        List(binding("legacyCode")),
+        ReviewPolicy.default
+      )
+      // what is stored from before the rule; the service would refuse it now
+      def stored(t: TenantId) =
+        ZIO.serviceWithZIO[Env](
+          _.app.transact(t)(Db.sql {
+            val _ = MetadataStore.insertField(legacy, admin.value)
+            val _ = MetadataStore.insertClass(id, old.key, None, admin.value)
+            MetadataStore.insertClassVersion(old, admin.value)
+          })
+        )
+      def issues(t: TenantId, value: String) =
+        as(t)(
+          _.validate(
+            id,
+            Some(1),
+            Map("title" -> MetadataValue.Text("Title"), "legacyCode" -> MetadataValue.Text(value)),
+            Draft,
+            false
+          )
+        ).map(_._2.map(_.kind.code))
+      for
+        t          <- ZIO.serviceWithZIO[Env](e => newTenant(e.owner))
+        _          <- stored(t)
+        refusedNew <- as(t)(
+          _.createClass("legacy-new", None, ClassDraft("New", None, List(binding("legacyCode"))), admin)
+        ).either
+        fits       <- issues(t, "ABC")
+        misfits    <- issues(t, "BCD")
+        refusedOld <- as(t)(
+          _.newClassVersion(id, ClassDraft("Old", None, List(binding("legacyCode"))), admin)
+        ).either
+        replaced <- as(t)(
+          _.newFieldVersion(
+            "legacyCode",
+            FieldDraft("Code", None, FieldType.Text(pattern = Some("A[A-Z]*"))),
+            admin
+          )
+        )
+        next <- as(t)(
+          _.newClassVersion(id, ClassDraft("Old", None, List(binding("legacyCode", replaced.version))), admin)
+        )
+      yield assertTrue(
+        refusedNew.left.exists {
+          case MetadataError.Invalid(p) =>
+            p.exists(m => m.contains("legacyCode") && m.contains("not supported"))
+          case _ => false
+        },
+        fits.isEmpty,
+        misfits == List("pattern_mismatch"),
+        refusedOld.left.exists(_.isInstanceOf[MetadataError.Invalid]),
+        next.version == 2
+      )
+    },
     test("stored versions are append-only") {
       for
         e         <- ZIO.service[Env]

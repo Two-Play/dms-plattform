@@ -22,6 +22,8 @@ export const upload = {
     analysing: 'Reading the fields…',
     failed: 'The file cannot be used: {message}',
     notConvertible: 'Files of type .{extension} cannot be archived as PDF/A.',
+    tooComplex:
+      'This file is too large or too complex to be processed. Split it or remove content it does not need, then upload it again.',
     chosen: '{name} · {size}',
     checksum: 'SHA-256 {sha}',
     filledBefore:

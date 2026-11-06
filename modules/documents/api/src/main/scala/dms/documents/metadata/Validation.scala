@@ -208,7 +208,7 @@ object Validation:
           .filter(text.length > _)
           .map(n => IssueKind.OutOfRange(s"At most $n characters are allowed."))
           .toList ++
-          pattern.filterNot(p => text.isEmpty || p.r.matches(text)).map(IssueKind.PatternMismatch(_)).toList
+          pattern.filter(_ => text.nonEmpty).toList.flatMap(formatIssue(_, text))
 
       case (FieldType.Number(min, max, scale), MetadataValue.Number(n)) =>
         bounds(n, min, max) ++
@@ -238,6 +238,16 @@ object Validation:
       case (FieldType.PersonRef, MetadataValue.PersonRef(_))     => Nil
       case (FieldType.DocumentRef, MetadataValue.DocumentRef(_)) => Nil
       case (expected, actual) => List(IssueKind.WrongType(expected.kind, actual.kind))
+
+  /** Longer values are not checked against a format at all (DMS-160, ADR 0076). */
+  private def formatIssue(pattern: String, text: String): Option[IssueKind] =
+    if text.length > FieldPattern.MaxValueLength then
+      Some(
+        IssueKind.OutOfRange(
+          s"At most ${FieldPattern.MaxValueLength} characters can be checked against the format of this field."
+        )
+      )
+    else Option.unless(FieldPattern.matches(pattern, text))(IssueKind.PatternMismatch(pattern))
 
   private def bounds(n: BigDecimal, min: Option[BigDecimal], max: Option[BigDecimal]): List[IssueKind] =
     min.filter(n < _).map(m => IssueKind.OutOfRange(s"The value must be at least $m.")).toList ++

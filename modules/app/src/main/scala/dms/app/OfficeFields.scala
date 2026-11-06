@@ -42,7 +42,7 @@ object OfficeFields:
   def fillable(name: String): Boolean = format(name).isDefined
 
   /** The fields of a file in document order, each key once; none for files whose fields are not filled. */
-  def scan(name: String, bytes: Array[Byte]): Either[String, List[WordField]] =
+  def scan(name: String, bytes: Array[Byte]): Either[OfficeProblem, List[WordField]] =
     format(name) match
       case None              => Right(Nil)
       case Some(Format.Docx) => WordDocx.scan(bytes)
@@ -50,7 +50,11 @@ object OfficeFields:
       case Some(Format.Pptx) => placeholders(bytes, Presentation)
 
   /** The file with `values` filled into its fields; files whose fields are not filled unchanged. */
-  def fill(name: String, bytes: Array[Byte], values: Map[String, FieldValue]): Either[String, Array[Byte]] =
+  def fill(
+      name: String,
+      bytes: Array[Byte],
+      values: Map[String, FieldValue]
+  ): Either[OfficeProblem, Array[Byte]] =
     format(name) match
       case None              => Right(bytes)
       case Some(Format.Docx) => WordDocx.fillValues(bytes, values)
@@ -61,7 +65,7 @@ object OfficeFields:
     * custom XML part and the custom document properties the platform writes when filling
     * ([[WordDocx.recover]]); none for other files (their placeholders are replaced when filled).
     */
-  def recover(name: String, bytes: Array[Byte]): Either[String, RecoveredValues] =
+  def recover(name: String, bytes: Array[Byte]): Either[OfficeProblem, RecoveredValues] =
     format(name) match
       case Some(Format.Docx) => WordDocx.recover(bytes)
       case _                 => Right(RecoveredValues.none)
@@ -118,7 +122,7 @@ object OfficeFields:
     _.replaceAll("\\s*\\n\\s*", " ")
   )
 
-  private def placeholders(bytes: Array[Byte], layout: Layout): Either[String, List[WordField]] =
+  private def placeholders(bytes: Array[Byte], layout: Layout): Either[OfficeProblem, List[WordField]] =
     for
       entries <- OfficePackage.unzip(bytes, layout.mainPart, layout.kind)
       parts   <- OfficePackage.parse(entries, layout.parts, layout.kind)
@@ -133,7 +137,7 @@ object OfficeFields:
       bytes: Array[Byte],
       values: Map[String, FieldValue],
       layout: Layout
-  ): Either[String, Array[Byte]] =
+  ): Either[OfficeProblem, Array[Byte]] =
     for
       entries <- OfficePackage.unzip(bytes, layout.mainPart, layout.kind)
       parts   <- OfficePackage.parse(entries, layout.parts, layout.kind)

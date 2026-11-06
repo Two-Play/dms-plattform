@@ -20,10 +20,10 @@ import zio.json.ast.Json
 import java.time.{Instant, OffsetDateTime}
 import java.util.UUID
 
-/** Why the last attempt failed. `code` (`unavailable`, `rejected`, `not_archivable`, `invalid`, `integrity`,
-  * `database`, `timeout`, `internal`; of a publication `conflict`, `legal_hold`, `invalid`, `not_found`,
-  * `database`, `timeout`, `internal`) says what kind of failure it was, so the client can explain it;
-  * `message` is the technical detail.
+/** Why the last attempt failed. `code` (`unavailable`, `rejected`, `not_archivable`, `invalid`,
+  * `too_complex`, `integrity`, `database`, `timeout`, `internal`; of a publication `conflict`, `legal_hold`,
+  * `invalid`, `not_found`, `database`, `timeout`, `internal`) says what kind of failure it was, so the client
+  * can explain it; `message` is the technical detail.
   */
 final case class RenditionErrorView(code: Option[String], message: String) derives JsonCodec, Schema
 

@@ -18,6 +18,7 @@ object Versions {
   val awsSdk        = "2.57.5"
   val zioJson       = "1.1.1"  // same as tapir-json-zio
   val cel           = "0.15.0"
+  val re2j          = "1.8"
   val flowable      = "8.0.0"  // embedded workflow engine, see docs/adr/0006 and 0024
   val veraPdf       = "1.30.2" // PDF/A validation, same release as the CLI of spike DMS-23 (ADR 0008, 0025)
   val pdfbox        = "3.0.8"  // on-demand PDFs of file documents (stamp, merge); text extraction in tests
@@ -78,6 +79,9 @@ object Dependencies {
 
   /** Common Expression Language for template conditions and computed fields (ADR 0020). */
   val cel = Seq("dev.cel" % "cel" % Versions.cel)
+
+  /** Tenant-defined field formats (DMS-160, ADR 0076): linear-time regular expressions. */
+  val re2j = Seq("com.google.re2j" % "re2j" % Versions.re2j)
 
   /** Embedded BPMN engine (ADR 0006, 0024). `commons-logging` (from Spring 7) duplicates the classes of
     * `jcl-over-slf4j`, which Flowable brings as well.

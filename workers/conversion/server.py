@@ -14,9 +14,10 @@ Endpoints:
                                         422 the file cannot be converted, 500 unexpected failure
 
 Isolation: every conversion runs in its own temporary directory with its own LibreOffice profile, which is deleted
-afterwards; one conversion at a time per container (scale with replicas). LibreOffice gets no network access from
-this process (it is started with a fixed command line, never with user-provided options), and the container should
-run without outbound network (see compose.yaml).
+afterwards; one conversion at a time per container (scale with replicas). LibreOffice is started with a fixed command
+line, never with user-provided options. Documents can still name external content, and LibreOffice loads it unless it
+is stopped (DMS-160, ADR 0076): the profile blocks linked images and file:// embedding, and the container has no
+outbound network (compose.yaml), which is the only thing that stops HTML stylesheets.
 """
 
 import argparse
@@ -37,7 +38,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 # Bump when this file changes in a way that affects the output.
-WORKER_VERSION = "1"
+WORKER_VERSION = "2"
 
 
 def build_fingerprint() -> str:
@@ -80,6 +81,16 @@ PDF_EXPORT = {
     **{e: "draw_pdf_Export" for e in ["odg", "otg", "vsd", "vsdx", "pdf"]},
 }
 DOCX_SOURCES = {"html", "htm", "odt", "rtf", "doc"}
+
+# Seeded into every profile (DMS-160, ADR 0076): LibreOffice refuses links from documents outside its trusted
+# locations, of which there are none, so images are not fetched over the network or read through file://.
+PROFILE_SETTINGS = """<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry" xmlns:xs="http://www.w3.org/2001/XMLSchema" \
+xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<item oor:path="/org.openoffice.Office.Common/Security/Scripting">\
+<prop oor:name="BlockUntrustedRefererLinks" oor:op="fuse"><value>true</value></prop></item>
+</oor:items>
+"""
 TARGETS = {"pdf/a-2b", "docx"}
 EXTENSION = re.compile(r"^[a-z0-9]{1,10}$")
 
@@ -124,6 +135,13 @@ def parse_query(path: str) -> tuple[str, str]:
     return target, extension
 
 
+def seed_profile(profile: Path) -> None:
+    """Writes the settings every conversion runs with; LibreOffice completes the profile when it starts."""
+    user = profile / "user"
+    user.mkdir(parents=True)
+    (user / "registrymodifications.xcu").write_text(PROFILE_SETTINGS, encoding="utf-8")
+
+
 def command(target: str, extension: str, source: Path, out: Path, profile: Path) -> list[str]:
     base = [
         "soffice",
@@ -158,6 +176,7 @@ def convert(target: str, extension: str, data: bytes) -> bytes:
         out = work / "out"
         out.mkdir()
         profile = work / "profile"
+        seed_profile(profile)
         with CONVERT_LOCK:
             try:
                 result = subprocess.run(

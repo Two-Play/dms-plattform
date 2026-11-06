@@ -247,11 +247,9 @@ object VersionCompareApi:
       for
         names      <- VersionViewApi.displayNames(p, WordFilling.people(details, v, approval))
         filled     <- FileVersions.filled(details, v, names, approval).mapError(VersionViewApi.toResponse)
-        paragraphs <- ZIO
-          .fromEither(WordDocx.paragraphs(filled.toArray))
-          .mapError(m =>
-            (StatusCode.UnprocessableEntity, ApiError("invalid_docx", s"version ${v.label}: $m"))
-          )
+        paragraphs <- OfficeGate(WordDocx.paragraphs(filled.toArray)).mapError(p =>
+          OfficeProblem.response("invalid_docx")(p.unreadableAs(s"version ${v.label}: "))
+        )
       yield content(paragraphs)
 
   /** Paragraphs as the blocks of one section; line breaks inside a paragraph stay line breaks. */

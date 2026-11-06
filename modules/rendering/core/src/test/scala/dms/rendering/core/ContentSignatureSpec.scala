@@ -13,7 +13,7 @@ object ContentSignatureSpec extends ZIOSpecDefault:
   private val rtf  = "{\\rtf1\\ansi Hello}".getBytes(UTF_8)
   private val text = "a;b;c\n1;2;3\n".getBytes(UTF_8)
 
-  private val textExtensions = Set("txt", "csv", "html", "htm")
+  private val textExtensions = Set("txt", "csv")
 
   private def ok(name: String, head: Array[Byte])  = DocumentConverter.contentMatches(name, head).isRight
   private def bad(name: String, head: Array[Byte]) = DocumentConverter.contentMatches(name, head).isLeft
@@ -38,7 +38,6 @@ object ContentSignatureSpec extends ZIOSpecDefault:
         // PDF readers accept a few bytes before the header
         ok("Scan.pdf", Array.fill[Byte](20)(' '.toByte) ++ pdf),
         ok("Data.csv", text),
-        ok("Page.html", "<!doctype html><p>Hi</p>".getBytes(UTF_8)),
         ok("Wide.txt", Array(0xff, 0xfe).map(_.toByte) ++ "Hi".getBytes(UTF_16LE)),
         // names that are not convertible are decided elsewhere
         ok("data.zip", pdf)

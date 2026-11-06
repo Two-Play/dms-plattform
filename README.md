@@ -66,7 +66,7 @@ scripts/dev-setup.sh
 
 The script is idempotent and never deletes data (except `--reset`). It
 
-1. starts the services (`docker compose up -d --build`: PostgreSQL on 5433, ZITADEL on `http://localhost:8085`, SeaweedFS on 9100, rendering worker on 9180, conversion worker on 9181, OpenSearch on 9200) and waits for them,
+1. starts the services (`docker compose up -d --build`: PostgreSQL on 5433, ZITADEL on `http://localhost:8085`, SeaweedFS on 9100, rendering worker on 9180 and conversion worker on 9181 through `worker-gateway`, OpenSearch on 9200) and waits for them,
 2. creates the ZITADEL project and OIDC application (`scripts/zitadel-setup.sh`, writes `.local/zitadel/dms.env`),
 3. builds the backend (`sbt app/stage`) and migrates the database (`dms.app.Migrate`),
 4. registers the ZITADEL organization as tenant (`dms.tenant.zitadel_org_id`, time zone Europe/Berlin),

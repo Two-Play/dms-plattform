@@ -1,3 +1,4 @@
+import { t } from '@/i18n'
 import type { components } from './schema'
 
 export type ApiErrorBody = components['schemas']['ApiError']
@@ -75,9 +76,12 @@ export function requestError(response: Response, raw: unknown, fallback: string)
       body?.code ?? 'partner_directory_unavailable',
     )
   }
+  // The size or structure of a file, wherever it is read; the backend's message is technical (DMS-160).
+  const message =
+    body?.code === 'office_file_too_complex' ? t('upload.file.tooComplex') : body?.message
   return new ApiRequestError(
     response.status,
-    body?.message ?? fallback,
+    message ?? fallback,
     body?.code,
     body?.issues,
     retryAfter(response),

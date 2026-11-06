@@ -29,12 +29,15 @@ import javax.sql.DataSource
 /** HTTP tests of the document class administration against a Testcontainers database. */
 object DocumentClassApiSpec extends ZIOSpecDefault:
 
-  private val issuer   = "http://localhost:8085"
-  private val audience = "project-1"
-  private val orgId    = "org-1"
-  private val tenantId = TenantId.random()
-  private val admin    = UserId("admin-1")
-  private val author   = UserId("author-1")
+  private val issuer    = "http://localhost:8085"
+  private val audience  = "project-1"
+  private val orgId     = "org-1"
+  private val tenantId  = TenantId.random()
+  private val admin     = UserId("admin-1")
+  private val author    = UserId("author-1")
+  private val reviewer  = UserId("reviewer-1")
+  private val reader    = UserId("reader-1")
+  private val elsewhere = UserId("author-of-another-class")
 
   private val signingKey: RSAKey = RSAKeyGenerator(2048).keyID("key-1").generate()
 
@@ -70,7 +73,14 @@ object DocumentClassApiSpec extends ZIOSpecDefault:
       _ <- db
         .transact(tenantId)(
           RoleAssignments.Postgres.grant(admin, RoleAssignment(Role.TenantAdmin), admin) *>
-            RoleAssignments.Postgres.grant(author, RoleAssignment(Role.Author), admin)
+            RoleAssignments.Postgres.grant(author, RoleAssignment(Role.Author), admin) *>
+            RoleAssignments.Postgres.grant(reviewer, RoleAssignment(Role.Reviewer), admin) *>
+            RoleAssignments.Postgres.grant(reader, RoleAssignment(Role.Reader), admin) *>
+            RoleAssignments.Postgres.grant(
+              elsewhere,
+              RoleAssignment(Role.Author, documentClass = Some("other-class")),
+              admin
+            )
         )
         .orDieWith(e => RuntimeException(e.toString))
     yield db
@@ -201,6 +211,39 @@ object DocumentClassApiSpec extends ZIOSpecDefault:
           ),
         invalid._1 == Status.UnprocessableEntity
       )
+    },
+    test("only those who fill in metadata of the class may run its checks (DMS-160)") {
+      for
+        cls <- call(
+          admin,
+          "POST",
+          "/api/v1/admin/document-classes",
+          Some("""{"key":"checks","label":"Checks","fields":[]}""")
+        )
+        id   = cls._2.fromJson[DocumentClassView].toOption.map(_.id).get
+        path = s"/api/v1/document-classes/$id/validate"
+        body = Some("""{"values":{},"targetStatus":"Draft"}""")
+        byAuthor    <- call(author, "POST", path, body)
+        byReviewer  <- call(reviewer, "POST", path, body)
+        byReader    <- call(reader, "POST", path, body)
+        byAdmin     <- call(admin, "POST", path, body)
+        byElsewhere <- call(elsewhere, "POST", path, body)
+      yield assertTrue(
+        byAuthor._1 == Status.Ok,
+        byReviewer._1 == Status.Ok,
+        byReader._1 == Status.Forbidden,
+        byAdmin._1 == Status.Forbidden,
+        byElsewhere._1 == Status.Forbidden
+      )
+    },
+    test("a format RE2 cannot run is refused with a message that says why (DMS-160)") {
+      for created <- call(
+          admin,
+          "POST",
+          "/api/v1/admin/field-definitions",
+          Some("""{"key":"lookahead","label":"L","fieldType":{"type":"Text","pattern":"(?=a)a"}}""")
+        )
+      yield assertTrue(created._1 == Status.UnprocessableEntity, created._2.contains("not supported"))
     },
     test("validation names the missing required fields for a target status") {
       for

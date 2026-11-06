@@ -103,8 +103,8 @@ services:
     restart: "no"
 
   # Rendering worker (ADR 0008, 0025): HTML -> PDF/A with WeasyPrint over HTTP (POST /render, GET /health).
-  # Built from workers/rendering; stateless, no credentials, read-only file system. The application calls it at
-  # dms.rendering.url (default http://localhost:9180).
+  # Built from workers/rendering; stateless, no credentials, read-only file system, no outbound network (DMS-160,
+  # ADR 0076). The application calls it through worker-gateway at dms.rendering.url (default http://localhost:9180).
   #
   # Image identity (DMS-93, ADR 0055): locally the image is built and tagged dms-rendering-worker:local. Where the image
   # is published to a registry, set DMS_RENDERING_IMAGE to its reference pinned by digest
@@ -115,8 +115,8 @@ services:
     image: ${DMS_RENDERING_IMAGE:-dms-rendering-worker:local}
     environment:
       DMS_WORKER_IMAGE: ${DMS_RENDERING_IMAGE:-dms-rendering-worker:local}
-    ports:
-      - "9180:8080"  # 9180 to avoid clashing with other local services on 8080
+    networks:
+      - workers
     read_only: true
     tmpfs:
       - /tmp
@@ -128,16 +128,17 @@ services:
 
   # Conversion worker (DMS-115, ADR 0042): LibreOffice converts the originals of file documents (Word, Excel,
   # PowerPoint, …) into PDF/A and structured documents into Word. Built from workers/conversion; stateless, no
-  # credentials, read-only file system, no outbound network. The application calls it at dms.conversion.url
-  # (default http://localhost:9181).
+  # credentials, read-only file system, no outbound network (DMS-160, ADR 0076: documents can name external content,
+  # and for HTML stylesheets only the network stops LibreOffice). The application calls it through worker-gateway at
+  # dms.conversion.url (default http://localhost:9181).
   # Image identity as for the rendering worker (DMS_CONVERSION_IMAGE).
   conversion:
     build: ./workers/conversion
     image: ${DMS_CONVERSION_IMAGE:-dms-conversion-worker:local}
     environment:
       DMS_WORKER_IMAGE: ${DMS_CONVERSION_IMAGE:-dms-conversion-worker:local}
-    ports:
-      - "9181:8080"  # next to the rendering worker
+    networks:
+      - workers
     read_only: true
     tmpfs:
       - /tmp
@@ -146,6 +147,33 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
       interval: 10s
       retries: 5
+
+  # The only way to the workers (DMS-160, ADR 0076). Their network is internal, and Docker publishes no ports of a
+  # container that is only on internal networks, while the application runs on the host. This relay stands in both
+  # networks and forwards TCP connections to the workers, never the other way round. Start it instead of the workers:
+  # `docker compose up -d worker-gateway` starts them as well.
+  worker-gateway:
+    image: nginx:1.30-alpine@sha256:e9b2d7624fd7957f4ed44ae0a272d93fb73aeb8512ba8916f8118ae6143fd115
+    command: ["nginx", "-c", "/etc/dms/nginx.conf", "-g", "daemon off;"]
+    user: "101"
+    networks:
+      - default
+      - workers
+    ports:
+      - "9180:9180"  # rendering; 9180 to avoid clashing with other local services on 8080
+      - "9181:9181"  # conversion, next to the rendering worker
+    volumes:
+      - ./docker/worker-gateway/nginx.conf:/etc/dms/nginx.conf:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      - rendering
+      - conversion
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9181/health"]
+      interval: 5s
+      retries: 20
 
   # Virus scanner (DMS-117, ADR 0041 addendum): clamd scans every uploaded file (attachments, originals, Word templates,
   # upload previews) before it is stored. Not part of the default stack (about 1.5 GB of memory, signature download at the
@@ -204,6 +232,11 @@ services:
       test: ["CMD", "/mailpit", "readyz"]
       interval: 5s
       retries: 10
+
+networks:
+  # No route out: the workers reach nothing but each other and the gateway (DMS-160, ADR 0076).
+  workers:
+    internal: true
 
 volumes:
   dms-db:

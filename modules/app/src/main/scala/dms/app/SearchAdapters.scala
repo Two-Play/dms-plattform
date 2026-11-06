@@ -7,7 +7,6 @@ import dms.documents.core.{DocumentDetails, DocumentError, DocumentService}
 import dms.identity.{TenantOrganizations, UserDirectory}
 import dms.kernel.{DocumentId, TenantId}
 import dms.search.{SearchDocument, SearchError, SearchSource}
-import dms.rendering.core.RenderingError
 import dms.search.core.AccessFilter
 import dms.templates.core.*
 import dms.templates.{Block, Inline, Language, Limits, TemplateContent}
@@ -153,7 +152,7 @@ object SearchDocuments:
               tenant <- DocumentRenditions.currentTenant
               names  <- VersionViewApi.displayNames(tenant, WordFilling.people(details, v, approval))
               filled <- FileVersions.filled(details, v, names, approval)
-              text   <- ZIO.fromEither(WordDocx.text(filled.toArray)).mapError(m => RenderingError.Invalid(m))
+              text   <- OfficeGate(WordDocx.text(filled.toArray)).mapError(FileVersions.failure(""))
             yield Option(text).filter(_.nonEmpty))
               .provideEnvironment(env)
               .catchAll(e =>
