@@ -101,7 +101,7 @@ Given: `Withdrawn` exists as "out of force" for valid versions (US-07.1, ADR 003
 
 - Done (DMS-145, ADR 0061): a review task whose revision was withdrawn or discarded opens again for the valid version.
 - Done (DMS-145, ADR 0061): a way out for a due version whose publication can never succeed, for example because a field required from `Published` is empty in the frozen values: a version whose publication job is dead can be withdrawn after its date, too, and the document can get a new version. Preventing such a version stays open (ADR 0061, decision 13).
-- Should (DMS-145): decide rights on the valid version, not on the latest one, in `RetentionApi`, `LegalHoldApi` and `EvidenceReportApi`. A never-valid version with wrong metadata stays the latest one, which can lock out records managers scoped to the valid version.
+- Done (DMS-155, ADR 0072): decide rights not on the latest version in `RetentionApi`, `LegalHoldApi` and `EvidenceReportApi`. A never-valid version with wrong metadata stays the latest one, which can lock out records managers scoped to the valid version. Not the valid version alone: what decides differs per endpoint.
 - Done (DMS-145, ADR 0070): the author is told as well; the story names approvers and owner, but the author was told about the approval.
 - Done (DMS-145, ADR 0070): the withdrawal in the evidence report's version section.
 - Done (DMS-145, ADR 0070): "never valid" wording for on-demand copies and filled files.

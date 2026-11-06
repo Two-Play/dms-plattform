@@ -300,7 +300,8 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
       FileDocumentApi.endpoints.map(_.widen[Env]) ++ DocumentApi.endpoints.map(_.widen[Env]) ++
         WorkflowApi.endpoints.map(_.widen[Env]) ++ WordTemplateApi.endpoints.map(_.widen[Env]) ++
         VersionViewApi.endpoints.map(_.widen[Env]) ++ AttachmentApi.endpoints.map(_.widen[Env]) ++
-        VersionCompareApi.endpoints.map(_.widen[Env]) ++ UploadFlowApi.endpoints.map(_.widen[Env])
+        VersionCompareApi.endpoints.map(_.widen[Env]) ++ UploadFlowApi.endpoints.map(_.widen[Env]) ++
+        RenditionApi.endpoints.map(_.widen[Env])
     )
 
   final case class Response(status: Status, headers: Headers, body: Chunk[Byte]):
@@ -715,10 +716,30 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
         other  <- call(author, "GET", s"$path/filled")
         fields <- call(author, "GET", s"$path/word-fields").map(as[WordFieldsView])
         copy   <- call(author, "GET", s"$path/copy.pdf")
-        body  = part(filled.body.toArray, "word/document.xml")
-        pages = RenderingWorker.pageTexts(copy.body).map(RenderingWorker.normalized)
+        // What the document page shows and what the archive holds (DMS-155).
+        preview   <- call(author, "GET", s"$path/preview.pdf")
+        archive   <- call(author, "GET", s"$path/rendition")
+        rendition <- call(author, "GET", s"/api/v1/documents/${doc.id}")
+          .map(as[DocumentView](_).current.rendition)
+        body      = part(filled.body.toArray, "word/document.xml")
+        pages     = RenderingWorker.pageTexts(copy.body).map(RenderingWorker.normalized)
+        previewed = RenderingWorker.pageTexts(preview.body).map(RenderingWorker.normalized)
       yield assertTrue(
+        preview.status == Status.Ok,
+        previewed.forall(_.contains("Zurückgezogen, nie gültig")),
+        previewed.forall(_.contains(s"${doc.id}")),
+        archive.status == Status.Ok,
+        rendition.exists(_.sha256 == sha256(archive.body.toArray)),
+        !RenderingWorker.pageTexts(archive.body).exists(_.contains("nie gültig")),
+        archive.header("Content-Disposition").exists(_.endsWith("-never-valid.pdf\"")),
         part(approved.body.toArray, "word/document.xml").contains("Freigegeben"),
+        !approved.header("Content-Disposition").exists(_.contains("gezogen")),
+        filled
+          .header("Content-Disposition")
+          .exists(_.contains("%28Zur%C3%BCckgezogen%2C%20nie%20g%C3%BCltig%29.docx")),
+        other
+          .header("Content-Disposition")
+          .exists(_.contains("%28Zur%C3%BCckgezogen%2C%20nie%20g%C3%BCltig%29.docx")),
         withdrawn.status == Status.Ok,
         filled.status == Status.Ok,
         body.contains("Zurückgezogen, nie gültig"),
@@ -728,6 +749,76 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
         fields.fields.find(_.key == "status").flatMap(_.value).contains("Zurückgezogen, nie gültig"),
         copy.status == Status.Ok,
         pages.forall(_.contains("Zurückgezogen, nie gültig · Kopie"))
+      )
+    },
+    test(
+      "a filled file of a version out of force does not say released, with or without the field (DMS-155)"
+    ) {
+      val withStatus = docx(
+        paragraph(textRun("Status: ") + control("dms:status", "Status", "–")) +
+          paragraph(textRun("Kunde: ") + control("customer", "Customer", "Name des Kunden"))
+      )
+      val withoutStatus =
+        docx(paragraph(textRun("Kunde: ") + control("customer", "Customer", "Name des Kunden")))
+      def published(file: Array[Byte], title: String) =
+        for
+          created <- wordTemplate(file)
+          (id, _) = created
+          _   <- release(id, 1)
+          doc <- call(
+            author,
+            "POST",
+            "/api/v1/documents/word",
+            Some(s"""{"templateId":"$id","templateVersion":1,"title":"$title","values":${values("de")}}""")
+          ).map(as[DocumentView])
+          _ <- call(
+            author,
+            "PUT",
+            s"/api/v1/documents/${doc.id}/word-fields",
+            Some("""{"values":{"customer":"ACME GmbH"}}""")
+          )
+          _ <- approveAndPublish(doc.id)
+        yield doc
+      def status(version: UUID, value: String) =
+        ownerQuery {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          sql"""update dms.document_version set status = $value where id = $version""".update.run()
+        }
+      def filled(doc: DocumentView) =
+        call(owner, "GET", s"/api/v1/documents/${doc.id}/versions/${doc.current.id}/filled.docx")
+      def says(response: Response) = part(response.body.toArray, "word/document.xml")
+      for
+        doc        <- published(withStatus, "Vertrag E")
+        valid      <- filled(doc)
+        _          <- status(doc.current.id, "Superseded")
+        superseded <- filled(doc)
+        fields <- call(owner, "GET", s"/api/v1/documents/${doc.id}/versions/${doc.current.id}/word-fields")
+          .map(as[WordFieldsView])
+        _          <- status(doc.current.id, "Withdrawn")
+        withdrawn  <- filled(doc)
+        _          <- status(doc.current.id, "Archived")
+        archived   <- filled(doc)
+        plain      <- published(withoutStatus, "Vertrag F")
+        plainValid <- filled(plain)
+        _          <- status(plain.current.id, "Superseded")
+        plainOld   <- filled(plain)
+      yield assertTrue(
+        says(valid).contains("Freigegeben"),
+        !valid.header("Content-Disposition").exists(_.contains("%28")),
+        says(superseded).contains("Abgelöst"),
+        !says(superseded).contains("Freigegeben"),
+        superseded.header("Content-Disposition").exists(_.contains("%28Abgel%C3%B6st%29.docx")),
+        fields.fields.find(_.key == "status").flatMap(_.value).contains("Abgelöst"),
+        says(withdrawn).contains("Außer Kraft"),
+        !says(withdrawn).contains("Freigegeben"),
+        withdrawn.header("Content-Disposition").exists(_.contains("%28Au%C3%9Fer%20Kraft%29.docx")),
+        says(archived).contains("Archiviert"),
+        !says(archived).contains("Freigegeben"),
+        // No field that could say it: the name does, the bytes are filled as always.
+        !plainValid.header("Content-Disposition").exists(_.contains("%28")),
+        plainOld.status == Status.Ok,
+        plainOld.header("Content-Disposition").exists(_.contains("%28Abgel%C3%B6st%29.docx")),
+        says(plainOld) == says(plainValid)
       )
     },
     test("a new version takes the file and values over; a revised Word file keeps the field definitions") {

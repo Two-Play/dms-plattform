@@ -10,8 +10,8 @@ import dms.documents.metadata.{CoreFields, FieldIssue, IssueKind, MetadataProfil
 import dms.identity.{Authenticator, Principal}
 import dms.kernel.{DocumentId, TemplateId, UserId}
 import dms.templates.{DeviationChange, Inline, PathStep, SectionId, TemplateContent}
-import dms.workflow.{CaseDetails, DeputyApproval, StepKind}
-import dms.workflow.core.{ApprovalWorkflow, Rules, WorkflowError}
+import dms.workflow.{CaseDetails, StepKind}
+import dms.workflow.core.{ApprovalWorkflow, WorkflowError}
 import dms.templates.core.ContentJson.given
 import dms.templates.core.DeviationJson.given
 import sttp.model.StatusCode
@@ -518,7 +518,7 @@ object DocumentApi:
               discard <- details.open.filter(_.status == DocumentStatus.Draft) match
                 case Some(open) => ctx.allowed(Action.DiscardDraft, resource(p, details, open))
                 case None       => ZIO.succeed(false)
-              withdrawable <- withdrawableVersion(ctx, p, details)
+              withdrawable <- withdrawableVersion(ctx, details)
             yield documentView(
               details.document,
               details.profile,
@@ -785,9 +785,11 @@ object DocumentApi:
               approvers = approversOf(cases, versionId)
               // Decided as if the version were still approved: whoever may withdraw it learns why it did not work
               // (409 from the service, which decides under the lock of the version), everyone else gets 403.
-              right     <- withdrawalRight(ctx, p, details, version, cases)
+              right     <- ctx.withdrawalRight(details, version, cases)
               actingFor <- right.fold(
-                ctx.check(Action.Withdraw, withdrawalResource(p, details, version, approvers)).as(None)
+                ctx
+                  .check(Action.Withdraw, withdrawalResource(p.tenantId, details, version, approvers))
+                  .as(None)
               )(ZIO.succeed(_))
               withdrawn <- ctx.service.withdrawApproved(versionId, req.reason, approvers, p.userId, actingFor)
             yield versionViewIn(
@@ -905,6 +907,10 @@ object DocumentApi:
     def check(action: Action, resource: Resource): IO[AccessDenied, Unit] =
       authz.check(subject, action, resource).unit
 
+    /** See [[Authorizer.checkCleared]]. */
+    def checkCleared(action: Action, resource: Resource): IO[AccessDenied, Unit] =
+      authz.checkCleared(subject, action, resource)
+
     /** Entered access groups (core field `allowedGroups`, ADR 0032) must exist in the tenant (422
       * `unknown_option` otherwise); their format is checked with the profile.
       */
@@ -921,16 +927,13 @@ object DocumentApi:
     def allowed(action: Action, resource: Resource): UIO[Boolean] =
       Clock.instant.map(now => Policy.decide(subject, action, resource, now).isPermitted)
 
-    /** [[allowed]] with the scope of an approval the caller gave as deputy (DMS-145, ADR 0070), if given. */
-    def allowedWith(
-        approval: Option[DeputyApproval],
-        action: Action,
-        resource: Resource
-    ): IO[WorkflowError, Boolean] =
-      for
-        actor <- ZIO.foreach(approval)(Delegation.forApproval(authz, subject, _))
-        now   <- Clock.instant
-      yield Policy.decide(actor.getOrElse(subject), action, resource, now).isPermitted
+    /** See [[Delegation.withdrawalRight]]. */
+    def withdrawalRight(
+        details: DocumentDetails,
+        v: DocumentVersion,
+        cases: List[CaseDetails]
+    ): IO[WorkflowError, Option[Option[UserId]]] =
+      Delegation.withdrawalRight(authz.assignments, workflow, subject, details, v, cases)
 
     /** The decision for `action`, for filtering a long list at one moment in time. */
     def allows(action: Action): UIO[Resource => Boolean] =
@@ -1002,7 +1005,7 @@ object DocumentApi:
       val participants = participantsOf(cases)
       for
         actor    <- Delegation.subject(authz, subject, cases.flatMap(_.tasks))
-        asDeputy <- Delegation.approvedAsDeputy(authz, workflow, subject, details, cases)
+        asDeputy <- Delegation.approvedAsDeputy(authz.assignments, workflow, subject, details, cases)
         now      <- Clock.instant
       yield (
         details.versions.filter(v =>
@@ -1022,7 +1025,7 @@ object DocumentApi:
       for
         cases    <- workflow.cases(details.document.id)
         actor    <- Delegation.subject(authz, subject, cases.flatMap(_.tasks))
-        asDeputy <- Delegation.approvedAsDeputy(authz, workflow, subject, details, cases)
+        asDeputy <- Delegation.approvedAsDeputy(authz.assignments, workflow, subject, details, cases)
         _        <- ZIO.unless(asDeputy(v.id))(
           authz.check(actor, Action.ReadDocument, resource(actor, details, v, participantsOf(cases)))
         )
@@ -1108,7 +1111,7 @@ object DocumentApi:
   /** Whether `user` approved a version in person: with a vote of their own, or as final approver without
     * standing in for anyone.
     */
-  private def approvedInPerson(cases: List[CaseDetails], versionId: UUID, user: UserId): Boolean =
+  private[app] def approvedInPerson(cases: List[CaseDetails], versionId: UUID, user: UserId): Boolean =
     cases.filter(_.workflowCase.versionId == versionId).exists { c =>
       val approvalTasks = c.tasks.filter(_.kind == StepKind.Approval).map(_.id).toSet
       c.votes.exists(v =>
@@ -1118,60 +1121,23 @@ object DocumentApi:
     }
 
   /** The resource `Withdraw` decides on: the version as approved, with everyone who approved it. */
-  private def withdrawalResource(
-      p: Principal,
+  private[app] def withdrawalResource(
+      tenant: dms.kernel.TenantId,
       details: DocumentDetails,
       v: DocumentVersion,
       approvers: Set[UserId]
   ): Resource =
-    resource(p, details, v).copy(
+    resource(tenant, details, v).copy(
       status = Some(DocumentStatus.Approved),
       approvedBy = approvers ++ v.releasedBy,
       withdrawnBeforeValid = false
     )
-
-  /** Whether the caller may withdraw `v`: `None` if not, `Some(None)` on their own right, `Some(Some(p))` if
-    * their right rests on a vote cast as deputy of `p` (DMS-145, ADR 0070).
-    *
-    * Roles held in the document's scope, and votes of their own, are their own right, as in ADR 0059. A vote
-    * cast for someone else counts with the role the caller holds in that scope, and while the deputyship
-    * stands (`ApprovalWorkflow.standingApprovals`) with the principal's scope as well: the task that gave
-    * them this scope is done. Then the audit trail names the principal, the latest one for several (as the
-    * approval does, ADR 0028). Nobody else gains anything: only the caller's votes on this version count, and
-    * the extended subject decides this withdrawal alone.
-    */
-  private def withdrawalRight(
-      ctx: Context,
-      p: Principal,
-      details: DocumentDetails,
-      v: DocumentVersion,
-      cases: List[CaseDetails]
-  ): IO[WorkflowError, Option[Option[UserId]]] =
-    val approved = withdrawalResource(p, details, v, approversOf(cases, v.id))
-    val asDeputy = Rules.deputyApprovals(cases, v.id, p.userId)
-    val ownVote  = approvedInPerson(cases, v.id, p.userId)
-    val ownRight =
-      if asDeputy.isEmpty || ownVote then approved
-      else approved.copy(approvedBy = approved.approvedBy - p.userId)
-    ctx.allowed(Action.Withdraw, ownRight).flatMap {
-      case true                      => ZIO.some(None)
-      case false if asDeputy.isEmpty => ZIO.none
-      case false                     =>
-        ctx.workflow.standingApprovals(cases, details.document.id, v.id, p.userId).flatMap { standing =>
-          ZIO.collectFirst(asDeputy) { approval =>
-            ctx
-              .allowedWith(Some(approval).filter(standing.contains), Action.Withdraw, approved)
-              .map(Option.when(_)(Some(approval.principal)))
-          }
-        }
-    }
 
   /** The approved version the caller may withdraw now, if any. Mirrors the checks of `withdrawVersion`, which
     * decides again.
     */
   private def withdrawableVersion(
       ctx: Context,
-      p: Principal,
       details: DocumentDetails
   ): IO[WorkflowError, Option[WithdrawableVersionView]] =
     details.versions.find(_.status == DocumentStatus.Approved) match
@@ -1180,7 +1146,7 @@ object DocumentApi:
         for
           cases  <- ctx.workflow.cases(details.document.id)
           now    <- Clock.instant
-          right  <- withdrawalRight(ctx, p, details, v, cases)
+          right  <- ctx.withdrawalRight(details, v, cases)
           failed <- ctx.service.publicationFailed(v.id).mapError(WorkflowDocuments.toWorkflowError)
         yield Option.when(right.isDefined && (failed || !Publication.isDue(v.validFrom, details.zone, now)))(
           WithdrawableVersionView(
@@ -1259,6 +1225,12 @@ object DocumentApi:
       v,
       participants.getOrElse(v.id, Set.empty)
     )
+
+  /** The resources a right on the document as a whole is decided on: every governing version must permit it
+    * (DMS-155, ADR 0072).
+    */
+  private[app] def governing(tenant: dms.kernel.TenantId, details: DocumentDetails): List[Resource] =
+    Versioning.governing(details.versions).map(resource(tenant, details, _))
 
   /** The resource of a document version from its parts, e.g. for versions read without their content. */
   private[app] def versionResource(

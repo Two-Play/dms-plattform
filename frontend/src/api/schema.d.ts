@@ -1097,7 +1097,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description The Word document of a version with its fields filled: automatic fields from the platform (with the approval once approved), manual fields as entered. The editable artifact; filled on request, not stored, the download is audited with the SHA-256 of the bytes. 409 if the original is not a DOCX. Requires reading the version. */
+    /** @description The Word document of a version with its fields filled: automatic fields from the platform (with the approval once approved), manual fields as entered. The editable artifact; filled on request, not stored, the download is audited with the SHA-256 of the bytes. A version out of force names its status in the field `status` and in the file name. 409 if the original is not a DOCX. Requires reading the version. */
     get: operations['getApiV1DocumentsIdVersionsVersionidFilled.docx']
     put?: never
     post?: never
@@ -1114,7 +1114,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description The original of a version with its fields filled (DMS-122): a Word document (DOCX), Excel workbook (XLSX) or PowerPoint presentation (PPTX), named and typed like the original. Automatic fields from the platform (with the approval once approved), manual fields as entered; filled on request, not stored, the download is audited with the SHA-256 of the bytes. 409 if the original is of another type. Requires reading the version. */
+    /** @description The original of a version with its fields filled (DMS-122): a Word document (DOCX), Excel workbook (XLSX) or PowerPoint presentation (PPTX), named and typed like the original. Automatic fields from the platform (with the approval once approved), manual fields as entered; filled on request, not stored, the download is audited with the SHA-256 of the bytes. A version out of force names its status in the field `status` and in the file name. 409 if the original is of another type. Requires reading the version. */
     get: operations['getApiV1DocumentsIdVersionsVersionidFilled']
     put?: never
     post?: never
@@ -1131,7 +1131,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description A PDF of a file document version for reading in the browser: the archived rendition of an approved version; otherwise the original (a Word file with its fields filled) converted on request with the draft marking on every page. Not stored; a conversion is kept in memory per version and state, so an unchanged draft is converted once. 409 for structured documents (see …/html), 404 without file, 503 if the conversion worker is unavailable. Requires ReadDocument on the version. */
+    /** @description A PDF of a file document version for reading in the browser: the archived rendition of an approved version; otherwise the original (a Word file with its fields filled) converted on request with the draft marking on every page. A version withdrawn before it took effect is marked on every page of what is sent; the archived rendition stays as it is. Not stored; a conversion is kept in memory per version and state, so an unchanged draft is converted once. 409 for structured documents (see …/html), 404 without file, 503 if the conversion worker is unavailable. Requires ReadDocument on the version. */
     get: operations['getApiV1DocumentsIdVersionsVersionidPreview.pdf']
     put?: never
     post?: never
@@ -1369,7 +1369,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description The archive rendition (PDF/A) of a version, produced on approval. 404 if the version has none; the SHA-256 is sent as Repr-Digest and ETag. */
+    /** @description The archive rendition (PDF/A) of a version, produced on approval. 404 if the version has none; the SHA-256 is sent as Repr-Digest and ETag. The bytes are the archived ones in every case: of a version withdrawn before it took effect only the file name says so (`-never-valid`). */
     get: operations['getApiV1DocumentsIdVersionsVersionidRendition']
     put?: never
     post?: never
@@ -1488,7 +1488,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description The content of a version resolved with its stored values, as HTML fragment for reading on screen. Versions that were never approved carry the draft marking; approved versions are rendered from their frozen content and values. 409 for file documents (see …/preview.pdf). Requires ReadDocument on the version. */
+    /** @description The content of a version resolved with its stored values, as HTML fragment for reading on screen. Versions that were never approved carry the draft marking; approved versions are rendered from their frozen content and values, a version withdrawn before it took effect with its own marking. 409 for file documents (see …/preview.pdf). Requires ReadDocument on the version. */
     get: operations['getApiV1DocumentsIdVersionsVersionidHtml']
     put?: never
     post?: never
@@ -5580,6 +5580,7 @@ export interface components {
       version: string
       status: string
       draftMarking?: string
+      neverValidMarking?: string
       language: string
       html: string
     }

@@ -18,6 +18,8 @@ Document resources and search (DMS-51/52, ADR 0029 and addendum to ADR 0018): `D
 
 Legal holds (DMS-56, ADR 0031 and addendum to ADR 0018): `ManageRetention` (records managers, matrix row "Retention / legal hold") covers legal holds. Hold-level operations check it on the tenant resource (records manager for the whole tenant), each document put under a hold on its `DocumentResource`.
 
+Rights on a document as a whole (DMS-155, ADR 0072): retention, legal holds and evidence reports ask on every version of `Versioning.governing` (the valid versions and what is on its way into force), not on the latest one, which may be a version that never took effect. Destruction asks on each named version as well, an evidence report for clearance on every version it shows (`Authorizer.checkCleared`).
+
 Single module without an `api`/`core` split.
 
 Document numbers (DMS-113, ADR 0040): `AssignDocumentNumber` (manual document number with reason) is granted on a document (any status but `Destroyed`) to records managers in scope and to holders of the owner role who are the document's owner; tenant administrators manage number ranges with `Configure` on `ConfigurationArea.NumberRanges`.

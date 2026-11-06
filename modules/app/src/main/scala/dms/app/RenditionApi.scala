@@ -30,7 +30,8 @@ object RenditionApi:
       .out(byteArrayBody)
       .description(
         "The archive rendition (PDF/A) of a version, produced on approval. 404 if the version has none; the SHA-256 " +
-          "is sent as Repr-Digest and ETag."
+          "is sent as Repr-Digest and ETag. The bytes are the archived ones in every case: of a version withdrawn " +
+          "before it took effect only the file name says so (`-never-valid`)."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -46,13 +47,13 @@ object RenditionApi:
                 rendition <- ZIO
                   .fromOption(version.rendition)
                   .orElseFail(DocumentError.NotFound(s"version ${version.label} has no rendition"))
-              yield (version.label, rendition)
+              yield (version.label + version.withdrawal.fold("")(_ => "-never-valid"), rendition)
             }
-            (label, rendition) = found
+            (name, rendition) = found
             bytes <- ZIO.serviceWithZIO[RenditionArchive](_.read(rendition)).mapError(toResponse)
             digest = Sha256.fromHex(rendition.sha256).fold(_ => "", d => s"sha-256=:${d.base64}:")
           yield (
-            s"""attachment; filename="$id-$label.pdf"""",
+            s"""attachment; filename="$id-$name.pdf"""",
             s"\"${rendition.sha256}\"",
             digest,
             bytes.toArray

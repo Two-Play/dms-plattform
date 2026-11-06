@@ -55,21 +55,23 @@ import javax.sql.DataSource
   */
 object EvidenceReportApiSpec extends ZIOSpecDefault:
 
-  private val issuer   = "http://localhost:8085"
-  private val audience = "project-1"
-  private val orgId    = "org-1"
-  private val tenantId = TenantId.random()
-  private val admin    = UserId("admin-1")
-  private val author   = UserId("author-1")
-  private val reviewer = UserId("reviewer-1")
-  private val approver = UserId("approver-1")
-  private val deputy   = UserId("deputy-1")
-  private val reader   = UserId("reader-1")
-  private val auditor  = UserId("auditor-1")
-  private val records  = UserId("records-1")
-  private val records2 = UserId("records-2")
-  private val designer = UserId("designer-1")
-  private val designr2 = UserId("designer-2")
+  private val issuer       = "http://localhost:8085"
+  private val audience     = "project-1"
+  private val orgId        = "org-1"
+  private val tenantId     = TenantId.random()
+  private val admin        = UserId("admin-1")
+  private val author       = UserId("author-1")
+  private val reviewer     = UserId("reviewer-1")
+  private val approver     = UserId("approver-1")
+  private val deputy       = UserId("deputy-1")
+  private val reader       = UserId("reader-1")
+  private val auditor      = UserId("auditor-1")
+  private val legalAuditor = UserId("auditor-legal")
+  private val salesAuditor = UserId("auditor-sales")
+  private val records      = UserId("records-1")
+  private val records2     = UserId("records-2")
+  private val designer     = UserId("designer-1")
+  private val designr2     = UserId("designer-2")
 
   private val signingKey: RSAKey = RSAKeyGenerator(2048).keyID("key-1").generate()
 
@@ -457,6 +459,42 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
       )
     yield ()
 
+  /** The next version of a document, as a draft. */
+  private def nextVersion(doc: UUID): ZIO[Env, Any, UUID] =
+    call(
+      author,
+      "POST",
+      s"/api/v1/documents/$doc/versions",
+      Some("""{"changeKind":"Major","reason":"Revised"}""")
+    ).map(as[DocumentVersionView](_).id)
+
+  /** Sets what a version says about itself; how it came to say so is not under test. */
+  private def rewrite(version: UUID, unit: String, confidentiality: String) =
+    val ou    = s"""{"type":"Text","value":"$unit"}"""
+    val level = s"""{"type":"Selection","code":"$confidentiality"}"""
+    ownerQuery {
+      val _ = sql"set local session_replication_role = replica".update.run()
+      sql"""update dms.document_version
+            set field_values = jsonb_set(
+                  jsonb_set(field_values, '{organizationalUnit,value}', cast($ou as jsonb)),
+                  '{confidentiality,value}', cast($level as jsonb))
+            where id = $version""".update.run()
+    }
+
+  /** Makes `version` one that was approved and withdrawn before it took effect (ADR 0059). */
+  private def neverValid(version: UUID, at: String = "2010-03-01T10:00:00Z") =
+    ownerQuery {
+      val _ = sql"set local session_replication_role = replica".update.run()
+      sql"""update dms.document_version
+            set status = 'Withdrawn', released_at = cast($at as timestamptz), released_by = ${approver.value},
+                withdrawn_at = cast($at as timestamptz), status_changed_at = cast($at as timestamptz),
+                withdrawn_by = ${approver.value}, withdrawal_reason = 'Wrong metadata',
+                metadata_snapshot = (select o.metadata_snapshot from dms.document_version o
+                                     where o.document_id = document_version.document_id
+                                       and o.metadata_snapshot is not null limit 1)
+            where id = $version""".update.run()
+    }
+
   private def createReport(user: UserId, doc: UUID, archive: Option[RenditionArchive] = None) =
     call(user, "POST", s"/api/v1/documents/$doc/evidence-report", archive = archive)
 
@@ -617,6 +655,139 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         texts.exists(_.contains("Falscher Vertragspartner")),
         // The format stays: reports of other versions do not change.
         !plain.text.contains("\"withdrawal\"")
+      )
+    },
+    test(
+      "a report needs the role on what stands for the document, and clearance for all it shows (DMS-155)"
+    ) {
+      for
+        // Granted here: they would count as readers of the documents of the other tests.
+        s <- setup.await
+        _ <- s.app
+          .transact(tenantId)(
+            RoleAssignments.Postgres.grant(
+              legalAuditor,
+              RoleAssignment(Role.Auditor, Some("Legal")),
+              admin
+            ) *>
+              RoleAssignments.Postgres.grant(salesAuditor, RoleAssignment(Role.Auditor, Some("Sales")), admin)
+          )
+        doc  <- publishedDocument("Rechte AG")
+        next <- nextVersion(doc.id)
+        valid = doc.current.id
+        // A draft says more than the valid version: it is still in the report, so it still decides.
+        _             <- rewrite(next, "Legal", "Confidential")
+        stricterDraft <- createReport(auditor, doc.id)
+        // A draft says less than the valid version: the latest one alone used to let everyone in.
+        _          <- rewrite(next, "Legal", "Internal") *> rewrite(valid, "Legal", "Confidential")
+        widerDraft <- createReport(auditor, doc.id)
+        _          <- rewrite(valid, "Legal", "Internal")
+        // The draft moved to another unit: not yet the document's scope, but already part of it.
+        _          <- rewrite(next, "Sales", "Internal")
+        movedLegal <- createReport(legalAuditor, doc.id)
+        movedSales <- createReport(salesAuditor, doc.id)
+        // The same version, never valid: it stays the latest one for good, and has no say in the scope.
+        _            <- neverValid(next)
+        ofLegal      <- createReport(legalAuditor, doc.id)
+        ofSales      <- createReport(salesAuditor, doc.id)
+        stored       <- payloadOf(legalAuditor, as[EvidenceReportView](ofLegal))
+        forOtherUnit <- payloadOf(salesAuditor, as[EvidenceReportView](ofLegal))
+        // Its confidentiality still counts: the report shows the version.
+        _            <- rewrite(next, "Legal", "Confidential")
+        notCleared   <- createReport(auditor, doc.id)
+        storedHidden <- payloadOf(legalAuditor, as[EvidenceReportView](ofLegal))
+      yield assertTrue(
+        stricterDraft.status == Status.Forbidden,
+        widerDraft.status == Status.Forbidden,
+        movedLegal.status == Status.Forbidden,
+        movedSales.status == Status.Forbidden,
+        ofLegal.status == Status.Created,
+        ofSales.status == Status.Forbidden,
+        stored.status == Status.Ok,
+        forOtherUnit.status == Status.Forbidden,
+        notCleared.status == Status.Forbidden,
+        storedHidden.status == Status.Forbidden
+      )
+    },
+    test("retention rights follow what stands for the document (DMS-155)") {
+      def set(doc: UUID) =
+        call(records, "PUT", s"/api/v1/documents/$doc/retention", Some("""{"rule":"contract-10y"}"""))
+      def canChange(doc: UUID) =
+        call(records, "GET", s"/api/v1/documents/$doc/retention").map(as[DocumentRetentionView](_).canChange)
+      for
+        doc  <- publishedDocument("Aufbewahrung AG")
+        next <- nextVersion(doc.id)
+        valid = doc.current.id
+        _             <- rewrite(next, "Legal", "Confidential")
+        stricterDraft <- set(doc.id)
+        changeable    <- canChange(doc.id)
+        _             <- rewrite(next, "Legal", "Internal") *> rewrite(valid, "Legal", "Confidential")
+        widerDraft    <- set(doc.id)
+        _             <- rewrite(valid, "Legal", "Internal") *> rewrite(next, "Legal", "Confidential")
+        _             <- neverValid(next)
+        afterwards    <- set(doc.id)
+        changeableNow <- canChange(doc.id)
+      yield assertTrue(
+        stricterDraft.status == Status.Forbidden,
+        !changeable,
+        widerDraft.status == Status.Forbidden,
+        afterwards.status == Status.Ok,
+        changeableNow
+      )
+    },
+    test(
+      "a version is destroyed only by someone cleared for it, whatever the latest version says (DMS-155)"
+    ) {
+      def propose(versions: UUID*) =
+        val ids = versions.map(v => s""""$v"""").mkString(",")
+        call(
+          records,
+          "POST",
+          "/api/v1/retention/destruction-proposals",
+          Some(s"""{"versionIds":[$ids],"reason":"Retention of 2020 ended"}""")
+        )
+      def endOfValidity(version: UUID) =
+        ownerQuery {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          sql"""update dms.document_version
+                set status = 'Withdrawn', withdrawn_at = '2010-03-01T10:00:00Z',
+                    status_changed_at = '2010-03-01T10:00:00Z'
+                where id = $version""".update.run()
+        }
+      for
+        doc  <- publishedDocument("Geheim Vernichtung AG")
+        next <- nextVersion(doc.id)
+        valid = doc.current.id
+        _       <- endOfValidity(valid)
+        _       <- rewrite(next, "Legal", "Confidential") *> neverValid(next)
+        list    <- call(records, "GET", "/api/v1/retention/destruction-list").map(as[DestructionListView])
+        secret  <- propose(next)
+        both    <- propose(valid, next)
+        allowed <- propose(valid)
+        proposal = as[DestructionProposalView](allowed)
+        // Meanwhile the version to be destroyed turned out to be confidential: nobody can approve it.
+        _       <- rewrite(valid, "Legal", "Confidential")
+        blocked <- call(
+          records2,
+          "POST",
+          s"/api/v1/retention/destruction-proposals/${proposal.id}/approve",
+          Some("""{"reason":"Checked against the register"}""")
+        )
+        _        <- rewrite(valid, "Legal", "Internal")
+        approved <- call(
+          records2,
+          "POST",
+          s"/api/v1/retention/destruction-proposals/${proposal.id}/approve",
+          Some("""{"reason":"Checked against the register"}""")
+        )
+      yield assertTrue(
+        list.candidates.map(_.versionId).toSet.intersect(Set(valid, next)) == Set(valid, next),
+        list.candidates.filter(c => c.versionId == valid).forall(_.title.isDefined),
+        secret.status == Status.Forbidden,
+        both.status == Status.Forbidden,
+        allowed.status == Status.Created,
+        blocked.status == Status.Forbidden,
+        approved.status == Status.Ok
       )
     },
     test("only auditors and records managers create and read reports") {

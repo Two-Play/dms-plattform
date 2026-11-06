@@ -66,7 +66,7 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
       |  create role dms_app_user login nobypassrls password 'dms-app-test' in role dms_app;
       |end $$""".stripMargin
 
-  final case class Setup(app: Db, released: TemplateId)
+  final case class Setup(app: Db, owner: Db, released: TemplateId)
 
   private val setup = Unsafe.unsafe(implicit u => Promise.unsafe.make[Nothing, Setup](FiberId.None))
 
@@ -129,7 +129,7 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
         )
         .mapError(e => RuntimeException(e.toString))
         .orDie
-      _ <- setup.succeed(Setup(app, released))
+      _ <- setup.succeed(Setup(app, schemaOwner, released))
     yield ZEnvironment(app, appSource)
   )
 
@@ -306,6 +306,35 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
   private def release(user: UserId, hold: UUID, reason: String = "Settled") =
     call(user, "POST", s"/api/v1/legal-holds/$hold/release", Some(s"""{"reason":"$reason"}"""))
 
+  /** Sets what a version says about itself; how it came to say so is not under test. */
+  private def rewrite(version: UUID, confidentiality: String) =
+    val level = s"""{"type":"Selection","code":"$confidentiality"}"""
+    setup.await.flatMap(
+      _.owner.transactSystem(
+        Db.sql {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          sql"""update dms.document_version
+                set field_values = jsonb_set(field_values, '{confidentiality,value}', cast($level as jsonb))
+                where id = $version""".update.run()
+        }
+      )
+    )
+
+  /** Makes `version` one that was approved and withdrawn before it took effect (ADR 0059). */
+  private def neverValid(version: UUID) =
+    setup.await.flatMap(
+      _.owner.transactSystem(
+        Db.sql {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          sql"""update dms.document_version
+                set status = 'Withdrawn', released_at = now(), released_by = ${approver.value},
+                    withdrawn_at = now(), status_changed_at = now(), withdrawn_by = ${approver.value},
+                    withdrawal_reason = 'Wrong metadata'
+                where id = $version""".update.run()
+        }
+      )
+    )
+
   private def auditActions(objectId: UUID): ZIO[Env, Any, List[(String, Option[String])]] =
     setup.await.flatMap(s =>
       s.app.transact(tenantId)(
@@ -407,6 +436,66 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
         !nothing.exists(_.name == "Confidential"),
         !bySecret.legalHold,
         draft.documentCount == 1
+      )
+    },
+    test("the rights on a held document follow what stands for it, not its latest version (DMS-155)") {
+      def add(hold: UUID, doc: UUID) =
+        call(
+          records,
+          "POST",
+          s"/api/v1/legal-holds/$hold/documents",
+          Some(s"""{"reason":"Also this one","documentIds":["$doc"]}""")
+        )
+      def remove(hold: UUID, doc: UUID) =
+        call(
+          records,
+          "POST",
+          s"/api/v1/legal-holds/$hold/documents/$doc/remove",
+          Some("""{"reason":"Added by mistake"}""")
+        )
+      def titleIn(hold: UUID, doc: UUID) =
+        call(records, "GET", s"/api/v1/legal-holds/$hold")
+          .map(as[LegalHoldView](_).documents.toList.flatten.find(_.documentId == doc).flatMap(_.title))
+      def manageable(text: String) =
+        call(records, "POST", "/api/v1/legal-holds/search-preview", Some(s"""{"q":"$text"}"""))
+          .map(as[HoldSearchPreviewView](_).documents.map(_.manageable))
+      for
+        doc  <- validDocument("Vergleich Quartalszahlen")
+        next <- call(
+          author,
+          "POST",
+          s"/api/v1/documents/${doc.id}/versions",
+          Some("""{"changeKind":"Major","reason":"Revised"}""")
+        ).map(as[DocumentVersionView](_).id)
+        valid = doc.current.id
+        // A confidential draft is on its way: its title may be the document's, it still decides.
+        _             <- rewrite(next, "Confidential")
+        stricterDraft <- create(records, hold("Quartal A", List(doc.id)))
+        stricterList  <- manageable("Quartalszahlen")
+        // It is withdrawn before it takes effect: it stays the latest one and has no say any more.
+        _       <- neverValid(next)
+        held    <- create(records, hold("Quartal B", List(doc.id))).map(as[LegalHoldView])
+        shown   <- titleIn(held.id, doc.id)
+        now     <- manageable("Quartalszahlen")
+        removed <- remove(held.id, doc.id)
+        added   <- add(held.id, doc.id)
+        // The valid version itself is what counts: being cleared for the latest one does not help.
+        _            <- rewrite(next, "Internal") *> rewrite(valid, "Confidential")
+        wider        <- create(records, hold("Quartal C", List(doc.id)))
+        widerAdded   <- add(held.id, doc.id)
+        widerRemoved <- remove(held.id, doc.id)
+        hidden       <- titleIn(held.id, doc.id)
+      yield assertTrue(
+        stricterDraft._1 == Status.Forbidden,
+        stricterList == List(false),
+        shown.contains("Vergleich Quartalszahlen"),
+        now == List(true),
+        removed._1 == Status.Ok,
+        added._1 == Status.Ok,
+        wider._1 == Status.Forbidden,
+        widerAdded._1 == Status.Forbidden,
+        widerRemoved._1 == Status.Forbidden,
+        hidden.isEmpty
       )
     },
     test("setting, adding and releasing require a reason (422)") {

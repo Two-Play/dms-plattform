@@ -50,6 +50,26 @@ object Versioning:
           .maxByOption(_.number)
       )
 
+  /** The versions that speak for the document as a whole when a right on the document is decided (DMS-155,
+    * ADR 0072). A version that ended without taking effect has no say: it stays the latest one for good, and
+    * its metadata may be the reason it was stopped (ADR 0059).
+    *
+    * All valid versions, and whatever is still on its way into force: its metadata will stand for the
+    * document, and the document's title may come from it. If a document has none of these, the latest version
+    * that was in force; without one, the latest version.
+    *
+    * Callers ask for the right on every one of them, so a version cannot widen what another one restricts.
+    */
+  def governing(versions: List[DocumentVersion]): List[DocumentVersion] =
+    val standing = versions.filter(v => isValid(v.status) || isOpen(v.status) || v.status == Approved)
+    if standing.nonEmpty then standing
+    else
+      versions
+        .filter(v => v.publishedAt.isDefined && v.status != Destroyed)
+        .maxByOption(_.number)
+        .orElse(versions.lastOption)
+        .toList
+
   /** The number of the first version of a document. */
   val first: VersionNo = VersionNo.Initial
 

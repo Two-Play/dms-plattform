@@ -5,13 +5,7 @@ import dms.archive.core.{CleanupReport, DestructionService, ObjectCleanup}
 import dms.authz.{AccessDenied, Action, Authorizer, ConfigurationArea, Policy, Resource, Subject}
 import dms.db.{Db, DbError}
 import dms.documents.{ClassRetention, DocumentStatus, DocumentVersion, FieldEntry, ValueOrigin, Versioning}
-import dms.documents.core.{
-  DocumentClassService,
-  DocumentDetails,
-  DocumentError,
-  DocumentService,
-  MetadataError
-}
+import dms.documents.core.{DocumentClassService, DocumentError, DocumentService, MetadataError}
 import dms.documents.metadata.MetadataValue
 import dms.identity.{Authenticator, Principal}
 import dms.kernel.DocumentId
@@ -358,7 +352,9 @@ object RetentionApi:
               for
                 list <- service.destructionList
                 ids     = req.versionIds.getOrElse(Nil)
-                touched = list.candidates.filter(c => ids.contains(c.versionId)).map(_.documentId).distinct
+                touched = list.candidates
+                  .filter(c => ids.contains(c.versionId))
+                  .map(c => c.documentId -> c.versionId)
                 _ <- checkAll(authz, subject, documents, touched, Action.ManageRetention, archived = false)
                 created <- service.propose(ids, reason, p.userId)
                 view    <- proposalView(subject, documents, created)
@@ -440,7 +436,7 @@ object RetentionApi:
                   authz,
                   subject,
                   documents,
-                  open.items.map(_.documentId).distinct,
+                  open.items.map(i => i.documentId -> i.versionId),
                   Action.Destroy,
                   true
                 )
@@ -590,10 +586,12 @@ object RetentionApi:
                 _       <- ZIO.when(details.gone)(
                   ZIO.fail(DocumentApi.discardedDocument(id, details))
                 )
-                latest <- ZIO
-                  .fromOption(details.versions.lastOption)
-                  .orElseFail(DocumentError.NotFound(s"document $id does not exist"))
-                _     <- ctx.check(Action.ManageRetention, DocumentApi.resource(p.tenantId, details, latest))
+                _ <- ZIO.when(details.versions.isEmpty)(
+                  ZIO.fail(DocumentError.NotFound(s"document $id does not exist"))
+                )
+                _ <- ZIO.foreachDiscard(DocumentApi.governing(p.tenantId, details))(
+                  ctx.check(Action.ManageRetention, _)
+                )
                 rules <- destruction.rules.mapError(fromDestruction)
                 rule = req.rule.map(_.trim).filter(_.nonEmpty)
                 _ <- ZIO.foreachDiscard(rule.filterNot(k => rules.exists(_.key == k)))(k =>
@@ -658,10 +656,9 @@ object RetentionApi:
             .mapError(DocumentService.metadataError)
           documentRule <- ctx.service.documentRetentionRule(id)
           manager      <- ctx.allowed(Action.ManageRetention, Resource(p.tenantId))
-          onDoc        <- ctx.allowed(
-            Action.ManageRetention,
-            DocumentApi.resource(p.tenantId, details, details.versions.lastOption.getOrElse(version))
-          )
+          onDoc        <- ZIO
+            .foreach(DocumentApi.governing(p.tenantId, details))(ctx.allowed(Action.ManageRetention, _))
+            .map(_.forall(identity))
         yield documentRetentionView(version, classRule, documentRule, rules, manager && onDoc)
       }
     yield view
@@ -761,30 +758,34 @@ object RetentionApi:
         }
     yield subject
 
-  /** The resource of a document for retention decisions: its latest version; for `Destroy` as archived (the
-    * destruction archives a superseded or withdrawn version first).
+  /** As the destruction archives a superseded or withdrawn version first, `Destroy` is decided as archived.
     */
-  private def resourceOf(subject: Subject, details: DocumentDetails, archived: Boolean): Option[Resource] =
-    details.versions.lastOption.map { latest =>
-      val r = DocumentApi.resource(subject.tenantId, details, latest)
-      if archived then r.copy(status = Some(DocumentStatus.Archived)) else r
-    }
+  private def asArchived(resource: Resource): Resource =
+    resource.copy(status = Some(DocumentStatus.Archived))
 
+  /** The right on versions that are to be destroyed, given with their documents: on the document, and on each
+    * version, since that is what goes (DMS-155, ADR 0072). The document alone would let a version be
+    * destroyed by someone who is not cleared for it.
+    */
   private def checkAll(
       authz: Authorizer,
       subject: Subject,
       documents: DocumentService,
-      ids: List[DocumentId],
+      versions: List[(DocumentId, UUID)],
       action: Action,
       archived: Boolean
   ): IO[Failure, Unit] =
-    ZIO.foreachDiscard(ids)(id =>
-      documents
-        .get(id)
-        .flatMap(details =>
-          ZIO.foreachDiscard(resourceOf(subject, details, archived))(authz.check(subject, action, _))
+    ZIO.foreachDiscard(versions.groupMap(_._1)(_._2).toList.sortBy(_._1.value)) { (id, versionIds) =>
+      documents.get(id).flatMap { details =>
+        val resources = DocumentApi.governing(subject.tenantId, details) ++
+          details.versions
+            .filter(v => versionIds.contains(v.id))
+            .map(DocumentApi.resource(subject.tenantId, details, _))
+        ZIO.foreachDiscard(resources)(r =>
+          authz.check(subject, action, if archived then asArchived(r) else r)
         )
-    )
+      }
+    }
 
   /** The documents among `ids` the caller may act on with `action` (without failing). */
   private def permitted(
@@ -799,8 +800,9 @@ object RetentionApi:
         documents
           .get(id)
           .map(details =>
-            resourceOf(subject, details, archived = false)
-              .exists(r => Policy.decide(subject, action, r, now).isPermitted)
+            DocumentApi
+              .governing(subject.tenantId, details)
+              .forall(r => Policy.decide(subject, action, r, now).isPermitted)
           )
           .map(id -> _)
       )

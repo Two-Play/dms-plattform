@@ -12,9 +12,10 @@ import '@dms-document/document.css'
 
 /**
  * The rendered content of a version (DMS-112): drafts and versions in review or approval with the draft
- * marking from their saved values, approved versions from their frozen package. The HTML comes from the
- * backend's renderer, which escapes all text, and is styled by the shared document stylesheet. The box
- * scrolls on its own so the metadata next to it stays in view.
+ * marking from their saved values, approved versions from their frozen package, one withdrawn before it
+ * took effect with its own marking (ADR 0072). The HTML comes from the backend's renderer, which escapes
+ * all text, and is styled by the shared document stylesheet. The box scrolls on its own so the metadata
+ * next to it stays in view.
  */
 export function VersionContent({
   documentId,
@@ -25,6 +26,7 @@ export function VersionContent({
 }) {
   const client = useApiClient()
   const content = useQuery(versionHtmlQuery(client, documentId, version.id))
+  const marking = content.data?.draftMarking ?? content.data?.neverValidMarking
 
   return (
     <Card>
@@ -37,9 +39,7 @@ export function VersionContent({
             </CardDescription>
           )}
         </div>
-        {content.data?.draftMarking && (
-          <Badge variant="destructive">{content.data.draftMarking}</Badge>
-        )}
+        {marking && <Badge variant="destructive">{marking}</Badge>}
       </CardHeader>
       <CardContent>
         {content.isPending && <LoadingState label={t('docs.view.loading')} rows={8} />}

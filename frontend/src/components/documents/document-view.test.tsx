@@ -175,9 +175,11 @@ const ok = (data: unknown, status = 200, headers: Record<string, string> = {}): 
   Promise.resolve({ data, error: undefined, response: new Response(null, { status, headers }) })
 
 let current: DocumentVersionView
+let neverValid: string | undefined
 
 beforeEach(() => {
   current = published
+  neverValid = undefined
 })
 
 afterEach(() => {
@@ -196,7 +198,10 @@ function renderAt(path: string) {
         return ok(current.id === 'v1' ? [published] : [published, inReview])
       case '/api/v1/documents/{id}/versions/{versionId}/html': {
         const v = init?.params?.path?.versionId === 'v2' ? inReview : published
-        return ok(html(v, v === inReview))
+        return ok({
+          ...html(v, v === inReview),
+          ...(neverValid ? { neverValidMarking: neverValid } : {}),
+        })
       }
       case '/api/v1/documents/{id}/versions/{versionId}/rendition':
       case '/api/v1/documents/{id}/versions/{versionId}/draft.pdf':
@@ -392,6 +397,16 @@ describe('Document page: a version in review', () => {
       },
       parseAs: 'blob',
     })
+  })
+
+  it('marks the wording of a version withdrawn before it took effect (ADR 0072)', async () => {
+    neverValid = 'Withdrawn, never valid'
+    renderAt(`/documents/${documentId}`)
+
+    expect(await screen.findByText('Withdrawn, never valid')).toBeInTheDocument()
+    expect(
+      screen.getByText('The wording as approved, rendered from the frozen version.'),
+    ).toBeInTheDocument()
   })
 
   it('opens the published version from the version history', async () => {

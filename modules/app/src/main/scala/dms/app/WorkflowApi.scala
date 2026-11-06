@@ -1,11 +1,21 @@
 package dms.app
 
-import dms.authz.{AccessDenied, Action, Authorizer, ConfigurationArea, Policy, Resource, Role, Subject}
+import dms.authz.{
+  AccessDenied,
+  Action,
+  Authorizer,
+  ConfigurationArea,
+  Policy,
+  Resource,
+  Role,
+  RoleAssignments,
+  Subject
+}
 import dms.db.{Db, DbError}
-import dms.documents.DocumentStatus
+import dms.documents.{DocumentStatus, DocumentVersion}
 import dms.documents.core.{DocumentDetails, DocumentService}
 import dms.identity.{Authenticator, Principal}
-import dms.kernel.DocumentId
+import dms.kernel.{DocumentId, UserId}
 import dms.workflow.*
 import dms.workflow.core.{ApprovalWorkflow, Rules, WorkflowError}
 import sttp.model.StatusCode
@@ -197,11 +207,60 @@ private[app] object Delegation:
   /** `subject` with the assignments of the lane's role of whom they approved for as deputy (DMS-145, ADR
     * 0070), for a decision on that version only. [[Policy]] still checks validity and scope of each of them.
     */
-  def forApproval(authz: Authorizer, subject: Subject, approval: DeputyApproval): IO[WorkflowError, Subject] =
+  def forApproval(
+      assignments: RoleAssignments,
+      subject: Subject,
+      approval: DeputyApproval
+  ): IO[WorkflowError, Subject] =
     scala.util.Try(Role.valueOf(approval.role)).toOption match
       case None       => ZIO.succeed(subject)
       case Some(role) =>
-        authz.onBehalfOf(subject, approval.principal, Set(role)).mapError(WorkflowError.Database(_))
+        Authorizer
+          .onBehalfOf(assignments, subject, approval.principal, Set(role))
+          .mapError(WorkflowError.Database(_))
+
+  /** Whether `subject` may withdraw `v`: `None` if not, `Some(None)` on their own right, `Some(Some(p))` if
+    * their right rests on a vote cast as deputy of `p` (DMS-145, ADR 0070). The dialog, the withdrawal and
+    * the failure notice of a dead publication all ask here, so what a person is told is what they can do.
+    *
+    * Roles held in the document's scope, and votes of their own, are their own right, as in ADR 0059. A vote
+    * cast for someone else counts with the role the subject holds in that scope, and while the deputyship
+    * stands (`ApprovalWorkflow.standingApprovals`) with the principal's scope as well: the task that gave
+    * them this scope is done. Then the audit trail names the principal, the latest one for several (as the
+    * approval does, ADR 0028). Nobody else gains anything: only the subject's votes on this version count,
+    * and the extended subject decides this withdrawal alone.
+    */
+  def withdrawalRight(
+      assignments: RoleAssignments,
+      workflow: ApprovalWorkflow,
+      subject: Subject,
+      details: DocumentDetails,
+      v: DocumentVersion,
+      cases: List[CaseDetails]
+  ): IO[WorkflowError, Option[Option[UserId]]] =
+    val approved =
+      DocumentApi.withdrawalResource(subject.tenantId, details, v, DocumentApi.approversOf(cases, v.id))
+    val asDeputy = Rules.deputyApprovals(cases, v.id, subject.userId)
+    val ownVote  = DocumentApi.approvedInPerson(cases, v.id, subject.userId)
+    val ownRight =
+      if asDeputy.isEmpty || ownVote then approved
+      else approved.copy(approvedBy = approved.approvedBy - subject.userId)
+    Clock.instant.flatMap { now =>
+      if Policy.decide(subject, Action.Withdraw, ownRight, now).isPermitted then ZIO.some(None)
+      else if asDeputy.isEmpty then ZIO.none
+      else
+        workflow.standingApprovals(cases, details.document.id, v.id, subject.userId).flatMap { standing =>
+          ZIO.collectFirst(asDeputy) { approval =>
+            ZIO
+              .when(standing.contains(approval))(forApproval(assignments, subject, approval))
+              .map(actor =>
+                Option.when(
+                  Policy.decide(actor.getOrElse(subject), Action.Withdraw, approved, now).isPermitted
+                )(Some(approval.principal))
+              )
+          }
+        }
+    }
 
   /** The versions the caller may read because they approved them as deputy and the deputyship stands
     * (DMS-145, ADR 0070): without this the version they can withdraw would be out of their sight, since the
@@ -209,7 +268,7 @@ private[app] object Delegation:
     * its date or stays a version that never took effect; the other versions of the document stay as they are.
     */
   def approvedAsDeputy(
-      authz: Authorizer,
+      assignments: RoleAssignments,
       workflow: ApprovalWorkflow,
       subject: Subject,
       details: DocumentDetails,
@@ -223,7 +282,7 @@ private[app] object Delegation:
       .foreach(waiting) { v =>
         for
           standing <- workflow.standingApprovals(cases, details.document.id, v.id, subject.userId)
-          actor    <- ZIO.foldLeft(standing)(subject)(forApproval(authz, _, _))
+          actor    <- ZIO.foldLeft(standing)(subject)(forApproval(assignments, _, _))
           now      <- Clock.instant
           resource = DocumentApi
             .resource(subject.tenantId, details, v, Map.empty)
@@ -505,7 +564,7 @@ object WorkflowApi:
       for
         now      <- Clock.instant
         actor    <- Delegation.subject(authz, subject, cases.flatMap(_.tasks))
-        asDeputy <- Delegation.approvedAsDeputy(authz, workflow, subject, details, cases)
+        asDeputy <- Delegation.approvedAsDeputy(authz.assignments, workflow, subject, details, cases)
         visible = details.versions.filter(v =>
           asDeputy(v.id) ||
             Policy

@@ -392,17 +392,26 @@ final class PlatformNotificationEvents(
             // Neither the owner nor an approver is always able to retry or withdraw (both depend on the roles
             // held), so the text must not promise it; the same goes for reading the version on the page.
             personal = (user: UserId, extra: Option[(String, String)]) =>
-              subjectOf(event.tenant, user).map(subject =>
-                notice(
-                  List(user),
-                  List(
-                    "audience" -> NotificationTemplates.Audience.Owner,
-                    "canRetry" -> may(subject, retry).toString,
-                    "canRead"  -> may(subject, Action.ReadDocument).toString,
-                    // Withdrawing is the way out if a retry cannot help; only a publication has it (ADR 0061).
-                    "canWithdraw" -> may(subject, Action.Withdraw).toString
-                  ) ++ extra*
-                )
+              for
+                subject <- subjectOf(event.tenant, user)
+                // A deputy's vote gives what it gives on the page, while the deputyship stands (ADR 0070, 0072).
+                asDeputy <- ZIO
+                  .foreach(workflow)(Delegation.approvedAsDeputy(roles, _, subject, d, cases))
+                  .mapBoth(_.describe, _.getOrElse(Set.empty[UUID]))
+                // Withdrawing is the way out if a retry cannot help; only a publication has it (ADR 0061).
+                canWithdraw <- ZIO
+                  .foreach(workflow.filterNot(_ => rendition))(
+                    Delegation.withdrawalRight(roles, _, subject, d, v, cases).map(_.isDefined)
+                  )
+                  .mapBoth(_.describe, _.getOrElse(may(subject, Action.Withdraw)))
+              yield notice(
+                List(user),
+                List(
+                  "audience"    -> NotificationTemplates.Audience.Owner,
+                  "canRetry"    -> may(subject, retry).toString,
+                  "canRead"     -> (asDeputy(v.id) || may(subject, Action.ReadDocument)).toString,
+                  "canWithdraw" -> canWithdraw.toString
+                ) ++ extra*
               )
             answerable = (responsible :: approvers.toList.sortBy(_.value)).distinct.filterNot(onList)
             direct  <- ZIO.foreach(answerable)(personal(_, None))
@@ -572,12 +581,15 @@ final class PolicyNotificationDocuments(
             actor    <- Delegation
               .subject(authz, Subject(user, tenant, held, memberOf), cases.flatMap(_.tasks))
               .mapError(_.toString)
+            asDeputy <- Delegation
+              .approvedAsDeputy(roles, workflow, Subject(user, tenant, held, memberOf), details, cases)
+              .mapError(_.toString)
             now <- Clock.instant
             participants = DocumentApi.participantsOf(cases)
             candidates   = details.versions.filter(v => ref.versionId.forall(_ == v.id))
             readable     = candidates.filter { v =>
               val resource = DocumentApi.resource(tenant, details, v, participants)
-              actions.exists(Policy.decide(actor, _, resource, now).isPermitted)
+              asDeputy(v.id) || actions.exists(Policy.decide(actor, _, resource, now).isPermitted)
             }
           yield readable.lastOption.map(v =>
             DocumentFacts(DocumentRenditions.title(details, v), Some(v.label), details.document.number)
