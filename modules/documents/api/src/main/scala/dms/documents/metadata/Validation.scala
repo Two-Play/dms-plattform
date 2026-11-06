@@ -29,18 +29,28 @@ enum IssueKind:
     */
   case ComputedFieldMissing(computed: List[ComputedFieldName])
 
+  /** A later version is less confidential than the version it started from (DMS-158, ADR 0074). */
+  case ConfidentialityLowered(basis: String)
+
+  /** A later version names access groups the version it started from does not have, and the caller is not the
+    * document's owner (DMS-158, ADR 0074).
+    */
+  case AccessGroupsWidened(groups: List[String])
+
   def code: String = this match
-    case MissingRequired(_)      => "missing_required"
-    case UnknownField            => "unknown_field"
-    case WrongType(_, _)         => "wrong_type"
-    case OutOfRange(_)           => "out_of_range"
-    case PatternMismatch(_)      => "pattern_mismatch"
-    case UnknownOption(_)        => "unknown_option"
-    case RetiredOption(_)        => "retired_option"
-    case UnknownCurrency(_)      => "unknown_currency"
-    case NotEditable             => "not_editable"
-    case NoRetentionRule         => "no_retention_rule"
-    case ComputedFieldMissing(_) => "computed_field_missing"
+    case MissingRequired(_)        => "missing_required"
+    case UnknownField              => "unknown_field"
+    case WrongType(_, _)           => "wrong_type"
+    case OutOfRange(_)             => "out_of_range"
+    case PatternMismatch(_)        => "pattern_mismatch"
+    case UnknownOption(_)          => "unknown_option"
+    case RetiredOption(_)          => "retired_option"
+    case UnknownCurrency(_)        => "unknown_currency"
+    case NotEditable               => "not_editable"
+    case NoRetentionRule           => "no_retention_rule"
+    case ComputedFieldMissing(_)   => "computed_field_missing"
+    case ConfidentialityLowered(_) => "confidentiality_lowered"
+    case AccessGroupsWidened(_)    => "access_groups_widened"
 
   def message: String = this match
     case MissingRequired(status)     => s"The field is required in status $status."
@@ -57,6 +67,10 @@ enum IssueKind:
     case ComputedFieldMissing(computed) =>
       val names = computed.map(c => s"'${c.label}'").mkString(", ")
       s"The document cannot be approved without this value; these computed fields need it: $names."
+    case ConfidentialityLowered(basis) =>
+      s"A new version cannot be less confidential than the version it started from ($basis)."
+    case AccessGroupsWidened(groups) =>
+      s"Only the document's owner can add access groups: ${groups.mkString(", ")}."
 
 /** A computed field of a template by its stable key and the name people read: its label, otherwise its key.
   */

@@ -274,6 +274,30 @@ object PolicySpec extends ZIOSpecDefault:
         Policy.clearedFor(reader, confidential.copy(confidentiality = Confidentiality.Internal))
       )
     },
+    test("starting a version needs clearance for the version it starts from (DMS-158)") {
+      // What `DocumentApi.versionStart` hands over: the base version as a draft, with its own author and owner.
+      val base = document(Draft).copy(
+        authorId = Some(other),
+        ownerId = Some(other),
+        confidentiality = Confidentiality.Confidential,
+        allowedGroups = Set("legal")
+      )
+      val strict  = base.copy(confidentiality = Confidentiality.StrictlyConfidential)
+      val author  = subjectWith(Author)
+      val cleared = author.copy(groups = Set("legal"))
+      assertTrue(
+        !Policy.decide(author, EditDraft, base, now).isPermitted,
+        !Policy.decide(author, EditDraft, strict, now).isPermitted,
+        Policy.decide(cleared, EditDraft, base, now).isPermitted,
+        Policy.decide(cleared, EditDraft, strict, now).isPermitted,
+        // Being the author of the draft to come would pass: that is why the resource must not say so.
+        Policy.decide(author, EditDraft, base.copy(authorId = Some(user)), now).isPermitted,
+        Policy.decide(author, EditDraft, base.copy(ownerId = Some(user)), now).isPermitted,
+        Policy
+          .decide(author, EditDraft, base.copy(confidentiality = Confidentiality.Internal), now)
+          .isPermitted
+      )
+    },
     test("a template designer cannot release a template version they created or changed") {
       val designer = subjectWith(TemplateDesigner)
       val version  = base(ReleaseTemplate)

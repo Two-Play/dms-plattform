@@ -84,13 +84,7 @@ object DocumentResource:
       .flatMap(c => Try(Confidentiality.valueOf(c)).toOption)
       .getOrElse(Confidentiality.Internal)
 
-  def allowedGroups(values: Map[String, MetadataValue]): Set[String] =
-    def texts(value: MetadataValue): List[String] = value match
-      case MetadataValue.Text(t)      => List(t)
-      case MetadataValue.Selection(c) => List(c)
-      case MetadataValue.Many(vs)     => vs.flatMap(texts)
-      case _                          => Nil
-    values.get(AllowedGroupsField).toList.flatMap(texts).map(_.trim).filter(_.nonEmpty).toSet
+  def allowedGroups(values: Map[String, MetadataValue]): Set[String] = CoreFields.allowedGroups(values)
 
   private def text(values: Map[String, MetadataValue], key: String): Option[String] =
     values.get(key).collect {

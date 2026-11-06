@@ -49,7 +49,8 @@ object WordFilling:
         )
       ),
       Some("author" -> name(v.createdBy)),
-      details.document.ownerId.map(o => "owner" -> name(o)),
+      // What the version names: the document gets it only when the version takes effect (ADR 0074).
+      v.namedOwner.orElse(details.document.ownerId).map(o => "owner" -> name(o)),
       metadata.get("organizationalUnit").map("issuingUnit" -> _),
       details.profile.classPath.lastOption.map(c => "class" -> c.value),
       approved.map(a => "approvedAt" -> instant(a.at)),

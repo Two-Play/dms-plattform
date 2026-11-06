@@ -56,6 +56,33 @@ object CoreFields:
       case _                             => false
     }
 
+  /** Confidentiality levels from the most open to the most restricted (business concept 2.3). */
+  val ConfidentialityLevels: List[String] = List("Public", "Internal", "Confidential", "StrictlyConfidential")
+
+  /** The confidentiality level of `values`; missing or unknown values count as `Internal`, as for access. */
+  def confidentialityLevel(values: Map[String, MetadataValue]): String =
+    texts(values.getOrElse(Confidentiality, MetadataValue.Many(Nil))).headOption
+      .filter(ConfidentialityLevels.contains)
+      .getOrElse("Internal")
+
+  /** Whether `after` is less restricted than `before` (DMS-158, ADR 0074). */
+  def lowersConfidentiality(
+      before: Map[String, MetadataValue],
+      after: Map[String, MetadataValue]
+  ): Boolean =
+    def rank(level: String) = ConfidentialityLevels.indexOf(level)
+    rank(confidentialityLevel(after)) < rank(confidentialityLevel(before))
+
+  /** The keys of the access groups named in `values`. */
+  def allowedGroups(values: Map[String, MetadataValue]): Set[String] =
+    values.get(AllowedGroups).toList.flatMap(texts).map(_.trim).filter(_.nonEmpty).toSet
+
+  private def texts(value: MetadataValue): List[String] = value match
+    case MetadataValue.Text(t)      => List(t)
+    case MetadataValue.Selection(c) => List(c)
+    case MetadataValue.Many(vs)     => vs.flatMap(texts)
+    case _                          => Nil
+
   /** Fields that are required because of other values: [[AllowedGroups]] for a restricted version from the
     * status on in which the confidentiality itself is required (review), so that a confidential version
     * cannot enter the workflow without anyone besides author and owner being allowed to see it.

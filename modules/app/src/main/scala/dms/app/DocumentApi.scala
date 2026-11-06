@@ -595,7 +595,10 @@ object DocumentApi:
           "request and computed fields of the template cannot be changed (422); versions in review or later " +
           "cannot be changed (409), nor can a draft that has moved past `expectedWorkingState` (409). Values " +
           "taken over from a business system (origin System, e.g. the partner master) keep their origin; a " +
-          "different value for them is rejected (422 `not_editable`)."
+          "different value for them is rejected (422 `not_editable`). A first version sets owner and title of the " +
+          "document; a later version keeps them in its values until it is published. A later version cannot be " +
+          "less confidential than the version it started from (422 `confidentiality_lowered`, also if the field " +
+          "is left out), and only the document's owner can add access groups (422 `access_groups_widened`)."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -624,9 +627,11 @@ object DocumentApi:
       .out(jsonBody[DocumentVersionView])
       .description(
         "Submits the draft for review and starts the workflow of the document class (or the next round after " +
-          "a return). Blocked while fields required in review are missing (422 `incomplete` with issues) and " +
+          "a return). Blocked while fields required in review are missing (422 `incomplete` with issues), " +
           "while the content breaks the edit rules of the template (422 `unauthorized_deviations`: one issue " +
-          "per violation, `field` is the section id, `label` its title, `code` the kind of violation)."
+          "per violation, `field` is the section id, `label` its title, `code` the kind of violation) and while " +
+          "a later version is less confidential than the version it started from (422 " +
+          "`confidentiality_lowered`)."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -652,7 +657,9 @@ object DocumentApi:
           "workflow of the class), Minor for an editorial correction (on submission the " +
           "owner confirms it in a shortened workflow, and an automatic comparison warns in `editorialCheck` if " +
           "more text changed than the configured threshold). Both need a change summary in `reason` (422 if " +
-          "empty, DMS-126). 409 while a version is open or an approved version waits for its valid-from date."
+          "empty, DMS-126). 403 unless the caller may edit drafts and is cleared for the valid version: its " +
+          "author, the document's owner or in one of its access groups, if it is confidential. 409 while a " +
+          "version is open or an approved version waits for its valid-from date."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -670,12 +677,7 @@ object DocumentApi:
                 .orElseFail(
                   DocumentError.Conflict("only a document with a valid version can get a new version")
                 )
-              // The caller becomes the author of a draft of this document.
-              _ <- ctx.check(
-                Action.EditDraft,
-                resource(p, details, base)
-                  .copy(status = Some(DocumentStatus.Draft), authorId = Some(p.userId))
-              )
+              _       <- ctx.check(Action.EditDraft, versionStart(p.tenantId, details, base))
               created <- ctx.service
                 .newVersion(DocumentId(id), kind, req.reason, p.userId, req.requiresAcknowledgement)
             yield versionViewIn(details.copy(versions = details.versions :+ created), ctx.service.settings)(
@@ -1081,10 +1083,7 @@ object DocumentApi:
       case None       => ZIO.none
       case Some(base) =>
         ctx
-          .allowed(
-            Action.EditDraft,
-            resource(p, details, base).copy(status = Some(DocumentStatus.Draft), authorId = Some(p.userId))
-          )
+          .allowed(Action.EditDraft, versionStart(p.tenantId, details, base))
           .map(allowed =>
             Option.when(allowed)(
               if details.open.isDefined then Some("OpenVersion")
@@ -1193,6 +1192,17 @@ object DocumentApi:
 
   private def owner(values: Map[String, MetadataValue]): Option[UserId] =
     values.get("owner").collect { case MetadataValue.PersonRef(u) => UserId(u) }
+
+  /** The resource starting a new version from `base` is decided on: `base` as a draft, because that is what
+    * the action creates. Author, owner and groups stay those of `base`: the draft holds its content, so the
+    * caller needs clearance for it (DMS-158, ADR 0074). Becoming the draft's author must not count here.
+    */
+  private[app] def versionStart(
+      tenant: dms.kernel.TenantId,
+      details: DocumentDetails,
+      base: DocumentVersion
+  ): Resource =
+    resource(tenant, details, base).copy(status = Some(DocumentStatus.Draft))
 
   /** The resource of a document to be created by the caller from a template of `profile`'s class. */
   private[app] def creationResource(
