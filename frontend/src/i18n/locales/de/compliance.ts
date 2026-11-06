@@ -89,6 +89,39 @@ export const compliance: Translation<typeof en.compliance> = {
   withoutOwnerDetail: 'Gültige Dokumente, für die niemand verantwortlich ist',
   noWithoutOwner: 'Keine Dokumente ohne Verantwortliche/n.',
   noWithoutOwnerText: 'Jedes gültige Dokument dieser Auswahl hat eine/n Verantwortliche/n.',
+  orphaned: 'Verwaiste Dokumente',
+  orphanedDetail:
+    'Gültige Dokumente, deren Verantwortliche/r die Rolle dafür nicht mehr aktiv innehat',
+  noOrphaned: 'Keine verwaisten Dokumente.',
+  noOrphanedText:
+    'Die Verantwortlichen der gültigen Dokumente dieser Auswahl haben ihre Rolle aktiv inne.',
+  verification: {
+    title: 'Prüfung der Audit-Kette',
+    loading: 'Prüfung der Audit-Kette wird geladen',
+    neverRan:
+      'Die Prüfung ist noch nie gelaufen, über die Audit-Kette ist daher noch nichts bekannt.',
+    intact: 'Audit-Kette intakt',
+    violated: 'Verletzung der Audit-Kette gefunden',
+    lastRun: 'Letzte Prüfung: {date}',
+    entries: plural({ one: '{entries} Eintrag geprüft', other: '{entries} Einträge geprüft' }),
+    position: 'an Position {position}',
+    since: '(gefunden seit {date})',
+    violatedHint:
+      'Nachweisberichte weisen das aus, bis eine Prüfung die Kette wieder als intakt bestätigt. Compliance-Beauftragte und Mandantenadministration sind informiert.',
+    stale:
+      'Dieses Ergebnis ist veraltet: Die letzte Prüfung ist älter als {days} Tage, die tägliche Prüfung ist also nicht gelaufen.',
+    noCheckpoints:
+      'Die unveränderlichen Checkpoints konnten nicht gelesen werden: Diese Prüfung umfasst nur Verkettung, Hashes und Zeitstempel.',
+    kinds: {
+      MissingEntry: 'Ein Eintrag fehlt',
+      BrokenLink: 'Die Verkettung zweier Einträge ist unterbrochen',
+      HashMismatch: 'Ein Eintrag passt nicht zu seinem Hash',
+      UnsupportedFormat: 'Ein Eintrag hat ein unbekanntes Format',
+      AnchorMismatch: 'Ein Zeitstempel passt nicht',
+      CheckpointMismatch: 'Ein unveränderlicher Checkpoint passt nicht',
+      other: 'Die Kette ist beschädigt',
+    },
+  },
   deviations: 'Abweichungen von Standardklauseln',
   deviationsDetail: plural({
     one: '{count} Version weicht von gesperrten Abschnitten ihrer Vorlage ab',

@@ -132,6 +132,14 @@ object NotificationTemplates:
       */
     val Scoped = "scoped"
 
+  /** The notice of a violation of the audit chain (ADR 0080). */
+  val ChainViolation = "audit.chain-violation"
+
+  /** Who a notice of a violation is for: only compliance officers can open the cockpit. */
+  object ChainAudience:
+    val Compliance = "compliance"
+    val Admin      = "admin"
+
   /** Kinds this module has texts for. */
   val Kinds: Set[String] = Set(
     "workflow.task-assigned",
@@ -160,7 +168,8 @@ object NotificationTemplates:
     "failure.publication",
     "publication.withdrawn",
     "legal-hold.created",
-    "legal-hold.released"
+    "legal-hold.released",
+    ChainViolation
   )
 
   def render(
@@ -366,6 +375,24 @@ object NotificationTemplates:
           bodyDe = s"Der Legal Hold „${p("name")}“ wurde aufgehoben.",
           bodyEn = s"The legal hold “${p("name")}” was released."
         )(Some("/legal-holds"))
+      case ChainViolation =>
+        // Nothing of what was found: a mail leaves the platform, and the position stays in the cockpit.
+        val officer = params.get("audience").contains(ChainAudience.Compliance)
+        r(
+          de = s"${reminderSubjectDe}Verletzung der Audit-Kette gefunden",
+          en = s"${reminderSubjectEn}Violation of the audit chain found"
+        )(
+          bodyDe = s"${stillOpenSinceDe("foundAt")}Die regelmäßige Prüfung hat am ${date("foundAt")} eine Verletzung der " +
+            "Audit-Kette gefunden. Nachweisberichte weisen das aus, bis eine Prüfung die Kette wieder als " +
+            "intakt bestätigt. " +
+            (if officer then "Den Stand der Prüfung zeigt das Compliance-Cockpit."
+             else "Bitte klären Sie das weitere Vorgehen mit den Compliance-Beauftragten."),
+          bodyEn =
+            s"${stillOpenSinceEn("foundAt")}The regular verification found a violation of the audit chain on " +
+              s"${date("foundAt")}. Evidence reports state it until a verification finds the chain intact again. " +
+              (if officer then "The compliance cockpit shows the state of the verification."
+               else "Please agree on the next steps with the compliance officers.")
+        )(Option.when(officer)("/compliance"))
       case other =>
         r(de = "Neue Benachrichtigung", en = "New notification")(
           bodyDe = s"Es gibt eine Neuigkeit ($other)${docSuffixDe}.",
@@ -592,8 +619,11 @@ object NotificationTemplates:
 
     def reminderSubjectDe: String = if reminder then "Erinnerung: " else ""
     def reminderSubjectEn: String = if reminder then "Reminder: " else ""
-    def stillOpenDe: String       = if reminder then s"Seit ${date("failedAt")} noch offen: " else ""
-    def stillOpenEn: String       = if reminder then s"Still open since ${date("failedAt")}: " else ""
+    def stillOpenDe: String       = stillOpenSinceDe("failedAt")
+    def stillOpenEn: String       = stillOpenSinceEn("failedAt")
+
+    def stillOpenSinceDe(key: String): String = if reminder then s"Seit ${date(key)} noch offen: " else ""
+    def stillOpenSinceEn(key: String): String = if reminder then s"Still open since ${date(key)}: " else ""
 
     /** A deputy is told and decides nothing (ADR 0064); what they may do comes from their own roles. */
     def failureDeputyDe: String =

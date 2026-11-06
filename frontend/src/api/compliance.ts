@@ -12,6 +12,7 @@ import { attachmentName } from './search'
  * not acknowledged a version are purpose-limited: they need a stated purpose and reason, which the
  * backend records in the audit trail. Officers remind or escalate overdue reviews from here and
  * export every list; the backend builds the file, so that it can record the export (ADR 0077).
+ * The cockpit also shows whether the regular verification of the audit chain ran (ADR 0080).
  */
 
 export type ComplianceOverview = components['schemas']['ComplianceOverviewView']
@@ -20,6 +21,8 @@ export type VersionRate = components['schemas']['VersionRateView']
 export type OpenAcknowledgements = components['schemas']['OpenAcknowledgementsView']
 export type RateFigures = components['schemas']['RateView']
 export type UnownedDocument = components['schemas']['UnownedDocumentView']
+export type OrphanedDocument = components['schemas']['OrphanedDocumentView']
+export type AuditVerification = components['schemas']['AuditVerificationView']
 export type DeviationFigure = components['schemas']['DeviationFigureView']
 export type ComplianceNotice = components['schemas']['ComplianceNoticeView']
 
@@ -31,6 +34,7 @@ export type ComplianceList =
   | 'overdue-reviews'
   | 'acknowledgements'
   | 'documents-without-owner'
+  | 'orphaned-documents'
   | 'deviations'
   | 'four-eyes-findings'
 
@@ -115,6 +119,42 @@ export function unownedDocumentsQuery(client: ApiClient, unit: GroupFilter) {
           response,
           error,
           `Loading the documents without owner failed with HTTP ${response.status}`,
+        )
+      }
+      return data
+    },
+  })
+}
+
+export function orphanedDocumentsQuery(client: ApiClient, unit: GroupFilter, owner: GroupFilter) {
+  return queryOptions({
+    queryKey: ['compliance', 'orphaned-documents', unit ?? null, owner ?? null],
+    queryFn: async (): Promise<OrphanedDocument[]> => {
+      const { data, error, response } = await client.GET('/api/v1/compliance/orphaned-documents', {
+        params: { query: { unit, owner } },
+      })
+      if (!response.ok || !data) {
+        throw requestError(
+          response,
+          error,
+          `Loading the orphaned documents failed with HTTP ${response.status}`,
+        )
+      }
+      return data
+    },
+  })
+}
+
+export function auditVerificationQuery(client: ApiClient) {
+  return queryOptions({
+    queryKey: ['compliance', 'audit-verification'],
+    queryFn: async (): Promise<AuditVerification> => {
+      const { data, error, response } = await client.GET('/api/v1/compliance/audit-verification')
+      if (!response.ok || !data) {
+        throw requestError(
+          response,
+          error,
+          `Loading the audit chain verification failed with HTTP ${response.status}`,
         )
       }
       return data

@@ -2,6 +2,7 @@ package dms.app
 
 import dms.app.ComplianceCockpit.{Entry, Rate}
 import dms.audit.*
+import dms.audit.core.AuditEvidenceLive
 import dms.authz.*
 import dms.db.{Db, DbError, Jsonb}
 import dms.documents.*
@@ -50,7 +51,9 @@ final case class ComplianceOverviewView(
     documentsWithoutOwner: Int,
     /** Valid versions that deviate from locked sections of their template, and their deviations in total. */
     versionsWithDeviations: Int,
-    deviations: Int
+    deviations: Int,
+    /** Documents with a valid version whose owner has no active Owner role that covers them (ADR 0080). */
+    orphanedDocuments: Int
 ) derives JsonCodec,
       Schema
 
@@ -83,6 +86,45 @@ final case class UnownedDocumentView(
     classPath: List[String],
     unit: Option[String],
     publishedAt: Option[Instant]
+) derives JsonCodec,
+      Schema
+
+/** A document with a valid version whose owner no longer holds an Owner role that covers it (ADR 0080). */
+final case class OrphanedDocumentView(
+    documentId: UUID,
+    versionId: UUID,
+    title: String,
+    versionLabel: String,
+    classPath: List[String],
+    unit: Option[String],
+    owner: String,
+    publishedAt: Option[Instant]
+) derives JsonCodec,
+      Schema
+
+/** The regular verification of the audit chain, for the whole tenant (ADR 0080). Empty fields: it never ran.
+  * It says nothing about the content of the chain.
+  */
+final case class AuditVerificationView(
+    /** The newest full verification. */
+    lastRunAt: Option[Instant],
+    /** `intact` or `violated`. */
+    result: Option[String],
+    /** The newest run is older than the limit a report relies on it for; a run was missed. */
+    stale: Boolean,
+    /** How old the newest run may be before it is stale. */
+    staleAfterDays: Long,
+    entriesChecked: Option[Long],
+    /** The kind of violation found: MissingEntry, BrokenLink, HashMismatch, UnsupportedFormat, AnchorMismatch
+      * or CheckpointMismatch.
+      */
+    violationKind: Option[String],
+    /** Chain position of the violation found. */
+    violationPosition: Option[Long],
+    /** Since when runs find this violation. */
+    violatedSince: Option[Instant],
+    /** Whether the newest run could compare the chain with the write-once checkpoints. */
+    checkpointsCompared: Option[Boolean]
 ) derives JsonCodec,
       Schema
 
@@ -181,10 +223,14 @@ final case class OpenAcknowledgementsView(
   * From the cockpit a compliance officer also reminds the owner of an overdue review or escalates it, at most
   * once per version, kind and 24 hours ([[ComplianceNotices]]), and exports every list as CSV: the same
   * decisions as the screen, built on the server so that the export is recorded in the audit trail (ADR 0077).
+  *
+  * The cockpit shows whether the regular verification of the audit chain ran and what it found (ADR 0080),
+  * for the whole tenant: the chain is one, whatever the scope of the officer.
   */
 object ComplianceApi:
   type Env = Authenticator & Db & Authorizer & RoleAssignments & Groups & DocumentService &
-    AcknowledgementService & AuditTrail & ComplianceNoticeAudience & TenantOrganizations & UserDirectory
+    AcknowledgementService & AuditTrail & AuditEvidence & ComplianceNoticeAudience & TenantOrganizations &
+    UserDirectory
 
   /** Why names of readers are looked at (purpose limitation): escalating open acknowledgements to the
     * responsible management, or reminding the readers.
@@ -209,6 +255,7 @@ object ComplianceApi:
   private val WithoutOwner         = "documents-without-owner"
   private val Deviations           = "deviations"
   private val FourEyesFindings     = "four-eyes-findings"
+  private val Orphaned             = "orphaned-documents"
 
   private val base = "api" / "v1" / "compliance"
 
@@ -230,7 +277,7 @@ object ComplianceApi:
       .tag("Compliance")
       .serverLogic(p =>
         _ =>
-          cockpit(p, Needs(rates = true, deviations = true)) { (_, today, entries) =>
+          cockpit(p, Needs(rates = true, deviations = true, owners = true)) { (_, today, entries) =>
             val overdue          = entries.filter(e => ComplianceCockpit.overdue(e.version, today))
             val (versions, rate) = ComplianceCockpit.total(entries)
             val deviating        = entries.filter(_.deviations > 0)
@@ -243,7 +290,8 @@ object ComplianceApi:
               ComplianceCockpit.ratesByUnit(entries).map((unit, n, r) => UnitRateView(unit, rateView(n, r))),
               ComplianceCockpit.withoutOwner(entries, None).size,
               deviating.size,
-              deviating.map(_.deviations).sum
+              deviating.map(_.deviations).sum,
+              ComplianceCockpit.orphaned(entries, None, None).size
             )
           }
       )
@@ -287,6 +335,33 @@ object ComplianceApi:
       .description("Documents with a valid version in the caller's scope that have no owner, by title")
       .tag("Compliance")
       .serverLogic(p => unit => cockpit(p, Needs())((_, _, entries) => unownedViews(entries, unit)))
+
+  val orphanedDocuments: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(base / Orphaned)
+      .in(unitQuery)
+      .in(query[Option[String]]("owner").description("Owner's user id"))
+      .out(jsonBody[List[OrphanedDocumentView]])
+      .description(
+        "Documents with a valid version in the caller's scope whose owner has no active Owner role that covers " +
+          "the document, by title. Documents without any owner are in documents-without-owner."
+      )
+      .tag("Compliance")
+      .serverLogic(p =>
+        (unit, owner) =>
+          cockpit(p, Needs(owners = true))((_, _, entries) => orphanedViews(entries, unit, owner))
+      )
+
+  val auditVerification: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(base / "audit-verification")
+      .out(jsonBody[AuditVerificationView])
+      .description(
+        "The newest full verification of the tenant's audit chain: when it ran, what it found and whether it " +
+          "is stale. For compliance officers, whatever their scope. Never the content of an audit entry."
+      )
+      .tag("Compliance")
+      .serverLogic(p => _ => verification(p))
 
   val deviations: ZServerEndpoint[Env, Any] =
     SecuredApi.base.get
@@ -362,7 +437,7 @@ object ComplianceApi:
     SecuredApi.base.post
       .in(
         base / "exports" / path[String]("list").description(
-          s"$OverdueReviews, $AcknowledgementRates, $WithoutOwner, $Deviations or $FourEyesFindings"
+          s"$OverdueReviews, $AcknowledgementRates, $WithoutOwner, $Orphaned, $Deviations or $FourEyesFindings"
         )
       )
       .in(unitQuery)
@@ -405,6 +480,8 @@ object ComplianceApi:
       overdueReviews,
       acknowledgements,
       documentsWithoutOwner,
+      orphanedDocuments,
+      auditVerification,
       deviations,
       openAcknowledgementsExport,
       openAcknowledgements,
@@ -422,7 +499,8 @@ object ComplianceApi:
   private final case class Needs(
       rates: Boolean = false,
       deviations: Boolean = false,
-      notices: Boolean = false
+      notices: Boolean = false,
+      owners: Boolean = false
   )
 
   private def overdueViews(
@@ -493,6 +571,48 @@ object ComplianceApi:
           e.version.publishedAt
         )
       )
+
+  private def orphanedViews(
+      entries: List[Entry],
+      unit: Option[String],
+      owner: Option[String]
+  ): List[OrphanedDocumentView] =
+    ComplianceCockpit
+      .orphaned(entries, unit, owner)
+      .flatMap(e =>
+        e.owner.map(id =>
+          OrphanedDocumentView(
+            e.version.document.id.value,
+            e.version.versionId,
+            e.version.document.title,
+            e.version.label,
+            e.version.classPath,
+            e.unit,
+            id,
+            e.version.publishedAt
+          )
+        )
+      )
+
+  /** The newest verification of the chain; older than a report may rely on is stale (ADR 0077, 0080). */
+  private def verification(p: Principal): ZIO[Env, (StatusCode, ApiError), AuditVerificationView] =
+    inTransaction(p) { subject =>
+      for
+        now  <- Clock.instant
+        _    <- requireOfficer(subject, now)
+        last <- ZIO.serviceWithZIO[AuditEvidence](_.lastVerification)
+      yield AuditVerificationView(
+        last.map(_.verifiedAt),
+        last.map(run => if run.violationKind.isEmpty then "intact" else "violated"),
+        last.exists(run => !run.verifiedAt.plus(AuditEvidenceLive.PrefixMaxAge).isAfter(now)),
+        AuditEvidenceLive.PrefixMaxAge.toDays,
+        last.map(_.entriesChecked),
+        last.flatMap(_.violationKind),
+        last.flatMap(_.violationSeq),
+        last.flatMap(_.violatedSince),
+        last.map(_.checkpointsCompared)
+      )
+    }
 
   private def deviationViews(
       entries: List[Entry],
@@ -581,6 +701,10 @@ object ComplianceApi:
       reminders <-
         if needs.rates then ZIO.serviceWithZIO[AcknowledgementService](_.lastManualReminders(ids))
         else ZIO.succeed(Map.empty[UUID, Instant])
+      owners <-
+        if needs.owners then
+          ZIO.serviceWithZIO[RoleAssignments](_.holders(Role.Owner)).map(_.groupMap(_._1)(_._2))
+        else ZIO.succeed(Map.empty[UserId, List[RoleAssignment]])
     yield (
       now,
       LocalDate.ofInstant(now, zone),
@@ -590,10 +714,24 @@ object ComplianceApi:
           rates(v, r),
           deviations.getOrElse(v.versionId, 0),
           reminders.get(v.versionId),
-          ComplianceNotices.Kinds.flatMap(k => notices.get((v.versionId, k)).map(k -> _)).toMap
+          ComplianceNotices.Kinds.flatMap(k => notices.get((v.versionId, k)).map(k -> _)).toMap,
+          !needs.owners || v.document.ownerId.forall(ownerActs(_, owners, r, now))
         )
       )
     )
+
+  /** Whether `owner` holds an active Owner role that covers the document, as any other decision on it would
+    * ask: a role for another unit does not count, the concept names a change of function as well.
+    */
+  private def ownerActs(
+      owner: UserId,
+      holders: Map[UserId, List[RoleAssignment]],
+      r: Resource,
+      now: Instant
+  ): Boolean =
+    Policy
+      .rolesInScope(Subject(owner, r.tenantId, holders.getOrElse(owner, Nil).toSet), r, now)
+      .contains(Role.Owner)
 
   /** A list as a file: read and recorded in one transaction, so that nothing leaves without a record; names
     * come afterwards, as the directory is another system (ADR 0037).
@@ -633,6 +771,11 @@ object ComplianceApi:
         yield ComplianceCsv.acknowledgements(lang, found, names)
       case WithoutOwner =>
         rows(Needs())((_, _, all) => unownedViews(all, unit)).map(ComplianceCsv.withoutOwner(lang, _))
+      case Orphaned =>
+        for
+          found <- rows(Needs(owners = true))((_, _, all) => orphanedViews(all, unit, owner))
+          names <- named(found.map(r => Some(r.owner)))
+        yield ComplianceCsv.orphaned(lang, found, names)
       case Deviations =>
         for
           found <- rows(Needs(deviations = true))((_, _, all) => deviationViews(all, unit, owner))
@@ -980,6 +1123,43 @@ private[app] object ComplianceCsv:
           text(r.unit),
           r.publishedAt.fold("")(_.toString)
         )
+      )
+    )
+
+  def orphaned(
+      lang: Option[String],
+      rows: List[OrphanedDocumentView],
+      names: String => Option[String]
+  ): String =
+    Csv.table(
+      pick(lang)(
+        "Dokument-ID",
+        "Titel",
+        "Klasse",
+        "Version",
+        "Einheit",
+        "Eigentümer (Benutzer-ID)",
+        "Eigentümer (Name)",
+        "Veröffentlicht"
+      )(
+        "Document id",
+        "Title",
+        "Class",
+        "Version",
+        "Unit",
+        "Owner (user id)",
+        "Owner (name)",
+        "Published"
+      ),
+      rows.map(r =>
+        List(
+          r.documentId.toString,
+          Csv.text(r.title),
+          path(r.classPath),
+          Csv.text(r.versionLabel),
+          text(r.unit)
+        ) ++
+          owner(Some(r.owner), names) ++ List(r.publishedAt.fold("")(_.toString))
       )
     )
 

@@ -9,8 +9,8 @@ import com.nimbusds.jose.jwk.{JWKSet, RSAKey}
 import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jose.{JOSEObjectType, JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
-import dms.audit.AuditTrail
-import dms.audit.core.{AuditTrailLive, TsaTrust}
+import dms.audit.{AuditEvidence, AuditTrail}
+import dms.audit.core.{AuditEvidenceLive, AuditTrailLive, TsaTrust}
 import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
 import dms.db.{Db, DbConfig, DbError, Migrations}
 import dms.integration.{JobRunner, WorkerConfig}
@@ -241,7 +241,7 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
   /** What the overview, acknowledgement, settings and compliance endpoints need, each type once. */
   private type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow &
     AcknowledgementService & RoleAssignments & Groups & AuditTrail & TenantOrganizations & UserDirectory &
-    AcknowledgementReminderConfig & DocumentClassService & ComplianceNoticeAudience
+    AcknowledgementReminderConfig & DocumentClassService & ComplianceNoticeAudience & AuditEvidence
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -253,6 +253,7 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
       Authorizer.layer,
       ZLayer.succeed(TsaTrust(Nil)),
       AuditTrailLive.layer,
+      AuditEvidenceLive.layer,
       DocumentClassService.layer,
       DocumentClassProfiles.layer,
       TemplateService.layer,

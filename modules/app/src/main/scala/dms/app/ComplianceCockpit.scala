@@ -23,13 +23,17 @@ object ComplianceCockpit:
     *   when readers were last reminded by hand (ADR 0048)
     * @param lastNotices
     *   when the last notice of each kind went out from the cockpit (ADR 0077)
+    * @param ownerHasRole
+    *   whether the document's owner holds an active Owner role that covers the document (ADR 0080); only
+    *   decided for lists that ask for it
     */
   final case class Entry(
       version: CurrentVersion,
       acknowledgement: Option[Rate],
       deviations: Int = 0,
       lastReminder: Option[Instant] = None,
-      lastNotices: Map[String, Instant] = Map.empty
+      lastNotices: Map[String, Instant] = Map.empty,
+      ownerHasRole: Boolean = true
   ):
     def unit: Option[String]  = DocumentResource.organizationalUnit(version.metadata)
     def owner: Option[String] = version.document.ownerId.map(_.value)
@@ -92,6 +96,16 @@ object ComplianceCockpit:
   def withoutOwner(entries: List[Entry], unit: Option[String]): List[Entry] =
     entries
       .filter(e => e.owner.isEmpty && matches(unit, e.unit))
+      .distinctBy(_.version.document.id)
+      .sortBy(e => (e.version.document.title, e.version.versionId.toString))
+
+  /** One valid version per document whose owner has no active Owner role that covers it, so nobody can act as
+    * owner (business concept 6.2, "verwaist"), filtered by unit and owner, by title. A document without owner
+    * is not among them: that is [[withoutOwner]].
+    */
+  def orphaned(entries: List[Entry], unit: Option[String], owner: Option[String]): List[Entry] =
+    entries
+      .filter(e => e.owner.nonEmpty && !e.ownerHasRole && matches(unit, e.unit) && matches(owner, e.owner))
       .distinctBy(_.version.document.id)
       .sortBy(e => (e.version.document.title, e.version.versionId.toString))
 

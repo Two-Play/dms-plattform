@@ -49,6 +49,7 @@ const overview: ComplianceOverview = {
   documentsWithoutOwner: 2,
   versionsWithDeviations: 1,
   deviations: 4,
+  orphanedDocuments: 1,
 }
 
 const hrReview: OverdueReview = {
@@ -85,10 +86,35 @@ const rates: VersionRate[] = [
 let me: Me
 let reviews: OverdueReview[]
 let notices: () => Reply
+let verification: () => Reply
+let orphans: () => Reply
+
+const intactRun = {
+  lastRunAt: '2026-10-29T03:00:00Z',
+  result: 'intact',
+  stale: false,
+  staleAfterDays: 3,
+  entriesChecked: 1234,
+  checkpointsCompared: true,
+}
 
 beforeEach(() => {
   me = { userId: 'officer', tenantId: 'tenant-1', roles: ['ComplianceOfficer'] }
   reviews = overdue
+  verification = () => ok(intactRun)
+  orphans = () =>
+    ok([
+      {
+        documentId: 'd4',
+        versionId: 'v4',
+        title: 'Left behind',
+        versionLabel: '1.0',
+        classPath: ['policy'],
+        unit: 'HR',
+        owner: 'owner-gone',
+        publishedAt: '2026-01-01T08:00:00Z',
+      },
+    ])
   notices = () =>
     ok({
       versionId: 'v1',
@@ -136,6 +162,10 @@ function renderAt(path: string) {
             publishedAt: '2026-01-01T08:00:00Z',
           },
         ])
+      case '/api/v1/compliance/audit-verification':
+        return verification()
+      case '/api/v1/compliance/orphaned-documents':
+        return orphans()
       case '/api/v1/compliance/deviations':
         return ok([
           {
@@ -294,6 +324,105 @@ describe('compliance cockpit', () => {
         body: { purpose: 'reminder', reason: 'Rate below target' },
       },
     )
+  })
+
+  it('says when the verification of the audit chain never ran', async () => {
+    verification = () => ok({ stale: false, staleAfterDays: 3 })
+    renderAt('/compliance')
+
+    expect(await screen.findByText(/has never run/)).toBeInTheDocument()
+  })
+
+  it('shows an intact run with its date', async () => {
+    renderAt('/compliance')
+
+    expect(await screen.findByText('Audit chain intact')).toBeInTheDocument()
+    expect(screen.getByText(/1,234 entries checked/)).toBeInTheDocument()
+    expect(screen.queryByText(/out of date/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/checkpoints could not be read/)).not.toBeInTheDocument()
+  })
+
+  it('marks a stale run and one that could not read the checkpoints', async () => {
+    verification = () => ok({ ...intactRun, stale: true, checkpointsCompared: false })
+    renderAt('/compliance')
+
+    expect(await screen.findByText(/more than 3 days old/)).toBeInTheDocument()
+    expect(screen.getByText(/checkpoints could not be read/)).toBeInTheDocument()
+  })
+
+  it('shows a violation by kind and position, even if it is stale', async () => {
+    verification = () =>
+      ok({
+        ...intactRun,
+        result: 'violated',
+        stale: true,
+        violationKind: 'HashMismatch',
+        violationPosition: 17,
+        violatedSince: '2026-10-20T03:00:00Z',
+      })
+    renderAt('/compliance')
+
+    expect(await screen.findByText('Violation of the audit chain found')).toBeInTheDocument()
+    expect(screen.getByText(/An entry does not match its hash at position 17/)).toBeInTheDocument()
+    expect(screen.getByText(/more than 3 days old/)).toBeInTheDocument()
+  })
+
+  it('offers a retry when the verification cannot be loaded, and keeps the figures', async () => {
+    verification = () => failed(500, { code: 'internal', message: 'boom' })
+    const { user } = renderAt('/compliance')
+
+    const retry = await screen.findByRole('button', { name: 'Try again' })
+    expect(await screen.findByText('Overdue reviews')).toBeInTheDocument()
+
+    verification = () => ok(intactRun)
+    await user.click(retry)
+    expect(await screen.findByText('Audit chain intact')).toBeInTheDocument()
+  })
+
+  it('leaves the refusal of the cockpit to the figures', async () => {
+    verification = () => failed(403, { code: 'forbidden', message: 'no' })
+    renderAt('/compliance')
+
+    await screen.findByRole('link', { name: 'Overdue reviews: 3. Show the list' })
+    expect(screen.queryByRole('heading', { name: 'Audit chain verification' })).toBeNull()
+  })
+
+  it('leads to the orphaned documents with their owner and exports them', async () => {
+    const downloads = captureDownloads()
+    const { post, user } = renderAt('/compliance')
+
+    await user.click(
+      await screen.findByRole('link', { name: 'Orphaned documents: 1. Show the list' }),
+    )
+    const table = await screen.findByRole('table', { name: 'Orphaned documents' })
+    expect(within(table).getByRole('link', { name: 'Left behind' })).toBeInTheDocument()
+    expect(within(table).getByText('owner-gone')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Export Orphaned documents as CSV' }))
+    await waitFor(() => {
+      expect(downloads).toEqual(['list.csv'])
+    })
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/compliance/exports/{list}',
+      expect.objectContaining({
+        params: expect.objectContaining({
+          path: { list: 'orphaned-documents' },
+        }) as unknown,
+      }),
+    )
+  })
+
+  it('says when no document is orphaned', async () => {
+    orphans = () => ok([])
+    renderAt('/compliance?view=orphaned')
+    expect(await screen.findByText('No orphaned documents.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Export Orphaned documents as CSV' })).toBeDisabled()
+  })
+
+  it('offers a retry when the orphaned documents cannot be loaded', async () => {
+    orphans = () => failed(500, { code: 'internal', message: 'boom' })
+    renderAt('/compliance?view=orphaned')
+    expect(await screen.findByRole('button', { name: 'Try again' })).toBeInTheDocument()
   })
 
   it('leads to the documents without owner and the deviations', async () => {

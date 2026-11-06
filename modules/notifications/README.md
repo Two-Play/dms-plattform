@@ -6,7 +6,7 @@ Layout: `api` holds public types and the ports, `core` the implementation. Other
 
 ## `api` (package `dms.notifications`)
 
-- `NotificationCategory`: `workflow`, `deadline` (DMS-87), `acknowledgement`, `deputyship`, `publication`, `processing-failure` (DMS-142), `legal-hold`, each with an email default (all on except legal holds). `Channel`: `in-app`, `email`. `Language`: `de`, `en`.
+- `NotificationCategory`: `workflow`, `deadline` (DMS-87), `acknowledgement`, `deputyship`, `publication`, `processing-failure` (DMS-142), `legal-hold`, `audit-integrity` (DMS-169), each with an email default (all on except legal holds). `Channel`: `in-app`, `email`. `Language`: `de`, `en`.
 - `Notice(kind, category, recipients, document, params)`: what an outbox event means for whom. `params` never hold document titles.
 - Ports implemented by `app`:
   - `NotificationEvents` (`concerns`, `describe`): outbox event → notices (`PlatformNotificationEvents`).
@@ -53,6 +53,7 @@ Layout: `api` holds public types and the ports, `core` the implementation. Other
 | `legal-hold.created`, `legal-hold.released` | `legal-hold.*` | tenant-wide records managers | legal-hold |
 | `document.rendition-dead`, `document.publication-dead` (DMS-142) | `failure.rendition`, `failure.publication` | the owner (without owner: the version's author) and their active deputies, the records managers whose role covers the document, or tenant administrators if there are none; none if the version no longer waits | processing-failure |
 | `document.failure-reminder` (DMS-146) | `failure.rendition`, `failure.publication` | the same people, without those who have read a notice of this failure | processing-failure |
+| `audit.chain-violated` (DMS-169, ADR 0080) | `audit.chain-violation` | active compliance officers whatever their scope, with a link to the cockpit, and tenant-wide administrators who are not officers, without a link; the same for reminders. Only the date of the finding, never position, kind or detail | audit-integrity |
 
 Dead-job events are written by a trigger on `dms.job` (V40), so they also cover a timeout and a crash on the last attempt; single retries write nothing. The link depends on who may reach the retry (`Audience` in `NotificationTemplates`): the document page for the owner, the legal holds page for tenant-wide records managers, `/failures` for records managers of a unit or class and for someone who may retry but not read the version, the administration tab for tenant administrators. The reason is a text per failure code (`NotificationTemplates.FailureReasons`); the technical error stays with the job (ADR 0058).
 

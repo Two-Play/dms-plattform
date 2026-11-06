@@ -66,6 +66,36 @@ export const compliance = {
   withoutOwnerDetail: 'Valid documents nobody answers for',
   noWithoutOwner: 'No documents without owner.',
   noWithoutOwnerText: 'Every valid document in this selection has an owner.',
+  orphaned: 'Orphaned documents',
+  orphanedDetail: 'Valid documents whose owner no longer holds an active owner role for them',
+  noOrphaned: 'No orphaned documents.',
+  noOrphanedText: 'The owners of the valid documents in this selection hold an active owner role.',
+  verification: {
+    title: 'Audit chain verification',
+    loading: 'Loading the audit chain verification',
+    neverRan: 'The verification has never run, so nothing is known about the audit chain yet.',
+    intact: 'Audit chain intact',
+    violated: 'Violation of the audit chain found',
+    lastRun: 'Last verification: {date}',
+    entries: plural({ one: '{entries} entry checked', other: '{entries} entries checked' }),
+    position: 'at position {position}',
+    since: '(found since {date})',
+    violatedHint:
+      'Evidence reports state this until a verification finds the chain intact again. Compliance officers and tenant administrators have been told.',
+    stale:
+      'This result is out of date: the last verification is more than {days} days old, so the daily verification has not run.',
+    noCheckpoints:
+      'The write-once checkpoints could not be read: this verification covers links, hashes and anchors only.',
+    kinds: {
+      MissingEntry: 'An entry is missing',
+      BrokenLink: 'The link between two entries is broken',
+      HashMismatch: 'An entry does not match its hash',
+      UnsupportedFormat: 'An entry has an unknown format',
+      AnchorMismatch: 'A timestamp anchor does not match',
+      CheckpointMismatch: 'A write-once checkpoint does not match',
+      other: 'The chain is damaged',
+    },
+  },
   deviations: 'Deviations from standard clauses',
   deviationsDetail: plural({
     one: '{count} version deviates from locked sections of its template',

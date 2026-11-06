@@ -95,7 +95,8 @@ object Background:
         AuditScheduleConfig(
           config.audit.checkpointIntervalSeconds.seconds,
           config.audit.anchorHourUtc,
-          (config.audit.anchorHourUtc + 1) % 24
+          (config.audit.anchorHourUtc + 1) % 24,
+          config.audit.violationReminderDays
         )
       )
       publications = PublicationJobs(

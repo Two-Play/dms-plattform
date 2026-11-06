@@ -54,6 +54,35 @@ final case class ChainIntegrity(
     checkpointProblem: Option[String]
 )
 
+/** The newest full verification of a chain as the compliance cockpit shows it (ADR 0080): nothing of the
+  * audit entries, and the technical detail of a violation stays in the run.
+  *
+  * @param violationKind
+  *   the name of the [[Violation.Kind]] found; `None`: the chain was intact
+  * @param violationSeq
+  *   the chain position of what was found
+  * @param violatedSince
+  *   when the first run of the series that found this violation ran
+  * @param checkpointsCompared
+  *   `false` if the checkpoints could not be read, so the run covers links, hashes and anchors only
+  */
+final case class VerificationSummary(
+    verifiedAt: Instant,
+    entriesChecked: Long,
+    violationKind: Option[String],
+    violationSeq: Option[Long],
+    violatedSince: Option[Instant],
+    checkpointsCompared: Boolean
+)
+
+/** The outbox event of a violation of the audit chain that people should hear of (ADR 0080). Aggregate id:
+  * the tenant. Payload: `foundAt` (when a run found it first) and, for a reminder, `reminder` (the round). It
+  * names nothing of what was found.
+  */
+object AuditViolation:
+  val AggregateType = "audit-chain"
+  val Event         = "audit.chain-violated"
+
 /** Read access to the audit trail for evidence reports (US-12.1, DMS-57, ADR 0034). */
 trait AuditEvidence:
 
@@ -70,6 +99,9 @@ trait AuditEvidence:
     * finds; the regular integrity check (ADR 0017, 0077).
     */
   def verifyFully(tenant: TenantId): IO[DbError, ChainIntegrity]
+
+  /** The newest full verification of the tenant, if there was one. Must run inside `Db.transact(tenant)`. */
+  def lastVerification: IO[DbError, Option[VerificationSummary]]
 
 /** A generated evidence report as registered (migration V21).
   *

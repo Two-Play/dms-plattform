@@ -171,6 +171,7 @@ For templates with reference fields (`references` in the fields response), the p
 
 ## Compliance cockpit (DMS-59, ADR 0036)
 
+- `/compliance` shows the last verification of the audit chain above the figures, on its own query so that a finding stays visible when the figures fail (`audit-verification-card.tsx`, `GET /api/v1/compliance/audit-verification`, ADR 0080): never ran, intact, stale, violated.
 - `/compliance` (`components/compliance/compliance-page.tsx`) shows three key figure cards (overdue reviews, acknowledgement rate, open acknowledgements) and tables of overdue reviews per unit and per owner and of acknowledgement rates per unit (`GET /api/v1/compliance/overview`). Every figure is a link to its list below, kept in the URL (`view=reviews|acknowledgements`, `unit`, `owner`, `document`; parsed in `compliance-params.ts`); an empty `unit` or `owner` selects versions without one ("No unit", "No owner").
 - The acknowledgement list shows figures only. "Who has not acknowledged" opens a dialog that requires a purpose (escalation or reminder) and a reason before it requests the names (`GET …/acknowledgements/{documentId}/{versionId}/open`); the backend records purpose and reason in the audit trail. The names are not cached.
 

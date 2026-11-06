@@ -298,7 +298,8 @@ object NotificationApiSpec extends ZIOSpecDefault:
             "deputyship",
             "publication",
             "processing-failure",
-            "legal-hold"
+            "legal-hold",
+            "audit-integrity"
           ),
         initial.categories.forall(c => c.email == c.emailByDefault),
         changed.language.contains("en"),

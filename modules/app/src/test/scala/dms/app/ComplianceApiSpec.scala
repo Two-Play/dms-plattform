@@ -9,7 +9,8 @@ import com.nimbusds.jose.jwk.{JWKSet, RSAKey}
 import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jose.{JOSEObjectType, JWSAlgorithm, JWSHeader}
 import com.nimbusds.jwt.{JWTClaimsSet, SignedJWT}
-import dms.audit.core.{AuditTrailLive, TsaTrust}
+import dms.audit.AuditEvidence
+import dms.audit.core.{AuditEvidenceLive, AuditTrailLive, TsaTrust}
 import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
 import dms.db.{Db, DbConfig, DbError, Migrations}
 import dms.documents.*
@@ -18,6 +19,8 @@ import dms.documents.core.*
 import dms.documents.metadata.MetadataValue
 import dms.identity.*
 import dms.kernel.{DocumentId, TemplateId, TenantId, UserId}
+import dms.notifications.NotificationCategory
+import dms.notifications.core.NotificationTemplates
 import dms.templates.*
 import dms.templates.core.{TemplateDraft, TemplateService}
 import dms.workflow.core.DeadlineAudience
@@ -295,7 +298,8 @@ object ComplianceApiSpec extends ZIOSpecDefault:
       DocumentService.layer,
       AcknowledgementService.layer,
       noticeAudience,
-      directory
+      directory,
+      AuditEvidenceLive.layer
     )
 
   private def token(user: UserId): String =
@@ -397,6 +401,8 @@ object ComplianceApiSpec extends ZIOSpecDefault:
           "/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open/export"
         ),
         docs.paths.pathItems.contains("/api/v1/compliance/documents-without-owner"),
+        docs.paths.pathItems.contains("/api/v1/compliance/orphaned-documents"),
+        docs.paths.pathItems.contains("/api/v1/compliance/audit-verification"),
         docs.paths.pathItems.contains("/api/v1/compliance/deviations"),
         docs.paths.pathItems.contains("/api/v1/compliance/exports/{list}"),
         docs.paths.pathItems.contains("/api/v1/compliance/overdue-reviews/{documentId}/{versionId}/notices")
@@ -447,6 +453,143 @@ object ComplianceApiSpec extends ZIOSpecDefault:
         deviating.map(d => (d.versionId, d.deviations)) == List((f.hrPolicy.id, 2)),
         otherUnit.isEmpty,
         denied._1 == Status.Forbidden
+      )
+    },
+    test("orphaned documents: the owner's role ended or no longer covers the document (ADR 0080)") {
+      def inTenant[A](work: ZIO[Any, DbError, A]) = setup.await.flatMap(_.app.transact(tenantId)(work))
+      def endRoles(user: UserId)                  =
+        for
+          now <- Clock.instant
+          ids <- Db.sql(
+            sql"""select id from dms.role_assignment where user_id = ${user.value}
+                  and role = 'Owner' and valid_until is null""".query[UUID].run().toList
+          )
+          _ <- ZIO.foreachDiscard(ids)(RoleAssignments.Postgres.revoke(_, now))
+        yield ()
+      for
+        f <- fixture
+        // ownerA's role ended; ownerB changed function and answers for Finance only.
+        _ <- inTenant(
+          endRoles(ownerA) *> endRoles(ownerB) *>
+            RoleAssignments.Postgres.grant(ownerB, RoleAssignment(Role.Owner, Some("Finance")), admin)
+        )
+        overview <- get(officer, "/api/v1/compliance/overview").map(as[ComplianceOverviewView])
+        list     <- get(officer, "/api/v1/compliance/orphaned-documents").map(as[List[OrphanedDocumentView]])
+        byOwner  <- get(officer, s"/api/v1/compliance/orphaned-documents?owner=${ownerB.value}")
+          .map(as[List[OrphanedDocumentView]])
+        byUnit <- get(officer, "/api/v1/compliance/orphaned-documents?unit=Finance")
+          .map(as[List[OrphanedDocumentView]])
+        scoped <- get(officerHr, "/api/v1/compliance/orphaned-documents").map(as[List[OrphanedDocumentView]])
+        denied <- get(readerAll, "/api/v1/compliance/orphaned-documents")
+        csv    <- exportOf(officer, "orphaned-documents", "?unit=HR&lang=de")
+        trail  <- audited(ComplianceApi.ListExported)
+        _      <- inTenant(
+          endRoles(ownerB) *>
+            RoleAssignments.Postgres.grant(ownerA, RoleAssignment(Role.Owner), admin) *>
+            RoleAssignments.Postgres.grant(ownerB, RoleAssignment(Role.Owner), admin)
+        )
+        after <- get(officer, "/api/v1/compliance/overview").map(as[ComplianceOverviewView])
+      yield
+        val rows = csv._2.split("\r\n").toList
+        assertTrue(
+          // the secret version of ownerA stays out: no officer is cleared for it
+          overview.orphanedDocuments == 2,
+          list.map(r => (r.versionId, r.owner)).toSet ==
+            Set((f.hrPolicy.id, ownerA.value), (f.hrHandbook.id, ownerB.value)),
+          byOwner.map(_.versionId) == List(f.hrHandbook.id),
+          byUnit.isEmpty,
+          scoped.size == 2,
+          denied._1 == Status.Forbidden,
+          csv._1 == Status.Ok,
+          rows.size == 3,
+          rows.head.contains("Eigentümer (Benutzer-ID);Eigentümer (Name)"),
+          rows.exists(_.contains("'=Owner A")),
+          trail.lastOption.exists(_._3.contains("orphaned-documents")),
+          after.orphanedDocuments == 0
+        )
+    },
+    test("the verification of the chain: never ran, intact, stale, violated; for officers only (ADR 0080)") {
+      def state(user: UserId = officer) =
+        get(user, "/api/v1/compliance/audit-verification").map(as[AuditVerificationView])
+      def run(age: java.time.Duration, kind: Option[String], detail: String = "the secret entry") =
+        Clock.instant.flatMap(now =>
+          val at = java.time.OffsetDateTime.ofInstant(now.minus(age), java.time.ZoneOffset.UTC)
+          asOwner {
+            val _ = sql"""insert into dms.audit_verification_run
+                            (tenant_id, verified_at, ok, entries_checked, anchors_checked, head_seq,
+                             violation_seq, violation_kind, violation_detail)
+                          values (${tenantId.value}, $at, ${kind.isEmpty}, 12, 0, 12,
+                                  ${kind.map(_ => 7L)}, $kind, ${kind.map(_ => detail)})""".update.run()
+          }
+        )
+      val hours = java.time.Duration.ofHours(_)
+      for
+        never  <- state()
+        _      <- run(hours(1), None)
+        intact <- state()
+        scoped <- state(officerHr)
+        reader <- get(readerAll, "/api/v1/compliance/audit-verification")
+        admins <- get(admin, "/api/v1/compliance/audit-verification")
+        _      <- run(hours(71), None)
+        fresh  <- state()
+        _      <- run(hours(73), None)
+        stale  <- state()
+        _      <- run(hours(1), Some("HashMismatch"))
+        _      <- run(hours(0), Some("HashMismatch"))
+        raw    <- get(officer, "/api/v1/compliance/audit-verification")
+        violated = as[AuditVerificationView](raw)
+      yield assertTrue(
+        never.lastRunAt.isEmpty,
+        never.result.isEmpty,
+        !never.stale,
+        never.staleAfterDays == 3L,
+        intact.result.contains("intact"),
+        !intact.stale,
+        intact.entriesChecked.contains(12L),
+        intact.checkpointsCompared.contains(true),
+        scoped.result.contains("intact"),
+        reader._1 == Status.Forbidden,
+        admins._1 == Status.Forbidden,
+        !fresh.stale,
+        stale.stale,
+        stale.result.contains("intact"),
+        violated.result.contains("violated"),
+        violated.violationKind.contains("HashMismatch"),
+        violated.violationPosition.contains(7L),
+        violated.violatedSince.exists(since => violated.lastRunAt.exists(since.isBefore)),
+        !raw._2.contains("secret entry")
+      )
+    },
+    test("a violation of the chain reaches every active officer and the administrators, nothing of it") {
+      for
+        s         <- setup.await
+        documents <- ZIO.service[DocumentService]
+        roles     <- ZIO.service[RoleAssignments]
+        audit     <- ZIO.service[dms.audit.AuditTrail]
+        events = PlatformNotificationEvents(documents, roles, dms.archive.core.LegalHoldService(audit))
+        event  = dms.db.queue.OutboxEvent(
+          1,
+          tenantId,
+          dms.audit.AuditViolation.AggregateType,
+          tenantId.value,
+          dms.audit.AuditViolation.Event,
+          dms.db.Jsonb("""{"foundAt":"2026-11-02T03:00:00Z","reminder":"1"}"""),
+          None,
+          0
+        )
+        notices <- s.app
+          .transact(tenantId)(events.describe(event))
+          .mapError(e => RuntimeException(e.toString))
+      yield assertTrue(
+        events.concerns(event),
+        notices.forall(_.kind == NotificationTemplates.ChainViolation),
+        notices.forall(_.category == NotificationCategory.AuditIntegrity),
+        notices.forall(_.document.isEmpty),
+        notices.map(n => n.params("audience") -> n.recipients.toSet).toMap == Map(
+          "compliance" -> Set(officer, officerHr),
+          "admin"      -> Set(admin)
+        ),
+        notices.forall(_.params.keySet == Set("audience", "foundAt", "reminder"))
       )
     },
     test("exports carry the rights and filters of the screen and are audited") {
