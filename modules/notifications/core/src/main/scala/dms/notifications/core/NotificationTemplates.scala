@@ -199,6 +199,7 @@ object NotificationTemplates:
     "deputyship.ended-by-period",
     "publication.published",
     "publication.owner-replaced",
+    "record.owner-corrected",
     "failure.rendition",
     "failure.publication",
     "publication.withdrawn",
@@ -386,6 +387,13 @@ object NotificationTemplates:
           bodyDe =
             s"Mit der Veröffentlichung ist ${person("newOwner")} Eigentümer von $docDat. Sie sind es nicht mehr.",
           bodyEn = s"With its publication, ${person("newOwner")} owns $doc. You no longer do."
+        )(docLink)
+      case "record.owner-corrected" =>
+        r(de = s"Eigentümer berichtigt: $docShort", en = s"Owner corrected: $docShort")(
+          bodyDe =
+            s"Das Records Management hat den Eigentümer von $docDat berichtigt: Es ist ${person("newOwner")}, wie die zuletzt gültige Version es nennt.",
+          bodyEn =
+            s"Records management corrected the owner of $doc: it is ${person("newOwner")}, as the version last in force names."
         )(docLink)
       case "failure.rendition" =>
         r(

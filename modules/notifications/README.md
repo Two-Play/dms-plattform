@@ -50,6 +50,7 @@ Layout: `api` holds public types and the ports, `core` the implementation. Other
 | `workflow.deputyship-created`, `-started`, `-ended`, `-ended-by-period` | `deputyship.*` | principal and deputy (different texts) | deputyship |
 | `document.status-changed` Approved → Published | `publication.published` | the owner | publication |
 | `document.owner-replaced` (ADR 0083) | `publication.owner-replaced` | the owner a published version took the document from | publication |
+| `document.owner-corrected` (ADR 0084) | `record.owner-corrected` | the owner a correction by records management took the document from and the owner it gave it to, not who corrected it | publication |
 | `document.confidentiality-lowering-requested`, `-decided`, `document.confidentiality-lowered` (ADR 0083) | `lowering.requested`, `lowering.approved`, `lowering.refused`, `lowering.in-force` | who asked, author and owner, without who acted; no level and no reason | workflow |
 | `document.approved-version-withdrawn` | `publication.withdrawn` | author, approvers and owner, without who withdrew it; never readers | publication |
 | `legal-hold.created`, `legal-hold.released` | `legal-hold.*` | tenant-wide records managers | legal-hold |

@@ -48,6 +48,8 @@ import scala.util.Try
   *   - `document.confidentiality-lowering-requested`, `-decided`, `document.confidentiality-lowered` (ADR
   *     0083): who asked, the author and the owner, without who acted
   *   - `document.owner-replaced` (ADR 0083): the owner a version took the document from
+  *   - `document.owner-corrected` (ADR 0084): the owner a correction took the document from and the owner it
+  *     gave it to, without who corrected it
   *   - `workflow.approved`: author and owner, without the approver
   *   - `workflow.participant-missing`: the tenant administrators
   *   - `document.acknowledgement-requested`, `document.acknowledgement-reminder`: the named readers
@@ -220,6 +222,18 @@ final class PlatformNotificationEvents(
             List(
               Notice(
                 "publication.owner-replaced",
+                NotificationCategory.Publication,
+                users("recipients"),
+                document,
+                params("version", "newOwner")
+              )
+            )
+          )
+        case DocumentService.OwnerCorrected =>
+          ZIO.succeed(
+            List(
+              Notice(
+                "record.owner-corrected",
                 NotificationCategory.Publication,
                 users("recipients"),
                 document,
@@ -602,6 +616,7 @@ object PlatformNotificationEvents:
     "document.confidentiality-lowering-decided",
     "document.confidentiality-lowered",
     DocumentService.OwnerReplaced,
+    DocumentService.OwnerCorrected,
     "workflow.participant-missing",
     "document.acknowledgement-requested",
     "document.acknowledgement-reminder",

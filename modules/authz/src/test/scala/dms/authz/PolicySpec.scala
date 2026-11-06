@@ -45,6 +45,7 @@ object PolicySpec extends ZIOSpecDefault:
     case ViewAcknowledgementPersons => document(Published)
     case GenerateEvidenceReport     => document(Superseded)
     case AssignDocumentNumber       => document(Draft)
+    case CorrectDocumentRecord      => document(Published)
     case SearchUsers                => Resource(tenant)
     case DiscardDraft               => document(Draft)
     case RetryRendition             => document(InApproval).copy(ownerId = Some(other))
@@ -108,6 +109,8 @@ object PolicySpec extends ZIOSpecDefault:
     GenerateEvidenceReport -> List(Never, Never, Never, Never, Never, Never, Full, Full, Never, Never),
     // Manual document numbers (DMS-113, ADR 0040): records management, and owners for their own documents.
     AssignDocumentNumber -> List(Never, Never, Partial, Never, Never, Never, Full, Never, Never, Never),
+    // Keeping owner and title straight (DMS-162, ADR 0084): records management.
+    CorrectDocumentRecord -> List(Never, Never, Never, Never, Never, Never, Full, Never, Never, Never),
     // Finding people by name for pickers (DMS-111): every role of the tenant; nobody without a role.
     SearchUsers -> List(Full, Full, Full, Full, Full, Full, Full, Full, Full, Full),
     // Discarding a draft never submitted (DMS-129, ADR 0050): its author, the document's owner and tenant

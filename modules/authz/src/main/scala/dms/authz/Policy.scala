@@ -218,6 +218,12 @@ object Policy:
           "assigning a document number requires the records manager role or being the document's owner"
         )
 
+      case CorrectDocumentRecord =>
+        grantIf(
+          resource.isDocument && has(RecordsManager),
+          "the records of a document are kept by the records manager role"
+        )
+
       case DiscardDraft =>
         requireStatus(Draft)(
           grantIf(

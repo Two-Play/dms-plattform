@@ -47,11 +47,12 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
 import { formatDate, formatDateTime } from '@/i18n/format'
 import { toast } from '@/lib/toast'
 import { ClassRulesSection } from './class-rules-section'
+import { ReasonField } from './reason-field'
+import { RecordsSection } from './records-section'
 import type { RetentionPageSearch } from './retention-params'
 
 const th = 'py-2 pr-4 font-medium'
@@ -59,11 +60,8 @@ const td = 'py-2 pr-4 align-top'
 const selectClass =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
 
-/** Longest reason the backend accepts (`DestructionService.MaxReasonLength`). */
-const MAX_REASON = 4000
-
-type Tab = 'list' | 'proposals' | 'rules' | 'cleanup'
-const TABS: readonly Tab[] = ['list', 'proposals', 'rules', 'cleanup']
+type Tab = 'list' | 'proposals' | 'rules' | 'cleanup' | 'records'
+const TABS: readonly Tab[] = ['list', 'proposals', 'rules', 'cleanup', 'records']
 
 function Table({
   caption,
@@ -89,43 +87,6 @@ function Table({
         </thead>
         <tbody>{children}</tbody>
       </table>
-    </div>
-  )
-}
-
-/** The required reason of every proposal and decision; recorded in the audit trail. */
-function ReasonField({
-  id,
-  value,
-  onChange,
-  invalid,
-}: {
-  id: string
-  value: string
-  onChange: (value: string) => void
-  invalid: boolean
-}) {
-  return (
-    <div className="grid gap-1.5">
-      <Label htmlFor={id}>{t('retention.reasonField')}</Label>
-      <Textarea
-        id={id}
-        value={value}
-        maxLength={MAX_REASON}
-        onChange={(e) => {
-          onChange(e.target.value)
-        }}
-        aria-invalid={invalid || undefined}
-        aria-required
-        aria-describedby={`${id}-hint`}
-      />
-      <p
-        id={`${id}-hint`}
-        role={invalid ? 'alert' : undefined}
-        className={invalid ? 'text-sm text-destructive' : 'text-xs text-muted-foreground'}
-      >
-        {invalid ? t('retention.reasonMissing') : t('retention.reasonHint', { max: MAX_REASON })}
-      </p>
     </div>
   )
 }
@@ -1305,6 +1266,7 @@ export function RetentionPage() {
             </>
           )}
           {tab === 'cleanup' && <CleanupSection />}
+          {tab === 'records' && <RecordsSection />}
         </>
       )}
     </div>

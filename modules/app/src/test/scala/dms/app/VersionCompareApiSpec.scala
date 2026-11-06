@@ -328,8 +328,9 @@ object VersionCompareApiSpec extends ZIOSpecDefault:
         doc   <- validDocument(owner)
         major <- newVersion(doc.id, """{"changeKind":"Major","reason":"Rule 5 tightened, appendix added"}""")
           .map(as[DocumentVersionView])
+        // The owner saves it: only they move a later version to another unit (ADR 0084).
         _ <- call(
-          author,
+          owner,
           "PUT",
           s"/api/v1/documents/${doc.id}/draft",
           Some(

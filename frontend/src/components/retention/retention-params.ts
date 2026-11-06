@@ -4,7 +4,7 @@
  */
 export interface RetentionPageSearch {
   /** The section shown; default the destruction list. */
-  tab?: 'proposals' | 'rules' | 'cleanup'
+  tab?: 'proposals' | 'rules' | 'cleanup' | 'records'
   /** Proposals of this status; default the open ones. */
   status?: 'approved' | 'rejected' | 'all'
   /** Filters of the destruction list. */
@@ -13,7 +13,7 @@ export interface RetentionPageSearch {
   q?: string
 }
 
-const TABS = ['proposals', 'rules', 'cleanup'] as const
+const TABS = ['proposals', 'rules', 'cleanup', 'records'] as const
 const STATUSES = ['approved', 'rejected', 'all'] as const
 
 function text(value: unknown): string | undefined {

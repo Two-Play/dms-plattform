@@ -262,6 +262,51 @@ private[core] object DocumentStore:
     val _ = sql"""update dms.document set title = $title, owner_id = ${owner.map(_.value)}, updated_at = now()
                   where id = ${id.value}""".update.run()
 
+  /** The documents whose owner or title may differ from their last version in force, with the rule of
+    * `Versioning.lastInForce` in SQL so that a report does not read every document (ADR 0084). The caller
+    * decides on the versions.
+    */
+  def recordDifferenceCandidates(using DbTx): List[DocumentId] =
+    sql"""select d.id
+          from dms.document d
+          join lateral (
+              select v.field_values
+              from dms.document_version v
+              where v.document_id = d.id and v.status <> 'Destroyed'
+                and (v.published_at is not null or v.status in ('Published', 'ReviewDue'))
+              order by v.status in ('Published', 'ReviewDue') desc, v.published_at desc nulls last
+              limit 1
+          ) l on true
+          where l.field_values #>> '{owner,value,userId}' is distinct from d.owner_id
+                  and l.field_values #>> '{owner,value,userId}' is not null
+             or btrim(l.field_values #>> '{title,value,value}') <> d.title
+          order by d.id""".query[UUID].run().toList.map(DocumentId(_))
+
+  /** The documents whose open version may stand below another version: a lower level than any version that
+    * was not discarded, by what access goes by (ADR 0083). `DocumentRecord.belowBasis` decides.
+    */
+  def belowBasisCandidates(using DbTx): List[DocumentId] =
+    sql"""with level as (
+              select v.id, v.document_id, v.status,
+                     coalesce(
+                       array_position(
+                         array['Public', 'Internal', 'Confidential', 'StrictlyConfidential'],
+                         coalesce(l.from_level, v.field_values #>> '{confidentiality,value,code}',
+                                  v.field_values #>> '{confidentiality,value,value}')
+                       ),
+                       2
+                     ) as rank
+              from dms.document_version v
+              left join dms.document_confidentiality_lowering l
+                on l.version_id = v.id and l.status = 'Approved' and v.published_at is null
+              where v.status not in ('Discarded', 'Destroyed')
+          )
+          select distinct o.document_id
+          from level o
+          join level b on b.document_id = o.document_id and b.id <> o.id and b.rank > o.rank
+          where o.status in ('Draft', 'InReview', 'InApproval')
+          order by o.document_id""".query[UUID].run().toList.map(DocumentId(_))
+
   // The column list is repeated in each query: Magnum binds parameters only for literal sql"" fragments.
 
   /** All versions of a document, by number and creation. */

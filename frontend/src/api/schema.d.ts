@@ -824,7 +824,7 @@ export interface paths {
       cookie?: never
     }
     get?: never
-    /** @description Changes the draft and saves it as the next working state. Locked sections without an active deviation request and computed fields of the template cannot be changed (422); versions in review or later cannot be changed (409), nor can a draft that has moved past `expectedWorkingState` (409). Values taken over from a business system (origin System, e.g. the partner master) keep their origin; a different value for them is rejected (422 `not_editable`). A first version sets owner and title of the document; a later version keeps them in its values until it is published. A later version cannot be less confidential than the version it started from without the additional approval (422 `confidentiality_lowered`, also if the field is left out), and only the document's owner can add access groups (422 `access_groups_widened`). */
+    /** @description Changes the draft and saves it as the next working state. Locked sections without an active deviation request and computed fields of the template cannot be changed (422); versions in review or later cannot be changed (409), nor can a draft that has moved past `expectedWorkingState` (409). Values taken over from a business system (origin System, e.g. the partner master) keep their origin; a different value for them is rejected (422 `not_editable`). A first version sets owner and title of the document; a later version keeps them in its values until it is published. A later version cannot be less confidential than the version it started from without the additional approval (422 `confidentiality_lowered`, also if the field is left out), and only the document's owner can add access groups (422 `access_groups_widened`) or move it to another organizational unit (422 `unit_moved`), one in which they can edit it (422 `unit_out_of_reach`). */
     put: operations['putApiV1DocumentsIdDraft']
     post?: never
     delete?: never
@@ -2615,6 +2615,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/records/document-differences': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Documents whose owner or title differ from the version last in force (ADR 0084): what a draft saved before ADR 0074 left behind. They stay as they are unless someone corrects them. For records managers, decided per document on its governing versions and that version, so only documents within their scope and clearance; `notCleared` counts those in scope left out. Reading the report is recorded in the audit trail. */
+    get: operations['getApiV1RecordsDocument-differences']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/records/drafts-below-basis': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Open versions whose level is below that of the version they started from (ADR 0084), by the level access goes by. Rights as for `document-differences`. Reading the report is recorded in the audit trail. */
+    get: operations['getApiV1RecordsDrafts-below-basis']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/record-correction': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Gives the document the owner, the title or both that its last version in force names (ADR 0084), with a reason, recorded in the audit trail as `document.record-corrected` with before and after. No other value can be set. Tells both owners. 403 as for the report. 409 while a version is in the workflow, or if `versionId` is no longer the last one in force or the chosen value no longer differs. 422 without reason or value. */
+    post: operations['postApiV1DocumentsIdRecord-correction']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/{id}/evidence-report': {
     parameters: {
       query?: never
@@ -3669,6 +3720,14 @@ export interface components {
       updatedAt?: string
       updatedBy?: string
     }
+    /** CorrectRecord */
+    CorrectRecord: {
+      /** Format: uuid */
+      versionId: string
+      owner: boolean
+      title: boolean
+      reason: string
+    }
     /** DecideDestruction */
     DecideDestruction: {
       reason?: string
@@ -4164,6 +4223,31 @@ export interface components {
        * @enum {string}
        */
       type: 'FormattingChanged'
+    }
+    /** DraftBelowBasisView */
+    DraftBelowBasisView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      versionLabel: string
+      versionStatus: string
+      title: string
+      classPath?: string[]
+      unit?: string
+      author: string
+      owner?: string
+      level: string
+      basisLabel: string
+      basisLevel: string
+      /** Format: date-time */
+      changedAt: string
+    }
+    /** DraftsBelowBasisView */
+    DraftsBelowBasisView: {
+      drafts?: components['schemas']['DraftBelowBasisView'][]
+      /** Format: int32 */
+      notCleared: number
     }
     /** FourEyesFindingView */
     FourEyesFindingView: {
@@ -5031,6 +5115,35 @@ export interface components {
       /** Format: int32 */
       open: number
       recipients?: components['schemas']['RecipientView'][]
+    }
+    /** RecordCorrectedView */
+    RecordCorrectedView: {
+      /** Format: uuid */
+      documentId: string
+      owner?: string
+      title: string
+    }
+    /** RecordDifferenceView */
+    RecordDifferenceView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      versionLabel: string
+      versionStatus: string
+      classPath?: string[]
+      unit?: string
+      documentOwner?: string
+      documentTitle: string
+      versionOwner?: string
+      versionTitle?: string
+      inWorkflow?: string
+    }
+    /** RecordDifferencesView */
+    RecordDifferencesView: {
+      differences?: components['schemas']['RecordDifferenceView'][]
+      /** Format: int32 */
+      notCleared: number
     }
     /** RecipientView */
     RecipientView: {
@@ -13311,6 +13424,103 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['FourEyesFindingView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1RecordsDocument-differences': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RecordDifferencesView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1RecordsDrafts-below-basis': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DraftsBelowBasisView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1DocumentsIdRecord-correction': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CorrectRecord']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RecordCorrectedView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
         }
       }
       default: {

@@ -62,6 +62,21 @@ object NewVersionAccessApiSpec extends ZIOSpecDefault:
   private val designer   = UserId("designer-1")
   private val designer2  = UserId("designer-2")
 
+  /** Holds the owner role in Finance only: answers for a document, and has no right in another unit. */
+  private val financeOwner = UserId("owner-finance")
+
+  /** An author of another unit, in the access group: reaches a draft only if it moves there. */
+  private val salesAuthor = UserId("author-sales")
+
+  /** A records manager for the whole tenant, in the access group. */
+  private val records = UserId("records-1")
+
+  /** A records manager for the whole tenant, in no access group. */
+  private val unclearedRecords = UserId("records-uncleared")
+
+  /** A records manager of another unit, in the access group. */
+  private val salesRecords = UserId("records-sales")
+
   /** Small limit, so that oversized uploads are cheap to send. */
   private val maxSize = 64L * 1024
 
@@ -126,9 +141,26 @@ object NewVersionAccessApiSpec extends ZIOSpecDefault:
             _ <- RoleAssignments.Postgres.grant(reviewer, RoleAssignment(Role.Reviewer), admin)
             _ <- RoleAssignments.Postgres.grant(approver, RoleAssignment(Role.Approver), admin)
             _ <- RoleAssignments.Postgres.grant(accomplice, RoleAssignment(Role.Owner), admin)
+            _ <- RoleAssignments.Postgres.grant(
+              financeOwner,
+              RoleAssignment(Role.Owner, organizationalUnit = Some("Finance")),
+              admin
+            )
+            _ <- RoleAssignments.Postgres.grant(
+              salesAuthor,
+              RoleAssignment(Role.Author, organizationalUnit = Some("Sales")),
+              admin
+            )
+            _ <- RoleAssignments.Postgres.grant(records, RoleAssignment(Role.RecordsManager), admin)
+            _ <- RoleAssignments.Postgres.grant(unclearedRecords, RoleAssignment(Role.RecordsManager), admin)
+            _ <- RoleAssignments.Postgres.grant(
+              salesRecords,
+              RoleAssignment(Role.RecordsManager, organizationalUnit = Some("Sales")),
+              admin
+            )
             _ <- Groups.Postgres.create("board", "Board", admin)
             _ <- Groups.Postgres.create("works-council", "Works council", admin)
-            _ <- ZIO.foreachDiscard(List(member, reviewer, approver))(
+            _ <- ZIO.foreachDiscard(List(member, reviewer, approver, salesAuthor, records, salesRecords))(
               Groups.Postgres.addMember("board", _, admin)
             )
             cls <- classes.createClass("policy", None, ClassDraft("Policy", None, Nil), admin)
@@ -251,7 +283,7 @@ object NewVersionAccessApiSpec extends ZIOSpecDefault:
   private val routes =
     ZioHttpInterpreter().toHttp(
       DocumentApi.endpoints.map(_.widen[Env]) ++ WorkflowApi.endpoints.map(_.widen[Env]) ++
-        AttachmentApi.endpoints.map(_.widen[Env])
+        AttachmentApi.endpoints.map(_.widen[Env]) ++ RecordsApi.endpoints.map(_.widen[Env])
     )
 
   final case class Response(status: Status, headers: Headers, body: Chunk[Byte]):
@@ -301,13 +333,14 @@ object NewVersionAccessApiSpec extends ZIOSpecDefault:
       level: Option[String] = Some("Confidential"),
       groups: List[String] = List("board"),
       ownerId: UserId = owner,
-      validFrom: LocalDate = past
+      validFrom: LocalDate = past,
+      unit: String = "Finance"
   ) =
     val confidentiality = level.fold("")(l => s""""confidentiality":{"type":"Selection","code":"$l"},""")
     val allowed         = groups.map(g => s"""{"type":"Text","value":"$g"}""").mkString(",")
     val access = if groups.isEmpty then "" else s""""allowedGroups":{"type":"Many","values":[$allowed]},"""
     s"""{"owner":{"type":"PersonRef","userId":"${ownerId.value}"},
-       |"organizationalUnit":{"type":"Text","value":"Finance"},
+       |"organizationalUnit":{"type":"Text","value":"$unit"},
        |"validFrom":{"type":"Date","value":"$validFrom"},
        |$confidentiality$access
        |"language":{"type":"Text","value":"en"},
@@ -399,6 +432,61 @@ object NewVersionAccessApiSpec extends ZIOSpecDefault:
     )
 
   private def issues(response: Response) = as[ApiError](response).issues.toList.flatten
+
+  private def outbox(doc: UUID) =
+    ownerQuery(
+      sql"select event_type, payload::text from dms.outbox_event where aggregate_id = $doc order by id"
+        .query[(String, String)]
+        .run()
+        .toList
+    )
+
+  /** What a draft saved before ADR 0074 left on a document. */
+  private def takeOver(doc: UUID, by: UserId = accomplice, title: String = "Hijacked") =
+    ownerQuery(
+      sql"update dms.document set owner_id = ${by.value}, title = $title where id = $doc".update.run()
+    )
+
+  /** What a draft saved before ADR 0074 could do to its own level. */
+  private def lowerOpenVersion(doc: UUID, level: String = "Internal") =
+    val code = s"\"$level\""
+    ownerQuery(
+      sql"""update dms.document_version
+            set field_values = jsonb_set(field_values, '{confidentiality,value,code}', $code::jsonb)
+            where document_id = $doc and status = 'Draft'""".update.run()
+    )
+
+  private def differences(user: UserId) =
+    call(user, "GET", "/api/v1/records/document-differences")
+
+  private def belowBasis(user: UserId) =
+    call(user, "GET", "/api/v1/records/drafts-below-basis")
+
+  private def difference(user: UserId, doc: UUID) =
+    differences(user).map(as[RecordDifferencesView](_).differences.find(_.documentId == doc))
+
+  private def correct(
+      user: UserId,
+      doc: UUID,
+      version: UUID,
+      owner: Boolean = true,
+      title: Boolean = true,
+      reason: String = "Taken over by a draft"
+  ) =
+    call(
+      user,
+      "POST",
+      s"/api/v1/documents/$doc/record-correction",
+      Some(CorrectRecord(version, owner, title, reason).toJson)
+    )
+
+  private def lastReading(action: String) =
+    ownerQuery(
+      sql"select actor_id, details::text from dms.audit_event where action = $action order by seq desc limit 1"
+        .query[(String, String)]
+        .run()
+        .headOption
+    )
 
   def spec = suite("New versions of confidential documents")(
     suite("Starting a version")(
@@ -633,6 +721,223 @@ object NewVersionAccessApiSpec extends ZIOSpecDefault:
           all <- cases(doc.id)
           task = all.last.tasks.find(_.status == "Open").get
         yield assertTrue(task.candidates == List(owner.value))
+      }
+    ),
+    suite("Moving a draft to another organizational unit")(
+      test("only the document's owner moves a later version, and it stays where they moved it") {
+        for
+          doc     <- published()
+          _       <- startVersion(member, doc.id)
+          moved   <- save(member, doc.id, values(unit = "Sales"))
+          byOwner <- save(owner, doc.id, values(unit = "Sales"))
+          again   <- save(member, doc.id, values(unit = "Sales"))
+          further <- save(member, doc.id, values(unit = "Legal"))
+          back    <- save(member, doc.id, values())
+        yield assertTrue(
+          moved.status == Status.UnprocessableEntity,
+          issues(moved).map(i => (i.field, i.code)) == List(("organizationalUnit", "unit_moved")),
+          byOwner.status == Status.Ok,
+          again.status == Status.Ok,
+          further.status == Status.UnprocessableEntity,
+          back.status == Status.Ok
+        )
+      },
+      test("the owner moves it only to a unit in which they can edit it, and nothing is saved") {
+        for
+          doc   <- published(values(level = Some("Internal"), groups = Nil, ownerId = financeOwner))
+          draft <- startVersion(member, doc.id).map(as[DocumentVersionView])
+          moved <- save(
+            financeOwner,
+            doc.id,
+            values(level = Some("Internal"), groups = Nil, ownerId = financeOwner, unit = "Sales")
+          )
+          unit <- ownerQuery(
+            sql"""select field_values #>> '{organizationalUnit,value,value}', working_state
+                  from dms.document_version where id = ${draft.id}""".query[(String, Int)].run().head
+          )
+        yield assertTrue(
+          moved.status == Status.UnprocessableEntity,
+          issues(moved).map(i => (i.field, i.code)) == List(("organizationalUnit", "unit_out_of_reach")),
+          unit == ("Finance", draft.workingState)
+        )
+      },
+      test("authors of the other unit reach the copied content only after the owner moved it") {
+        val open = values(level = Some("Internal"), groups = Nil)
+        for
+          doc    <- published(open)
+          _      <- startVersion(member, doc.id)
+          before <- call(salesAuthor, "GET", s"/api/v1/documents/${doc.id}")
+          _      <- save(member, doc.id, values(level = Some("Internal"), groups = Nil, unit = "Sales"))
+          still  <- call(salesAuthor, "GET", s"/api/v1/documents/${doc.id}")
+          _      <- save(owner, doc.id, values(level = Some("Internal"), groups = Nil, unit = "Sales"))
+          after  <- call(salesAuthor, "GET", s"/api/v1/documents/${doc.id}")
+        yield assertTrue(
+          before.status == Status.Forbidden,
+          still.status == Status.Forbidden,
+          after.status == Status.Ok
+        )
+      },
+      test("a first version moves freely, it copied nothing") {
+        for
+          doc   <- draft()
+          moved <- save(author, doc.id, values(unit = "Sales"))
+        yield assertTrue(moved.status == Status.Ok)
+      }
+    ),
+    suite("Owner and title that differ from the version last in force")(
+      test("records managers see the difference, within scope and clearance, and reading is recorded") {
+        for
+          doc     <- published()
+          _       <- takeOver(doc.id)
+          row     <- difference(records, doc.id)
+          hidden  <- differences(unclearedRecords).map(as[RecordDifferencesView])
+          other   <- differences(salesRecords).map(as[RecordDifferencesView])
+          refused <- differences(owner)
+          audited <- lastReading(RecordsApi.DifferencesViewed)
+        yield assertTrue(
+          row.exists(r =>
+            r.documentOwner.contains(accomplice.value) && r.versionOwner.contains(owner.value) &&
+              r.documentTitle == "Hijacked" && r.versionTitle.contains("Board minutes") &&
+              r.versionLabel == "1.0" && r.inWorkflow.isEmpty && r.unit.contains("Finance")
+          ),
+          !hidden.differences.exists(_.documentId == doc.id),
+          hidden.notCleared >= 1,
+          !other.differences.exists(_.documentId == doc.id),
+          other.notCleared == 0,
+          refused.status == Status.Forbidden,
+          audited.exists((_, details) => details.contains("notCleared"))
+        )
+      },
+      test("a document that matches its version is not listed, nor is one with an open draft's values") {
+        for
+          doc <- published()
+          _   <- startVersion(member, doc.id)
+          _   <- save(member, doc.id, values(ownerId = accomplice), "Renamed")
+          row <- difference(records, doc.id)
+        yield assertTrue(row.isEmpty)
+      },
+      test("a correction is a decision per value, with a reason, and is recorded") {
+        for
+          doc       <- published()
+          _         <- takeOver(doc.id)
+          row       <- difference(records, doc.id).map(_.get)
+          noReason  <- correct(records, doc.id, row.versionId, reason = "  ")
+          nothing   <- correct(records, doc.id, row.versionId, owner = false, title = false)
+          uncleared <- correct(unclearedRecords, doc.id, row.versionId)
+          byOwner   <- correct(owner, doc.id, row.versionId)
+          untouched <- stored(doc.id)
+          ownerOnly <- correct(records, doc.id, row.versionId, title = false)
+          afterOne  <- stored(doc.id)
+          left      <- difference(records, doc.id)
+          twice     <- correct(records, doc.id, row.versionId, title = false)
+          titleOnly <- correct(records, doc.id, row.versionId, owner = false)
+          afterAll  <- stored(doc.id)
+          gone      <- difference(records, doc.id)
+          audit     <- auditActions(doc.id)
+          reasons   <- ownerQuery(
+            sql"""select reason from dms.audit_event
+                  where object_id = ${doc.id} and action = ${DocumentService.RecordCorrected}"""
+              .query[Option[String]]
+              .run()
+              .toList
+          )
+          sent <- outbox(doc.id)
+        yield assertTrue(
+          noReason.status == Status.UnprocessableEntity,
+          nothing.status == Status.UnprocessableEntity,
+          uncleared.status == Status.Forbidden,
+          byOwner.status == Status.Forbidden,
+          untouched == (Some(accomplice.value), "Hijacked"),
+          ownerOnly.status == Status.Ok,
+          afterOne == (Some(owner.value), "Hijacked"),
+          left.exists(r => r.versionOwner.isEmpty && r.versionTitle.contains("Board minutes")),
+          twice.status == Status.Conflict,
+          titleOnly.status == Status.Ok,
+          afterAll == (Some(owner.value), "Board minutes"),
+          gone.isEmpty,
+          audit.count(_._1 == DocumentService.RecordCorrected) == 2,
+          audit.exists((action, details) =>
+            action == DocumentService.RecordCorrected && details.contains(accomplice.value) &&
+              details.contains("Hijacked")
+          ),
+          reasons == List(Some("Taken over by a draft"), Some("Taken over by a draft")),
+          sent.count(_._1 == DocumentService.OwnerCorrected) == 1,
+          sent.exists((event, payload) =>
+            event == DocumentService.OwnerCorrected && payload.contains(accomplice.value) &&
+              payload.contains(owner.value)
+          )
+        )
+      },
+      test("the corrected owner has the document's rights, the former one loses them") {
+        for
+          doc    <- published()
+          _      <- takeOver(doc.id)
+          row    <- difference(records, doc.id).map(_.get)
+          before <- call(owner, "GET", s"/api/v1/documents/${doc.id}")
+          _      <- correct(records, doc.id, row.versionId)
+          now    <- call(owner, "GET", s"/api/v1/documents/${doc.id}")
+          former <- call(accomplice, "GET", s"/api/v1/documents/${doc.id}")
+        yield assertTrue(
+          before.status == Status.Forbidden,
+          now.status == Status.Ok,
+          former.status == Status.Forbidden
+        )
+      },
+      test("a correction waits for a version in the workflow, not for a draft") {
+        for
+          doc   <- published()
+          _     <- takeOver(doc.id)
+          row   <- difference(records, doc.id).map(_.get)
+          draft <- startVersion(member, doc.id)
+          _     <- call(member, "POST", s"/api/v1/documents/${doc.id}/submit")
+          shown <- difference(records, doc.id)
+          held  <- correct(records, doc.id, row.versionId)
+          after <- stored(doc.id)
+        yield assertTrue(
+          draft.status == Status.Created,
+          shown.exists(_.inWorkflow.isDefined),
+          held.status == Status.Conflict,
+          after == (Some(accomplice.value), "Hijacked")
+        )
+      },
+      test("a correction is refused on a version that is not the last in force") {
+        for
+          doc     <- published()
+          _       <- takeOver(doc.id)
+          draft   <- startVersion(member, doc.id).map(as[DocumentVersionView])
+          refused <- correct(records, doc.id, draft.id)
+        yield assertTrue(refused.status == Status.Conflict)
+      }
+    ),
+    suite("Open versions below their basis")(
+      test("records managers see them, within scope and clearance, and reading is recorded") {
+        for
+          doc     <- published()
+          _       <- startVersion(member, doc.id)
+          _       <- lowerOpenVersion(doc.id)
+          list    <- belowBasis(records).map(as[DraftsBelowBasisView])
+          hidden  <- belowBasis(unclearedRecords).map(as[DraftsBelowBasisView])
+          other   <- belowBasis(salesRecords).map(as[DraftsBelowBasisView])
+          refused <- belowBasis(author)
+          audited <- lastReading(RecordsApi.DraftsViewed)
+        yield assertTrue(
+          list.drafts.exists(d =>
+            d.documentId == doc.id && d.level == "Internal" && d.basisLevel == "Confidential" &&
+              d.basisLabel == "1.0" && d.versionStatus == "Draft" && d.author == member.value &&
+              d.owner.contains(owner.value)
+          ),
+          !hidden.drafts.exists(_.documentId == doc.id),
+          !other.drafts.exists(_.documentId == doc.id),
+          refused.status == Status.Forbidden,
+          audited.isDefined
+        )
+      },
+      test("a draft at the level of its basis is not listed") {
+        for
+          doc  <- published()
+          _    <- startVersion(member, doc.id)
+          list <- belowBasis(records).map(as[DraftsBelowBasisView])
+        yield assertTrue(!list.drafts.exists(_.documentId == doc.id))
       }
     )
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

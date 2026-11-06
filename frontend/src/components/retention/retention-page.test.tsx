@@ -443,6 +443,7 @@ describe('retention helpers', () => {
       q: 'north',
     })
     expect(parseRetentionPageSearch({ tab: 'list' })).toEqual({})
+    expect(parseRetentionPageSearch({ tab: 'records' })).toEqual({ tab: 'records' })
   })
 
   it('filters candidates by class, rule and text', () => {

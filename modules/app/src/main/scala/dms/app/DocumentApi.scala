@@ -630,7 +630,9 @@ object DocumentApi:
           "document; a later version keeps them in its values until it is published. A later version cannot be " +
           "less confidential than the version it started from without the additional approval (422 " +
           "`confidentiality_lowered`, also if the field " +
-          "is left out), and only the document's owner can add access groups (422 `access_groups_widened`)."
+          "is left out), and only the document's owner can add access groups (422 `access_groups_widened`) or " +
+          "move it to another organizational unit (422 `unit_moved`), one in which they can edit it (422 " +
+          "`unit_out_of_reach`)."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -648,6 +650,13 @@ object DocumentApi:
                 DocumentId(id),
                 DraftChange(req.title, keepExternal(open) ++ entered, req.content, req.expectedWorkingState),
                 p.userId
+              )
+              // The check above saw the draft where it stood. Where it goes decides who reads what it copied.
+              _ <- ZIO.foreachDiscard(Versioning.reachedUnit(open, updated.metadata, details.versions))(
+                unit =>
+                  ctx
+                    .allowed(Action.EditDraft, resource(p, details, updated))
+                    .flatMap(allowed => ZIO.unless(allowed)(ZIO.fail(unitOutOfReach(details, unit))))
               )
             yield versionViewIn(details, ctx.service.settings)(updated)
           }
@@ -1237,6 +1246,18 @@ object DocumentApi:
     ZIO
       .fromOption(details.open)
       .orElseFail(DocumentError.Conflict(s"document ${details.document.id.value} has no open version"))
+
+  private def unitOutOfReach(details: DocumentDetails, unit: String): DocumentError =
+    val field = DocumentResource.OrganizationalUnitField
+    DocumentError.InvalidValues(
+      List(
+        FieldIssue(
+          field,
+          details.profile.field(field).fold(field)(_.definition.label),
+          IssueKind.UnitOutOfReach(unit)
+        )
+      )
+    )
 
   /** Values a business system set keep their origin until the system changes them. */
   private def keepExternal(v: DocumentVersion): Map[String, FieldEntry] =
