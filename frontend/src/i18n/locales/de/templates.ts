@@ -97,6 +97,10 @@ export const templates: Translation<typeof en.templates> = {
     issues: plural({ one: '{count} Problem im Inhalt', other: '{count} Probleme im Inhalt' }),
   },
   test: {
+    caseTypical: 'Typische Werte',
+    caseEmptyOptional: 'Leere optionale Felder',
+    caseLong: 'Lange Werte',
+    caseCondition: '{location}: Bedingung ist {outcome}',
     notReached: 'nicht erreicht',
     true: 'wahr',
     false: 'falsch',

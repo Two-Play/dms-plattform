@@ -1,3 +1,4 @@
+import { errorDetail } from '@/components/shared/error-messages'
 import { InlineError } from '@/components/shared/error-state'
 import { toast } from '@/lib/toast'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -26,9 +27,12 @@ import {
  */
 export function DeputyshipForm({
   withPrincipal = false,
+  selfId,
   onCreated,
 }: {
   withPrincipal?: boolean
+  /** The signed-in person, when they set their own deputy: nobody can stand in for themselves. */
+  selfId?: string
   onCreated?: (created: Deputyship) => void
 }) {
   const client = useApiClient()
@@ -108,6 +112,10 @@ export function DeputyshipForm({
           }}
           required
           invalid={Boolean(shown.deputy)}
+          excluded={{
+            ids: [withPrincipal ? input.principal : selfId].filter((v) => Boolean(v)) as string[],
+            label: t('deputies.notOwnDeputy'),
+          }}
           describedBy={`${id}-deputy-hint`}
         />
         {hint('deputy', t('deputies.deputyHint'))}
@@ -193,7 +201,16 @@ export function DeputyshipForm({
         <Button type="submit" disabled={create.isPending}>
           {create.isPending ? t('deputies.saving') : t('deputies.submit')}
         </Button>
-        {create.isError && <InlineError error={create.error} />}
+        {create.isError && (
+          <InlineError
+            error={create.error}
+            text={
+              errorDetail(create.error)?.includes('same authority')
+                ? t('deputies.needsSameRole')
+                : undefined
+            }
+          />
+        )}
       </div>
     </form>
   )

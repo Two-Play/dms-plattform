@@ -96,6 +96,10 @@ export const templates = {
     issues: plural({ one: '{count} issue in the content', other: '{count} issues in the content' }),
   },
   test: {
+    caseTypical: 'Typical values',
+    caseEmptyOptional: 'Empty optional fields',
+    caseLong: 'Long values',
+    caseCondition: '{location}: condition is {outcome}',
     notReached: 'not reached',
     true: 'true',
     false: 'false',

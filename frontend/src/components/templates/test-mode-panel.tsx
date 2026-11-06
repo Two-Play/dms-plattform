@@ -198,7 +198,7 @@ function Results({ run }: { run: TestRun }) {
                 }}
                 className="w-full rounded-md border px-2 py-1.5 text-left text-sm hover:bg-muted aria-pressed:border-primary aria-pressed:bg-muted"
               >
-                <span className="block">{c.name}</span>
+                <span className="block">{caseName(c.name)}</span>
                 {c.error ? (
                   <span className="text-xs text-destructive">{t('templates.test.failed')}</span>
                 ) : (c.missingRequired ?? []).length > 0 ? (
@@ -212,11 +212,11 @@ function Results({ run }: { run: TestRun }) {
         </ul>
         {current && (
           <section
-            aria-label={t('templates.test.caseLabel', { name: current.name })}
+            aria-label={t('templates.test.caseLabel', { name: caseName(current.name) })}
             className="min-w-0 space-y-2"
           >
             <div className="flex items-center justify-between gap-2">
-              <h3 className="font-medium">{current.name}</h3>
+              <h3 className="font-medium">{caseName(current.name)}</h3>
               <Badge variant="destructive">{t('docs.preview.draftLabel')}</Badge>
             </div>
             {current.error && <InlineError error={current.error} text={current.error} />}
@@ -244,6 +244,20 @@ function Results({ run }: { run: TestRun }) {
  * Test mode (DMS-35): resolves the version with generated sample data that reaches every condition branch,
  * leaves optional fields empty and uses long values, and shows each case rendered like the live preview.
  */
+/** The generated cases are named in English by the backend; what they mean is fixed. */
+function caseName(name: string): string {
+  if (name === 'typical values') return t('templates.test.caseTypical')
+  if (name === 'empty optional fields') return t('templates.test.caseEmptyOptional')
+  if (name === 'long values') return t('templates.test.caseLong')
+  const conditional = /^(.*): condition is (true|false)$/.exec(name)
+  if (!conditional) return name
+  const [, location = '', outcome] = conditional
+  return t('templates.test.caseCondition', {
+    location,
+    outcome: outcome === 'true' ? t('templates.test.true') : t('templates.test.false'),
+  })
+}
+
 export function TestModePanel({
   version,
   unsaved = false,

@@ -68,6 +68,9 @@ export const deputies: Translation<typeof en.deputies> = {
   title: 'Stellvertretungen',
   description:
     'Solange eine Stellvertretung aktiv ist, kann die Stellvertretung offene Prüf- und Freigabeaufgaben in Ihrem Namen erledigen. Die eigenen Aufgaben bleiben erhalten.',
+  notOwnDeputy: 'Eigene Person',
+  needsSameRole:
+    'Diese Person hat nicht alle vertretenen Rollen. Wählen Sie jemanden mit denselben Rollen oder schränken Sie die Rollen ein.',
   setDeputy: 'Stellvertretung festlegen',
   setDeputyText: 'Für einen begrenzten Zeitraum, z. B. einen Urlaub.',
   loading: 'Stellvertretungen werden geladen',
