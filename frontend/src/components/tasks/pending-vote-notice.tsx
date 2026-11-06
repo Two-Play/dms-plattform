@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { decisionLabel, type WorkflowTask } from '@/api/workflow'
+import { decisionLabel, stepLabel, type WorkflowTask } from '@/api/workflow'
 import { clearPendingVote, loadPendingVote, type PendingVote } from '@/auth/pending-vote'
 import { Button } from '@/components/ui/button'
 import { t } from '@/i18n'
@@ -29,7 +29,7 @@ export function PendingVoteNotice({
         {t('tasks.pending.text', {
           decision: decisionLabel(pending.decision),
           title: titleOf(task) ?? t('tasks.aDocument'),
-          step: task.stepName,
+          step: stepLabel(task),
         })}
       </p>
       <div className="flex shrink-0 gap-2">

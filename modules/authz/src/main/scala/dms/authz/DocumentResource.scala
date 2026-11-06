@@ -42,7 +42,7 @@ object DocumentResource:
       version.status,
       version.createdBy,
       version.releasedBy,
-      version.metadata
+      version.accessMetadata
     )
       .copy(
         assignedParticipants = participants,

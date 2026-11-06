@@ -10,6 +10,7 @@ import {
   isApprovalStep,
   isFourEyesRefusal,
   needsReason,
+  stepLabel,
   type VoteDecision,
   type WorkflowTask,
 } from '@/api/workflow'
@@ -28,6 +29,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
 import { InlineError } from '@/components/shared/error-state'
+import { LOWERING_STEP } from '@/api/confidentiality-lowering'
+import { LoweringDecisionNote } from '@/components/documents/confidentiality-lowering-panel'
 
 export interface VoteDraft {
   decision: VoteDecision
@@ -197,12 +200,15 @@ export function VoteDialog({
           <DialogHeader>
             <DialogTitle>
               {t('tasks.voteDialog.title', {
-                step: task.stepName,
+                step: stepLabel(task),
                 title: documentTitle ?? t('tasks.voteDialog.document'),
               })}
             </DialogTitle>
             <DialogDescription>{t('tasks.voteDialog.description')}</DialogDescription>
           </DialogHeader>
+          {task.step === LOWERING_STEP && (
+            <LoweringDecisionNote documentId={task.documentId} versionId={task.versionId} />
+          )}
           <VoteForm
             task={task}
             initial={initial}

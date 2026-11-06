@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-11-06; proposed 2026-11-06, implemented in DMS-158) |
+| Status | Accepted (2026-11-06; proposed 2026-11-06, implemented in DMS-158); decision 2 is amended by [0083](0083-lowering-confidentiality-with-an-additional-approval.md): the way down is the additional approval, saving stays refused |
 | Date | 2026-11-06 |
 | Decided by | Philippe |
 

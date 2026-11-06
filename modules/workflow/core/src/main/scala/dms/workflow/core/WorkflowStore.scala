@@ -171,7 +171,8 @@ private[core] object WorkflowStore:
     val _ = sql"""update dms.workflow_case
                   set process_instance_id = ${c.processInstanceId}, round = ${c.round}, status = ${c.status},
                       current_step = ${c.currentStep}, returned_step = ${c.returnedStep},
-                      content_sha256 = ${c.contentSha256}, updated_at = now()
+                      content_sha256 = ${c.contentSha256}, definition = ${c.definition},
+                      process_definition_id = ${c.processDefinitionId}, updated_at = now()
                   where id = ${c.id}""".update.run()
 
   final case class TaskRow(

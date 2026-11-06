@@ -223,7 +223,7 @@ export const errors = {
   issues: {
     access_groups_widened: 'Only the owner of the document can add access groups.',
     confidentiality_lowered:
-      'A new version cannot be less confidential than the version it started from.',
+      'A new version cannot be less confidential than the version it started from without an additional approval. Ask for the lower level with a reason.',
     missing_required: 'This field is required.',
     not_editable: 'This field is set by the platform and cannot be entered.',
     pattern_mismatch: 'The value does not have the expected format.',

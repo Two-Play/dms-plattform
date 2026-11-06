@@ -40,6 +40,8 @@ import { DiscardDraftAction } from './discard-draft-action'
 import { WithdrawVersionAction } from './withdraw-version-action'
 import { ChangeSummaryPanel } from './change-summary-panel'
 import { DeviationsPanel } from './deviations-panel'
+import { ConfidentialityLoweringPanel } from './confidentiality-lowering-panel'
+import { ProposedValuesNote } from './proposed-values-note'
 
 /** Whether the page shows the acknowledgement card for a version: valid and requiring it. */
 function asksForAcknowledgement(version: DocumentVersionView): boolean {
@@ -189,6 +191,7 @@ export function DocumentPage({
       {document.data && shown && (
         <>
           <AccessNote document={document.data} />
+          <ProposedValuesNote document={document.data} version={shown} />
           {!showingOther && document.data.changeCostsVote && (
             <p
               role="status"
@@ -263,6 +266,12 @@ export function DocumentPage({
               onUnsavedChange={setUnsavedSection}
             />
           )}
+          <ConfidentialityLoweringPanel
+            key={`lowering-${shown.id}`}
+            documentId={document.data.id}
+            version={shown}
+            editable={editing}
+          />
           <AttachmentsPanel
             key={`attachments-${shown.id}`}
             documentId={document.data.id}

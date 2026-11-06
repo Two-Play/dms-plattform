@@ -613,7 +613,8 @@ object DocumentApi:
           "taken over from a business system (origin System, e.g. the partner master) keep their origin; a " +
           "different value for them is rejected (422 `not_editable`). A first version sets owner and title of the " +
           "document; a later version keeps them in its values until it is published. A later version cannot be " +
-          "less confidential than the version it started from (422 `confidentiality_lowered`, also if the field " +
+          "less confidential than the version it started from without the additional approval (422 " +
+          "`confidentiality_lowered`, also if the field " +
           "is left out), and only the document's owner can add access groups (422 `access_groups_widened`)."
       )
       .tag("Documents")
@@ -647,7 +648,7 @@ object DocumentApi:
           "while the content breaks the edit rules of the template (422 `unauthorized_deviations`: one issue " +
           "per violation, `field` is the section id, `label` its title, `code` the kind of violation) and while " +
           "a later version is less confidential than the version it started from (422 " +
-          "`confidentiality_lowered`)."
+          "`confidentiality_lowered`; a lower level is asked for at `POST …/confidentiality-lowering`)."
       )
       .tag("Documents")
       .serverLogic(p =>

@@ -198,15 +198,18 @@ private[core] object DocumentStore:
       .run()
       .toList
 
-  private type OpenUseRow = (UUID, UUID, String, String, Int, Int, Int, String, Int, OffsetDateTime, Jsonb)
+  private type OpenUseRow =
+    (UUID, UUID, String, String, Int, Int, Int, String, Int, OffsetDateTime, Jsonb, Option[String])
 
   /** Open versions on a version of `template` before `before` with the document title, the most recently
     * changed first. The field values are read only to tell whether the version is restricted (confidentiality
-    * at least `Confidential`); they are not returned.
+    * at least `Confidential`, or an approved lowering that keeps it there, ADR 0083); they are not returned.
     */
   def openTemplateUses(template: TemplateId, before: Int)(using DbTx): List[OpenTemplateUse] =
     sql"""select v.document_id, v.id, d.title, v.created_by, v.major, v.minor, v.working_state, v.status,
-                 v.template_version, v.updated_at, v.field_values
+                 v.template_version, v.updated_at, v.field_values,
+                 (select l.from_level from dms.document_confidentiality_lowering l
+                  where l.version_id = v.id and l.status = 'Approved')
           from dms.document_version v join dms.document d on d.id = v.document_id
           where v.template_id = ${template.value} and v.template_version < $before
             and v.status in ('Draft', 'InReview', 'InApproval')
@@ -225,7 +228,8 @@ private[core] object DocumentStore:
               status,
               templateVersion,
               at,
-              values
+              values,
+              floor
             ) =>
           val s       = DocumentStatus.valueOf(status)
           val entries = values.value
@@ -240,7 +244,8 @@ private[core] object DocumentStore:
             s,
             templateVersion,
             at.toInstant,
-            CoreFields.isRestricted(entries.map((k, e) => k -> e.value))
+            CoreFields.isRestricted(entries.map((k, e) => k -> e.value)) ||
+              floor.exists(CoreFields.RestrictedLevels.contains)
           )
       }
       .toList
@@ -286,12 +291,14 @@ private[core] object DocumentStore:
         val attachments = AttachmentStore.ofDocuments(ids)
         val files       = VersionFileStore.ofDocuments(ids)
         val editors     = editorsOf(versions.map(_.id))
+        val lowerings   = loweringsOf(versions.map(_.id))
         versions
           .map(v =>
             v.copy(
               attachments = attachments.getOrElse(v.id, Nil),
               file = files.get(v.id),
-              editors = editors.getOrElse(v.id, Set.empty)
+              editors = editors.getOrElse(v.id, Set.empty),
+              lowerings = lowerings.getOrElse(v.id, Nil)
             )
           )
           .groupBy(_.documentId)
@@ -312,7 +319,8 @@ private[core] object DocumentStore:
         v.copy(
           attachments = AttachmentStore.ofVersion(v.id),
           file = VersionFileStore.ofVersion(v.id),
-          editors = editorsOf(List(v.id)).getOrElse(v.id, Set.empty)
+          editors = editorsOf(List(v.id)).getOrElse(v.id, Set.empty),
+          lowerings = loweringsOf(List(v.id)).getOrElse(v.id, Nil)
         )
       )
 
@@ -333,7 +341,8 @@ private[core] object DocumentStore:
         v.copy(
           attachments = AttachmentStore.ofVersion(v.id),
           file = VersionFileStore.ofVersion(v.id),
-          editors = editorsOf(List(v.id)).getOrElse(v.id, Set.empty)
+          editors = editorsOf(List(v.id)).getOrElse(v.id, Set.empty),
+          lowerings = loweringsOf(List(v.id)).getOrElse(v.id, Nil)
         )
       )
 
@@ -422,6 +431,79 @@ private[core] object DocumentStore:
       .view
       .mapValues(_.toSet)
       .toMap
+
+  private type LoweringRow = (
+      UUID,
+      UUID,
+      String,
+      String,
+      String,
+      String,
+      OffsetDateTime,
+      String,
+      Option[String],
+      Option[OffsetDateTime],
+      Option[String],
+      Option[String]
+  )
+
+  /** The requests to lower the confidentiality of the given versions, oldest first (ADR 0083). */
+  def loweringsOf(versions: List[UUID])(using DbTx): Map[UUID, List[ConfidentialityLowering]] =
+    val array = versions.distinct.map(_.toString).toArray
+    sql"""select id, version_id, from_level, to_level, reason, requested_by, requested_at, status, decided_by,
+                 decided_at, decision_reason, acting_for
+          from dms.document_confidentiality_lowering
+          where version_id = any(cast($array as uuid[]))
+          order by requested_at, id"""
+      .query[LoweringRow]
+      .run()
+      .toList
+      .map {
+        case (id, version, from, to, reason, by, at, status, decidedBy, decidedAt, decision, actingFor) =>
+          ConfidentialityLowering(
+            id,
+            version,
+            from,
+            to,
+            reason,
+            UserId(by),
+            at.toInstant,
+            LoweringStatus.valueOf(status),
+            decidedBy.map(UserId(_)),
+            decidedAt.map(_.toInstant),
+            decision,
+            actingFor.map(UserId(_))
+          )
+      }
+      .groupBy(_.versionId)
+
+  def insertLowering(l: ConfidentialityLowering)(using DbTx): Unit =
+    val at = l.requestedAt.atOffset(ZoneOffset.UTC)
+    val _  = sql"""insert into dms.document_confidentiality_lowering
+                    (id, tenant_id, version_id, from_level, to_level, reason, requested_by, requested_at)
+                  values (${l.id}, dms.current_tenant(), ${l.versionId}, ${l.from}, ${l.to}, ${l.reason},
+                          ${l.requestedBy.value}, $at)""".update.run()
+
+  /** Ends an open request; false if it is not open any more. */
+  def closeLowering(l: ConfidentialityLowering)(using DbTx): Boolean =
+    val at = l.decidedAt.map(_.atOffset(ZoneOffset.UTC))
+    sql"""update dms.document_confidentiality_lowering
+          set status = ${l.status.toString}, decided_by = ${l.decidedBy.map(_.value)}, decided_at = $at,
+              decision_reason = ${l.decisionReason}, acting_for = ${l.actingFor.map(_.value)}
+          where id = ${l.id} and status = 'Requested'""".update.run() == 1
+
+  /** The level a draft stands at when it is submitted: raising a level is free while a request is open. */
+  def followLevel(id: UUID, from: String)(using DbTx): Unit =
+    val _ = sql"""update dms.document_confidentiality_lowering set from_level = $from
+                  where id = $id and status = 'Requested'""".update.run()
+
+  /** Writes the approved level into a version in approval: its field values with nothing else changed, as the
+    * guard asks (V60).
+    */
+  def applyLevel(v: DocumentVersion)(using DbTx): Boolean =
+    val values = Jsonb(v.values.toJson)
+    sql"""update dms.document_version set field_values = $values, updated_at = now()
+          where id = ${v.id} and status = 'InApproval'""".update.run() == 1
 
   /** The highest working state of earlier (withdrawn) versions with the same number, for continuous counting.
     */

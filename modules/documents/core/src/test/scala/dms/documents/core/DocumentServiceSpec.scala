@@ -1285,6 +1285,141 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         assigned.last.details.value.contains(""""before":null,"after":"contract-10y"""")
       )
     },
+    test("asking leaves the draft at its level, counts as a change, and one request is open at a time") {
+      for
+        f     <- fixture
+        doc   <- published(f)
+        draft <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Figures"), author))
+        asker = UserId("owner-1")
+        none  <- as(f.tenant)(_.requestLowering(doc, "Internal", "Same level", asker)).either
+        blank <- as(f.tenant)(_.requestLowering(doc, "Public", "  ", asker)).either
+        asked <- as(f.tenant)(_.requestLowering(doc, "Public", " Published on the website ", asker))
+        twice <- as(f.tenant)(_.requestLowering(doc, "Public", "Again", asker)).either
+        saved <- as(f.tenant)(
+          _.updateDraft(
+            doc,
+            DraftChange(
+              None,
+              reviewValues ++ manual("confidentiality" -> MetadataValue.Selection("Public")),
+              None
+            ),
+            author
+          )
+        ).either
+        stored <- as(f.tenant)(_.get(doc)).map(_.versions.find(_.id == draft.id).get)
+        audit  <- ZIO.serviceWithZIO[Env](_.audit.get)
+      yield assertTrue(
+        none.left.exists(_.isInstanceOf[DocumentError.Invalid]),
+        blank.left.exists(_.isInstanceOf[DocumentError.Invalid]),
+        twice.left.exists(_.isInstanceOf[DocumentError.Conflict]),
+        saved.left.exists(_.isInstanceOf[DocumentError.InvalidValues]),
+        asked.requestedLowering
+          .map(l => (l.from, l.to, l.reason))
+          .contains(
+            ("Internal", "Public", "Published on the website")
+          ),
+        CoreFields.confidentialityLevel(stored.metadata) == "Internal",
+        stored.editors.contains(asker),
+        audit.exists(e =>
+          e.action == "document.confidentiality-lowering-requested" && e.actor.id == asker.value &&
+            e.reason.contains("Published on the website")
+        )
+      )
+    },
+    test("a first version has nothing to ask for") {
+      for
+        f       <- fixture
+        created <- create(f, reviewValues)
+        (doc, _) = created
+        refused <- as(f.tenant)(_.requestLowering(doc.id, "Public", "Why", author)).either
+      yield assertTrue(refused.left.exists(_.isInstanceOf[DocumentError.Invalid]))
+    },
+    test("a decision needs an open request and the version in approval") {
+      for
+        f     <- fixture
+        doc   <- published(f)
+        draft <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Figures"), author))
+        none  <- as(f.tenant)(_.approveLowering(draft.id, None, approver, None)).either
+        _     <- as(f.tenant)(_.requestLowering(doc, "Public", "Why", author))
+        early <- as(f.tenant)(_.approveLowering(draft.id, None, approver, None)).either
+      yield assertTrue(
+        none.left.exists(_.isInstanceOf[DocumentError.Conflict]),
+        early.isLeft
+      )
+    },
+    test("approving changes the level and nothing else; the effect comes with the publication") {
+      for
+        f      <- fixture
+        doc    <- published(f)
+        draft  <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Figures"), author))
+        _      <- as(f.tenant)(_.requestLowering(doc, "Public", "Why", author))
+        _      <- as(f.tenant)(_.submit(doc, author))
+        _      <- as(f.tenant)(_.changeStatus(draft.id, ReviewPassed, UserId("reviewer-1")))
+        before <- as(f.tenant)(_.get(doc)).map(_.versions.find(_.id == draft.id).get)
+        after  <- as(f.tenant)(_.approveLowering(draft.id, Some("Fine"), approver, Some(UserId("principal"))))
+        stored <- as(f.tenant)(_.get(doc)).map(_.versions.find(_.id == draft.id).get)
+        _      <- as(f.tenant)(
+          _.attachRendition(draft.id, Rendition("renditions/2.pdf", Some("v1"), "b" * 64), author)
+        )
+        approved <- as(f.tenant)(_.changeStatus(draft.id, Approve, approver))
+        _        <- as(f.tenant)(_.changeStatus(draft.id, Publish, approver))
+        valid    <- as(f.tenant)(_.get(doc)).map(_.versions.find(_.id == draft.id).get)
+        audit    <- ZIO.serviceWithZIO[Env](_.audit.get)
+        events   <- outbox(DocumentId(doc.value))
+      yield assertTrue(
+        after.approvedLowering.isDefined,
+        CoreFields.confidentialityLevel(stored.metadata) == "Public",
+        stored.accessFloor.contains("Internal"),
+        stored.workingState == before.workingState,
+        stored.metadata - "confidentiality" == before.metadata - "confidentiality",
+        !stored.editors.contains(approver),
+        approved.metadataSnapshot.exists(s => CoreFields.confidentialityLevel(s.values) == "Public"),
+        valid.accessFloor.isEmpty,
+        CoreFields.confidentialityLevel(valid.accessMetadata) == "Public",
+        audit.exists(e =>
+          e.action == "document.confidentiality-lowering-approved" && e.actor.id == approver.value &&
+            e.actor.onBehalfOf.contains("principal") && e.details.value.contains("Fine")
+        ),
+        audit.exists(e => e.action == "document.confidentiality-lowered" && e.reason.contains("Why")),
+        events.contains("document.confidentiality-lowering-decided"),
+        events.contains("document.confidentiality-lowered")
+      )
+    },
+    test("refusing records who and why and changes no value") {
+      for
+        f     <- fixture
+        doc   <- published(f)
+        draft <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Figures"), author))
+        _     <- as(f.tenant)(_.requestLowering(doc, "Public", "Why", author))
+        _     <- as(f.tenant)(_.submit(doc, author))
+        _     <- as(f.tenant)(_.changeStatus(draft.id, ReviewPassed, UserId("reviewer-1")))
+        after <- as(f.tenant)(_.refuseLowering(draft.id, Some("Too early"), approver, None))
+        audit <- ZIO.serviceWithZIO[Env](_.audit.get)
+      yield assertTrue(
+        after.lowerings.map(l => (l.status, l.decisionReason)) ==
+          List((LoweringStatus.Refused, Some("Too early"))),
+        CoreFields.confidentialityLevel(after.metadata) == "Internal",
+        after.accessFloor.isEmpty,
+        audit.exists(e =>
+          e.action == "document.confidentiality-lowering-refused" && e.details.value.contains("Too early")
+        )
+      )
+    },
+    test("a draft raised while a request is open records the level it was frozen at") {
+      for
+        f     <- fixture
+        doc   <- published(f)
+        draft <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Figures"), author))
+        _     <- as(f.tenant)(_.requestLowering(doc, "Public", "Why", author))
+        raised = reviewValues ++ manual(
+          "confidentiality" -> MetadataValue.Selection("Confidential"),
+          "allowedGroups"   -> MetadataValue.Many(List(MetadataValue.Text("board")))
+        )
+        _      <- as(f.tenant)(_.updateDraft(doc, DraftChange(None, raised, None), UserId("owner-1")))
+        _      <- as(f.tenant)(_.submit(doc, author))
+        stored <- as(f.tenant)(_.get(doc)).map(_.versions.find(_.id == draft.id).get)
+      yield assertTrue(stored.requestedLowering.map(_.from).contains("Confidential"))
+    },
     test("tenants only see their own documents") {
       for
         f       <- fixture

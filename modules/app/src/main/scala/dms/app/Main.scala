@@ -78,6 +78,7 @@ object Main extends ZIOAppDefault:
       PublicationStatusApi.endpoints.map(_.widen[Env]) ++
       VersionViewApi.endpoints.map(_.widen[Env]) ++
       DraftContentApi.endpoints.map(_.widen[Env]) ++
+      ConfidentialityLoweringApi.endpoints.map(_.widen[Env]) ++
       AcknowledgementApi.endpoints.map(_.widen[Env]) ++
       AcknowledgementOverviewApi.endpoints.map(_.widen[Env]) ++
       ReviewApi.endpoints.map(_.widen[Env]) ++

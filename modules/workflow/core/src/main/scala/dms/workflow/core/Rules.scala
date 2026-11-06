@@ -47,7 +47,12 @@ object Rules:
   ): Resume =
     val contentChanged = votedChecksum != currentChecksum
     if contentChanged || voterEdited then Resume(definition.resetStep, contentChanged, voterEdited)
-    else Resume(returnedStep.filter(definition.step(_).isDefined).getOrElse(definition.firstStep), false)
+    else
+      // A refused lowering took its step along (ADR 0083): the version stands where it stood before that step.
+      val refused =
+        returnedStep.filter(_ == WorkflowDefinition.LoweringStep).map(_ => definition.steps.last.key)
+      val step = returnedStep.filter(definition.step(_).isDefined).orElse(refused)
+      Resume(step.getOrElse(definition.firstStep), false)
 
   final case class Resume(step: String, contentChanged: Boolean, voterEdited: Boolean = false):
     def reset: Boolean = contentChanged || voterEdited

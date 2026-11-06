@@ -38,6 +38,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/metrics': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Business figures in the text format of Prometheus: the depth of the rendering queue by state, and how long the oldest due job has been waiting. 503 without the database. */
+    get: operations['getMetrics']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/me': {
     parameters: {
       query?: never
@@ -447,7 +464,7 @@ export interface paths {
     }
     /** @description One version of a template */
     get: operations['getApiV1AdminTemplatesIdVersionsVersion']
-    /** @description Changes a draft; versions in any other status cannot be changed (409) */
+    /** @description Changes a draft; versions in any other status cannot be changed (409), nor can a draft that has moved past `expectedUpdatedAt` (409) */
     put: operations['putApiV1AdminTemplatesIdVersionsVersion']
     post?: never
     delete?: never
@@ -807,7 +824,7 @@ export interface paths {
       cookie?: never
     }
     get?: never
-    /** @description Changes the draft and saves it as the next working state. Locked sections without an active deviation request and computed fields of the template cannot be changed (422); versions in review or later cannot be changed (409), nor can a draft that has moved past `expectedWorkingState` (409). Values taken over from a business system (origin System, e.g. the partner master) keep their origin; a different value for them is rejected (422 `not_editable`). A first version sets owner and title of the document; a later version keeps them in its values until it is published. A later version cannot be less confidential than the version it started from (422 `confidentiality_lowered`, also if the field is left out), and only the document's owner can add access groups (422 `access_groups_widened`). */
+    /** @description Changes the draft and saves it as the next working state. Locked sections without an active deviation request and computed fields of the template cannot be changed (422); versions in review or later cannot be changed (409), nor can a draft that has moved past `expectedWorkingState` (409). Values taken over from a business system (origin System, e.g. the partner master) keep their origin; a different value for them is rejected (422 `not_editable`). A first version sets owner and title of the document; a later version keeps them in its values until it is published. A later version cannot be less confidential than the version it started from without the additional approval (422 `confidentiality_lowered`, also if the field is left out), and only the document's owner can add access groups (422 `access_groups_widened`). */
     put: operations['putApiV1DocumentsIdDraft']
     post?: never
     delete?: never
@@ -825,7 +842,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Submits the draft for review and starts the workflow of the document class (or the next round after a return). Blocked while fields required in review are missing (422 `incomplete` with issues), while the content breaks the edit rules of the template (422 `unauthorized_deviations`: one issue per violation, `field` is the section id, `label` its title, `code` the kind of violation) and while a later version is less confidential than the version it started from (422 `confidentiality_lowered`). */
+    /** @description Submits the draft for review and starts the workflow of the document class (or the next round after a return). Blocked while fields required in review are missing (422 `incomplete` with issues), while the content breaks the edit rules of the template (422 `unauthorized_deviations`: one issue per violation, `field` is the section id, `label` its title, `code` the kind of violation) and while a later version is less confidential than the version it started from (422 `confidentiality_lowered`; a lower level is asked for at `POST …/confidentiality-lowering`). */
     post: operations['postApiV1DocumentsIdSubmit']
     delete?: never
     options?: never
@@ -1575,6 +1592,57 @@ export interface paths {
     }
     /** @description The locked sections of the template of a version, with the text they have there: what restores a section that deviates. Requires ReadDocument on the version. */
     get: operations['getApiV1DocumentsIdVersionsVersionidStandard-text']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/confidentiality-lowering': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Asks to lower the confidentiality of a later version below the level of the version it started from. The draft stays at its level and can be worked on; at submission its workflow gets the additional approval step, in which an approver cleared for the level, who neither started nor changed the version, decides. The level changes with that approval and takes effect for access with the publication of this version. Asking counts as a change of the draft (ADR 0075). 422 `invalid` for a first version, a level that needs no approval, or an empty reason; 409 while a request is open or the version is not a draft. Requires EditDraft. */
+    post: operations['postApiV1DocumentsIdConfidentiality-lowering']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/confidentiality-lowering/withdraw': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Withdraws the open request while the version is a draft; the version goes on at its level, without the additional approval step. 409 without an open request or if the version is not a draft. Requires EditDraft. */
+    post: operations['postApiV1DocumentsIdConfidentiality-loweringWithdraw']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/confidentiality-lowering': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The level of a version, the level access is decided on and the requests to lower it. Whoever is not cleared for the level a request was made at does not get the requests, also after the lower level took effect. Requires ReadDocument on the version. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidConfidentiality-lowering']
     put?: never
     post?: never
     delete?: never
@@ -4367,6 +4435,35 @@ export interface components {
       /** Format: int32 */
       column: number
     }
+    /** LoweringView */
+    LoweringView: {
+      /** Format: uuid */
+      id: string
+      from: string
+      to: string
+      reason: string
+      requestedBy: string
+      /** Format: date-time */
+      requestedAt: string
+      status: string
+      decidedBy?: string
+      /** Format: date-time */
+      decidedAt?: string
+      decisionReason?: string
+      actingFor?: string
+    }
+    /** LoweringsView */
+    LoweringsView: {
+      /** Format: uuid */
+      versionId: string
+      version: string
+      status: string
+      level: string
+      accessLevel: string
+      basisLevel?: string
+      canRequest: boolean
+      requests?: components['schemas']['LoweringView'][]
+    }
     /** Many */
     Many: {
       values: components['schemas']['MetadataValue'][]
@@ -5087,6 +5184,11 @@ export interface components {
     /** RequestDeviation */
     RequestDeviation: {
       sectionId: string
+      reason: string
+    }
+    /** RequestLowering */
+    RequestLowering: {
+      level: string
       reason: string
     }
     /** ResolvedBlock */
@@ -6214,6 +6316,34 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ReadinessView']
+        }
+      }
+    }
+  }
+  getMetrics: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          'Content-Type': string
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain; version=0.0.4; charset=utf-8': string
+        }
+      }
+      503: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
         }
       }
     }
@@ -10505,6 +10635,129 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['StandardTextView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1DocumentsIdConfidentiality-lowering': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RequestLowering']
+      }
+    }
+    responses: {
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LoweringsView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'postApiV1DocumentsIdConfidentiality-loweringWithdraw': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LoweringsView']
+        }
+      }
+      /** @description Invalid value for: path parameter id */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsIdVersionsVersionidConfidentiality-lowering': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LoweringsView']
         }
       }
       /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */

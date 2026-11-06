@@ -94,6 +94,26 @@ trait DocumentGateway:
     */
   def editors(versions: List[UUID]): IO[WorkflowError, Map[UUID, Set[UserId]]]
 
+  /** Whether the version has an open request to lower its confidentiality (ADR 0083): its workflow then gets
+    * the additional approval step [[dms.workflow.WorkflowDefinition.loweringStep]].
+    */
+  def loweringRequested(documentId: DocumentId, versionId: UUID): IO[WorkflowError, Boolean]
+
+  /** Records the decision of the additional approval step on the open request. If `approved`, the version
+    * states the lower level from now on, so the returned subject has another checksum.
+    *
+    * @param actingFor
+    *   the candidate a deputy decided for
+    */
+  def decideLowering(
+      documentId: DocumentId,
+      versionId: UUID,
+      approved: Boolean,
+      reason: Option[String],
+      actor: UserId,
+      actingFor: Option[UserId]
+  ): IO[WorkflowError, ReviewSubject]
+
   /** Applies a lifecycle event to the version as `actor` (`ReviewPassed`, `Approve`, `RequestChanges`,
     * `Reject`).
     */

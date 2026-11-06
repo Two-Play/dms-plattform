@@ -238,7 +238,7 @@ export const errors: Translation<typeof en.errors> = {
   issues: {
     access_groups_widened: 'Nur der Eigentümer des Dokuments kann Zugriffsgruppen hinzufügen.',
     confidentiality_lowered:
-      'Eine neue Version darf nicht weniger vertraulich sein als die Version, von der sie ausgeht.',
+      'Eine neue Version darf ohne zusätzliche Freigabe nicht weniger vertraulich sein als die Version, von der sie ausgeht. Beantragen Sie die niedrigere Stufe mit Begründung.',
     missing_required: 'Dieses Feld ist erforderlich.',
     not_editable: 'Dieses Feld setzt die Plattform; es kann nicht eingegeben werden.',
     pattern_mismatch: 'Der Wert hat nicht das erwartete Format.',

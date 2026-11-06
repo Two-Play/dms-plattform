@@ -1,6 +1,6 @@
 package dms.documents
 
-import dms.documents.metadata.{DocumentClassId, MetadataValue}
+import dms.documents.metadata.{CoreFields, DocumentClassId, MetadataValue}
 import dms.kernel.{DocumentId, TemplateId, UserId, VersionNo}
 import dms.templates.{Block, DeviationReport, TemplateContent}
 
@@ -162,7 +162,8 @@ final case class DocumentVersion(
     attachments: List[VersionAttachment] = Nil,
     file: Option[VersionFile] = None,
     withdrawal: Option[VersionWithdrawal] = None,
-    editors: Set[UserId] = Set.empty
+    editors: Set[UserId] = Set.empty,
+    lowerings: List[ConfidentialityLowering] = Nil
 ):
   def label: String = Versioning.label(number, status, workingState)
 
@@ -178,6 +179,26 @@ final case class DocumentVersion(
 
   /** The field values without their origin. */
   def metadata: Map[String, MetadataValue] = values.map((k, e) => k -> e.value)
+
+  /** The open request to lower the confidentiality (ADR 0083), decided in the additional approval step. */
+  def requestedLowering: Option[ConfidentialityLowering] =
+    lowerings.find(_.status == LoweringStatus.Requested)
+
+  /** The approved lowering of this version, if any. */
+  def approvedLowering: Option[ConfidentialityLowering] = lowerings.find(_.status == LoweringStatus.Approved)
+
+  /** The level that still governs access although the version states a lower one (ADR 0083): an approved
+    * lowering takes effect with the publication of this version, and never if it is not published.
+    */
+  def accessFloor: Option[String] = approvedLowering.filter(_ => publishedAt.isEmpty).map(_.from)
+
+  /** The field values access is decided on: [[metadata]], at the level of [[accessFloor]] while there is one.
+    * Whoever asks who may see a version reads these, not [[metadata]].
+    */
+  def accessMetadata: Map[String, MetadataValue] =
+    accessFloor.fold(metadata)(level =>
+      metadata.updated(CoreFields.Confidentiality, MetadataValue.Selection(level))
+    )
 
   /** The owner this version names. The document has it only from the moment the version takes effect, except
     * for a first version (ADR 0074); rights follow the document.
