@@ -862,7 +862,7 @@ object RenditionApiSpec extends ZIOSpecDefault:
         failed.lastError.flatMap(_.code).contains("too_long"),
         failed.canRetry,
         events.size == 1,
-        events.head.contains("\"final\":true"),
+        events.head.contains("\"final\": true"),
         told.map(_._1).toSet == Set(author.value, records.value),
         told.forall(_._3.contains("zu lang")),
         finals == List(true, true, false),
