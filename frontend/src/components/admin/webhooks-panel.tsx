@@ -358,7 +358,7 @@ function Deliveries({ webhook, onClose }: { webhook: Webhook; onClose: () => voi
         <p className="text-sm text-muted-foreground">{t('webhooks.noDeliveries')}</p>
       )}
       {deliveries.data && deliveries.data.length > 0 && (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full text-sm">
             <caption className="sr-only">{t('webhooks.deliveriesCaption', { host })}</caption>
             <thead className="text-left text-xs text-muted-foreground">
@@ -556,7 +556,7 @@ function WebhookTable({
     <div className="space-y-2">
       {test.isError && <InlineError error={test.error} />}
       {toggle.isError && <InlineError error={toggle.error} />}
-      <div className="overflow-x-auto">
+      <div className="relative overflow-x-auto">
         <table className="w-full text-sm">
           <caption className="sr-only">{t('webhooks.listCaption')}</caption>
           <thead className="text-left text-xs text-muted-foreground">

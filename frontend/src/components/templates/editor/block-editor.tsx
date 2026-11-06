@@ -731,7 +731,7 @@ function TableEditor({
           </>
         )}
       </div>
-      <div className="overflow-x-auto">
+      <div className="relative overflow-x-auto">
         <table className="w-full border-collapse text-sm">
           <caption className="sr-only">{t('templateEditor.table.caption')}</caption>
           {!env.readOnly && width > 0 && (

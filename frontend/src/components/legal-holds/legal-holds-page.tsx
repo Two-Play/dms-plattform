@@ -73,7 +73,7 @@ function Table({
   children: ReactNode
 }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto">
       <table className="w-full text-sm">
         <caption className="sr-only">{caption}</caption>
         <thead className="text-left text-xs text-muted-foreground">

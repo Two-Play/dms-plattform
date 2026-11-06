@@ -265,7 +265,7 @@ function MemberTable({ group, members }: { group: Group; members: GroupMember[] 
   return (
     <div className="space-y-2">
       {remove.isError && <InlineError error={remove.error} />}
-      <div className="overflow-x-auto">
+      <div className="relative overflow-x-auto">
         <table className="w-full text-sm">
           <caption className="sr-only">{t('groups.membersCaption', { group: group.name })}</caption>
           <thead className="text-left text-xs text-muted-foreground">

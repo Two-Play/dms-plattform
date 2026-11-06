@@ -465,7 +465,7 @@ function Report({
           description={t('deviations.report.emptyHint')}
         />
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full text-sm" data-testid="deviation-report">
             <caption className="sr-only">{t('deviations.report.caption', { label })}</caption>
             <thead className="text-left text-xs text-muted-foreground">

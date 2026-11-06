@@ -199,7 +199,7 @@ function RowsInput({
       {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t('word.fields.noRows')}</p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full text-sm">
             <caption className="sr-only">{field.label}</caption>
             <thead>

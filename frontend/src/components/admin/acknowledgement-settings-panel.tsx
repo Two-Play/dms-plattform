@@ -256,7 +256,7 @@ export function AcknowledgementSettingsPanel() {
           <ErrorState error={settings.error} onRetry={() => void settings.refetch()} />
         )}
         {data && (
-          <div className="overflow-x-auto">
+          <div className="relative overflow-x-auto">
             <table className="w-full text-sm">
               <caption className="sr-only">{t('ackSettings.title')}</caption>
               <thead>

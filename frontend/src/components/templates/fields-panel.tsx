@@ -27,7 +27,7 @@ export function FieldsPanel({ version }: { version: TemplateVersion }) {
   const references = fields.data.references ?? []
   return (
     <div className="space-y-3">
-      <div className="overflow-x-auto">
+      <div className="relative overflow-x-auto">
         <table className="w-full text-sm">
           <caption className="sr-only">{t('templates.fields.caption')}</caption>
           <thead className="text-left text-xs text-muted-foreground">
