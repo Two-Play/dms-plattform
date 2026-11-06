@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
 import { ApiClientProvider } from '@/api/context'
 import type { MetadataValue, Preview, TemplateFields } from '@/api/templates'
+import { setLocale } from '@/i18n'
+import { routed } from '@/test/routed'
 import { NewDocumentPage } from './new-document-page'
 
 const templateId = '7c1e2f0a-0000-4000-8000-000000000001'
@@ -78,6 +80,29 @@ const fields: TemplateFields = {
       required: false,
       usedInTemplate: false,
     },
+    {
+      key: 'services',
+      label: 'Services',
+      fieldType: {
+        type: 'Selection',
+        options: [
+          { code: 'hosting', label: 'Hosting', active: true },
+          { code: 'support', label: 'Support', active: true },
+        ],
+      },
+      multiple: true,
+      required: true,
+      usedInTemplate: false,
+      description: 'What the contract covers',
+    },
+    {
+      key: 'title',
+      label: 'Title',
+      fieldType: { type: 'Text' },
+      multiple: false,
+      required: false,
+      usedInTemplate: false,
+    },
   ],
 }
 
@@ -135,23 +160,28 @@ function setup() {
     }
     return Promise.resolve({ data: fields, response: new Response(null, { status: 200 }) })
   })
-  const post = vi.fn((_path: string, init: { body: PreviewBody }) =>
-    Promise.resolve({
-      data: previewFor(init.body.values),
-      response: new Response(null, { status: 200 }),
-    }),
+  const post = vi.fn((path: string, init: { body: PreviewBody }) =>
+    path === '/api/v1/documents'
+      ? Promise.resolve({
+          data: { id: 'new-document', current: { version: '1.0-draft.1' } },
+          response: new Response(null, { status: 201 }),
+        })
+      : Promise.resolve({
+          data: previewFor(init.body.values),
+          response: new Response(null, { status: 200 }),
+        }),
   )
   const client = { GET: get, POST: post } as unknown as ApiClient
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const { router, element } = routed(<NewDocumentPage />)
   render(
     <QueryClientProvider client={queryClient}>
-      <ApiClientProvider client={client}>
-        <NewDocumentPage />
-      </ApiClientProvider>
+      <ApiClientProvider client={client}>{element}</ApiClientProvider>
     </QueryClientProvider>,
   )
-  const lastBody = (): PreviewBody | undefined => post.mock.calls.at(-1)?.[1].body
-  return { get, post, lastBody }
+  const previews = () => post.mock.calls.filter(([path]) => path !== '/api/v1/documents')
+  const lastBody = (): PreviewBody | undefined => previews().at(-1)?.[1].body
+  return { get, post, lastBody, router }
 }
 
 /** The control labelled `label`, with or without the required marker. */
@@ -160,6 +190,11 @@ function fieldControl(label: string, find: true): Promise<HTMLElement>
 function fieldControl(label: string, find?: true): HTMLElement | Promise<HTMLElement> {
   const matcher = new RegExp(`^${label}\\*?$`)
   return find ? screen.findByLabelText(matcher) : screen.getByLabelText(matcher)
+}
+
+/** Goes to the other page of the test router, which the application's routes do not know. */
+function leave(router: ReturnType<typeof routed>['router']) {
+  router.history.push('/elsewhere')
 }
 
 async function chooseTemplate() {
@@ -276,5 +311,161 @@ describe('NewDocumentPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Monthly fee' }))
     expect(fieldControl('Monthly fee')).toHaveFocus()
+  })
+
+  describe('unsaved input (DMS-165)', () => {
+    const saved = () => screen.findByText('Draft saved as version 1.0-draft.1.')
+
+    it('asks before leaving the page with unsaved input', async () => {
+      const { router } = setup()
+      const user = await chooseTemplate()
+      await user.type(fieldControl('Client name'), 'ACME')
+
+      leave(router)
+      const dialog = await screen.findByRole('dialog', { name: 'Leave without saving?' })
+      await user.click(within(dialog).getByRole('button', { name: 'Stay on the page' }))
+
+      expect(router.state.location.pathname).toBe('/')
+      expect(fieldControl('Client name')).toHaveValue('ACME')
+    })
+
+    it('does not ask with nothing entered or after the input was taken back', async () => {
+      const { router } = setup()
+      const user = await chooseTemplate()
+      await user.type(fieldControl('Client name'), 'A')
+      await user.clear(fieldControl('Client name'))
+
+      leave(router)
+
+      expect(await screen.findByText('Elsewhere')).toBeInTheDocument()
+    })
+
+    it('saving clears the flag, and new input after the save sets it again', async () => {
+      const { router } = setup()
+      const user = await chooseTemplate()
+      await user.type(fieldControl('Title'), 'Contract')
+      await user.click(screen.getByRole('button', { name: 'Save draft' }))
+      await saved()
+
+      await user.type(fieldControl('Client name'), 'A')
+      leave(router)
+      await screen.findByRole('dialog', { name: 'Leave without saving?' })
+      await user.click(screen.getByRole('button', { name: 'Stay on the page' }))
+      await user.clear(fieldControl('Client name'))
+
+      leave(router)
+      expect(await screen.findByText('Elsewhere')).toBeInTheDocument()
+    })
+
+    it('asks before another content kind replaces the form, and keeps it on "keep"', async () => {
+      setup()
+      const user = await chooseTemplate()
+      await user.type(fieldControl('Client name'), 'ACME')
+
+      await user.click(screen.getByRole('radio', { name: 'Upload a file after saving' }))
+      const dialog = await screen.findByRole('dialog', { name: 'Discard the entries?' })
+      await user.click(within(dialog).getByRole('button', { name: 'Keep the entries' }))
+
+      expect(fieldControl('Client name')).toHaveValue('ACME')
+      expect(screen.getByRole('radio', { name: 'Edited here (structured)' })).toBeChecked()
+
+      await user.click(screen.getByRole('radio', { name: 'Upload a file after saving' }))
+      await user.click(
+        within(await screen.findByRole('dialog')).getByRole('button', {
+          name: 'Discard and switch',
+        }),
+      )
+
+      expect(screen.getByRole('radio', { name: 'Upload a file after saving' })).toBeChecked()
+      expect(await fieldControl('Client name', true)).toHaveValue('')
+    })
+
+    it('asks before another template replaces the form', async () => {
+      setup()
+      const user = await chooseTemplate()
+      await user.type(fieldControl('Client name'), 'ACME')
+
+      await user.selectOptions(screen.getByLabelText('Template'), 'Choose a template…')
+      const dialog = await screen.findByRole('dialog', { name: 'Discard the entries?' })
+      await user.click(within(dialog).getByRole('button', { name: 'Keep the entries' }))
+
+      expect(screen.getByLabelText('Template')).toHaveValue(`${templateId}:2`)
+      expect(fieldControl('Client name')).toHaveValue('ACME')
+    })
+
+    it('switches the kind without asking while nothing is entered', async () => {
+      setup()
+      const user = await chooseTemplate()
+
+      await user.click(screen.getByRole('radio', { name: 'Upload a file after saving' }))
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.getByRole('radio', { name: 'Upload a file after saving' })).toBeChecked()
+    })
+  })
+
+  describe('title and fields (DMS-165)', () => {
+    it('shows the title first, even when the template does not use it', async () => {
+      setup()
+      await chooseTemplate()
+
+      const controls = [...document.querySelectorAll('form input, form select, form textarea')]
+      expect(controls[0]).toBe(fieldControl('Title'))
+      expect(fieldControl('Title')).toHaveAttribute('aria-required', 'true')
+    })
+
+    it('reports a missing title at the field and moves the focus there', async () => {
+      const { post } = setup()
+      const user = await chooseTemplate()
+      await user.type(fieldControl('Client name'), 'ACME')
+
+      await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+      const title = fieldControl('Title')
+      expect(title).toHaveFocus()
+      expect(title).toHaveAttribute('aria-invalid', 'true')
+      expect(title).toHaveAccessibleDescription('Enter a title before saving the draft.')
+      expect(post).not.toHaveBeenCalledWith('/api/v1/documents', expect.anything())
+
+      await user.type(title, 'Contract')
+      expect(title).not.toHaveAttribute('aria-invalid')
+    })
+
+    it('does not save past a refused value, which would drop it without a word', async () => {
+      const { post } = setup()
+      const user = await chooseTemplate()
+      await user.type(fieldControl('Title'), 'Contract')
+      await user.type(fieldControl('Monthly fee'), '1,25')
+      expect(await screen.findByText(/^Unclear notation/)).toBeInTheDocument()
+
+      await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+      expect(fieldControl('Monthly fee')).toHaveFocus()
+      expect(post).not.toHaveBeenCalledWith('/api/v1/documents', expect.anything())
+      expect(screen.getByText('Correct the marked fields first.')).toBeInTheDocument()
+    })
+
+    it('gives the group of check boxes the same state as other fields', async () => {
+      setup()
+      await chooseTemplate()
+
+      const group = screen.getByRole('group', { name: /^Services/ })
+      expect(group).toHaveAttribute('aria-required', 'true')
+      expect(group).toHaveAccessibleDescription('What the contract covers')
+    })
+
+    it('defaults the document language to the language of the UI', async () => {
+      setLocale('de')
+      const { lastBody } = setup()
+      expect(await screen.findByLabelText('Dokumentsprache')).toHaveValue('de')
+      const select = await screen.findByLabelText('Vorlage')
+      await waitFor(() => {
+        expect(select).toBeEnabled()
+      })
+      await userEvent.setup().selectOptions(select, `${templateId}:2`)
+      await waitFor(() => {
+        expect(lastBody()?.language).toBe('de')
+      })
+    })
   })
 })

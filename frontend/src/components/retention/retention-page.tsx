@@ -827,7 +827,9 @@ function RuleDialog({
   const months = Number(draft.periodMonths)
   const keyInvalid = !RULE_KEY.test(draft.key)
   const nameMissing = draft.name.trim() === ''
-  const periodInvalid = !Number.isInteger(months) || months < 1 || months > MAX_PERIOD_MONTHS
+  // Digits only: `Number` reads a grouped `1.000` as 1.
+  const periodInvalid =
+    !/^\d+$/.test(draft.periodMonths.trim()) || months < 1 || months > MAX_PERIOD_MONTHS
 
   const mutation = useMutation({
     mutationFn: () =>

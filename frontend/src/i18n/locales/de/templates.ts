@@ -49,12 +49,13 @@ export const templates: Translation<typeof en.templates> = {
       'Abschnitte, Texte, Felder und Regeln dieses Entwurfs bearbeiten; „Prüfen“ lässt den Server ihn gegen die Dokumentenklasse übersetzen.',
     contentReadOnly:
       'Nur Entwürfe sind änderbar. Für Änderungen an einer freigegebenen Vorlage eine neue Version anlegen.',
+    saveFirst: 'Bitte zuerst die Änderungen am Inhalt speichern oder verwerfen.',
     testMode: 'Testmodus',
     testModeText:
       'Generierte Beispieldaten, die jeden Bedingungszweig erreichen, mit leeren optionalen Feldern und langen Werten; jeder Fall wird wie die Vorschau dargestellt.',
   },
   actions: {
-    Testing: 'Test starten',
+    Testing: 'In Testphase geben',
     Draft: 'Zurück zum Entwurf',
     Released: 'Freigeben …',
     Deprecated: 'Abkündigen …',
@@ -126,7 +127,7 @@ export const templates: Translation<typeof en.templates> = {
     english: 'Englisch',
     german: 'Deutsch',
     running: 'Läuft …',
-    run: 'Testmodus ausführen',
+    run: 'Mit Beispieldaten ausprobieren',
     hints: {
       title: 'Hinweise zu leeren Feldern',
       computedTitle: 'Berechnete Felder ohne Wert',

@@ -35,6 +35,12 @@ export const shell = {
   switchToLight: 'Switch to light mode',
   language: 'Language',
   languages: { de: 'Deutsch', en: 'English' },
+  languageUnsaved: {
+    title: 'Switch the language?',
+    text: 'This page has changes that are not saved. Switching the language starts it again, so they are lost.',
+    stay: 'Keep this language',
+    switch: 'Discard and switch',
+  },
   nav: {
     home: 'Home',
     documents: 'Documents',

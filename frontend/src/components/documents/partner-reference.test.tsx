@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { routed } from '@/test/routed'
 import type { ApiClient } from '@/api/client'
 import { ApiClientProvider } from '@/api/context'
 import type { Partner } from '@/api/partners'
@@ -121,9 +122,7 @@ function setup({ partnerMasterDown = false } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
     <QueryClientProvider client={queryClient}>
-      <ApiClientProvider client={client}>
-        <NewDocumentPage />
-      </ApiClientProvider>
+      <ApiClientProvider client={client}>{routed(<NewDocumentPage />).element}</ApiClientProvider>
     </QueryClientProvider>,
   )
   const previewValues = (): Record<string, MetadataValue> | undefined => {

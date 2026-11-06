@@ -34,6 +34,12 @@ export const shell: Translation<typeof en.shell> = {
   switchToLight: 'Helles Design verwenden',
   language: 'Sprache',
   languages: { de: 'Deutsch', en: 'English' },
+  languageUnsaved: {
+    title: 'Sprache wechseln?',
+    text: 'Diese Seite hat Änderungen, die nicht gespeichert sind. Der Sprachwechsel lädt sie neu, die Änderungen gehen dann verloren.',
+    stay: 'Sprache beibehalten',
+    switch: 'Verwerfen und wechseln',
+  },
   nav: {
     home: 'Start',
     documents: 'Dokumente',

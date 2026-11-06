@@ -9,7 +9,7 @@ import { LoadingState } from '@/components/shared/states'
 import { toast } from '@/lib/toast'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { useApiClient } from '@/api/context'
 import { useMe } from '@/api/me'
 import {
@@ -31,6 +31,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { ContentEditor } from './content-editor'
+import { contentKey, toEditor } from './editor/content-model'
 import { FieldsPanel } from './fields-panel'
 import { ReleaseDialog } from './release-dialog'
 import {
@@ -102,10 +103,19 @@ interface StatusActionsProps {
   userId: string | undefined
   /** A Word template: its next version takes the Word file over (DMS-115). */
   word?: boolean
+  /** The content editor holds changes: a status change must not pass them by (DMS-165). */
+  unsaved?: boolean
 }
 
-function StatusActions({ version, versions, userId, word = false }: StatusActionsProps) {
+function StatusActions({
+  version,
+  versions,
+  userId,
+  word = false,
+  unsaved = false,
+}: StatusActionsProps) {
   const client = useApiClient()
+  const saveFirstId = useId()
   const queryClient = useQueryClient()
   const [dialog, setDialog] = useState<TemplateStatus | undefined>()
 
@@ -154,7 +164,8 @@ function StatusActions({ version, versions, userId, word = false }: StatusAction
           <Button
             key={action.to}
             variant={action.to === 'Released' ? 'default' : 'outline'}
-            disabled={change.isPending}
+            disabled={change.isPending || unsaved}
+            aria-describedby={unsaved ? saveFirstId : undefined}
             onClick={() => {
               trigger(action)
             }}
@@ -174,6 +185,11 @@ function StatusActions({ version, versions, userId, word = false }: StatusAction
           </Button>
         )}
       </div>
+      {unsaved && (
+        <p id={saveFirstId} className="text-xs text-muted-foreground">
+          {t('templates.page.saveFirst')}
+        </p>
+      )}
       {version.status === 'Testing' && isContributor && (
         <p className="text-xs text-muted-foreground">{t('templates.page.fourEyes')}</p>
       )}
@@ -255,6 +271,7 @@ function VersionDetails({
   word?: WordTemplate | null
 }) {
   const editable = version.status === 'Draft'
+  const [unsaved, setUnsaved] = useState(false)
   return (
     <div className="space-y-6">
       <Card>
@@ -271,6 +288,7 @@ function VersionDetails({
             versions={versions}
             userId={userId}
             word={word !== undefined && word !== null}
+            unsaved={unsaved}
           />
         </CardContent>
       </Card>
@@ -286,14 +304,43 @@ function VersionDetails({
       {word ? (
         <WordTemplatePanel key={word.sha256} version={version} word={word} />
       ) : (
-        <StructuredContent version={version} editable={editable} />
+        <StructuredContent
+          version={version}
+          editable={editable}
+          unsaved={unsaved}
+          onUnsavedChange={setUnsaved}
+        />
       )}
     </div>
   )
 }
 
 /** Content editor and test mode of a structured template version. */
-function StructuredContent({ version, editable }: { version: TemplateVersion; editable: boolean }) {
+function StructuredContent({
+  version,
+  editable,
+  unsaved,
+  onUnsavedChange,
+}: {
+  version: TemplateVersion
+  editable: boolean
+  unsaved: boolean
+  onUnsavedChange: (unsaved: boolean) => void
+}) {
+  // The editor starts again from the stored content when that changes, so it never shows text that was not
+  // saved as if it were stored. Not over edits still being made, and not after its own save (`onSaved`):
+  // it already shows that content.
+  const stored = useMemo(() => contentKey(toEditor(version.content)), [version.content])
+  const [seen, setSeen] = useState(stored)
+  const [held, setHeld] = useState(stored)
+  const [generation, setGeneration] = useState(0)
+  if (stored !== seen) {
+    setSeen(stored)
+    if (!unsaved && stored !== held) {
+      setHeld(stored)
+      setGeneration((g) => g + 1)
+    }
+  }
   return (
     <>
       <Card>
@@ -304,7 +351,14 @@ function StructuredContent({ version, editable }: { version: TemplateVersion; ed
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ContentEditor version={version} readOnly={!editable} />
+          <ContentEditor
+            // Without `editable` the editor would go on showing edits that can no longer be saved.
+            key={`${String(editable)}:${String(generation)}`}
+            version={version}
+            readOnly={!editable}
+            onDirtyChange={onUnsavedChange}
+            onSaved={setHeld}
+          />
         </CardContent>
       </Card>
       <Card>
@@ -313,7 +367,7 @@ function StructuredContent({ version, editable }: { version: TemplateVersion; ed
           <CardDescription>{t('templates.page.testModeText')}</CardDescription>
         </CardHeader>
         <CardContent>
-          <TestModePanel key={contentText(version.content)} version={version} />
+          <TestModePanel key={contentText(version.content)} version={version} unsaved={unsaved} />
         </CardContent>
       </Card>
     </>

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { routed } from '@/test/routed'
 import type { ApiClient } from '@/api/client'
 import { ApiClientProvider } from '@/api/context'
 import type { TemplateFields } from '@/api/templates'
@@ -85,7 +86,7 @@ type Reply = Promise<{ data: unknown; error: unknown; response: Response }>
 const ok = (data: unknown, status = 200): Reply =>
   Promise.resolve({ data, error: undefined, response: new Response(null, { status }) })
 
-function setup(roles: string[], uploaded: UploadAnalysis = analysis) {
+async function setup(roles: string[], uploaded: UploadAnalysis = analysis) {
   const get = vi.fn((path: string) => {
     switch (path) {
       case '/api/v1/me':
@@ -125,16 +126,18 @@ function setup(roles: string[], uploaded: UploadAnalysis = analysis) {
   const onDocumentCreated = vi.fn()
   const onTemplateCreated = vi.fn()
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const { router, element } = routed(
+    <UploadWizard
+      onDocumentCreated={onDocumentCreated}
+      onTemplateCreated={onTemplateCreated}
+      uploadFile={uploadFile as never}
+      uploadTemplate={uploadTemplateFile as never}
+    />,
+  )
+  await router.load()
   render(
     <QueryClientProvider client={queryClient}>
-      <ApiClientProvider client={client}>
-        <UploadWizard
-          onDocumentCreated={onDocumentCreated}
-          onTemplateCreated={onTemplateCreated}
-          uploadFile={uploadFile as never}
-          uploadTemplate={uploadTemplateFile as never}
-        />
-      </ApiClientProvider>
+      <ApiClientProvider client={client}>{element}</ApiClientProvider>
     </QueryClientProvider>,
   )
   return {
@@ -169,7 +172,7 @@ async function throughPreview(user: ReturnType<typeof userEvent.setup>) {
 
 describe('Upload document wizard (DMS-127)', () => {
   it('reads the fields, previews the filled file and creates a document of a class with it', async () => {
-    const { post, put, uploadFile, onDocumentCreated, user } = setup(['Author'])
+    const { post, put, uploadFile, onDocumentCreated, user } = await setup(['Author'])
     const steps = screen.getByRole('navigation', { name: 'Steps' })
     expect(within(steps).getByText('File').closest('li')).toHaveAttribute('aria-current', 'step')
 
@@ -233,7 +236,7 @@ describe('Upload document wizard (DMS-127)', () => {
         f.key === 'title' ? { ...f, value: undefined } : f,
       ),
     }
-    const { user } = setup(['Author'], withoutTitle)
+    const { user } = await setup(['Author'], withoutTitle)
     await throughPreview(user)
     await user.selectOptions(await screen.findByLabelText('Document class'), classId)
     await user.click(screen.getByRole('button', { name: 'Continue with the metadata' }))
@@ -241,7 +244,7 @@ describe('Upload document wizard (DMS-127)', () => {
   })
 
   it('designers make a Word template of the file; the document choice is disabled', async () => {
-    const { post, uploadTemplateFile, onTemplateCreated, user } = setup(['TemplateDesigner'])
+    const { post, uploadTemplateFile, onTemplateCreated, user } = await setup(['TemplateDesigner'])
     await throughPreview(user)
     expect(screen.getByRole('radio', { name: /A document/ })).toBeDisabled()
     expect(
@@ -268,7 +271,7 @@ describe('Upload document wizard (DMS-127)', () => {
   })
 
   it('reports files that cannot be used', async () => {
-    const { post, user } = setup(['Author'])
+    const { post, user } = await setup(['Author'])
     post.mockImplementationOnce(() =>
       Promise.resolve({
         data: undefined,
@@ -284,7 +287,7 @@ describe('Upload document wizard (DMS-127)', () => {
 
   it('speaks German', async () => {
     setLocale('de')
-    const { user } = setup(['Author', 'TemplateDesigner'])
+    const { user } = await setup(['Author', 'TemplateDesigner'])
     expect(screen.getByRole('heading', { name: 'Dokument hochladen' })).toBeInTheDocument()
     const steps = screen.getByRole('navigation', { name: 'Schritte' })
     expect(within(steps).getByText('Verwendung')).toBeInTheDocument()

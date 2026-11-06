@@ -47,6 +47,12 @@ export const docs: Translation<typeof en.docs> = {
     option: '{name} (Version {version})',
     noTemplates: 'Noch keine freigegebenen Vorlagen.',
     loadingFields: 'Felder der Vorlage werden geladen',
+    discard: {
+      title: 'Eingaben verwerfen?',
+      text: 'Dieses Formular enthält Eingaben, die nicht gespeichert sind. Eine andere Vorlage oder Inhaltsart beginnt mit einem leeren Formular, die Eingaben gehen dann verloren.',
+      keep: 'Eingaben behalten',
+      confirm: 'Verwerfen und wechseln',
+    },
   },
   workspace: {
     documentLanguage: 'Dokumentsprache',
@@ -54,6 +60,7 @@ export const docs: Translation<typeof en.docs> = {
     german: 'Deutsch',
     fromPartnerMaster: 'Aus dem Partnerstamm',
     titleMissing: 'Vor dem Speichern einen Titel eingeben.',
+    correctFirst: 'Bitte zuerst die markierten Felder korrigieren.',
     correctAndSave: '{message} Bitte die markierten Felder korrigieren und erneut speichern.',
     correct: '{message} Bitte die markierten Felder korrigieren.',
     conflictSaved:
@@ -99,6 +106,8 @@ export const docs: Translation<typeof en.docs> = {
     maxLength: 'Höchstens {max} Zeichen.',
     pattern: 'Entspricht nicht dem Format {pattern}.',
     number: 'Bitte eine Zahl eingeben, z. B. 12 oder 12,5.',
+    numberAmbiguous:
+      'Unklare Schreibweise: Das Komma trennt die Dezimalstellen, der Punkt nur Dreiergruppen, z. B. 1.250,50.',
     scale: plural({
       one: 'Höchstens {count} Nachkommastelle.',
       other: 'Höchstens {count} Nachkommastellen.',

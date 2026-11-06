@@ -37,6 +37,7 @@ import type { ScopeVariable } from './editor/expressions'
 import { ComputedEditor, ReferencesEditor } from './editor/fields-editors'
 import { SectionsEditor } from './editor/sections-editor'
 import { UnsavedChangesGuard } from './editor/unsaved-changes'
+import { useReportDirty } from './editor/unsaved-state'
 import { contentText, errorMessage, locationLabel } from './template-lifecycle'
 
 type Outcome =
@@ -147,9 +148,15 @@ function AdvancedView({
 export function ContentEditor({
   version,
   readOnly = false,
+  onDirtyChange,
+  onSaved,
 }: {
   version: TemplateVersion
   readOnly?: boolean
+  /** Told whether the editor holds changes that are not saved (DMS-165). */
+  onDirtyChange?: (dirty: boolean) => void
+  /** Told the key (`contentKey`) of what was just stored. */
+  onSaved?: (key: string) => void
 }) {
   const client = useApiClient()
   const queryClient = useQueryClient()
@@ -165,6 +172,7 @@ export function ContentEditor({
 
   const key = contentKey(content)
   const dirty = !readOnly && (key !== saved || jsonDraft !== undefined)
+  useReportDirty(dirty, onDirtyChange)
 
   const fieldVars = useMemo(() => fieldVariables(fields.data), [fields.data])
   const scope: ScopeVariable[] = useMemo(
@@ -233,6 +241,7 @@ export function ContentEditor({
       ),
     onSuccess: async (_data, snapshot) => {
       setSaved(contentKey(snapshot))
+      onSaved?.(contentKey(snapshot))
       setOutcome({ kind: 'saved' })
       await queryClient.invalidateQueries({ queryKey: ['template-admin'] })
     },

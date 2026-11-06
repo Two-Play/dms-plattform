@@ -46,6 +46,12 @@ export const docs = {
     option: '{name} (version {version})',
     noTemplates: 'No released templates yet.',
     loadingFields: 'Loading the template fields',
+    discard: {
+      title: 'Discard the entries?',
+      text: 'This form has entries that are not saved. Another template or content type starts an empty form, so they are lost.',
+      keep: 'Keep the entries',
+      confirm: 'Discard and switch',
+    },
   },
   workspace: {
     documentLanguage: 'Document language',
@@ -53,6 +59,7 @@ export const docs = {
     german: 'German',
     fromPartnerMaster: 'From the partner master',
     titleMissing: 'Enter a title before saving the draft.',
+    correctFirst: 'Correct the marked fields first.',
     correctAndSave: '{message} Correct the marked fields and save again.',
     correct: '{message} Correct the marked fields.',
     conflictSaved:
@@ -97,6 +104,8 @@ export const docs = {
     maxLength: 'At most {max} characters.',
     pattern: 'Does not match the format {pattern}.',
     number: 'Enter a number, e.g. 12 or 12.5.',
+    numberAmbiguous:
+      'Unclear notation: the point separates decimals, the comma only groups of three, e.g. 1,250.50.',
     scale: plural({
       one: 'At most {count} decimal place.',
       other: 'At most {count} decimal places.',

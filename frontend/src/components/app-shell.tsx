@@ -42,6 +42,8 @@ import { NotificationBell } from '@/components/notifications/notification-bell'
 import { useOpenTaskCount } from '@/components/tasks/use-open-task-count'
 import { Input } from '@/components/ui/input'
 import { currentTheme, setTheme, type Theme } from '@/lib/theme'
+import { DiscardDialog } from '@/components/templates/editor/unsaved-changes'
+import { hasUnsavedChanges } from '@/components/templates/editor/unsaved-state'
 import { LOCALES, setLocale, t, useLocale, type Locale } from '@/i18n'
 import type { Messages } from '@/i18n/locales/en'
 
@@ -115,61 +117,80 @@ function UserMenu() {
   const profile = auth.user?.profile
   const name = displayName(profile) ?? t('shell.signedInUser')
   const locale = useLocale()
+  // The language a person chose while the page has unsaved changes: it waits for their answer.
+  const [pendingLocale, setPendingLocale] = useState<Locale | undefined>(undefined)
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="gap-2 px-2" aria-label={t('shell.userMenu')}>
-          <Avatar className="size-7">
-            <AvatarFallback>{initials(name) || '?'}</AvatarFallback>
-          </Avatar>
-          <span className="hidden text-sm sm:inline">{name}</span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-56">
-        <DropdownMenuLabel>
-          <div className="font-medium text-foreground">{name}</div>
-          {profile?.email && (
-            <div className="text-xs font-normal text-muted-foreground">{profile.email}</div>
-          )}
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link to="/deputies">
-            <UserRoundCheck />
-            {t('shell.deputies')}
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuItem asChild>
-          <Link to="/settings/notifications">
-            <BellRing />
-            {t('notifications.settingsLink')}
-          </Link>
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
-          <Languages aria-hidden="true" className="size-4" />
-          {t('shell.language')}
-        </DropdownMenuLabel>
-        <DropdownMenuRadioGroup
-          value={locale}
-          onValueChange={(value) => {
-            setLocale(value as Locale)
-          }}
-        >
-          {LOCALES.map((l) => (
-            <DropdownMenuRadioItem key={l} value={l} lang={l}>
-              {t(`shell.languages.${l}`)}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void auth.signoutRedirect()}>
-          <LogOut />
-          {t('shell.signOut')}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" className="gap-2 px-2" aria-label={t('shell.userMenu')}>
+            <Avatar className="size-7">
+              <AvatarFallback>{initials(name) || '?'}</AvatarFallback>
+            </Avatar>
+            <span className="hidden text-sm sm:inline">{name}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-56">
+          <DropdownMenuLabel>
+            <div className="font-medium text-foreground">{name}</div>
+            {profile?.email && (
+              <div className="text-xs font-normal text-muted-foreground">{profile.email}</div>
+            )}
+          </DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <Link to="/deputies">
+              <UserRoundCheck />
+              {t('shell.deputies')}
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <Link to="/settings/notifications">
+              <BellRing />
+              {t('notifications.settingsLink')}
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="flex items-center gap-2 text-xs font-normal text-muted-foreground">
+            <Languages aria-hidden="true" className="size-4" />
+            {t('shell.language')}
+          </DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={locale}
+            onValueChange={(value) => {
+              // A new language renders every page from scratch (`App`), also a form with unsaved input.
+              if (hasUnsavedChanges()) setPendingLocale(value as Locale)
+              else setLocale(value as Locale)
+            }}
+          >
+            {LOCALES.map((l) => (
+              <DropdownMenuRadioItem key={l} value={l} lang={l}>
+                {t(`shell.languages.${l}`)}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={() => void auth.signoutRedirect()}>
+            <LogOut />
+            {t('shell.signOut')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DiscardDialog
+        open={pendingLocale !== undefined}
+        title={t('shell.languageUnsaved.title')}
+        text={t('shell.languageUnsaved.text')}
+        stay={t('shell.languageUnsaved.stay')}
+        discard={t('shell.languageUnsaved.switch')}
+        onStay={() => {
+          setPendingLocale(undefined)
+        }}
+        onDiscard={() => {
+          if (pendingLocale) setLocale(pendingLocale)
+        }}
+      />
+    </>
   )
 }
 

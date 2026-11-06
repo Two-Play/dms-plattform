@@ -1,4 +1,5 @@
 import { Plus, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import {
   CHECKED,
   parseRows,
@@ -13,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { t } from '@/i18n'
 import { formatPlainDate } from '@/i18n/format'
+import { canonicalToText, isCanonicalNumber, parseNumberText } from '@/i18n/numbers'
 
 type Typed = Pick<WordField, 'type' | 'label' | 'required' | 'options'>
 
@@ -90,17 +92,89 @@ function SimpleInput({
       </select>
     )
   }
+  if (field.type === 'Number') {
+    return (
+      <NumberInput
+        id={id}
+        label={label}
+        required={field.required}
+        value={value}
+        onChange={onChange}
+      />
+    )
+  }
   return (
     <Input
       id={id}
       aria-label={label}
-      type={field.type === 'Date' ? 'date' : field.type === 'Number' ? 'number' : 'text'}
+      type={field.type === 'Date' ? 'date' : 'text'}
       value={value}
       required={field.required}
       onChange={(event) => {
         onChange(event.target.value)
       }}
     />
+  )
+}
+
+/** Marks text the form refused: the backend reads it as no number, so it can never be stored as one. */
+const REFUSED = ' ?'
+
+/** What a number field hands on for `text`: the plain number, or text the backend refuses. */
+function storedNumber(text: string): string {
+  if (text.trim() === '') return ''
+  const parsed = parseNumberText(text)
+  return parsed.kind === 'number' ? parsed.canonical : `${text}${REFUSED}`
+}
+
+function numberText(stored: string): string {
+  return isCanonicalNumber(stored) ? canonicalToText(stored) : stored
+}
+
+/**
+ * A number typed in the language of the UI (DMS-165). Word values are stored as plain numbers, which a
+ * browser's number input cannot guarantee: it follows the browser's language, not the UI's.
+ */
+function NumberInput({
+  id,
+  label,
+  required,
+  value,
+  onChange,
+}: {
+  id?: string
+  label?: string
+  required?: boolean
+  value: string
+  onChange: (value: string) => void
+}) {
+  const [typed, setTyped] = useState<string | undefined>(undefined)
+  // What was typed stays as typed while it stands for the value; a value from elsewhere replaces it.
+  const text = typed !== undefined && storedNumber(typed) === value ? typed : numberText(value)
+  const parsed = parseNumberText(text)
+  const invalid = text.trim() !== '' && parsed.kind !== 'number'
+  return (
+    <div className="space-y-1">
+      <Input
+        id={id}
+        aria-label={label}
+        inputMode="decimal"
+        value={text}
+        required={required}
+        aria-invalid={invalid ? true : undefined}
+        onChange={(event) => {
+          setTyped(event.target.value)
+          onChange(storedNumber(event.target.value))
+        }}
+      />
+      {invalid && (
+        <p role="alert" className="text-xs text-destructive">
+          {parsed.kind === 'ambiguous'
+            ? t('docs.validation.numberAmbiguous')
+            : t('docs.validation.number')}
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -242,5 +316,6 @@ function plain(field: Pick<WordColumn, 'type'>, value: string | undefined): stri
   if (field.type === 'Checkbox')
     return value === CHECKED ? t('word.fields.yes') : t('word.fields.no')
   if (field.type === 'Date' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return formatPlainDate(value)
+  if (field.type === 'Number') return numberText(value)
   return value
 }
