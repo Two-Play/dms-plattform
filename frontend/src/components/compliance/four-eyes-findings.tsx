@@ -28,7 +28,7 @@ function decision(f: FourEyesFinding): string {
 
 function Findings({ findings }: { findings: FourEyesFinding[] }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto">
       <table className="w-full text-sm">
         <caption className="sr-only">{t('compliance.fourEyes.title')}</caption>
         <thead className="text-left text-xs text-muted-foreground">

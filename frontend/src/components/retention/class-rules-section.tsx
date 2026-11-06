@@ -158,7 +158,7 @@ export function ClassRulesSection() {
             {rules.data.length === 0 && (
               <p className="text-sm text-muted-foreground">{t('retention.classRules.noRules')}</p>
             )}
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className="w-full text-sm">
                 <caption className="sr-only">{t('retention.classRules.caption')}</caption>
                 <thead>

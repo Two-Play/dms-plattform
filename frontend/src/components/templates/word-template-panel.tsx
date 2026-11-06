@@ -170,7 +170,7 @@ export function WordTemplatePanel({
           {fields.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t('word.fields.none')}</p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="relative overflow-x-auto">
               <table className="w-full text-sm">
                 <caption className="sr-only">{t('word.templates.fieldsTitle')}</caption>
                 <thead>

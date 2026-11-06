@@ -294,7 +294,7 @@ function RangeTable({
 }) {
   const labels = new Map(classes.map((c) => [c.classId, c.label]))
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto">
       <table className="w-full text-sm">
         <caption className="sr-only">{t('numberRanges.rangesCaption')}</caption>
         <thead className="text-left text-xs text-muted-foreground">
@@ -390,7 +390,7 @@ function ClassAssignments({
   return (
     <div className="space-y-2">
       {assign.isError && <InlineError error={assign.error} />}
-      <div className="overflow-x-auto">
+      <div className="relative overflow-x-auto">
         <table className="w-full text-sm">
           <caption className="sr-only">{t('numberRanges.classesCaption')}</caption>
           <thead className="text-left text-xs text-muted-foreground">

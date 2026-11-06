@@ -155,7 +155,7 @@ function Results({ run }: { run: TestRun }) {
           : t('templates.test.notCovered', { count: cases.length })}
       </p>
       {(run.coverage ?? []).length > 0 && (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table className="w-full text-sm">
             <caption className="sr-only">{t('templates.test.coverage')}</caption>
             <thead className="text-left text-xs text-muted-foreground">

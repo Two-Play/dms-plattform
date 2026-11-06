@@ -240,7 +240,7 @@ function ValueChanges({
 }) {
   if (changes.length === 0) return <p className="text-sm text-muted-foreground">{empty}</p>
   return (
-    <div className="overflow-x-auto">
+    <div className="relative overflow-x-auto">
       <table aria-label={label} className="w-full text-left text-sm">
         <thead className="text-muted-foreground">
           <tr>
@@ -306,7 +306,7 @@ function OriginalChanges({
             <Badge variant="secondary">{t('docs.compare.originalUnchanged')}</Badge>
           )}
         </p>
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table aria-label={t('docs.compare.originalTitle')} className="w-full text-left">
             <thead className="text-muted-foreground">
               <tr>
