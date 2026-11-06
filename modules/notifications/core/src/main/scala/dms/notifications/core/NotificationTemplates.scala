@@ -37,7 +37,18 @@ object NotificationTemplates:
 
   /** Parameters holding user ids; the delivery resolves their display names. */
   val PersonParams: Set[String] =
-    Set("returnedBy", "approvedBy", "principal", "deputy", "actingFor", "assignee", "withdrawnBy")
+    Set(
+      "returnedBy",
+      "approvedBy",
+      "principal",
+      "deputy",
+      "actingFor",
+      "assignee",
+      "withdrawnBy",
+      "requestedBy",
+      "decidedBy",
+      "newOwner"
+    )
 
   /** Notices of jobs that failed for good (DMS-142, ADR 0058). Parameters: `reason` (the failure code),
     * `audience`, `canRetry`, `canRead` and `canWithdraw`; `actingFor` for a deputy, `reminder` (the round)
@@ -148,12 +159,27 @@ object NotificationTemplates:
     val Compliance = "compliance"
     val Admin      = "admin"
 
+  /** The platform's own step has a name in each language (ADR 0083); the steps of a class are named by it. */
+  private def ownStepInLanguage(language: Language, parameters: Map[String, String]) =
+    parameters.get("step").filter(LoweringStep.contains).fold(parameters) { _ =>
+      parameters + ("step" -> (language match
+        case Language.De => "Freigabe der niedrigeren Vertraulichkeit"
+        case Language.En => "Approval of the lower confidentiality"))
+    }
+
+  /** How notices name the step: by key, or by the name the workflow gave it. */
+  private val LoweringStep = Set("confidentiality-lowering", "Approval of the lower confidentiality")
+
   /** Kinds this module has texts for. */
   val Kinds: Set[String] = Set(
     "workflow.task-assigned",
     "workflow.changes-requested",
     "workflow.rejected",
     "workflow.approved",
+    "lowering.requested",
+    "lowering.approved",
+    "lowering.refused",
+    "lowering.in-force",
     "workflow.participant-missing",
     "workflow.task-due-soon",
     "workflow.task-overdue",
@@ -172,6 +198,7 @@ object NotificationTemplates:
     "deputyship.ended",
     "deputyship.ended-by-period",
     "publication.published",
+    "publication.owner-replaced",
     "failure.rendition",
     "failure.publication",
     "publication.withdrawn",
@@ -187,7 +214,7 @@ object NotificationTemplates:
       about: Option[DocumentRef],
       context: TemplateContext
   ): Rendered =
-    val t        = Texts(language, parameters, about, context)
+    val t        = Texts(language, ownStepInLanguage(language, parameters), about, context)
     val docLink  = t.documentLink
     val tasks    = Some("/tasks")
     val deputies = Some("/deputies")
@@ -220,6 +247,32 @@ object NotificationTemplates:
         r(de = s"Freigegeben: $docShort", en = s"Approved: $docShort")(
           bodyDe = s"${person("approvedBy")} hat $doc freigegeben.",
           bodyEn = s"${person("approvedBy")} approved $doc."
+        )(docLink)
+      // No level and no reason in a notice (business concept 8); both are on the document page.
+      case "lowering.requested" =>
+        r(de = s"Herabstufung beantragt: $docShort", en = s"Lower confidentiality requested: $docShort")(
+          bodyDe = s"${person("requestedBy")} hat beantragt, die Vertraulichkeit von $docDat herabzustufen.",
+          bodyEn = s"${person("requestedBy")} asked to lower the confidentiality of $doc."
+        )(docLink)
+      case "lowering.approved" =>
+        r(de = s"Herabstufung freigegeben: $docShort", en = s"Lower confidentiality approved: $docShort")(
+          bodyDe =
+            s"${person("decidedBy")} hat die Herabstufung der Vertraulichkeit von $docDat freigegeben. Sie gilt, sobald diese Version veröffentlicht ist.",
+          bodyEn =
+            s"${person("decidedBy")} approved lowering the confidentiality of $doc. It applies once this version is published."
+        )(docLink)
+      case "lowering.refused" =>
+        r(de = s"Herabstufung abgelehnt: $docShort", en = s"Lower confidentiality refused: $docShort")(
+          bodyDe =
+            s"${person("decidedBy")} hat die Herabstufung der Vertraulichkeit von $docDat abgelehnt. Die Version ist zurück im Entwurf und bleibt auf ihrer Stufe.",
+          bodyEn =
+            s"${person("decidedBy")} refused lowering the confidentiality of $doc. The version is back in draft and stays at its level."
+        )(docLink)
+      case "lowering.in-force" =>
+        r(de = s"Herabstufung wirksam: $docShort", en = s"Lower confidentiality in force: $docShort")(
+          bodyDe =
+            s"Die niedrigere Vertraulichkeitsstufe von $docDat gilt jetzt: Die Version ist veröffentlicht.",
+          bodyEn = s"With its publication, the lower confidentiality level now applies to $doc."
         )(docLink)
       case "workflow.participant-missing" =>
         r(
@@ -327,6 +380,12 @@ object NotificationTemplates:
         r(de = s"Gültig: $docShort", en = s"Now valid: $docShort")(
           bodyDe = s"$docCapitalDe, dessen Eigentümer Sie sind, ist jetzt gültig${validFromDe}.",
           bodyEn = s"$docCapitalEn, which you own, is now valid${validFromEn}."
+        )(docLink)
+      case "publication.owner-replaced" =>
+        r(de = s"Eigentümer gewechselt: $docShort", en = s"Owner changed: $docShort")(
+          bodyDe =
+            s"Mit der Veröffentlichung ist ${person("newOwner")} Eigentümer von $docDat. Sie sind es nicht mehr.",
+          bodyEn = s"With its publication, ${person("newOwner")} owns $doc. You no longer do."
         )(docLink)
       case "failure.rendition" =>
         r(

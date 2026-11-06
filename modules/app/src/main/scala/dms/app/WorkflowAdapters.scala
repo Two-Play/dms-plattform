@@ -48,6 +48,26 @@ final class WorkflowDocuments(service: DocumentService) extends DocumentGateway:
   def editors(versions: List[UUID]): IO[WorkflowError, Map[UUID, Set[UserId]]] =
     service.editors(versions).mapError(WorkflowDocuments.toWorkflowError)
 
+  def loweringRequested(documentId: DocumentId, versionId: UUID): IO[WorkflowError, Boolean] =
+    service
+      .get(documentId)
+      .mapBoth(
+        WorkflowDocuments.toWorkflowError,
+        _.versions.find(_.id == versionId).exists(_.requestedLowering.isDefined)
+      )
+
+  def decideLowering(
+      documentId: DocumentId,
+      versionId: UUID,
+      approved: Boolean,
+      reason: Option[String],
+      actor: UserId,
+      actingFor: Option[UserId]
+  ): IO[WorkflowError, ReviewSubject] =
+    (if approved then service.approveLowering(versionId, reason, actor, actingFor)
+     else service.refuseLowering(versionId, reason, actor, actingFor))
+      .mapError(WorkflowDocuments.toWorkflowError) *> subject(documentId, versionId)
+
   def advance(
       documentId: DocumentId,
       versionId: UUID,
@@ -75,7 +95,7 @@ object WorkflowDocuments:
       details.document.ownerId,
       contentSha256(v),
       v.changeKind,
-      Option.when(CoreFields.isRestricted(v.metadata))(DocumentResource.allowedGroups(v.metadata)),
+      Option.when(CoreFields.isRestricted(v.accessMetadata))(DocumentResource.allowedGroups(v.metadata)),
       v.editors
     )
 

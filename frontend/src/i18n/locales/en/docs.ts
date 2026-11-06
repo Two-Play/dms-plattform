@@ -2,6 +2,11 @@ import { plural } from '@/i18n/core'
 
 /** Document list, document page, new document, the draft workspace and the version comparison. */
 export const docs = {
+  proposed: {
+    hint: 'This version proposes what changes with its publication. Until then the heading above stands, and the person named has no right from it.',
+    title: 'New title: {title}',
+    owner: 'New owner: {name}',
+  },
   list: {
     title: 'Documents',
     description: 'Your drafts and the documents you may read.',

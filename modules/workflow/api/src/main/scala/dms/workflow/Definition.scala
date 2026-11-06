@@ -140,6 +140,30 @@ object WorkflowDefinition:
     )
   )
 
+  /** Key of the additional approval for lowering the confidentiality, reserved for the platform. */
+  val LoweringStep = "confidentiality-lowering"
+
+  /** The additional approval for lowering the confidentiality of a later version (business concept 3.2, ADR
+    * 0083). Added by the platform to the workflow of a version with an open request, whatever its class
+    * defines and on the editorial path too. It is an approval step: it asks for a recent sign-in and leaves
+    * out the version's authors whatever the four-eyes setting says, and the approvers of a confidential
+    * version are those in its access groups. Last, so that nobody votes on the version afterwards: approving
+    * it changes what the version states.
+    */
+  val loweringStep: Step = Step(
+    LoweringStep,
+    "Approval of the lower confidentiality",
+    StepKind.Approval,
+    List(Lane("approver", OwnerDeputyRole))
+  )
+
+  /** `d` with the additional approval for lowering the confidentiality as its last step. */
+  def withLowering(d: WorkflowDefinition): WorkflowDefinition =
+    if d.step(LoweringStep).isDefined then d else d.copy(steps = d.steps :+ loweringStep)
+
+  def withoutLowering(d: WorkflowDefinition): WorkflowDefinition =
+    d.copy(steps = d.steps.filterNot(_.key == LoweringStep))
+
   /** Used for classes without a workflow of their own: one review by a reviewer, one approval by an approver.
     */
   val default: WorkflowDefinition = WorkflowDefinition(
@@ -161,6 +185,7 @@ object WorkflowDefinition:
         d.steps.dropWhile(_.kind == StepKind.Review).exists(_.kind == StepKind.Review)
       )("review steps must come before the approval steps"),
       Option.when(keys.distinct.size != keys.size)("step keys must be unique"),
+      Option.when(keys.contains(LoweringStep))(s"the step key $LoweringStep is reserved for the platform"),
       d.resetTo.filterNot(keys.contains).map(k => s"resetTo names an unknown step: $k")
     ).flatten ++ d.deadlines.toList.flatMap(DeadlinePolicy.problems) ++
       d.steps.flatMap { s =>

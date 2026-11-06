@@ -20,7 +20,7 @@ import dms.notifications.core.{
   SmtpMailSender
 }
 import dms.rendering.RenditionEvents
-import dms.workflow.CaseDetails
+import dms.workflow.{CaseDetails, WorkflowDefinition}
 import dms.workflow.core.ApprovalWorkflow
 import zio.*
 import zio.json.*
@@ -43,7 +43,11 @@ import scala.util.Try
   *     when overdue, the escalation targets when escalated
   *   - `document.compliance-notice` (DMS-108, ADR 0077): what a compliance officer sent from the cockpit: the
   *     owner and the owner's deputies, the escalation targets of an escalation
-  *   - `workflow.returned`: author and owner (changes requested or rejected)
+  *   - `workflow.returned`: author and owner (changes requested or rejected); not from the additional
+  *     approval of a lower confidentiality, whose decision has a notice of its own
+  *   - `document.confidentiality-lowering-requested`, `-decided`, `document.confidentiality-lowered` (ADR
+  *     0083): who asked, the author and the owner, without who acted
+  *   - `document.owner-replaced` (ADR 0083): the owner a version took the document from
   *   - `workflow.approved`: author and owner, without the approver
   *   - `workflow.participant-missing`: the tenant administrators
   *   - `document.acknowledgement-requested`, `document.acknowledgement-reminder`: the named readers
@@ -177,6 +181,8 @@ final class PlatformNotificationEvents(
               params("dueOn")
             )
           )
+        case "workflow.returned" if text("step").contains(WorkflowDefinition.LoweringStep) =>
+          ZIO.succeed(Nil)
         case "workflow.returned" =>
           val kind =
             if text("decision").contains("Reject") then "workflow.rejected" else "workflow.changes-requested"
@@ -188,6 +194,36 @@ final class PlatformNotificationEvents(
                 users("recipients"),
                 document,
                 params("version", "step", "returnedBy", "actingFor")
+              )
+            )
+          )
+        case "document.confidentiality-lowering-requested" | "document.confidentiality-lowering-decided" |
+            "document.confidentiality-lowered" =>
+          val kind = event.eventType match
+            case "document.confidentiality-lowered"            => "lowering.in-force"
+            case "document.confidentiality-lowering-requested" => "lowering.requested"
+            case _ if text("status").contains("Approved")      => "lowering.approved"
+            case _                                             => "lowering.refused"
+          ZIO.succeed(
+            List(
+              Notice(
+                kind,
+                NotificationCategory.Workflow,
+                users("recipients"),
+                document,
+                params("version", "requestedBy", "decidedBy", "actingFor")
+              )
+            )
+          )
+        case DocumentService.OwnerReplaced =>
+          ZIO.succeed(
+            List(
+              Notice(
+                "publication.owner-replaced",
+                NotificationCategory.Publication,
+                users("recipients"),
+                document,
+                params("version", "newOwner")
               )
             )
           )
@@ -562,6 +598,10 @@ object PlatformNotificationEvents:
     ComplianceNotices.Event,
     "workflow.returned",
     "workflow.approved",
+    "document.confidentiality-lowering-requested",
+    "document.confidentiality-lowering-decided",
+    "document.confidentiality-lowered",
+    DocumentService.OwnerReplaced,
     "workflow.participant-missing",
     "document.acknowledgement-requested",
     "document.acknowledgement-reminder",

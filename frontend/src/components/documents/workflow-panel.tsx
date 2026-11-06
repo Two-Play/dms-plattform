@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useApiClient } from '@/api/context'
 import { documentWorkflowQuery, type WorkflowCase } from '@/api/documents'
-import { decisionLabel, myTasksQuery, type WorkflowTask } from '@/api/workflow'
+import { stepLabel, decisionLabel, myTasksQuery, type WorkflowTask } from '@/api/workflow'
 import { roleLabel } from '@/components/shared/role-label'
 import { UserName, UserNames } from '@/components/shared/user-name'
 import { t } from '@/i18n'
@@ -64,7 +64,7 @@ function CaseDetails({
         <span>{t('docPanels.workflow.round', { round: workflowCase.round })}</span>
         {workflowCase.status === 'Running' && current && (
           <span className="text-muted-foreground">
-            {t('docPanels.workflow.currentStep', { step: current.stepName })}
+            {t('docPanels.workflow.currentStep', { step: stepLabel(current) })}
           </span>
         )}
         {workflowCase.status === 'Returned' && (
@@ -114,7 +114,7 @@ function CaseDetails({
             <tbody>
               {tasks.map((task) => (
                 <tr key={task.id} className="border-b last:border-0">
-                  <td className="py-1.5 pr-3">{task.stepName}</td>
+                  <td className="py-1.5 pr-3">{stepLabel(task)}</td>
                   <td className="py-1.5 pr-3">{roleLabel(task.role)}</td>
                   <td className="py-1.5 pr-3">
                     {statusLabel(task.status)}
@@ -185,7 +185,7 @@ function MyOpenTasks({ documentId, title }: { documentId: string; title: string 
           className="flex flex-col gap-2 rounded-lg border border-primary/40 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
         >
           <span>
-            {t('docPanels.workflow.yourTask')} <strong>{task.stepName}</strong> (
+            {t('docPanels.workflow.yourTask')} <strong>{stepLabel(task)}</strong> (
             {roleLabel(task.role)})
           </span>
           <Button

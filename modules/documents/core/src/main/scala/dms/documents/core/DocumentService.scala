@@ -878,6 +878,7 @@ final class DocumentService(
       // Drafts saved before DMS-158 may be less confidential than the version they started from.
       versions <- sql(DocumentStore.versions(id, templates))
       _        <- checkLevel(document, current, current.values, versions)
+      _        <- followLevel(current)
       // Drafts saved before DMS-133 (or before their class got a rule) get the class's retention rule now.
       refreshed <- refreshRetention(document, current, actor)
       _         <- ZIO.when(document.kind == DocumentKind.File)(
@@ -896,9 +897,10 @@ final class DocumentService(
     yield updated
 
   /** A later version cannot be less protected than the version it started from: it holds that version's
-    * content from the first moment (DMS-158, ADR 0074). The level never goes down (business concept 3.2: it
-    * can only be raised without an additional approval, which does not exist yet); access groups are added by
-    * the document's owner only. A missing level counts as `Internal`, as for access.
+    * content from the first moment (DMS-158, ADR 0074). A draft never goes below the level of its basis
+    * (business concept 3.2: it can only be raised without an additional approval), for nobody: the way down
+    * is [[requestLowering]], and the level changes when that is approved (ADR 0083). Access groups are added
+    * by the document's owner only. A missing level counts as `Internal`, as for access.
     */
   private def checkProtection(
       profile: MetadataProfile,
@@ -911,7 +913,7 @@ final class DocumentService(
     // What the owner added to the draft stays when someone else saves it.
     val added = Versioning
       .basis(current, versions)
-      .filter(b => CoreFields.isRestricted(b.metadata) && !document.ownerId.contains(actor))
+      .filter(b => CoreFields.isRestricted(b.accessMetadata) && !document.ownerId.contains(actor))
       .toList
       .flatMap(b =>
         (CoreFields.allowedGroups(metadataOf(values)) -- CoreFields.allowedGroups(b.metadata) --
@@ -939,7 +941,7 @@ final class DocumentService(
     ZIO.foreachDiscard(
       Versioning
         .basis(current, versions)
-        .filter(b => CoreFields.lowersConfidentiality(b.metadata, metadataOf(values)))
+        .filter(b => CoreFields.lowersConfidentiality(b.accessMetadata, metadataOf(values)))
     )(b =>
       profile(document.classId, current.classVersion).flatMap { profile =>
         val label =
@@ -1328,9 +1330,10 @@ final class DocumentService(
         status = DocumentStatus.Draft,
         changeKind = kind,
         changeReason = changeReason,
+        // A base that was never published states a level that never took effect (ADR 0083).
         values = (base.values - ClassRetention.Field) ++
           systemValues(id, profile, number, template, document.number) ++
-          retention.map(ClassRetention.Field -> _),
+          retention.map(ClassRetention.Field -> _) ++ base.accessFloor.map(levelEntry(base, _)),
         metadataSnapshot = None,
         rendition = None,
         createdBy = actor,
@@ -1347,7 +1350,8 @@ final class DocumentService(
         ),
         attachments = attachments,
         file = file,
-        editors = Set(actor)
+        editors = Set(actor),
+        lowerings = Nil
       )
       _ <- sql {
         DocumentStore.insertVersion(version, templates)
@@ -1776,14 +1780,267 @@ final class DocumentService(
       )
     yield updated
 
+  /** Asks to lower the confidentiality of a later version below the level of its basis (business concept 3.2,
+    * ADR 0083). Nothing changes on the draft: it stays at its level, and whoever asks counts as an editor, so
+    * they cannot decide (ADR 0075). The workflow adds the additional approval step while a request is open.
+    * One open request per version (409). Authorization is the caller's job: `EditDraft`, like every change of
+    * a draft.
+    */
+  def requestLowering(
+      id: DocumentId,
+      level: String,
+      reason: String,
+      actor: UserId
+  ): IO[DocumentError, DocumentVersion] =
+    val why = reason.trim
+    for
+      current  <- lockDraft(id, "requests to lower the confidentiality")
+      document <- sql(DocumentStore.document(id)).someOrFail(documentNotFound(id))
+      versions <- sql(DocumentStore.versions(id, templates))
+      from  = CoreFields.confidentialityLevel(current.metadata)
+      basis = Versioning.basis(current, versions).map(b => CoreFields.confidentialityLevel(b.accessMetadata))
+      problems = ConfidentialityLowering.problems(level, from, basis) ++
+        Option.when(why.isEmpty)("a request to lower the confidentiality needs a reason") ++
+        Option.when(why.length > MaxReasonLength)(
+          s"the reason must not exceed $MaxReasonLength characters"
+        )
+      _   <- ZIO.unless(problems.isEmpty)(ZIO.fail(DocumentError.Invalid(problems)))
+      _   <- ZIO.foreachDiscard(current.requestedLowering)(_ => ZIO.fail(alreadyLowering(current)))
+      now <- databaseNow
+      request = ConfidentialityLowering(UUID.randomUUID(), current.id, from, level, why, actor, now)
+      _ <- sql(DocumentStore.insertLowering(request)).mapError {
+        case DocumentError.Database(DbError.UniqueViolation(_, _)) => alreadyLowering(current)
+        case other                                                 => other
+      }
+      _ <- sql(DocumentStore.recordEditor(current.id, actor))
+      updated = current.copy(lowerings = current.lowerings :+ request, editors = current.editors + actor)
+      _ <- record(
+        actor,
+        "document.confidentiality-lowering-requested",
+        updated,
+        loweringDetails(request),
+        Some(why)
+      )
+      _ <- publishLowering(
+        "document.confidentiality-lowering-requested",
+        document,
+        updated,
+        request,
+        Set(current.createdBy) ++ document.ownerId - actor
+      )
+    yield updated
+
+  /** Withdraws the open request while the version is a draft. */
+  def withdrawLowering(id: DocumentId, actor: UserId): IO[DocumentError, DocumentVersion] =
+    for
+      current <- lockDraft(id, "requests to lower the confidentiality")
+      request <- ZIO
+        .fromOption(current.requestedLowering)
+        .orElseFail(
+          DocumentError.Conflict(s"version ${current.label} has no open request to lower its level")
+        )
+      now <- databaseNow
+      closed = request.copy(status = LoweringStatus.Withdrawn, decidedBy = Some(actor), decidedAt = Some(now))
+      _ <- sql(DocumentStore.closeLowering(closed)).filterOrFail(identity)(changedConcurrently(current))
+      _ <- sql(DocumentStore.recordEditor(current.id, actor))
+      updated = current.copy(
+        lowerings = current.lowerings.map(l => if l.id == closed.id then closed else l),
+        editors = current.editors + actor
+      )
+      _ <- record(actor, "document.confidentiality-lowering-withdrawn", updated, loweringDetails(closed))
+    yield updated
+
+  /** Approves the open request in the additional approval step, called by the workflow in the transaction of
+    * the vote: the version states the new level from now on, so that the rendition and the metadata snapshot
+    * do, while access keeps the old level until it is published ([[DocumentVersion.accessFloor]]). The
+    * checksum of the version changes with it; the workflow follows. The only change of field values outside a
+    * draft, and the guard of V60 allows nothing else.
+    */
+  def approveLowering(
+      versionId: UUID,
+      reason: Option[String],
+      actor: UserId,
+      actingFor: Option[UserId]
+  ): IO[DocumentError, DocumentVersion] =
+    for
+      (document, current, request) <- decidedLowering(versionId)
+      closed <- closeDecided(current, request, LoweringStatus.Approved, reason, actor, actingFor)
+      updated = current.copy(
+        values = current.values + levelEntry(current, closed.to),
+        lowerings = current.lowerings.map(l => if l.id == closed.id then closed else l)
+      )
+      _ <- sql(DocumentStore.applyLevel(updated)).filterOrFail(identity)(changedConcurrently(current))
+      _ <- record(
+        actor,
+        "document.confidentiality-lowering-approved",
+        updated,
+        loweringDetails(closed),
+        Some(closed.reason),
+        actingFor
+      )
+      _ <- publishLowering(
+        "document.confidentiality-lowering-decided",
+        document,
+        updated,
+        closed,
+        Set(closed.requestedBy, current.createdBy) ++ document.ownerId - actor
+      )
+    yield updated
+
+  /** Refuses the open request in the additional approval step, in the transaction of the vote that returns
+    * the version to its author. Nothing else changes: the version never left its level.
+    */
+  def refuseLowering(
+      versionId: UUID,
+      reason: Option[String],
+      actor: UserId,
+      actingFor: Option[UserId]
+  ): IO[DocumentError, DocumentVersion] =
+    for
+      (document, current, request) <- decidedLowering(versionId)
+      closed <- closeDecided(current, request, LoweringStatus.Refused, reason, actor, actingFor)
+      updated = current.copy(lowerings = current.lowerings.map(l => if l.id == closed.id then closed else l))
+      _ <- record(
+        actor,
+        "document.confidentiality-lowering-refused",
+        updated,
+        loweringDetails(closed),
+        Some(closed.reason),
+        actingFor
+      )
+      _ <- publishLowering(
+        "document.confidentiality-lowering-decided",
+        document,
+        updated,
+        closed,
+        Set(closed.requestedBy, current.createdBy) ++ document.ownerId - actor
+      )
+    yield updated
+
+  private def decidedLowering(versionId: UUID) =
+    for
+      current <- sql(DocumentStore.lockVersion(versionId, templates)).someOrFail(versionNotFound(versionId))
+      request <- ZIO
+        .fromOption(current.requestedLowering)
+        .orElseFail(
+          DocumentError.Conflict(s"version ${current.label} has no open request to lower its level")
+        )
+      document <- sql(DocumentStore.document(current.documentId))
+        .someOrFail(documentNotFound(current.documentId))
+    yield (document, current, request)
+
+  private def closeDecided(
+      current: DocumentVersion,
+      request: ConfidentialityLowering,
+      status: LoweringStatus,
+      reason: Option[String],
+      actor: UserId,
+      actingFor: Option[UserId]
+  ): IO[DocumentError, ConfidentialityLowering] =
+    for
+      now <- databaseNow
+      closed = request.copy(
+        status = status,
+        decidedBy = Some(actor),
+        decidedAt = Some(now),
+        decisionReason = reason.map(_.trim).filter(_.nonEmpty),
+        actingFor = actingFor
+      )
+      _ <- sql(DocumentStore.closeLowering(closed)).filterOrFail(identity)(changedConcurrently(current))
+    yield closed
+
+  /** The version takes effect, and with it the lower level (ADR 0083): a fact of its own in the audit trail.
+    */
+  private def loweringTookEffect(
+      document: Document,
+      v: DocumentVersion,
+      lowering: ConfidentialityLowering,
+      actor: UserId
+  ) =
+    record(actor, "document.confidentiality-lowered", v, loweringDetails(lowering), Some(lowering.reason)) *>
+      publishLowering(
+        "document.confidentiality-lowered",
+        document,
+        v,
+        lowering,
+        Set(lowering.requestedBy, v.createdBy) ++ document.ownerId
+      )
+
+  /** A draft that went up while a request was open is frozen at that level: the request follows it, so that
+    * the old level on record is the one the version really had. A request the level has overtaken blocks
+    * submission until it is withdrawn.
+    */
+  private def followLevel(current: DocumentVersion): IO[DocumentError, Unit] =
+    val level = CoreFields.confidentialityLevel(current.metadata)
+    ZIO.foreachDiscard(current.requestedLowering.filter(_.from != level)) { request =>
+      val problems = ConfidentialityLowering.problems(request.to, level, Some(level))
+      ZIO.unless(problems.isEmpty)(ZIO.fail(DocumentError.Invalid(problems))) *>
+        sql(DocumentStore.followLevel(request.id, level))
+    }
+
+  private def levelEntry(v: DocumentVersion, level: String): (String, FieldEntry) =
+    CoreFields.Confidentiality -> FieldEntry(
+      MetadataValue.Selection(level),
+      v.values.get(CoreFields.Confidentiality).fold(ValueOrigin.Manual)(_.origin)
+    )
+
+  private def loweringDetails(l: ConfidentialityLowering): Json.Obj =
+    def user(u: Option[UserId]) = u.fold[Json](Json.Null)(o => Json.Str(o.value))
+    Json.Obj(
+      "requestId"      -> Json.Str(l.id.toString),
+      "from"           -> Json.Str(l.from),
+      "to"             -> Json.Str(l.to),
+      "requestedBy"    -> Json.Str(l.requestedBy.value),
+      "status"         -> Json.Str(l.status.toString),
+      "decidedBy"      -> user(l.decidedBy),
+      "actingFor"      -> user(l.actingFor),
+      "decisionReason" -> l.decisionReason.fold[Json](Json.Null)(Json.Str(_))
+    )
+
+  /** Tells the people involved. No level and no reason: notices carry no content (business concept 8). */
+  private def publishLowering(
+      eventType: String,
+      document: Document,
+      v: DocumentVersion,
+      l: ConfidentialityLowering,
+      recipients: Set[UserId]
+  ) =
+    Outbox
+      .publish(
+        "document",
+        document.id.value,
+        eventType,
+        Jsonb(
+          Json
+            .Obj(
+              (List(
+                "documentId" -> Json.Str(document.id.value.toString),
+                "versionId"  -> Json.Str(v.id.toString),
+                "version"    -> Json.Str(v.label),
+                "status"     -> Json.Str(l.status.toString),
+                "recipients" -> Json.Arr(recipients.toList.sortBy(_.value).map(u => Json.Str(u.value))*)
+              ) ++ l.decidedBy.map(u => "decidedBy" -> Json.Str(u.value)) ++
+                l.actingFor.map(u => "actingFor" -> Json.Str(u.value)) ++
+                Option
+                  .when(l.status == LoweringStatus.Requested)("requestedBy" -> Json.Str(l.requestedBy.value)))*
+            )
+            .toJson
+        )
+      )
+      .mapError(DocumentError.Database(_))
+      .unit
+
   /** The open version of a document, locked, if it is a draft. */
-  private def lockDraft(id: DocumentId): IO[DocumentError, DocumentVersion] =
+  private def lockDraft(
+      id: DocumentId,
+      what: String = "deviation requests"
+  ): IO[DocumentError, DocumentVersion] =
     for
       current <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
       _       <- ZIO.unless(Versioning.isEditable(current.status))(
         ZIO.fail(
           DocumentError.Conflict(
-            s"version ${current.label} is ${current.status}; deviation requests only change while it is a draft"
+            s"version ${current.label} is ${current.status}; $what only change while it is a draft"
           )
         )
       )
@@ -2030,7 +2287,8 @@ final class DocumentService(
         ReviewService.reopenFor(audit, current.id)
       )
       _ <- ZIO.when(current.status == DocumentStatus.Approved && target == DocumentStatus.Published)(
-        applyToDocument(document, current, actor)
+        applyToDocument(document, current, actor) *>
+          ZIO.foreachDiscard(current.approvedLowering)(loweringTookEffect(document, current, _, actor))
       )
       // Who must acknowledge is fixed by the class's settings at publication (DMS-100, ADR 0048).
       _ <- ZIO.when(
@@ -2105,6 +2363,26 @@ final class DocumentService(
               "titleBefore" -> Json.Str(document.title),
               "title"       -> Json.Str(title)
             )
+          ) *>
+          ZIO.foreachDiscard(document.ownerId.filterNot(owner.contains))(previous =>
+            Outbox
+              .publish(
+                "document",
+                document.id.value,
+                OwnerReplaced,
+                Jsonb(
+                  Json
+                    .Obj(
+                      "documentId" -> Json.Str(document.id.value.toString),
+                      "versionId"  -> Json.Str(v.id.toString),
+                      "version"    -> Json.Str(v.label),
+                      "newOwner"   -> user(owner),
+                      "recipients" -> Json.Arr(Json.Str(previous.value))
+                    )
+                    .toJson
+                )
+              )
+              .mapError(DocumentError.Database(_))
           )
       )
       .unit
@@ -2260,6 +2538,9 @@ object DocumentService:
     * status change itself is a `document.status-changed` like every other.
     */
   val ApprovedVersionWithdrawn = "document.approved-version-withdrawn"
+
+  /** A version took effect and named another owner: told to the person who lost the document (ADR 0083). */
+  val OwnerReplaced = "document.owner-replaced"
 
   /** Why `v` cannot be withdrawn at `now`, if so: it must be approved, and before its valid-from date unless
     * its publication failed for good, or in approval with a rendition that failed for good.
@@ -2420,6 +2701,9 @@ object DocumentService:
     DocumentError.NotFound(s"document ${id.value} does not exist")
 
   private def versionNotFound(id: UUID) = DocumentError.NotFound(s"document version $id does not exist")
+
+  private def alreadyLowering(v: DocumentVersion) =
+    DocumentError.Conflict(s"version ${v.label} already has an open request to lower its level")
 
   private def alreadyRequested(section: SectionId) =
     DocumentError.Conflict(s"section '${section.value}' already has an active deviation request")

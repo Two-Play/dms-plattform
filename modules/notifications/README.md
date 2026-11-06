@@ -33,7 +33,7 @@ Layout: `api` holds public types and the ports, `core` the implementation. Other
 | Outbox event | Kind | Recipients | Category |
 |---|---|---|---|
 | `workflow.task-assigned` (new) | `workflow.task-assigned` | candidates of the task; active deputies of a candidate (text "as deputy of …") | workflow |
-| `workflow.returned` | `workflow.changes-requested` / `workflow.rejected` | author and owner | workflow |
+| `workflow.returned` | `workflow.changes-requested` / `workflow.rejected` | author and owner; not from the additional approval of a lower confidentiality, which has its own notice | workflow |
 | `workflow.approved` | `workflow.approved` | author and owner, not the approver | workflow |
 | `workflow.participant-missing` | `workflow.participant-missing` | tenant administrators | workflow |
 | `workflow.task-due-soon` (DMS-87) | `workflow.task-due-soon` | candidates | deadline |
@@ -49,6 +49,8 @@ Layout: `api` holds public types and the ports, `core` the implementation. Other
 | `document.acknowledgement-reminder` | `acknowledgement.reminder` | the reminded readers | acknowledgement |
 | `workflow.deputyship-created`, `-started`, `-ended`, `-ended-by-period` | `deputyship.*` | principal and deputy (different texts) | deputyship |
 | `document.status-changed` Approved → Published | `publication.published` | the owner | publication |
+| `document.owner-replaced` (ADR 0083) | `publication.owner-replaced` | the owner a published version took the document from | publication |
+| `document.confidentiality-lowering-requested`, `-decided`, `document.confidentiality-lowered` (ADR 0083) | `lowering.requested`, `lowering.approved`, `lowering.refused`, `lowering.in-force` | who asked, author and owner, without who acted; no level and no reason | workflow |
 | `document.approved-version-withdrawn` | `publication.withdrawn` | author, approvers and owner, without who withdrew it; never readers | publication |
 | `legal-hold.created`, `legal-hold.released` | `legal-hold.*` | tenant-wide records managers | legal-hold |
 | `document.rendition-dead`, `document.publication-dead` (DMS-142) | `failure.rendition`, `failure.publication` | the owner (without owner: the version's author) and their active deputies, the records managers whose role covers the document, or tenant administrators if there are none; none if the version no longer waits | processing-failure |

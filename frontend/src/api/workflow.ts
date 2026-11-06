@@ -1,6 +1,7 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query'
 import { t } from '@/i18n'
 import type { ApiClient } from './client'
+import { LOWERING_STEP } from './confidentiality-lowering'
 import { ApiRequestError, requestError } from './errors'
 import type { components } from './schema'
 
@@ -90,10 +91,17 @@ export function isApprovalStep(task: Pick<WorkflowTask, 'kind'>): boolean {
  * The decisions offered for a task: review steps return the version with "request changes",
  * approval steps with "reject".
  */
-export function decisionsFor(task: Pick<WorkflowTask, 'kind'>): VoteDecision[] {
+export function decisionsFor(task: Pick<WorkflowTask, 'kind' | 'step'>): VoteDecision[] {
+  // A lower confidentiality is granted or not; conditions would have nowhere to go (ADR 0083).
+  if (task.step === LOWERING_STEP) return ['Approve', 'Reject']
   return isApprovalStep(task)
     ? ['Approve', 'ApproveWithConditions', 'Reject']
     : ['Approve', 'ApproveWithConditions', 'RequestChanges']
+}
+
+/** The name of a step for people: the platform's own step in their language, a class's step as it is named. */
+export function stepLabel(task: Pick<WorkflowTask, 'step' | 'stepName'>): string {
+  return task.step === LOWERING_STEP ? t('lowering.step') : task.stepName
 }
 
 /** The label of a decision as the voter picks it, e.g. "Approve with conditions". */

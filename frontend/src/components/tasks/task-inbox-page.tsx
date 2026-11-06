@@ -12,7 +12,7 @@ import { useApiClient } from '@/api/context'
 import { documentQuery } from '@/api/documents'
 import type { DocumentView } from '@/api/partners'
 import { openReviewTasksQuery, type ReviewTask } from '@/api/reviews'
-import { decisionLabel, myTasksQuery, type WorkflowTask } from '@/api/workflow'
+import { decisionLabel, myTasksQuery, stepLabel, type WorkflowTask } from '@/api/workflow'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -69,7 +69,7 @@ function Context({ item }: { item: InboxItem }) {
   const parts: ReactNode[] = []
   if (item.classPath.length > 0) parts.push(item.classPath.join(' / '))
   if (item.kind === 'Review' || item.kind === 'Approval') {
-    parts.push(`${item.task.stepName} (${roleLabel(item.task.role)})`)
+    parts.push(`${stepLabel(item.task)} (${roleLabel(item.task.role)})`)
     const candidates = item.task.candidates ?? []
     if (candidates.length > 0) {
       parts.push(

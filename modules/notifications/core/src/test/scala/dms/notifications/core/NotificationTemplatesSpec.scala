@@ -245,6 +245,41 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
         r.link.contains(s"/documents/${doc.documentId.value}")
       )
     },
+    test("a lower confidentiality: who acted, in both languages, and no level and no reason") {
+      val params              = Map("version" -> "2.0", "requestedBy" -> "ben", "decidedBy" -> "ben")
+      def texts(kind: String) =
+        List(Language.De, Language.En).map(
+          NotificationTemplates.render(kind, _, params, Some(doc), ctx(Some(facts)))
+        )
+      val kinds = List("lowering.requested", "lowering.approved", "lowering.refused", "lowering.in-force")
+      val all   = kinds.flatMap(texts).map(r => r.subject + r.body)
+      assertTrue(
+        texts("lowering.approved").forall(_.body.contains("Ben Becker")),
+        texts("lowering.requested").forall(_.body.contains("Ben Becker")),
+        !all.exists(t => t.contains("Internal") || t.contains("Confidential")),
+        all.forall(_.contains("Reiserichtlinie"))
+      )
+    },
+    test("the step of the lower confidentiality has a German name in a task notice") {
+      val r = NotificationTemplates.render(
+        "workflow.task-assigned",
+        Language.De,
+        Map("version" -> "2.0", "step" -> "Approval of the lower confidentiality", "stepKind" -> "Approval"),
+        Some(doc),
+        ctx(Some(facts))
+      )
+      assertTrue(r.body.contains("Freigabe der niedrigeren Vertraulichkeit"))
+    },
+    test("the owner who lost a document reads who has it now, without a title if they may not read it") {
+      val r = NotificationTemplates.render(
+        "publication.owner-replaced",
+        Language.De,
+        Map("version" -> "2.0", "newOwner" -> "ben"),
+        Some(doc),
+        ctx(None)
+      )
+      assertTrue(r.body.contains("Ben Becker"), !r.body.contains("Reiserichtlinie"))
+    },
     test("deputyships: different texts for principal and deputy, dates in the tenant's time zone") {
       val params = Map(
         "principal"  -> "anna",

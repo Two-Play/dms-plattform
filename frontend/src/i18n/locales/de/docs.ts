@@ -2,6 +2,11 @@ import { plural, type Translation } from '@/i18n/core'
 import type * as en from '@/i18n/locales/en/docs'
 
 export const docs: Translation<typeof en.docs> = {
+  proposed: {
+    hint: 'Diese Version schlägt vor, was sich mit ihrer Veröffentlichung ändert. Bis dahin gilt, was oben steht, und die genannte Person hat keine Rechte daraus.',
+    title: 'Neuer Titel: {title}',
+    owner: 'Neuer Verantwortlicher: {name}',
+  },
   list: {
     title: 'Dokumente',
     description: 'Eigene Entwürfe und alle Dokumente mit Leseberechtigung.',

@@ -157,6 +157,97 @@ object RulesSpec extends ZIOSpecDefault:
         )
       }
     ),
+    suite("the additional approval for a lower confidentiality (ADR 0083)")(
+      test("it comes last, once, as an approval of the approver role, also on the editorial path") {
+        val lowered = WorkflowDefinition.withLowering(definition)
+        val minor   = WorkflowDefinition.withLowering(WorkflowDefinition.editorial)
+        assertTrue(
+          lowered.steps.last.key == WorkflowDefinition.LoweringStep,
+          lowered.steps.last.kind == StepKind.Approval,
+          lowered.steps.last.lanes.map(_.role) == List("Approver"),
+          WorkflowDefinition.withLowering(lowered) == lowered,
+          WorkflowDefinition.withoutLowering(lowered) == definition,
+          minor.steps.map(_.key) == List("editorial-confirmation", WorkflowDefinition.LoweringStep)
+        )
+      },
+      test("whoever changed the version takes no part, even with the four-eyes rule off") {
+        val kind = WorkflowDefinition.loweringStep.kind
+        assertTrue(
+          Rules.excludesAuthors(fourEyes = false, kind),
+          Rules.eligible(
+            List(UserId("editor"), UserId("second")),
+            Set(UserId("editor")),
+            Rules.excludesAuthors(fourEyes = false, kind)
+          ) == List(UserId("second"))
+        )
+      },
+      test("no deputy stands in for an editor, and no editor stands in for a candidate") {
+        val second = UserId("second")
+        val editor = UserId("editor")
+        val roles  = Map(editor -> Set("Approver"), UserId("deputy") -> Set("Approver"))
+        def deputyship(principal: UserId, deputy: UserId) =
+          Deputyship(
+            UUID.randomUUID(),
+            principal,
+            deputy,
+            now.minusSeconds(60),
+            now.plusSeconds(60),
+            List("Approver"),
+            None,
+            None,
+            principal,
+            now.minusSeconds(60),
+            None,
+            None
+          )
+        assertTrue(
+          Rules
+            .taskDeputies(
+              "Approver",
+              List(second),
+              Set(editor),
+              Nil,
+              List(deputyship(second, editor)),
+              roles,
+              now
+            )
+            .isEmpty,
+          Rules
+            .taskDeputies(
+              "Approver",
+              List(editor),
+              Set(editor),
+              Nil,
+              List(deputyship(editor, UserId("deputy"))),
+              roles,
+              now
+            )
+            .isEmpty
+        )
+      },
+      test("a version whose request was refused goes on from the step before it") {
+        val resume = Rules.resume(definition, Some(WorkflowDefinition.LoweringStep), a, a)
+        assertTrue(resume == Rules.Resume("approval", contentChanged = false))
+      },
+      test("a request after a return keeps the place of the return, a new one comes back to the step") {
+        val lowered = WorkflowDefinition.withLowering(definition)
+        assertTrue(
+          Rules.resume(lowered, Some("approval"), a, a).step == "approval",
+          Rules.resume(lowered, Some(WorkflowDefinition.LoweringStep), a, a).step ==
+            WorkflowDefinition.LoweringStep,
+          Rules.resume(lowered, Some(WorkflowDefinition.LoweringStep), a, b).step == "review"
+        )
+      },
+      test("a class cannot define a step of that name; the BPMN of the definition has its task") {
+        val own = definition.copy(steps = definition.steps :+ WorkflowDefinition.loweringStep)
+        val xml = Bpmn.render("p", "p", WorkflowDefinition.withLowering(definition))
+        assertTrue(
+          WorkflowDefinition.problems(own).exists(_.contains("reserved")),
+          WorkflowDefinition.problems(WorkflowDefinition.withLowering(definition)).nonEmpty,
+          xml.contains(Rules.taskKey(WorkflowDefinition.LoweringStep, "approver"))
+        )
+      }
+    ),
     suite("definitions")(
       test("the default workflow is valid") {
         assertTrue(WorkflowDefinition.problems(WorkflowDefinition.default).isEmpty)

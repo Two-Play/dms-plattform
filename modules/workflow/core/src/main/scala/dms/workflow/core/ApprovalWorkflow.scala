@@ -208,12 +208,42 @@ final class ApprovalWorkflow(
         if decision.approves then
           for
             _ <- sql(WorkflowStore.completeTask(task.id, TaskStatus.Completed, Some(actor)))
+            // The version states the lower level from here on, so the case takes over its checksum: the
+            // approval and the rendition cover what is published. No vote follows this step (ADR 0083).
+            lowered <- ZIO.when(task.stepKey == WorkflowDefinition.LoweringStep)(
+              decideLowering(row, approved = true, vote, actor, actingFor)
+            )
             _ <- flowable.run(_.getTaskService.complete(task.id))
-            _ <- advance(row, subject, actor, authenticatedAt, actingFor)
+            _ <- advance(
+              lowered.fold(row)(s => row.copy(contentSha256 = s.contentSha256)),
+              lowered.getOrElse(subject),
+              actor,
+              authenticatedAt,
+              actingFor
+            )
           yield ()
-        else sendBack(row, subject, task, decision, actor, actingFor)
+        else
+          ZIO.when(task.stepKey == WorkflowDefinition.LoweringStep)(
+            decideLowering(row, approved = false, vote, actor, actingFor)
+          ) *> sendBack(row, subject, task, decision, actor, actingFor)
       details <- details(row.id)
     yield details
+
+  private def decideLowering(
+      row: CaseRow,
+      approved: Boolean,
+      vote: Vote,
+      actor: UserId,
+      actingFor: Option[UserId]
+  ) =
+    documents.decideLowering(
+      DocumentId(row.documentId),
+      row.versionId,
+      approved,
+      vote.reason,
+      actor,
+      actingFor
+    )
 
   /** Refuses `actor` on an open task under the four-eyes rule (ADR 0075). The vote itself checks the same;
     * the API asks first, so that the policy's general refusal does not hide the reason.
@@ -739,8 +769,11 @@ final class ApprovalWorkflow(
 
   private def open(subject: ReviewSubject, actor: UserId): IO[WorkflowError, UUID] =
     for
-      stored <- effective(subject.classPath)
-      (definition, key) = definitionFor(subject, stored)
+      stored   <- effective(subject.classPath)
+      lowering <- documents.loweringRequested(subject.documentId, subject.versionId)
+      (plain, plainKey) = definitionFor(subject, stored)
+      definition        = if lowering then WorkflowDefinition.withLowering(plain) else plain
+      key               = if lowering then loweringKey(plainKey) else plainKey
       tenant              <- sql(sql"select dms.current_tenant()".query[UUID].run().head)
       processDefinitionId <- deploy(tenant, key, definition)
       row = CaseRow(
@@ -748,7 +781,7 @@ final class ApprovalWorkflow(
         subject.documentId.value,
         subject.versionId,
         stored.fold(subject.classPath.lastOption.getOrElse(""))(_.classKey),
-        stored.filter(_ => definition != WorkflowDefinition.editorial).map(_.version),
+        stored.filter(_ => plain != WorkflowDefinition.editorial).map(_.version),
         WorkflowStore.json(definition),
         stored.forall(_.fourEyes),
         processDefinitionId,
@@ -782,8 +815,17 @@ final class ApprovalWorkflow(
     yield row.id
 
   private def resubmit(row: CaseRow, subject: ReviewSubject, actor: UserId): IO[WorkflowError, UUID] =
-    val definition = WorkflowStore.parse(row.definition)
+    val stored = WorkflowStore.parse(row.definition)
     for
+      lowering <- documents.loweringRequested(subject.documentId, subject.versionId)
+      definition =
+        if lowering then WorkflowDefinition.withLowering(stored)
+        else WorkflowDefinition.withoutLowering(stored)
+      process <-
+        if definition == stored then ZIO.succeed(row.processDefinitionId)
+        else
+          sql(sql"select dms.current_tenant()".query[UUID].run().head)
+            .flatMap(deploy(_, loweringKey(Bpmn.processKey(Some(row.classKey))), definition))
       votes <- sql(WorkflowStore.votesOfCase(row.id))
       resume = Rules.resume(
         definition,
@@ -804,6 +846,8 @@ final class ApprovalWorkflow(
         else ZIO.succeed(0)
       invalidated = changed + edited
       next        = row.copy(
+        definition = WorkflowStore.json(definition),
+        processDefinitionId = process,
         round = row.round + 1,
         status = CaseStatus.Running.toString,
         returnedStep = None,
@@ -840,6 +884,9 @@ final class ApprovalWorkflow(
   ): (WorkflowDefinition, String) =
     if subject.changeKind == ChangeKind.Minor then (WorkflowDefinition.editorial, Bpmn.EditorialKey)
     else (stored.fold(WorkflowDefinition.default)(_.definition), Bpmn.processKey(stored.map(_.classKey)))
+
+  /** The process of a workflow with the additional approval for lowering the confidentiality. */
+  private def loweringKey(key: String): String = s"$key.lowering"
 
   /** People who may take a lane: the document owner for [[WorkflowDefinition.DocumentOwner]] lanes (their
     * deputies if the owner started or changed the version or is missing, see [[Rules.ownerConfirmation]]),

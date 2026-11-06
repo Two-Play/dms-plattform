@@ -68,7 +68,8 @@ enum IssueKind:
       val names = computed.map(c => s"'${c.label}'").mkString(", ")
       s"The document cannot be approved without this value; these computed fields need it: $names."
     case ConfidentialityLowered(basis) =>
-      s"A new version cannot be less confidential than the version it started from ($basis)."
+      s"A new version cannot be less confidential than the version it started from ($basis) without an " +
+        "additional approval: ask for it with a reason."
     case AccessGroupsWidened(groups) =>
       s"Only the document's owner can add access groups: ${groups.mkString(", ")}."
 
