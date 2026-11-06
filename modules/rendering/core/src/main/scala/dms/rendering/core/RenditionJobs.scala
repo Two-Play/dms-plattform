@@ -76,10 +76,11 @@ final case class RenditionResult(
   *
   * Failures are retried by the job queue with backoff (ADR 0010). The outbox event [[RenditionEvents.Failed]]
   * is written on the first failed attempt and again when no retry follows; people are only notified when the
-  * job is dead ([[RenditionEvents.Dead]], DMS-142). The job's error starts with the failure's code in
-  * brackets (`[unavailable] …`, see [[RenderingError.code]]), so the status of a rendition can explain it
-  * (DMS-93). Every step is idempotent: rendering is deterministic, storing reuses an equal stored version,
-  * and an approved version is left alone.
+  * job is dead ([[RenditionEvents.Dead]], DMS-142). A failure no retry can cure ([[RenderingError.NoRetry]],
+  * ADR 0081) ends the job on the spot: `dms.job_fail` reads its code. The job's error starts with the
+  * failure's code in brackets (`[unavailable] …`, see [[RenderingError.code]]), so the status of a rendition
+  * can explain it (DMS-93). Every step is idempotent: rendering is deterministic, storing reuses an equal
+  * stored version, and an approved version is left alone.
   *
   * The last step also records what produced the PDF in `dms.rendition_provenance` (renderer versions, worker
   * image and build fingerprint, validator; DMS-93, ADR 0055) for the evidence report.
@@ -221,7 +222,7 @@ final class RenditionJobs(
       error: RenderingError,
       job: ClaimedJob
   ): IO[RenderingError, Unit] =
-    val last    = job.attempts >= job.maxAttempts
+    val last    = job.attempts >= job.maxAttempts || RenderingError.NoRetry(error.code)
     val details = Json.Obj(
       "documentId"  -> Json.Str(request.documentId.value.toString),
       "versionId"   -> Json.Str(request.versionId.toString),

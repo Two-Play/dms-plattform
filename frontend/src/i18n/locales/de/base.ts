@@ -168,6 +168,7 @@ export const errors: Translation<typeof en.errors> = {
     body_too_large: 'Die Anfrage ist zu groß.',
     database_error:
       'Die Anfrage konnte nicht abgeschlossen werden. Bitte versuchen Sie es gleich noch einmal.',
+    document_too_long: 'Das Dokument ist zu lang, um daraus ein PDF zu erzeugen. Kürzen oder teilen Sie es.',
     file_not_convertible: 'Dateien dieses Typs können nicht als PDF/A archiviert werden.',
     file_type_mismatch: 'Der Inhalt dieser Datei passt nicht zu ihrem Dateityp.',
     four_eyes: 'Das muss jemand anderes bestätigen: Es gilt das Vier-Augen-Prinzip.',
@@ -199,6 +200,8 @@ export const errors: Translation<typeof en.errors> = {
     reminder_too_soon: 'Es wurde gerade erst erinnert. Bitte versuchen Sie es später noch einmal.',
     report_removed: 'Der Inhalt dieses Berichts wurde nach Ablauf der Aufbewahrung entfernt.',
     rendering_failed: 'Das Dokument konnte nicht erzeugt werden.',
+    rendering_time_limit:
+      'Das Erzeugen des PDFs hat die Zeitgrenze überschritten. Kürzen oder teilen Sie das Dokument.',
     rendering_unavailable:
       'Das PDF kann gerade nicht erzeugt werden. Bitte versuchen Sie es gleich noch einmal.',
     rendition_not_failed: 'Das Erzeugen ist nicht fehlgeschlagen; es gibt nichts zu wiederholen.',

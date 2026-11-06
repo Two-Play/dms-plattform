@@ -70,6 +70,14 @@ object NotificationTemplates:
       "Grund: Die Originaldatei ist zu groß oder zu komplex, um ihre Felder zu füllen.",
       "Reason: the original file is too large or too complex to fill its fields."
     ),
+    "too_long" -> (
+      "Grund: Das Dokument ist zu lang, um daraus ein PDF zu erzeugen. Es wird nicht automatisch wiederholt: Kürzen oder teilen Sie das Dokument.",
+      "Reason: the document is too long to produce a PDF from it. It is not retried automatically: shorten or split the document."
+    ),
+    "time_limit" -> (
+      "Grund: Das Erzeugen des PDFs hat die Zeitgrenze überschritten. Es wird nicht automatisch wiederholt: Kürzen oder teilen Sie das Dokument.",
+      "Reason: producing the PDF ran into the time limit. It is not retried automatically: shorten or split the document."
+    ),
     "invalid" -> (
       "Grund: Die Version lässt sich in ihrem jetzigen Zustand nicht verarbeiten.",
       "Reason: the version cannot be processed in its current state."

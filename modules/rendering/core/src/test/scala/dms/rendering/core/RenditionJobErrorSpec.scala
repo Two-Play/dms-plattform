@@ -33,6 +33,16 @@ object RenditionJobErrorSpec extends ZIOSpecDefault:
         parsed(2)._2.contains("6.2.11.4.1-1")
       )
     },
+    test("the limits of the worker are never retried, everything else keeps its retries (ADR 0081)") {
+      val limits = List(RenderingError.TooLong("about 900 pages"), RenderingError.TimeLimit("120 seconds"))
+      assertTrue(
+        limits.map(e => RenditionJobs.parseJobError(RenditionJobs.jobError(e))._1) ==
+          List(Some("too_long"), Some("time_limit")),
+        limits.forall(e => RenderingError.NoRetry(e.code)),
+        !RenderingError.NoRetry(RenderingError.Unavailable("down").code),
+        !RenderingError.NoRetry(RenderingError.Rejected("external resource").code)
+      )
+    },
     test("timeouts read like dms.job_failure_code; other texts keep their message without a code") {
       assertTrue(
         RenditionJobs.parseJobError("timed out after 270 s") == (Some("timeout"), "timed out after 270 s"),

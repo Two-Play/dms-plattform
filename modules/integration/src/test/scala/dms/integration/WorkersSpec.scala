@@ -130,6 +130,28 @@ object WorkersSpec extends ZIOSpecDefault:
         brokenStatus <- jobStatus(broken.get)
       yield assertTrue(flakyStatus == ("done", 3), brokenStatus == ("dead", 3))
     },
+    test("a failure no retry can cure ends the job on its first attempt (DMS-171, ADR 0081)") {
+      for
+        env      <- ZIO.service[Env]
+        t        <- newTenant
+        tooLong  <- env.app.transact(t)(JobQueue.enqueue("test.long", maxAttempts = 5))
+        timedOut <- env.app.transact(t)(JobQueue.enqueue("test.slow", maxAttempts = 5))
+        down     <- env.app.transact(t)(JobQueue.enqueue("test.down", maxAttempts = 2))
+        runner = JobRunner(
+          env.app,
+          Map(
+            "test.long" -> (_ => ZIO.fail("[too_long] the document has about 900 pages")),
+            "test.slow" -> (_ => ZIO.fail("[time_limit] the render took longer than 120 seconds")),
+            "test.down" -> (_ => ZIO.fail("[unavailable] connection refused"))
+          ),
+          config("w-final")
+        )
+        _          <- drain(runner.runOnce)
+        longStatus <- jobStatus(tooLong.get)
+        slowStatus <- jobStatus(timedOut.get)
+        downStatus <- jobStatus(down.get)
+      yield assertTrue(longStatus == ("dead", 1), slowStatus == ("dead", 1), downStatus == ("dead", 2))
+    },
     test("a job of a crashed worker is taken over after its lease expires") {
       for
         env     <- ZIO.service[Env]

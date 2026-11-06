@@ -613,5 +613,9 @@ object VersionViewApi:
       (StatusCode.UnprocessableEntity, ApiError("rendering_failed", e.describe))
     case RenderingError.TooComplex(m) =>
       (StatusCode.UnprocessableEntity, ApiError(OfficeProblem.TooComplexCode, m))
+    case RenderingError.TooLong(m) =>
+      (StatusCode.UnprocessableEntity, ApiError("document_too_long", m))
+    case RenderingError.TimeLimit(m) =>
+      (StatusCode.UnprocessableEntity, ApiError("rendering_time_limit", m))
     case RenderingError.Database(e) => DocumentApi.toResponse(e)
     case e => (StatusCode.InternalServerError, ApiError("rendering_failed", e.describe))

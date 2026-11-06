@@ -24,6 +24,8 @@ export type RenditionErrorCode =
   | 'not_archivable'
   | 'invalid'
   | 'too_complex'
+  | 'too_long'
+  | 'time_limit'
   | 'integrity'
   | 'segregation_of_duties'
   | 'database'
@@ -36,6 +38,8 @@ const ERROR_CODES: ReadonlySet<string> = new Set([
   'not_archivable',
   'invalid',
   'too_complex',
+  'too_long',
+  'time_limit',
   'integrity',
   'segregation_of_duties',
   'database',

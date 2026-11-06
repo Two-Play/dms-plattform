@@ -17,7 +17,7 @@ Layout: `api` holds public types and interfaces, `core` the implementation. Othe
   - `RenditionLayout`: running header and footer (document ID, version, valid-from, approval note, page x of y), metadata,
     file identifier; pure. A deputy's approval note names the approver they stood in for ("on behalf of" / "i. V. für",
     `RenditionRequest.onBehalfOf`, DMS-49).
-  - `PdfRenderer` / `WeasyPrintRenderer`: HTTP client of the worker; `parallelJobs` says how many rendition jobs run at a time per instance, in a lane of their own (`Background`, ADR 0079). `PdfValidator` / `VeraPdfValidator`: veraPDF in-process.
+  - `PdfRenderer` / `WeasyPrintRenderer`: HTTP client of the worker; `parallelJobs` says how many rendition jobs run at a time per instance, in a lane of their own (`Background`, ADR 0079). A worker's limits arrive as `TooLong` and `TimeLimit`, which end the job without retries (`RenderingError.NoRetry`, `dms.job_failure_is_final`, ADR 0081). `PdfValidator` / `VeraPdfValidator`: veraPDF in-process.
   - `RenditionArchive`: object storage (`renditions/<tenant>/<document>/<version>.pdf`) with checksum check on read.
   - `RenditionSource`: port implemented by the application (`dms.app.DocumentRenditions`) for the page of a version (or,
     for a file document, its original with a `prepare` step that fills the Word fields, DMS-115) and the completion
@@ -26,7 +26,7 @@ Layout: `api` holds public types and interfaces, `core` the implementation. Othe
     office files → PDF/A-2b, HTML → DOCX. A PDF original that conforms to PDF/A-2b is archived unchanged.
     `DocumentConverter.contentMatches` checks that the first bytes of an upload fit its extension (DMS-121, ADR 0044).
 
-Tests: `RenditionLayoutSpec` (pure), `PdfRenditionSpec` (worker image built by Testcontainers, veraPDF, PDFBox text checks),
+Tests: `RenditionLayoutSpec` (pure), `PdfRenditionSpec` (worker image built by Testcontainers, veraPDF, PDFBox text checks), `RenderLimitsSpec` (the same worker with small limits),
 `ConversionWorkerSpec` (conversion worker image built by Testcontainers: DOCX → valid PDF/A-2b, HTML → DOCX),
 `ContentSignatureSpec` (pure), `RenditionJobErrorSpec` (pure: failure codes in job errors);
 end to end with workflow, database, SeaweedFS and download in `modules/app` (`RenditionApiSpec`).

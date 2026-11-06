@@ -24,6 +24,8 @@ object FailureFollowUpsSpec extends ZIOSpecDefault:
     RenderingError.NotArchivable(ValidationReport(ArchiveStandard.PdfA2b, compliant = false, "veraPDF", Nil)),
     RenderingError.Invalid("no content"),
     RenderingError.TooComplex("too large"),
+    RenderingError.TooLong("about 900 pages"),
+    RenderingError.TimeLimit("took longer than 120 seconds"),
     RenderingError.Integrity("checksum"),
     RenderingError.Refused("the last approver changed the version"),
     RenderingError.Database(DbError.NoTransaction)

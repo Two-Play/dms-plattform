@@ -29,11 +29,28 @@ this directory with Testcontainers (no compose needed).
 Responses: `200 application/pdf` with headers `X-Renderer` (WeasyPrint, pydyf and worker version), `X-Pages`, `X-Worker-Image`
 (the image reference from `DMS_WORKER_IMAGE`, `unknown` if unset) and `X-Worker-Build` (build fingerprint, see below); `400` malformed
 request; `422` the page cannot be rendered (e.g. an external reference); `500` unexpected failure. `GET /health` answers `200`.
+Errors are JSON with `error`; a `422` for a limit also has `code` (see Limits).
 
 One render runs at a time per container (WeasyPrint is not documented as thread-safe); scale with replicas. Further requests wait
-in the worker, and a render whose caller gave up still runs to its end; the application keeps on-demand PDFs from piling up here
+in the worker, and a render whose caller gave up still runs up to the time limit; the application keeps on-demand PDFs from piling up here
 (`dms.onDemandPdf`, ADR 0073), and runs as many rendition jobs at a time as `dms.rendering.parallelJobs` says (ADR 0079).
 `scripts/loadtest/render_bench.py` measures a worker.
+
+## Limits
+
+([ADR 0081](../../docs/adr/0081-limits-of-a-render-child-process-and-failures-without-retry.md), DMS-171)
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `DMS_RENDER_MAX_PAGES` | 300 | Estimated pages above which a page is refused before it is rendered: `422` with `code` `too_long`. The estimate is the larger of characters / 2,000 and tags / 105 in the body; images embedded as data URIs do not count. |
+| `DMS_RENDER_TIME_LIMIT_SECONDS` | 120 | When a render is killed: `422` with `code` `time_limit`. Keep `dms.rendering.timeoutSeconds` of the application (default 150) above it. |
+
+Every render runs in a child process, forked from a process that has imported the worker and loaded the fonts. WeasyPrint cannot be
+interrupted in a thread, a process can be killed. A child that the kernel kills at the memory limit of the container gives `too_long`
+as well; the worker stays up. The application ends the job on both codes at once: a retry would only repeat them. The waiting time for
+the lock does not count towards the time limit. `/tmp` must be writable, for the socket of the fork server.
+
+`scripts/loadtest/render_compare.py` shows whether two workers print the same bytes.
 
 ## Isolation
 

@@ -115,12 +115,16 @@ services:
     image: ${DMS_RENDERING_IMAGE:-dms-rendering-worker:local}
     environment:
       DMS_WORKER_IMAGE: ${DMS_RENDERING_IMAGE:-dms-rendering-worker:local}
+      # Limits of a render (DMS-171, ADR 0081): estimated pages before it starts, seconds until its process is killed.
+      DMS_RENDER_MAX_PAGES: ${DMS_RENDER_MAX_PAGES:-300}
+      DMS_RENDER_TIME_LIMIT_SECONDS: ${DMS_RENDER_TIME_LIMIT_SECONDS:-120}
     networks:
       - workers
     read_only: true
     tmpfs:
       - /tmp
     mem_limit: 512m
+    restart: unless-stopped  # ADR 0081
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
       interval: 10s
@@ -143,6 +147,7 @@ services:
     tmpfs:
       - /tmp
     mem_limit: 1g
+    restart: unless-stopped  # ADR 0081
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
       interval: 10s

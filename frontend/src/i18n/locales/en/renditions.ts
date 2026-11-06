@@ -30,6 +30,10 @@ export const renditions = {
       'The PDF does not pass the check against the archive standard (PDF/A-2b), e.g. because of a font that is not embedded.',
     invalid: 'The version cannot be rendered in its current state.',
     too_complex: 'The original file is too large or too complex to fill its fields.',
+    too_long:
+      'The document is too long to produce a PDF from it. It is not retried automatically: shorten or split the document.',
+    time_limit:
+      'Producing the PDF ran into the time limit. It is not retried automatically: shorten or split the document.',
     integrity: 'A stored file does not match its checksum.',
     segregation_of_duties:
       'The last approval came from someone who changed this version; the four-eyes rule does not allow it. A retry cannot help.',

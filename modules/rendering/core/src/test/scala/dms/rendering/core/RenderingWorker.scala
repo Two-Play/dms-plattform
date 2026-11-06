@@ -8,6 +8,7 @@ import org.testcontainers.images.builder.ImageFromDockerfile
 import zio.*
 
 import java.nio.file.{Files, Path}
+import scala.jdk.CollectionConverters.*
 
 /** The rendering worker of `workers/rendering` (ADR 0025), built from its Dockerfile and started with
   * Testcontainers. The image is built once per Docker daemon and then comes from the layer cache.
@@ -33,13 +34,17 @@ object RenderingWorker:
   val ImageReference: String = "dms-rendering-worker-test:local@sha256:" + "0" * 64
 
   /** A started worker; its configuration points at the mapped port. */
-  val config: ZLayer[Any, Throwable, RendererConfig] = ZLayer.scoped(
+  val config: ZLayer[Any, Throwable, RendererConfig] = configured(Map.empty)
+
+  /** A started worker with these environment variables, e.g. other limits (ADR 0081). */
+  def configured(environment: Map[String, String]): ZLayer[Any, Throwable, RendererConfig] = ZLayer.scoped(
     ZIO
       .acquireRelease(ZIO.attemptBlocking {
         val image = ImageFromDockerfile("dms-rendering-worker-test", false).withFileFromPath(".", directory)
         val c     = Container(image)
           .withExposedPorts(8080)
           .withEnv("DMS_WORKER_IMAGE", ImageReference)
+          .withEnv(environment.asJava)
           .waitingFor(Wait.forHttp("/health").forPort(8080).forStatusCode(200))
         c.start()
         c

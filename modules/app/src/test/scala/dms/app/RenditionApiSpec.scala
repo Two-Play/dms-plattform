@@ -23,7 +23,7 @@ import dms.integration.{JobRunner, WorkerConfig}
 import dms.kernel.{TemplateId, TenantId, UserId}
 import dms.notifications.{Mail, MailSender, Person, RecipientDirectory}
 import dms.notifications.core.{DeliverySettings, NotificationJobs}
-import dms.rendering.{ArchiveStandard, RenditionRequest}
+import dms.rendering.{RenditionEvents, ArchiveStandard, RenditionRequest}
 import dms.rendering.core.*
 import dms.storage.{ObjectStore, RetentionMode, S3ObjectStore, StorageConfig}
 import dms.templates.*
@@ -833,6 +833,41 @@ object RenditionApiSpec extends ZIOSpecDefault:
           byOwner.exists(_._4.contains(s"/documents/${doc.id}?version=$version")),
           second.size == 4
         )
+    },
+    test("a document over the worker's limits dies on its first attempt and says why (DMS-171, ADR 0081)") {
+      val tooLong: PdfRenderer =
+        (_: PdfJob) => ZIO.fail(RenderingError.TooLong("about 900 pages, the limit is 300"))
+      for
+        pair <- approvedByVotes("Wayne")
+        (doc, waiting) = pair
+        version        = waiting.versionId
+        mails  <- Ref.make(List.empty[Mail])
+        _      <- makeDue(version, maxAttempts = 5)
+        _      <- jobs(renderer = Some(tooLong)).flatMap(runJobs)
+        dead   <- renditionJob(version)
+        failed <- status(author, doc.id, version).map(as[RenditionStatusView])
+        events <- outbox(RenditionEvents.Failed, doc.id)
+        _      <- notifications(mails).flatMap(deliverDead(doc.id, _))
+        told   <- notices(doc.id)
+        // the database and the job agree on what ends a job
+        finals <- ZIO.foreach(RenderingError.NoRetry.toList :+ "unavailable")(code =>
+          ownerQuery(sql"select dms.job_failure_is_final(${s"[$code] x"})".query[Boolean].run().head)
+        )
+        // a raised limit is what a retry is still good for
+        _     <- retry(records, doc.id, version)
+        again <- renditionJob(version)
+      yield assertTrue(
+        dead.exists(j => j._1 == "dead" && j._2 == 1),
+        failed.state == "Failed",
+        failed.lastError.flatMap(_.code).contains("too_long"),
+        failed.canRetry,
+        events.size == 1,
+        events.head.contains("\"final\":true"),
+        told.map(_._1).toSet == Set(author.value, records.value),
+        told.forall(_._3.contains("zu lang")),
+        finals == List(true, true, false),
+        again.exists(_._1 == "queued")
+      )
     },
     test("a last approver who changed the version cannot finish: told, no retry, withdrawn (DMS-163)") {
       withRoles(author -> RoleAssignment(Role.Owner)) {
