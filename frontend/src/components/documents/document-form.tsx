@@ -6,7 +6,13 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
 import { ALLOWED_GROUPS_FIELD, groupKeys, groupsInput, visibleFields } from './access-groups'
-import { fieldControlId, type FieldInput, type FormInputs } from './field-values'
+import {
+  fieldControlId,
+  formOrder,
+  TITLE_FIELD,
+  type FieldInput,
+  type FormInputs,
+} from './field-values'
 import { GroupPicker } from './group-picker'
 
 const selectClass =
@@ -72,9 +78,17 @@ function FieldControl({ field, input, error, onChange }: FieldProps) {
 
   if (field.multiple && fieldType.type === 'Selection') {
     const selected = Array.isArray(input) ? input : []
-    const options = (fieldType.options ?? []).filter((o) => o.active)
+    // Like the single select: a stored option that is no longer offered stays visible until it is changed.
+    const options = (fieldType.options ?? []).filter((o) => o.active || selected.includes(o.code))
     return (
-      <div className="flex flex-wrap gap-x-4 gap-y-1" role="group" aria-labelledby={`${id}-label`}>
+      <div
+        className="flex flex-wrap gap-x-4 gap-y-1"
+        role="group"
+        aria-labelledby={`${id}-label`}
+        aria-required={common['aria-required']}
+        aria-invalid={common['aria-invalid']}
+        aria-describedby={common['aria-describedby']}
+      >
         {options.map((option, index) => (
           <label key={option.code} className="flex items-center gap-1.5 text-sm">
             <input
@@ -289,9 +303,11 @@ function FieldRow({ field, input, error, onChange }: FieldProps) {
 
 /** Form generated from the fields of a template version: inputs by type, required markers, inline errors. */
 export function DocumentForm({ fields, inputs, errors, onChange }: DocumentFormProps) {
-  const shown = visibleFields(fields, inputs)
-  const used = shown.filter((f) => f.usedInTemplate)
-  const other = shown.filter((f) => !f.usedInTemplate)
+  const shown = formOrder(visibleFields(fields, inputs))
+  // A document cannot be saved without a title, whether its template uses the title or not.
+  const title = shown.filter((f) => f.key === TITLE_FIELD).map((f) => ({ ...f, required: true }))
+  const used = shown.filter((f) => f.key !== TITLE_FIELD && f.usedInTemplate)
+  const other = shown.filter((f) => f.key !== TITLE_FIELD && !f.usedInTemplate)
   const rows = (group: TemplateField[]) =>
     group.map((field) => (
       <FieldRow
@@ -314,6 +330,7 @@ export function DocumentForm({ fields, inputs, errors, onChange }: DocumentFormP
       }}
     >
       <p className="text-xs text-muted-foreground">{t('docs.form.requiredHint', { star: '*' })}</p>
+      {rows(title)}
       {used.length > 0 && (
         <fieldset className="space-y-4">
           <legend className="mb-2 font-heading text-sm font-semibold">

@@ -12,7 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { t } from '@/i18n'
+import { getLocale, t } from '@/i18n'
 import { errorMessage, locationLabel } from './template-lifecycle'
 // The document stylesheet shared with the PDF rendering (modules/templates, DMS-39).
 import '@dms-document/document.css'
@@ -247,10 +247,17 @@ function Results({ run }: { run: TestRun }) {
  * Test mode (DMS-35): resolves the version with generated sample data that reaches every condition branch,
  * leaves optional fields empty and uses long values, and shows each case rendered like the live preview.
  */
-export function TestModePanel({ version }: { version: TemplateVersion }) {
+export function TestModePanel({
+  version,
+  unsaved = false,
+}: {
+  version: TemplateVersion
+  /** The editor holds changes: a run would test the stored version, not what is on the screen. */
+  unsaved?: boolean
+}) {
   const client = useApiClient()
   const id = useId()
-  const [language, setLanguage] = useState<'en' | 'de'>('en')
+  const [language, setLanguage] = useState<'en' | 'de'>(getLocale)
   const test = useMutation({
     mutationFn: () => runTest(client, version.templateId, version.version, language),
   })
@@ -276,11 +283,17 @@ export function TestModePanel({ version }: { version: TemplateVersion }) {
           onClick={() => {
             test.mutate()
           }}
-          disabled={test.isPending}
+          disabled={test.isPending || unsaved}
+          aria-describedby={unsaved ? `${id}-save-first` : undefined}
         >
           {test.isPending ? t('templates.test.running') : t('templates.test.run')}
         </Button>
       </div>
+      {unsaved && (
+        <p id={`${id}-save-first`} className="text-xs text-muted-foreground">
+          {t('templates.page.saveFirst')}
+        </p>
+      )}
       {test.isError && (
         <p role="alert" className="text-sm text-destructive">
           {errorMessage(test.error)}

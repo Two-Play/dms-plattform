@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { routed } from '@/test/routed'
 import type { ApiClient } from '@/api/client'
 import { ApiClientProvider } from '@/api/context'
 import type { DocumentView } from '@/api/partners'
@@ -60,7 +61,7 @@ interface Body {
   values: Record<string, MetadataValue>
 }
 
-function renderWorkspace() {
+async function renderWorkspace() {
   const get = vi.fn((path: string) =>
     Promise.resolve({
       data: path === '/api/v1/groups' ? groups : undefined,
@@ -79,17 +80,19 @@ function renderWorkspace() {
   )
   const client = { GET: get, POST: post } as unknown as ApiClient
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const { router, element } = routed(
+    <DocumentWorkspace
+      templateId={templateId}
+      version={1}
+      language="en"
+      fields={fields}
+      references={[]}
+    />,
+  )
+  await router.load()
   render(
     <QueryClientProvider client={queryClient}>
-      <ApiClientProvider client={client}>
-        <DocumentWorkspace
-          templateId={templateId}
-          version={1}
-          language="en"
-          fields={fields}
-          references={[]}
-        />
-      </ApiClientProvider>
+      <ApiClientProvider client={client}>{element}</ApiClientProvider>
     </QueryClientProvider>,
   )
   const created = () =>
@@ -125,7 +128,7 @@ describe('access groups of confidential documents (DMS-101)', () => {
   })
 
   it('offers the group picker once the document is confidential and saves the picked groups', async () => {
-    const { get, created } = renderWorkspace()
+    const { get, created } = await renderWorkspace()
     const user = userEvent.setup()
 
     expect(screen.queryByText('Allowed groups')).not.toBeInTheDocument()
@@ -148,7 +151,7 @@ describe('access groups of confidential documents (DMS-101)', () => {
   })
 
   it('does not send the groups of a document that is no longer confidential', async () => {
-    const { created } = renderWorkspace()
+    const { created } = await renderWorkspace()
     const user = userEvent.setup()
 
     await user.type(screen.getByLabelText(/^Title/), 'Policy')

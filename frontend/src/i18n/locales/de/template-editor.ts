@@ -131,7 +131,7 @@ export const templateEditor: Translation<typeof en.templateEditor> = {
     noRules: 'Mindestens eine Regel hinzufügen.',
     preview: 'Ausdruck: {expression}',
     problem: {
-      number: 'Eine Zahl eingeben, z. B. 12 oder 12.5.',
+      number: 'Eine Zahl eingeben, z. B. 12 oder 12,5.',
       date: 'Ein Datum eingeben.',
       value: 'Einen Wert eingeben.',
     },

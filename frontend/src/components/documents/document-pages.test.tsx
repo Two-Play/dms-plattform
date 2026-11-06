@@ -10,6 +10,7 @@ import type { Deviations } from '@/api/deviations'
 import type { DocumentSummary, FieldValue, WorkflowCase } from '@/api/documents'
 import type { DocumentView } from '@/api/partners'
 import type { TemplateFields } from '@/api/templates'
+import { getLocale, setLocale } from '@/i18n'
 import { createAppRouter } from '@/router'
 
 const signedIn = {
@@ -257,11 +258,27 @@ function renderAt(path: string) {
         })
       case '/api/v1/me':
         return ok({ userId: 'author-1', tenantId: 'tenant-1', roles: ['Author'] })
+      case '/api/v1/templates':
+        return ok([
+          {
+            templateId,
+            version: 1,
+            name: 'Service contract',
+            documentClassId: fields.documentClassId,
+            documentClassVersion: 1,
+          },
+        ])
+      case '/api/v1/word-templates':
+        return ok([])
       default:
         return ok(fields)
     }
   })
   const post = vi.fn((p: string) => {
+    if (p === '/api/v1/documents') return ok(state.document, 201)
+    if (p === '/api/v1/documents/{id}/draft/discard') {
+      return ok({ documentDiscarded: true, version: '1.0-draft.2' })
+    }
     if (p === '/api/v1/documents/{id}/submit') {
       const reply = state.submitReplies.shift()
       if (reply) return reply()
@@ -354,6 +371,24 @@ describe('Document list', () => {
   })
 })
 
+describe('New document', () => {
+  it('continues on the page of a new file document without asking (DMS-165)', async () => {
+    const { router, user } = renderAt('/documents/new')
+    const template = await screen.findByLabelText('Template')
+    await screen.findByRole('option', { name: 'Service contract (version 1)' })
+    await user.selectOptions(template, `${templateId}:1`)
+    await user.click(screen.getByRole('radio', { name: 'Upload a file after saving' }))
+    await user.type(await screen.findByLabelText(/^Title/), 'Contract')
+
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/documents/${documentId}`)
+    })
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument()
+  })
+})
+
 describe('Document page with a draft', () => {
   it('saves the entered values as the next working state of the draft', async () => {
     const { put, del, user } = renderAt(`/documents/${documentId}`)
@@ -383,6 +418,87 @@ describe('Document page with a draft', () => {
       expect.anything(),
     )
     expect(del).not.toHaveBeenCalled()
+  })
+
+  it('saves a draft in the German UI without changing its numbers (DMS-165)', async () => {
+    setLocale('de')
+    state.document = draftDocument({
+      title: { value: { type: 'Text', value: 'Service contract ACME' }, origin: 'Manual' },
+      termMonths: { value: { type: 'Number', value: 12.5 }, origin: 'Manual' },
+    })
+    const { put, user } = renderAt(`/documents/${documentId}`)
+    await waitFor(() => {
+      expect(term()).toHaveValue('12,5')
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Entwurf speichern' }))
+
+    await waitFor(() => {
+      expect(put).toHaveBeenCalledWith(
+        '/api/v1/documents/{id}/draft',
+        expect.objectContaining({
+          body: expect.objectContaining({
+            values: expect.objectContaining({
+              termMonths: { type: 'Number', value: 12.5 },
+            }) as unknown,
+          }) as unknown,
+        }),
+      )
+    })
+  })
+
+  it('asks before the language switch would drop unsaved input (DMS-165)', async () => {
+    const { user } = renderAt(`/documents/${documentId}`)
+    await waitFor(() => {
+      expect(term()).toHaveValue('12')
+    })
+    await user.clear(term())
+    await user.type(term(), '24')
+
+    await user.click(screen.getByRole('button', { name: 'User menu' }))
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Deutsch' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Switch the language?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Keep this language' }))
+
+    expect(getLocale()).toBe('en')
+    expect(term()).toHaveValue('24')
+
+    await user.click(screen.getByRole('button', { name: 'User menu' }))
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Deutsch' }))
+    await user.click(await screen.findByRole('button', { name: 'Discard and switch' }))
+    expect(getLocale()).toBe('de')
+  })
+
+  it('switches the language without asking while nothing is unsaved (DMS-165)', async () => {
+    const { user } = renderAt(`/documents/${documentId}`)
+    await waitFor(() => {
+      expect(term()).toHaveValue('12')
+    })
+
+    await user.click(screen.getByRole('button', { name: 'User menu' }))
+    await user.click(await screen.findByRole('menuitemradio', { name: 'Deutsch' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(getLocale()).toBe('de')
+  })
+
+  it('leaves the page without asking once the draft is discarded (DMS-165)', async () => {
+    state.document = { ...state.document, canDiscardDraft: true }
+    const { router, user } = renderAt(`/documents/${documentId}`)
+    await waitFor(() => {
+      expect(term()).toHaveValue('12')
+    })
+    await user.clear(term())
+    await user.type(term(), '24')
+
+    await user.click(screen.getByRole('button', { name: 'Discard draft' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Discard draft' }))
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/documents')
+    })
+    expect(screen.queryByText('Leave without saving?')).not.toBeInTheDocument()
   })
 
   it('shows values the backend rejects at their fields', async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { FieldType, TemplateField } from '@/api/templates'
-import { collectValues, convert, initialInputs, parseNumber, type FormInputs } from './field-values'
+import { setLocale } from '@/i18n'
+import { collectValues, convert, initialInputs, type FormInputs } from './field-values'
 
 function field(
   key: string,
@@ -24,7 +25,7 @@ describe('field values', () => {
       kind: 'value',
       value: { type: 'Text', value: 'ACME' },
     })
-    expect(convert(field('n', { type: 'Number' }), '12,5')).toEqual({
+    expect(convert(field('n', { type: 'Number' }), '12.5')).toEqual({
       kind: 'value',
       value: { type: 'Number', value: 12.5 },
     })
@@ -121,6 +122,62 @@ describe('field values', () => {
       values: { name: { type: 'Text', value: 'ACME' } },
       errors: { months: 'Enter a number, e.g. 12 or 12.5.' },
     })
-    expect(parseNumber('  ')).toBeUndefined()
+  })
+
+  describe('numbers in the German UI (DMS-165)', () => {
+    const number = field('n', { type: 'Number' })
+    const amount = field('a', { type: 'Amount' })
+
+    it('reads the dot as grouping and the comma as decimal separator', () => {
+      setLocale('de')
+      expect(convert(number, '1.250')).toEqual({
+        kind: 'value',
+        value: { type: 'Number', value: 1250 },
+      })
+      expect(convert(amount, { amount: '1.250,50', currency: 'EUR' })).toEqual({
+        kind: 'value',
+        value: { type: 'Amount', value: 1250.5, currency: 'EUR' },
+      })
+      expect(convert(amount, { amount: '1250,5', currency: 'EUR' })).toEqual({
+        kind: 'value',
+        value: { type: 'Amount', value: 1250.5, currency: 'EUR' },
+      })
+    })
+
+    it('refuses forms it would have to guess, with a message that explains the notation', () => {
+      setLocale('de')
+      const message =
+        'Unklare Schreibweise: Das Komma trennt die Dezimalstellen, der Punkt nur Dreiergruppen, z. B. 1.250,50.'
+      expect(convert(number, '1.25')).toEqual({ kind: 'invalid', message })
+      expect(convert(amount, { amount: '1.25', currency: 'EUR' })).toEqual({
+        kind: 'invalid',
+        message,
+      })
+      expect(convert(field('m', { type: 'Number' }, { multiple: true }), '1\n1.25')).toEqual({
+        kind: 'invalid',
+        message: `Wert 2: ${message}`,
+      })
+    })
+
+    it('counts decimals after the comma, not digits after a group separator', () => {
+      setLocale('de')
+      const scaled = field('n', { type: 'Number', scale: 2 })
+      expect(convert(scaled, '1.250').kind).toBe('value')
+      expect(convert(scaled, '1.250,50').kind).toBe('value')
+      expect(convert(scaled, '1,234').kind).toBe('invalid')
+    })
+  })
+
+  it('mirrors the rules in the English UI (DMS-165)', () => {
+    const number = field('n', { type: 'Number' })
+    expect(convert(number, '1,250.50')).toEqual({
+      kind: 'value',
+      value: { type: 'Number', value: 1250.5 },
+    })
+    expect(convert(number, '1,25')).toEqual({
+      kind: 'invalid',
+      message:
+        'Unclear notation: the point separates decimals, the comma only groups of three, e.g. 1,250.50.',
+    })
   })
 })

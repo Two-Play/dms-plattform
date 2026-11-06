@@ -1,3 +1,5 @@
+import { canonicalToText, isCanonicalNumber, parseNumberText } from '@/i18n/numbers'
+
 /**
  * Forms for the CEL expressions of a template (ADR 0020, DMS-128): conditions as rules, computed fields as
  * arithmetic, repeat collections as a list field. Each form builds an expression and reads back the
@@ -74,21 +76,24 @@ export function stringLiteral(value: string): string {
   return JSON.stringify(value)
 }
 
-const numberPattern = /^-?\d+(\.\d+)?$/
-
-/** Whether a form value is a number the form can write (digits, optional decimal point). */
+/** Whether a form value is a number as written in the language of the UI (DMS-165). */
 export function isNumber(value: string): boolean {
-  return numberPattern.test(value.trim())
+  return parseNumberText(value).kind === 'number'
 }
 
-/** A CEL double literal: profile numbers are doubles, so `12` is written `12.0` (ADR 0020). */
+/**
+ * A CEL double literal for a form value: profile numbers are doubles, so `12` is written `12.0` (ADR 0020).
+ * Text that is no number stays as it is: the rule shows the problem and the check refuses the expression.
+ */
 export function numberLiteral(value: string): string {
-  const v = value.trim()
-  return v.includes('.') ? v : `${v}.0`
+  const parsed = parseNumberText(value)
+  if (parsed.kind !== 'number') return value.trim()
+  return parsed.canonical.includes('.') ? parsed.canonical : `${parsed.canonical}.0`
 }
 
+/** The form value of a CEL number, in the language of the UI. */
 function numberValue(literal: string): string {
-  return literal.endsWith('.0') ? literal.slice(0, -2) : literal
+  return canonicalToText(literal.endsWith('.0') ? literal.slice(0, -2) : literal)
 }
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/
@@ -346,7 +351,7 @@ export function buildArithmetic(form: ArithmeticForm): string {
 }
 
 function readOperand(token: string, numeric: ReadonlySet<string>): Operand | undefined {
-  if (isNumber(token)) return { kind: 'number', value: numberValue(token) }
+  if (isCanonicalNumber(token)) return { kind: 'number', value: numberValue(token) }
   if (numeric.has(token)) return { kind: 'field', path: token }
   return undefined
 }

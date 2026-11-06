@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { setLocale } from '@/i18n'
 import type { FieldValue } from '@/api/documents'
 import type { ReferenceField } from '@/api/partners'
 import type { MetadataValue, TemplateField } from '@/api/templates'
@@ -112,6 +113,55 @@ describe('partnerFromDraft', () => {
         contractPartner: { value: { type: 'Text', value: 'typed' }, origin: 'Manual' },
       }),
     ).toBeUndefined()
+  })
+})
+
+describe('numbers in the form (DMS-165)', () => {
+  const number = field('term', { type: 'Number' })
+  const amount = field('fee', { type: 'Amount' })
+  const many: TemplateField = { ...number, multiple: true }
+
+  it('shows stored numbers in the format of the UI language', () => {
+    expect(inputFromValue(amount, stored.fee as MetadataValue)).toEqual({
+      amount: '1,250.5',
+      currency: 'CHF',
+    })
+    setLocale('de')
+    expect(inputFromValue(amount, stored.fee as MetadataValue)).toEqual({
+      amount: '1.250,5',
+      currency: 'CHF',
+    })
+    expect(inputFromValue(number, { type: 'Number', value: 1250 })).toBe('1.250')
+    expect(
+      inputFromValue(many, {
+        type: 'Many',
+        values: [
+          { type: 'Number', value: 1250.5 },
+          { type: 'Number', value: 2 },
+        ],
+      }),
+    ).toBe('1.250,5\n2')
+  })
+
+  it.each(['de', 'en'] as const)('returns the same values untouched in %s', (locale) => {
+    setLocale(locale)
+    for (const value of [0.25, 1.25, 1250, 1250.5, 1250000.75, -3.5]) {
+      const stays = { type: 'Number', value } as const
+      expect(convert(number, inputFromValue(number, stays))).toEqual({
+        kind: 'value',
+        value: stays,
+      })
+      const sum = { type: 'Amount', value, currency: 'EUR' } as const
+      expect(convert(amount, inputFromValue(amount, sum))).toEqual({ kind: 'value', value: sum })
+    }
+    const list: MetadataValue = {
+      type: 'Many',
+      values: [
+        { type: 'Number', value: 1250.5 },
+        { type: 'Number', value: 0.25 },
+      ],
+    }
+    expect(convert(many, inputFromValue(many, list))).toEqual({ kind: 'value', value: list })
   })
 })
 

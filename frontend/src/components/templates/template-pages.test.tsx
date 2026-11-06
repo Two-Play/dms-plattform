@@ -8,6 +8,7 @@ import type { ApiClient } from '@/api/client'
 import { ApiClientProvider } from '@/api/context'
 import type { TemplateImpact, TemplateVersion, TestRun } from '@/api/template-admin'
 import type { TemplateFields } from '@/api/templates'
+import { setLocale } from '@/i18n'
 import { createAppRouter } from '@/router'
 
 const signedIn = {
@@ -259,7 +260,14 @@ function renderAt(path: string) {
       </ApiClientProvider>
     </QueryClientProvider>,
   )
-  return { router, get, post, put, user: userEvent.setup() }
+  return {
+    router,
+    get,
+    post,
+    put,
+    user: userEvent.setup(),
+    invalidate: () => queryClient.invalidateQueries({ queryKey: ['template-admin'] }),
+  }
 }
 
 describe('Template list', () => {
@@ -408,7 +416,7 @@ describe('Template page', () => {
   it('runs the test mode and shows each case rendered', async () => {
     const { user } = renderAt(`/templates/${templateId}`)
 
-    await user.click(await screen.findByRole('button', { name: 'Run test mode' }))
+    await user.click(await screen.findByRole('button', { name: 'Try with sample data' }))
 
     expect(
       await screen.findByText('All condition branches covered by 2 test cases.'),
@@ -424,7 +432,7 @@ describe('Template page', () => {
   it('points to computed fields and conditions that depend on empty fields (DMS-85)', async () => {
     const { user } = renderAt(`/templates/${templateId}`)
 
-    await user.click(await screen.findByRole('button', { name: 'Run test mode' }))
+    await user.click(await screen.findByRole('button', { name: 'Try with sample data' }))
 
     const hints = await screen.findByRole('region', { name: 'Hints on empty fields' })
     expect(
@@ -452,5 +460,97 @@ describe('Template page', () => {
       .closest('li') as HTMLElement
     await user.click(within(hint).getByRole('button', { name: 'empty optional fields' }))
     expect(screen.getByTestId('test-case-preview')).toHaveTextContent('Empty case rendered')
+  })
+
+  describe('unsaved content (DMS-165)', () => {
+    const changed = { ...(content as object), sections: [{ id: 'main', locked: false }] }
+
+    async function editContent(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(await screen.findByRole('button', { name: 'Advanced: show JSON' }))
+      fireEvent.change(screen.getByLabelText('Content (JSON)'), {
+        target: { value: JSON.stringify(changed) },
+      })
+      await user.click(screen.getByRole('button', { name: 'Apply JSON' }))
+      await screen.findByText('Unsaved changes')
+    }
+
+    beforeEach(() => {
+      state.versions = [version(1, 'Released'), version(2, 'Draft')]
+    })
+
+    it('names the status change and the sample run so they cannot be confused', async () => {
+      renderAt(`/templates/${templateId}`)
+      expect(await screen.findByRole('button', { name: 'Move to test phase' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Try with sample data' })).toBeEnabled()
+    })
+
+    it('blocks the status change and the sample run while the content is unsaved', async () => {
+      const { post, user } = renderAt(`/templates/${templateId}`)
+      await editContent(user)
+
+      expect(screen.getByRole('button', { name: 'Move to test phase' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Try with sample data' })).toBeDisabled()
+      expect(screen.getAllByText('Save or discard the content changes first.')).toHaveLength(2)
+      expect(post).not.toHaveBeenCalled()
+
+      await user.click(screen.getByRole('button', { name: 'Discard changes' }))
+      expect(screen.getByRole('button', { name: 'Move to test phase' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Try with sample data' })).toBeEnabled()
+    })
+
+    it('frees both after saving, without replacing the editor', async () => {
+      const { user } = renderAt(`/templates/${templateId}`)
+      await editContent(user)
+      state.saveReply = () => {
+        state.versions = state.versions.map((v) =>
+          v.version === 2 ? { ...v, content: changed } : v,
+        )
+        return ok(state.versions[1])
+      }
+
+      await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+      expect(await screen.findByText('Draft saved.')).toBeInTheDocument()
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Move to test phase' })).toBeEnabled()
+      })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(screen.getByText('Draft saved.')).toBeInTheDocument()
+    })
+
+    it('does not replace unsaved edits when the stored content changes meanwhile', async () => {
+      const { user, invalidate } = renderAt(`/templates/${templateId}`)
+      await editContent(user)
+
+      state.versions = state.versions.map((v) =>
+        v.version === 2 ? { ...v, content: { ...(content as object), sections: [] } } : v,
+      )
+      await invalidate()
+
+      expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+    })
+
+    it('never leaves unsaved text in a read-only editor when the status changes elsewhere', async () => {
+      const { user, invalidate } = renderAt(`/templates/${templateId}`)
+      await editContent(user)
+
+      state.versions = state.versions.map((v) =>
+        v.version === 2 ? { ...v, status: 'Testing' } : v,
+      )
+      await invalidate()
+
+      expect(await screen.findByRole('button', { name: 'Back to draft' })).toBeInTheDocument()
+      expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+      await user.click(await screen.findByRole('button', { name: 'Advanced: show JSON' }))
+      expect(screen.getByLabelText<HTMLTextAreaElement>('Content (JSON)').value).toContain(
+        'termType',
+      )
+    })
+  })
+
+  it('defaults the language of the sample run to the language of the UI (DMS-165)', async () => {
+    setLocale('de')
+    renderAt(`/templates/${templateId}`)
+    expect(await screen.findByLabelText('Sprache')).toHaveValue('de')
   })
 })

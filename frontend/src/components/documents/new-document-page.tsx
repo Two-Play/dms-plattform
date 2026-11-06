@@ -2,13 +2,14 @@ import { useQuery } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { useApiClient } from '@/api/context'
 import { catalogQuery, templateFieldsQuery, type DocumentLanguage } from '@/api/templates'
+import { DiscardDialog } from '@/components/templates/editor/unsaved-changes'
 import { wordTemplateCatalogQuery } from '@/api/word'
 import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { ErrorState } from '@/components/shared/error-state'
 import { PageHeader } from '@/components/shared/page-header'
 import { LoadingState } from '@/components/shared/states'
-import { t } from '@/i18n'
+import { getLocale, t } from '@/i18n'
 import {
   DocumentWorkspace,
   LanguageSelect,
@@ -29,6 +30,7 @@ type EditorProps = Pick<
   | 'afterCreate'
   | 'initialValues'
   | 'unsavedSection'
+  | 'onDirtyChange'
 >
 
 /** Loads the fields of the template version and shows the workspace for them. */
@@ -46,6 +48,12 @@ export function DocumentEditor(props: EditorProps) {
       references={fields.data.references ?? []}
     />
   )
+}
+
+/** A change of the template or of what the content is. */
+interface Choice {
+  selected?: string
+  ownFile?: boolean
 }
 
 interface NewDocumentPageProps {
@@ -71,8 +79,19 @@ export function NewDocumentPage({
   const catalog = useQuery(catalogQuery(client))
   const words = useQuery(wordTemplateCatalogQuery(client))
   const [selected, setSelected] = useState('')
-  const [language, setLanguage] = useState<DocumentLanguage>('en')
+  const [language, setLanguage] = useState<DocumentLanguage>(getLocale)
   const [ownFile, setOwnFile] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  // Another template or kind starts an empty form: with unsaved input the change waits for an answer.
+  const [pending, setPending] = useState<Choice | undefined>(undefined)
+  const apply = (choice: Choice) => {
+    if (choice.selected !== undefined) setSelected(choice.selected)
+    if (choice.ownFile !== undefined) setOwnFile(choice.ownFile)
+  }
+  const choose = (choice: Choice) => {
+    if (dirty) setPending(choice)
+    else apply(choice)
+  }
   const entry = catalog.data?.find((e) => `${e.templateId}:${e.version}` === selected)
   const wordKeys = new Set((words.data ?? []).map((w) => `${w.templateId}:${String(w.version)}`))
   const isWord = entry !== undefined && wordKeys.has(selected)
@@ -94,7 +113,7 @@ export function NewDocumentPage({
             value={selected}
             disabled={!catalog.data}
             onChange={(e) => {
-              setSelected(e.target.value)
+              choose({ selected: e.target.value })
             }}
           >
             <option value="">
@@ -129,7 +148,7 @@ export function NewDocumentPage({
               name="content-kind"
               checked={!ownFile}
               onChange={() => {
-                setOwnFile(false)
+                choose({ ownFile: false })
               }}
             />
             {t('word.new.structured')}
@@ -140,7 +159,7 @@ export function NewDocumentPage({
               name="content-kind"
               checked={ownFile}
               onChange={() => {
-                setOwnFile(true)
+                choose({ ownFile: true })
               }}
             />
             {t('word.new.file')}
@@ -156,6 +175,7 @@ export function NewDocumentPage({
           onSubmitted={onSubmitted}
           kind={kind}
           onCreated={onCreated}
+          onDirtyChange={setDirty}
           aside={
             <Card>
               <CardContent className="pt-6 text-sm text-muted-foreground">
@@ -165,6 +185,20 @@ export function NewDocumentPage({
           }
         />
       )}
+      <DiscardDialog
+        open={pending !== undefined}
+        title={t('docs.new.discard.title')}
+        text={t('docs.new.discard.text')}
+        stay={t('docs.new.discard.keep')}
+        discard={t('docs.new.discard.confirm')}
+        onStay={() => {
+          setPending(undefined)
+        }}
+        onDiscard={() => {
+          if (pending) apply(pending)
+          setPending(undefined)
+        }}
+      />
     </div>
   )
 }

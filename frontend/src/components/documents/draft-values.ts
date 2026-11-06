@@ -3,6 +3,7 @@ import type { Partner, ReferenceField } from '@/api/partners'
 import type { MetadataValue, TemplateField } from '@/api/templates'
 import { t } from '@/i18n'
 import { formatNumber, formatPlainDate } from '@/i18n/format'
+import { numberToText } from '@/i18n/numbers'
 import { initialInput, initialInputs, type FieldInput, type FormInputs } from './field-values'
 
 /** The text of a single stored value as the form shows it (inverse of the form's conversion). */
@@ -12,9 +13,8 @@ function singleText(value: MetadataValue): string {
     case 'Date':
       return value.value
     case 'Number':
-      return String(value.value)
     case 'Amount':
-      return String(value.value)
+      return numberToText(value.value)
     case 'Selection':
       return value.code
     case 'YesNo':
@@ -38,7 +38,7 @@ export function inputFromValue(field: TemplateField, value: MetadataValue): Fiel
   }
   if (field.fieldType.type === 'Amount') {
     return value.type === 'Amount'
-      ? { amount: String(value.value), currency: value.currency }
+      ? { amount: numberToText(value.value), currency: value.currency }
       : initialInput(field)
   }
   return value.type === 'Many' ? initialInput(field) : singleText(value)

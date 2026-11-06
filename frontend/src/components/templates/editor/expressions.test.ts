@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { setLocale } from '@/i18n'
 import {
   buildArithmetic,
   buildCondition,
   formatsFor,
   insertAtCaret,
+  operandProblem,
   operatorsFor,
   parseArithmetic,
   parseCondition,
@@ -179,5 +181,46 @@ describe('placeholders and free expressions', () => {
     expect(insertAtCaret('a > ', 4, 4, 'b')).toEqual({ text: 'a > b', caret: 5 })
     expect(insertAtCaret('x', 1, 1, 'y')).toEqual({ text: 'x y', caret: 3 })
     expect(insertAtCaret('', 0, 0, 'y')).toEqual({ text: 'y', caret: 1 })
+  })
+})
+
+describe('numbers in the German UI (DMS-165)', () => {
+  const rule = (value: string): ConditionForm => ({
+    join: 'and',
+    rules: [{ field: 'termMonths', operator: 'ge', value }],
+  })
+  const number = (value: string) => ({ kind: 'number', value }) as const
+
+  it('writes what people type as a CEL number', () => {
+    setLocale('de')
+    expect(buildCondition(rule('1.250'), vars)).toBe('termMonths >= 1250.0')
+    expect(buildCondition(rule('1.250,5'), vars)).toBe('termMonths >= 1250.5')
+    expect(buildArithmetic({ first: number('1,5'), rest: [] })).toBe('1.5')
+  })
+
+  it('reads a CEL number into the form in the format of the language', () => {
+    setLocale('de')
+    expect(parseCondition('termMonths >= 1250.5', vars)?.rules[0]?.value).toBe('1.250,5')
+    expect(parseArithmetic('monthlyFee.amount * 1250.5', vars)?.rest[0]?.operand).toEqual(
+      number('1.250,5'),
+    )
+  })
+
+  it('leaves the expression as it is when the form writes it again', () => {
+    setLocale('de')
+    for (const expression of ['termMonths >= 1250.5', 'termMonths >= 12.0', 'termMonths < 0.25']) {
+      const form = parseCondition(expression, vars)
+      if (!form) throw new Error(`no form for ${expression}`)
+      expect(buildCondition(form, vars)).toBe(expression)
+    }
+  })
+
+  it('refuses a form it would have to guess', () => {
+    setLocale('de')
+    const v = vars.find((x) => x.path === 'termMonths')
+    expect(ruleProblem({ field: 'termMonths', operator: 'ge', value: '1.25' }, v)).toBe('number')
+    expect(operandProblem(number('1.25'))).toBe(true)
+    expect(ruleProblem({ field: 'termMonths', operator: 'ge', value: '1,25' }, v)).toBeUndefined()
+    expect(operandProblem(number('1,25'))).toBe(false)
   })
 })

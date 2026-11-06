@@ -48,12 +48,13 @@ export const templates = {
       'Edit the sections, text, fields and rules of this draft; “Check” has the server compile it against the document class.',
     contentReadOnly:
       'Only drafts can be changed. Create a new version to change a released template.',
+    saveFirst: 'Save or discard the content changes first.',
     testMode: 'Test mode',
     testModeText:
       'Generated sample data reaching every condition branch, with empty optional fields and long values; each case rendered like the preview.',
   },
   actions: {
-    Testing: 'Start testing',
+    Testing: 'Move to test phase',
     Draft: 'Back to draft',
     Released: 'Release…',
     Deprecated: 'Deprecate…',
@@ -125,7 +126,7 @@ export const templates = {
     english: 'English',
     german: 'German',
     running: 'Running…',
-    run: 'Run test mode',
+    run: 'Try with sample data',
     hints: {
       title: 'Hints on empty fields',
       computedTitle: 'Computed fields without value',

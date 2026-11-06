@@ -49,7 +49,7 @@ function DiscardForm({ document, onCancel }: { document: DocumentView; onCancel:
       if (result.documentDiscarded) {
         toast(t('discardDraft.discardedDocument', { label: result.version }))
         // The document is gone: leave its page first, so that it is not loaded again (404).
-        await navigate({ to: '/documents' })
+        await navigate({ to: '/documents', ignoreBlocker: true })
         queryClient.removeQueries({ queryKey: ['documents', document.id] })
         await queryClient.invalidateQueries({ queryKey: ['documents'] })
       } else {
@@ -65,6 +65,7 @@ function DiscardForm({ document, onCancel }: { document: DocumentView; onCancel:
           to: '/documents/$documentId',
           params: { documentId: document.id },
           search: {},
+          ignoreBlocker: true,
         })
       }
       await queryClient.invalidateQueries({ queryKey: ['workflow', 'tasks'] })

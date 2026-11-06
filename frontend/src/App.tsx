@@ -26,6 +26,7 @@ export function App({ router }: { router: ReturnType<typeof createAppRouter> }) 
   if (auth.isLoading) return <FullPageMessage title={t('common.loading')} />
 
   // Keyed by the language: switching it renders every page again with the new texts and formats.
-  // Server data stays in the query cache and the location in the URL; unsaved input is lost.
+  // Server data stays in the query cache and the location in the URL; unsaved input is lost, so the
+  // language menu asks first (DMS-165). Inputs cannot simply stay: numbers read differently per language.
   return <RouterProvider key={locale} router={router} context={{ auth }} />
 }

@@ -1,6 +1,7 @@
 import type { FieldType, MetadataValue, TemplateField } from '@/api/templates'
 import { t } from '@/i18n'
 import { formatPlainDate } from '@/i18n/format'
+import { parseNumberText } from '@/i18n/numbers'
 
 /**
  * Raw form input of a field, before conversion:
@@ -11,6 +12,9 @@ import { formatPlainDate } from '@/i18n/format'
 export type FieldInput = string | string[] | { amount: string; currency: string }
 
 export type FormInputs = Record<string, FieldInput>
+
+/** The field every document needs before it can be saved. */
+export const TITLE_FIELD = 'title'
 
 /** Id of the control of a field; the preview focuses it when a missing value is clicked. */
 export function fieldControlId(key: string): string {
@@ -37,13 +41,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const CURRENCY = /^[A-Z]{3}$/
 
-/** Parses a decimal number; accepts a comma as decimal separator. */
-export function parseNumber(text: string): number | undefined {
-  const normalized = text.trim().replace(',', '.')
-  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return undefined
-  return Number(normalized)
-}
-
 function range(
   value: number,
   min: number | undefined,
@@ -54,9 +51,8 @@ function range(
   return undefined
 }
 
-function decimals(text: string): number {
-  const fraction = text.trim().replace(',', '.').split('.')[1]
-  return fraction?.length ?? 0
+function ambiguousNumber(): Converted {
+  return { kind: 'invalid', message: t('docs.validation.numberAmbiguous') }
 }
 
 /** Converts and validates the text of a single value of `fieldType`, like the backend's field rules. */
@@ -87,14 +83,17 @@ function convertSingle(fieldType: FieldType, text: string): Converted {
       return { kind: 'value', value: { type: 'Text', value: trimmed } }
     }
     case 'Number': {
-      const n = parseNumber(trimmed)
-      if (n === undefined) return { kind: 'invalid', message: t('docs.validation.number') }
-      const outside = range(n, fieldType.min, fieldType.max)
+      const parsed = parseNumberText(trimmed)
+      if (parsed.kind === 'ambiguous') return ambiguousNumber()
+      if (parsed.kind === 'invalid') {
+        return { kind: 'invalid', message: t('docs.validation.number') }
+      }
+      const outside = range(parsed.value, fieldType.min, fieldType.max)
       if (outside) return { kind: 'invalid', message: outside }
-      if (fieldType.scale !== undefined && decimals(trimmed) > fieldType.scale) {
+      if (fieldType.scale !== undefined && parsed.decimals > fieldType.scale) {
         return { kind: 'invalid', message: t('docs.validation.scale', { count: fieldType.scale }) }
       }
-      return { kind: 'value', value: { type: 'Number', value: n } }
+      return { kind: 'value', value: { type: 'Number', value: parsed.value } }
     }
     case 'Date': {
       if (!DATE.test(trimmed) || Number.isNaN(Date.parse(trimmed))) {
@@ -139,8 +138,10 @@ function convertAmount(
   input: { amount: string; currency: string },
 ): Converted {
   if (input.amount.trim() === '') return { kind: 'empty' }
-  const n = parseNumber(input.amount)
-  if (n === undefined) return { kind: 'invalid', message: t('docs.validation.amount') }
+  const parsed = parseNumberText(input.amount)
+  if (parsed.kind === 'ambiguous') return ambiguousNumber()
+  if (parsed.kind === 'invalid') return { kind: 'invalid', message: t('docs.validation.amount') }
+  const n = parsed.value
   const outside = range(n, fieldType.min, fieldType.max)
   if (outside) return { kind: 'invalid', message: outside }
   const currency = input.currency.trim().toUpperCase()
@@ -185,6 +186,16 @@ export function convert(field: TemplateField, input: FieldInput | undefined): Co
       : { kind: 'empty' }
   }
   return typeof input === 'string' ? convertSingle(fieldType, input) : { kind: 'empty' }
+}
+
+/** The fields in the order of the form: the title first, then what the template uses, then the rest. */
+export function formOrder(fields: TemplateField[]): TemplateField[] {
+  const rest = fields.filter((f) => f.key !== TITLE_FIELD)
+  return [
+    ...fields.filter((f) => f.key === TITLE_FIELD),
+    ...rest.filter((f) => f.usedInTemplate),
+    ...rest.filter((f) => !f.usedInTemplate),
+  ]
 }
 
 /** Valid, non-empty values keyed by field key (for the preview), and validation messages by field key. */

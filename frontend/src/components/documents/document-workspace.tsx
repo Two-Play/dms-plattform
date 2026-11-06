@@ -3,6 +3,8 @@ import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-quer
 import { useMemo, useState, type ReactNode } from 'react'
 import { useApiClient } from '@/api/context'
 import { createWordDocument } from '@/api/word'
+import { UnsavedChangesGuard } from '@/components/templates/editor/unsaved-changes'
+import { useReportDirty } from '@/components/templates/editor/unsaved-state'
 import {
   applyReference,
   createDocument,
@@ -37,7 +39,9 @@ import { inputsFromDraft, partnerFromDraft } from './draft-values'
 import {
   collectValues,
   fieldControlId,
+  formOrder,
   initialInputs,
+  TITLE_FIELD,
   type FieldInput,
   type FormInputs,
 } from './field-values'
@@ -163,6 +167,8 @@ export interface DocumentWorkspaceProps {
   initialValues?: Partial<FormInputs>
   /** The title of a locked section whose text has unsaved changes (ADR 0071): submitting would lose them. */
   unsavedSection?: string
+  /** Told whether the form has input that is not saved (DMS-165). */
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 /** The empty inputs of the fields, with the given initial values for the fields that exist. */
@@ -201,6 +207,7 @@ export function DocumentWorkspace({
   afterCreate,
   initialValues,
   unsavedSection,
+  onDirtyChange,
 }: DocumentWorkspaceProps) {
   const client = useApiClient()
   const queryClient = useQueryClient()
@@ -225,6 +232,13 @@ export function DocumentWorkspace({
   })
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' })
   const [rejected, setRejected] = useState<Record<string, Rejected>>({})
+  const [titleMissing, setTitleMissing] = useState(false)
+  // The form as last loaded or saved; a change that is taken back again is no change.
+  const inputsKey = JSON.stringify(inputs)
+  const [savedInputs, setSavedInputs] = useState(inputsKey)
+  const dirty =
+    inputsKey !== savedInputs || references.some((r) => picked[r.key]?.id !== saved?.applied[r.key])
+  useReportDirty(dirty, onDirtyChange)
   // Fields filled by a reference field show the picked entry's values and are not entered.
   const formInputs = useMemo(() => {
     const result = { ...inputs }
@@ -281,13 +295,25 @@ export function DocumentWorkspace({
   /** Saves the draft; the document id if it was saved (taking partners over may still have failed). */
   const save = async (submitting = false): Promise<string | undefined> => {
     const title = values.title?.type === 'Text' ? values.title.value : ''
+    // Values taken over from the partner master are set by the server, not sent as entered values.
+    const filled = new Set(fields.filter((f) => f.reference).map((f) => f.key))
+    // A refused value would not be sent: the draft would be saved without it and nobody would notice.
+    const firstProblem = formOrder(fields).find(
+      (f) => (f.key === TITLE_FIELD && title === '') || (errors[f.key] && !filled.has(f.key)),
+    )
+    if (title === '') setTitleMissing(true)
+    if (firstProblem) {
+      setSaveState({ kind: 'failed', message: t('docs.workspace.correctFirst') })
+      focusField(firstProblem.key)
+      return undefined
+    }
     if (title === '') {
+      // Without a title field there is nothing to mark.
       setSaveState({ kind: 'failed', message: t('docs.workspace.titleMissing') })
       return undefined
     }
-    // Values taken over from the partner master are set by the server, not sent as entered values.
-    const filled = new Set(fields.filter((f) => f.reference).map((f) => f.key))
     const entered = Object.fromEntries(Object.entries(values).filter(([key]) => !filled.has(key)))
+    const sentInputs = inputsKey
     setSaveState({ kind: 'saving' })
     setRejected({})
     let current = saved
@@ -307,6 +333,7 @@ export function DocumentWorkspace({
         if (kind !== 'structured') onCreated?.(created.id)
       }
       setSaved(current)
+      setSavedInputs(sentInputs)
     } catch (e) {
       if (e instanceof ApiRequestError && e.issues.length > 0) {
         reject(e.issues, values)
@@ -444,7 +471,13 @@ export function DocumentWorkspace({
         <DocumentForm
           fields={fields}
           inputs={formInputs}
-          errors={{ ...serverErrors, ...errors }}
+          errors={{
+            ...serverErrors,
+            ...(titleMissing && values.title === undefined
+              ? { [TITLE_FIELD]: t('docs.workspace.titleMissing') }
+              : {}),
+            ...errors,
+          }}
           onChange={(key: string, input: FieldInput) => {
             setInputs((current) => ({ ...current, [key]: input }))
           }}
@@ -548,6 +581,7 @@ export function DocumentWorkspace({
           aside
         )}
       </div>
+      <UnsavedChangesGuard dirty={dirty} />
     </div>
   )
 }

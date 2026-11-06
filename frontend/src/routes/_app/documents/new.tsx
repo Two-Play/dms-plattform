@@ -25,11 +25,11 @@ function NewDocumentRoute() {
       }
       onCreated={(documentId) => {
         // File and Word documents continue on their page: upload, fields, preview (DMS-115).
-        void navigate({ to: '/documents/$documentId', params: { documentId } })
+        void navigate({ to: '/documents/$documentId', params: { documentId }, ignoreBlocker: true })
       }}
       onSubmitted={(documentId) => {
         // After submission the document page shows its review state.
-        void navigate({ to: '/documents/$documentId', params: { documentId } })
+        void navigate({ to: '/documents/$documentId', params: { documentId }, ignoreBlocker: true })
       }}
     />
   )
