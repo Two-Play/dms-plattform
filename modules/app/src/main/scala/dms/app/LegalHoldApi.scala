@@ -505,11 +505,8 @@ object LegalHoldApi:
       ZIO.foreach(distinct)(id =>
         for
           details <- documents.get(id)
-          latest = details.versions.last
-          _ <- authz.check(
-            subject,
-            Action.ManageRetention,
-            DocumentApi.resource(subject.tenantId, details, latest)
+          _       <- ZIO.foreachDiscard(DocumentApi.governing(subject.tenantId, details))(
+            authz.check(subject, Action.ManageRetention, _)
           )
         yield id
       )
@@ -534,14 +531,9 @@ object LegalHoldApi:
 
   private def permits(subject: Subject, details: DocumentDetails): UIO[Boolean] =
     Clock.instant.map(now =>
-      dms.authz.Policy
-        .decide(
-          subject,
-          Action.ManageRetention,
-          DocumentApi.resource(subject.tenantId, details, details.versions.last),
-          now
-        )
-        .isPermitted
+      DocumentApi
+        .governing(subject.tenantId, details)
+        .forall(dms.authz.Policy.decide(subject, Action.ManageRetention, _, now).isPermitted)
     )
 
   private def view(hold: LegalHold, documents: Option[List[(HeldDocument, Option[String])]]): LegalHoldView =

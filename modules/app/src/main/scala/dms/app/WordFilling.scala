@@ -40,8 +40,9 @@ object WordFilling:
       Some("version" -> (if v.releasedAt.isDefined || approval.isDefined then v.number.show else v.label)),
       Some(
         "status" -> VersionPrintLayout.statusLabel(
-          // The approval is what a filled file records, but not of a version that never took effect (ADR 0070).
-          if v.withdrawal.isDefined then VersionPrintLayout.statusKey(v)
+          // The approval is what a filled file records while the version stands; one that ended, or never took
+          // effect, must not read as released (ADR 0070, 0072).
+          if VersionPrintLayout.outOfForce(v) then VersionPrintLayout.statusKey(v)
           else if approval.isDefined then "Approved"
           else v.status.toString,
           language
@@ -59,6 +60,22 @@ object WordFilling:
       )
     ).flatten.toMap
     metadata ++ system
+
+  /** The name a filled file of `v` is handed out under: that of the original, with the status of a version
+    * out of force before the extension. A file need not have a field `status`, and what the platform writes
+    * into it would stay there if it is edited and uploaded again, so the name carries the marking for every
+    * file type (DMS-155, ADR 0072).
+    */
+  def fileName(name: String, v: DocumentVersion): String =
+    if !VersionPrintLayout.outOfForce(v) then name
+    else
+      val label = VersionPrintLayout.statusLabel(
+        VersionPrintLayout.statusKey(v),
+        DocumentRenditions.language(v).code
+      )
+      name.lastIndexOf('.') match
+        case dot if dot > 0 => s"${name.take(dot)} ($label)${name.drop(dot)}"
+        case _              => s"$name ($label)"
 
   /** The automatic values as filled: dates (metadata dates, the approval date) as [[FieldValue.Date]], so
     * that date picker controls print them in their own format (DMS-122), everything else as text.

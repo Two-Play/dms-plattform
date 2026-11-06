@@ -87,6 +87,66 @@ object VersioningSpec extends ZIOSpecDefault:
         Versioning.startingPoint(Nil).isEmpty
       )
     },
+    test("what is valid or on its way decides for the document, not what ended without taking effect") {
+      val template = TemplateId.random()
+      def version(
+          major: Int,
+          status: DocumentStatus,
+          withdrawn: Boolean = false,
+          published: Boolean = false
+      ) =
+        DocumentVersion(
+          UUID.randomUUID(),
+          DocumentId.random(),
+          VersionNo(major, 0),
+          1,
+          status,
+          Major,
+          None,
+          "",
+          1,
+          template,
+          1,
+          TemplateContent(Nil),
+          Map.empty,
+          None,
+          None,
+          UserId("author"),
+          Instant.EPOCH,
+          Instant.EPOCH,
+          None,
+          None,
+          publishedAt = Option.when(published)(Instant.EPOCH),
+          withdrawal =
+            Option.when(withdrawn)(VersionWithdrawal(Instant.EPOCH, UserId("owner"), "Approved by mistake"))
+        )
+      val superseded   = version(1, Superseded, published = true)
+      val valid        = version(2, Published, published = true)
+      val otherScope   = version(3, ReviewDue, published = true)
+      val neverValid   = version(4, Withdrawn, withdrawn = true)
+      val draft        = version(5, Draft)
+      val waiting      = version(5, Approved)
+      val discarded    = version(5, Discarded)
+      val ended        = version(2, Withdrawn, published = true)
+      val archived     = version(1, Archived, published = true)
+      val destroyed    = version(3, Destroyed, published = true)
+      val firstStop    = version(1, Withdrawn, withdrawn = true)
+      val firstStopped = version(2, Withdrawn, withdrawn = true)
+      assertTrue(
+        Versioning.governing(List(superseded, valid, neverValid)) == List(valid),
+        Versioning.governing(List(superseded, valid, discarded)) == List(valid),
+        // Several validity scopes, and what is on its way: each of them has a say.
+        Versioning.governing(List(valid, otherScope, neverValid)) == List(valid, otherScope),
+        Versioning.governing(List(valid, draft)) == List(valid, draft),
+        Versioning.governing(List(valid, waiting)) == List(valid, waiting),
+        Versioning.governing(List(draft)) == List(draft),
+        // Nothing stands: the last one that was in force, else the latest.
+        Versioning.governing(List(archived, ended, neverValid)) == List(ended),
+        Versioning.governing(List(archived, destroyed, neverValid)) == List(archived),
+        Versioning.governing(List(firstStop, firstStopped)) == List(firstStopped),
+        Versioning.governing(Nil).isEmpty
+      )
+    },
     test("labels can be parsed back") {
       assertTrue(
         Versioning.parseLabel("1.1-draft.3") == Some((VersionNo(1, 1), Some(3))),

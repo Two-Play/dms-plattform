@@ -1,6 +1,6 @@
 package dms.app
 
-import dms.documents.DocumentVersion
+import dms.documents.{DocumentStatus, DocumentVersion}
 import dms.rendering.core.{RenditionFacts, RenditionLayout}
 import dms.templates.core.HtmlRenderer.escape
 
@@ -115,6 +115,15 @@ object VersionPrintLayout:
     */
   def statusKey(v: DocumentVersion): String =
     if v.withdrawal.isDefined then NeverValid else v.status.toString
+
+  /** Whether a version is not in force and will not be: it was replaced, taken out of force or archived, or
+    * it never took effect (DMS-155, ADR 0072). Paper handed out on demand says so in the status it names.
+    */
+  def outOfForce(v: DocumentVersion): Boolean =
+    v.withdrawal.isDefined || OutOfForce.contains(v.status)
+
+  private val OutOfForce: Set[DocumentStatus] =
+    Set(DocumentStatus.Superseded, DocumentStatus.Withdrawn, DocumentStatus.Archived)
 
   private final case class Labels(
       documentId: String,

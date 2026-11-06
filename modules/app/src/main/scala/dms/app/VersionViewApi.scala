@@ -34,6 +34,11 @@ final case class VersionHtmlView(
       * and watermark in the HTML. Empty for approved versions, which are rendered from their frozen package.
       */
     draftMarking: Option[String],
+    /** "Withdrawn, never valid" (in the document language) for a version approved but withdrawn before it
+      * took effect: shown as banner and watermark in the HTML, so that a client showing only the fragment
+      * says so too (DMS-155, ADR 0072). Empty for all other versions.
+      */
+    neverValidMarking: Option[String],
     /** Language of the document, e.g. `de`. */
     language: String,
     /** HTML fragment: one `article.dms-document`, styled by the shared document stylesheet (`document.css`).
@@ -47,7 +52,8 @@ final case class VersionHtmlView(
   *
   *   - `GET …/versions/{versionId}/html`: the content of the version resolved with its stored values, as HTML
   *     fragment. Versions that were never approved are rendered like the live preview with the draft marking;
-  *     approved versions from their frozen version package without marking.
+  *     approved versions from their frozen version package without marking, except one that was withdrawn
+  *     before it took effect, which says so as a draft says it is one (ADR 0072).
   *   - `GET …/versions/{versionId}/draft.pdf?changelog=`: a PDF of an open version (draft, in review, in
   *     approval) printed by the rendering worker on demand, marked "Draft – not valid" in the header and as
   *     watermark on every page. Not validated, not stored, not archived; every download is audited
@@ -98,7 +104,8 @@ object VersionViewApi:
       .description(
         "The content of a version resolved with its stored values, as HTML fragment for reading on screen. " +
           "Versions that were never approved carry the draft marking; approved versions are rendered from their " +
-          "frozen content and values. 409 for file documents (see …/preview.pdf). Requires ReadDocument on the version."
+          "frozen content and values, a version withdrawn before it took effect with its own marking. 409 for file " +
+          "documents (see …/preview.pdf). Requires ReadDocument on the version."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -115,13 +122,18 @@ object VersionViewApi:
               )
             )
             rendering <- render(p, details, v)
+            neverValid = v.withdrawal.map(_ =>
+              VersionPrintLayout.statusLabel(VersionPrintLayout.NeverValid, rendering.language.code)
+            )
+            shown = rendering.options.copy(draftMarking = rendering.options.draftMarking.orElse(neverValid))
           yield VersionHtmlView(
             v.id,
             v.label,
             v.status.toString,
             rendering.options.draftMarking,
+            neverValid,
             rendering.language.code,
-            rendering.fragment
+            rendering.copy(options = shown).fragment
           )
       )
 

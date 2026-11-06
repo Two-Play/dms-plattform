@@ -481,9 +481,21 @@ object VersionViewApiSpec extends ZIOSpecDefault:
         )
         copy <- pdf(approver, doc.id, second.id, "copy.pdf", changelog = true)
         pages = texts(copy)
-        ofValid <- pdf(reader, doc.id, first.id, "copy.pdf", changelog = true)
+        ofValid   <- pdf(reader, doc.id, first.id, "copy.pdf", changelog = true)
+        fragment  <- html(approver, doc.id, second.id).map(as[VersionHtmlView])
+        validHtml <- html(reader, doc.id, first.id).map(as[VersionHtmlView])
       yield assertTrue(
         done.status == Status.Ok,
+        // The fragment says it without the document page around it (DMS-155).
+        fragment.neverValidMarking.contains("Zurückgezogen, nie gültig"),
+        fragment.draftMarking.isEmpty,
+        fragment.html.contains("data-watermark=\"Zurückgezogen, nie gültig\""),
+        fragment.html.contains(
+          "<div class=\"dms-draft-banner\" role=\"note\">Zurückgezogen, nie gültig</div>"
+        ),
+        fragment.html.contains("Globex"),
+        validHtml.neverValidMarking.isEmpty,
+        !validHtml.html.contains("dms-draft"),
         copy.status == Status.Ok,
         pages.forall(
           _.contains("Zurückgezogen, nie gültig · Kopie – maßgeblich ist die archivierte Fassung")

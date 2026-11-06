@@ -377,8 +377,9 @@ object FileDocumentApi:
       .description(
         "The Word document of a version with its fields filled: automatic fields from the platform (with the " +
           "approval once approved), manual fields as entered. The editable artifact; filled on request, not " +
-          "stored, the download is audited with the SHA-256 of the bytes. 409 if the original is not a DOCX. " +
-          "Requires reading the version."
+          "stored, the download is audited with the SHA-256 of the bytes. A version out of force names its status " +
+          "in the field `status` and in the file name. 409 if the original is not a DOCX. Requires reading the " +
+          "version."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -393,7 +394,11 @@ object FileDocumentApi:
             names <- VersionViewApi.displayNames(p, WordFilling.people(details, v, approvalFacts))
             bytes <- FileVersions.filled(details, v, names, approvalFacts).mapError(VersionViewApi.toResponse)
             _     <- audit(p, v, FilledDocxAction, bytes.toArray)
-          yield (VersionViewApi.DocxMediaType, AttachmentApi.contentDisposition(file.name), bytes.toArray)
+          yield (
+            VersionViewApi.DocxMediaType,
+            AttachmentApi.contentDisposition(WordFilling.fileName(file.name, v)),
+            bytes.toArray
+          )
       )
 
   val filledFile: ZServerEndpoint[Env, Any] =
@@ -408,8 +413,9 @@ object FileDocumentApi:
         "The original of a version with its fields filled (DMS-122): a Word document (DOCX), Excel workbook " +
           "(XLSX) or PowerPoint presentation (PPTX), named and typed like the original. Automatic fields from the " +
           "platform (with the approval once approved), manual fields as entered; filled on request, not stored, " +
-          "the download is audited with the SHA-256 of the bytes. 409 if the original is of another type. " +
-          "Requires reading the version."
+          "the download is audited with the SHA-256 of the bytes. A version out of force names its status in the " +
+          "field `status` and in the file name. 409 if the original is of another type. Requires reading the " +
+          "version."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -429,7 +435,11 @@ object FileDocumentApi:
             names <- VersionViewApi.displayNames(p, WordFilling.people(details, v, approvalFacts))
             bytes <- FileVersions.filled(details, v, names, approvalFacts).mapError(VersionViewApi.toResponse)
             _     <- audit(p, v, FilledFileAction, bytes.toArray)
-          yield (mediaType(file.name), AttachmentApi.contentDisposition(file.name), bytes.toArray)
+          yield (
+            mediaType(file.name),
+            AttachmentApi.contentDisposition(WordFilling.fileName(file.name, v)),
+            bytes.toArray
+          )
       )
 
   val preview: ZServerEndpoint[Env, Any] =
@@ -443,8 +453,10 @@ object FileDocumentApi:
       .description(
         "A PDF of a file document version for reading in the browser: the archived rendition of an approved " +
           "version; otherwise the original (a Word file with its fields filled) converted on request with the " +
-          "draft marking on every page. Not stored; a conversion is kept in memory per version and state, so an " +
-          "unchanged draft is converted once. 409 for structured documents (see …/html), 404 without file, " +
+          "draft marking on every page. A version withdrawn before it took effect is marked on every page of what " +
+          "is sent; the archived rendition stays as it is. Not stored; a conversion is kept in memory per version " +
+          "and state, so an unchanged draft is converted once. 409 for structured documents (see …/html), 404 " +
+          "without file, " +
           "503 if the conversion worker is unavailable. Requires ReadDocument on the version."
       )
       .tag("Documents")
@@ -465,12 +477,11 @@ object FileDocumentApi:
               ZIO.fail((StatusCode.NotFound, ApiError("not_found", s"version ${v.label} has no file yet")))
             )
             bytes   <- pdfOf(p, details, v, approval, archived = true)
-            stamped <-
-              if DocumentRenditions.drafted(v) then
-                ZIO
-                  .fromEither(PdfComposer.stamp(bytes.toArray, draftLines(details, v), emphasize = true))
-                  .mapError(m => VersionViewApi.toResponse(RenderingError.Invalid(m)))
-              else ZIO.succeed(bytes.toArray)
+            stamped <- previewLines(details, v).fold(ZIO.succeed(bytes.toArray))(lines =>
+              ZIO
+                .fromEither(PdfComposer.stamp(bytes.toArray, lines, emphasize = true))
+                .mapError(m => VersionViewApi.toResponse(RenderingError.Invalid(m)))
+            )
           yield (s"""inline; filename="$id-${v.label}.pdf"""", stamped)
       )
 
@@ -506,6 +517,17 @@ object FileDocumentApi:
             .mapError(VersionViewApi.toResponse)
         yield pdf
     }
+
+  /** What the preview of a version writes on every page, if anything: the marking of a version that is not
+    * valid and never was. Stamped on what is handed out; the archived rendition is not touched (ADR 0072).
+    */
+  private def previewLines(details: DocumentDetails, v: DocumentVersion): Option[List[String]] =
+    if DocumentRenditions.drafted(v) then Some(draftLines(details, v))
+    else
+      v.withdrawal.map(_ =>
+        VersionPrintLayout.statusLabel(VersionPrintLayout.NeverValid, DocumentRenditions.language(v).code) ::
+          draftLines(details, v).drop(1)
+      )
 
   /** The draft marking and identification written on every page of an unapproved file version. */
   private[app] def draftLines(details: DocumentDetails, v: DocumentVersion): List[String] =

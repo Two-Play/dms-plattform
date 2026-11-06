@@ -267,13 +267,22 @@ object EvidenceReportApi:
       _ <- register(p, stored, payload)
     yield view(stored, payload)
 
+  /** The report is about the document, so the role and its scope are decided on the governing versions. It
+    * also shows every version, with votes, reasons and file names, so the caller must be cleared for each of
+    * them, including those that have no say in the scope (DMS-155, ADR 0072).
+    */
   private def authorize(ctx: DocumentApi.Context, tenant: TenantId, details: DocumentDetails) =
-    ZIO
-      .fromOption(details.versions.lastOption)
-      .orElseFail(DocumentError.NotFound(s"document ${details.document.id.value} has no version"))
-      .flatMap(current =>
-        ctx.check(Action.GenerateEvidenceReport, DocumentApi.resource(tenant, details, current))
+    for
+      _ <- ZIO.when(details.versions.isEmpty)(
+        ZIO.fail(DocumentError.NotFound(s"document ${details.document.id.value} has no version"))
       )
+      _ <- ZIO.foreachDiscard(DocumentApi.governing(tenant, details))(
+        ctx.check(Action.GenerateEvidenceReport, _)
+      )
+      _ <- ZIO.foreachDiscard(details.versions)(v =>
+        ctx.checkCleared(Action.GenerateEvidenceReport, DocumentApi.resource(tenant, details, v))
+      )
+    yield ()
 
   /** Who must acknowledge each published version that requires it (ADR 0027): everyone who may read it under
     * the policy with their current role assignments and access groups, decided by [[Audience]] as in the

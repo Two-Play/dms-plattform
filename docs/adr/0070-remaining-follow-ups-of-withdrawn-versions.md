@@ -38,7 +38,7 @@ Given: ADR 0028 says a deputy acts only while the deputyship is active and they 
 9. **Copies.** PDF and Word copies carry "Zurückgezogen, nie gültig · Kopie – ..." in the marking colour of a draft, the footer names that instead of the valid-from date, and the approval note stays, since the approval happened. In the change history the row says when, by whom and for whom, and drops the valid-from date; rows of versions out of force keep "Außer Kraft". Layout version `print-layout-3`.
 10. **Filled files.** The field `status` of a filled Word, Excel or PowerPoint file says the same. Other released versions keep the wording they have.
 11. **Evidence report.** `EvidenceVersion.withdrawal` with time, person, principal and reason, and two rows in the version's section. The field is absent for other versions, so reports stay as they were and the format stays `dms.evidence-report/1`, as with `attachments` and `destruction`.
-12. **The archive stays.** The archive PDF of the version is not touched (ADR 0059, decision 7) and says what was approved. A download of the rendition itself, and the preview of a file document, which shows it, carry no marking; the document page around it does.
+12. **The archive stays.** The archive PDF of the version is not touched (ADR 0059, decision 7) and says what was approved. A download of the rendition itself, and the preview of a file document, which shows it, carry no marking; the document page around it does. (Since DMS-155, ADR 0072: the preview is stamped and the download names it in the file name; the archived bytes stay.)
 
 ### Tests
 
@@ -108,11 +108,11 @@ Flyway V47. No new dependency.
 ## Follow-ups
 
 - Must be done: user confirms this ADR (status → Accepted).
-- Should: the failure notice of a dead publication decides `canWithdraw` on the recipient's own roles, so it does not tell a deputy with a standing vote that they can withdraw, although they can.
-- Should: a filled file without the field `status` carries no marking at all, since filling only fills fields. A notice in the file needs a decision for each file type.
-- Should: filled files of versions out of force or superseded still say "Freigegeben", the status at approval. This is a question of its own: what a filled file records.
-- Should: `GET .../html` has no marking for such a version; the document page shows its own notice, other API clients do not.
-- Still open from ADR 0059 (DMS-145): decide rights on the valid version, not on the latest one, in `RetentionApi`, `LegalHoldApi` and `EvidenceReportApi`.
+- Done (DMS-155, ADR 0072): the failure notice of a dead publication decides `canWithdraw` on the recipient's own roles, so it does not tell a deputy with a standing vote that they can withdraw, although they can.
+- Done (DMS-155, ADR 0072, by the file name): a filled file without the field `status` carries no marking at all, since filling only fills fields. A notice in the file needs a decision for each file type.
+- Done (DMS-155, ADR 0072): filled files of versions out of force or superseded still say "Freigegeben", the status at approval. This is a question of its own: what a filled file records.
+- Done (DMS-155, ADR 0072): `GET .../html` has no marking for such a version; the document page shows its own notice, other API clients do not.
+- Done (DMS-155, ADR 0072), from ADR 0059: decide rights on the valid version, not on the latest one, in `RetentionApi`, `LegalHoldApi` and `EvidenceReportApi`.
 - Ruled out: a lasting right of a deputy; deputies of the owner withdrawing as owner (ADR 0028, 0030, 0064).
 
 ## Reversibility

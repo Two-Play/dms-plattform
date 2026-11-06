@@ -107,7 +107,7 @@ object RoleAssignments:
   val postgres: ULayer[RoleAssignments] = ZLayer.succeed(Postgres)
 
 /** Applies [[Policy]] for the signed-in caller and logs every denial with its reason. */
-final class Authorizer(assignments: RoleAssignments, val groups: Groups):
+final class Authorizer(val assignments: RoleAssignments, val groups: Groups):
 
   /** Builds the subject from the principal, its role assignments and its current access group memberships
     * (ADR 0032). Runs inside the caller's transaction.
@@ -124,23 +124,46 @@ final class Authorizer(assignments: RoleAssignments, val groups: Groups):
     * assignment.
     */
   def onBehalfOf(subject: Subject, principal: UserId, roles: Set[Role]): IO[DbError, Subject] =
+    Authorizer.onBehalfOf(assignments, subject, principal, roles)
+
+  def check(subject: Subject, action: Action, resource: Resource): IO[AccessDenied, Set[Condition]] =
+    Clock.instant.flatMap { now =>
+      Policy.decide(subject, action, resource, now) match
+        case Decision.Permit(conditions) => ZIO.succeed(conditions)
+        case Decision.Deny(reason)       => deny(subject, action, reason)
+    }
+
+  /** Whether the confidentiality of `resource` lets the subject see it, for an `action` on something that
+    * shows the resource without being decided on it (DMS-155, ADR 0072). Roles and their scope are left to
+    * [[check]].
+    */
+  def checkCleared(subject: Subject, action: Action, resource: Resource): IO[AccessDenied, Unit] =
+    ZIO
+      .unless(Policy.clearedFor(subject, resource))(
+        deny(subject, action, s"${resource.confidentiality} version: caller is not in an allowed group")
+      )
+      .unit
+
+  private def deny(subject: Subject, action: Action, reason: String): IO[AccessDenied, Nothing] =
+    ZIO.logAnnotate(
+      LogAnnotation("tenant", subject.tenantId.value.toString),
+      LogAnnotation("user", subject.userId.value),
+      LogAnnotation("action", action.toString)
+    )(ZIO.logWarning(s"Access denied: $reason")) *> ZIO.fail(AccessDenied(action, reason))
+
+object Authorizer:
+
+  /** See [[Authorizer.onBehalfOf]]; for deciding about someone other than the signed-in caller. */
+  def onBehalfOf(
+      assignments: RoleAssignments,
+      subject: Subject,
+      principal: UserId,
+      roles: Set[Role]
+  ): IO[DbError, Subject] =
     assignments
       .forUser(principal)
       .map(held =>
         subject.copy(assignments = subject.assignments ++ held.filter(a => roles.contains(a.role)))
       )
 
-  def check(subject: Subject, action: Action, resource: Resource): IO[AccessDenied, Set[Condition]] =
-    Clock.instant.flatMap { now =>
-      Policy.decide(subject, action, resource, now) match
-        case Decision.Permit(conditions) => ZIO.succeed(conditions)
-        case Decision.Deny(reason)       =>
-          ZIO.logAnnotate(
-            LogAnnotation("tenant", subject.tenantId.value.toString),
-            LogAnnotation("user", subject.userId.value),
-            LogAnnotation("action", action.toString)
-          )(ZIO.logWarning(s"Access denied: $reason")) *> ZIO.fail(AccessDenied(action, reason))
-    }
-
-object Authorizer:
   val layer: URLayer[RoleAssignments & Groups, Authorizer] = ZLayer.fromFunction(Authorizer(_, _))

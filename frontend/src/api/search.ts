@@ -137,8 +137,19 @@ export function validAtQuery(client: ApiClient, params: ValidAtParams) {
   })
 }
 
-/** The file name from `Content-Disposition: attachment; filename="…"`. */
+/**
+ * The file name from `Content-Disposition`: `filename*=UTF-8''…` if there is one, since only that
+ * keeps umlauts ("Zurückgezogen, nie gültig" in a filled file, ADR 0072), else `filename="…"`.
+ */
 export function attachmentName(header: string | null, fallback: string): string {
+  const encoded = header ? /filename\*=UTF-8''([^;]+)/i.exec(header) : null
+  if (encoded?.[1]) {
+    try {
+      return decodeURIComponent(encoded[1])
+    } catch {
+      // Malformed: the plain name below is as good.
+    }
+  }
   const match = header ? /filename="?([^";]+)"?/i.exec(header) : null
   return match?.[1] ?? fallback
 }

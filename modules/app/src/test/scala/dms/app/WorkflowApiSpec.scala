@@ -65,6 +65,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
   private val deputy2   = UserId("deputy-2")
   private val standIn   = UserId("deputy-3")
   private val bystander = UserId("deputy-4")
+  private val voter     = UserId("deputy-5")
 
   private val signingKey: RSAKey = RSAKeyGenerator(2048).keyID("key-1").generate()
 
@@ -1356,6 +1357,84 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         here  <- read(tenantId)
         there <- read(other)
       yield assertTrue(mine.nonEmpty, here._1 > 0, here._2 > 0, here._3 > 0, there == (0, 0, 0))
+    },
+    test(
+      "the notice of a dead publication promises a deputy what the page offers, while it stands (DMS-155)"
+    ) {
+      val now       = Instant.now()
+      val inPeriod  = ahead(120.seconds)
+      val afterward = ahead(2.hours)
+      for
+        s <- setup.await
+        _ <- s.app
+          .transact(tenantId)(
+            RoleAssignments.Postgres
+              .grant(voter, RoleAssignment(Role.Approver, documentClass = Some("policy")), admin)
+          )
+          .orDieWith(e => RuntimeException(e.toString))
+        _ <- call(
+          approver,
+          "POST",
+          "/api/v1/deputyships",
+          Some(
+            s"""{"deputy":"${voter.value}","validFrom":"${now.plusSeconds(60)}",
+               |"validUntil":"${now.plusSeconds(3600)}","roles":["Approver"]}""".stripMargin
+          )
+        ).map(r => assert(r._1 == Status.Created, r._2))
+        approved <- approvedAsDeputy(voter, inPeriod, "Soylent", values("Soylent"))
+        (doc, version) = approved
+        service  <- ZIO.service[DocumentService]
+        workflow <- ZIO.service[ApprovalWorkflow]
+        audit    <- ZIO.service[AuditTrail]
+        authz    <- ZIO.service[Authorizer]
+        groups   <- ZIO.service[Groups]
+        roles    <- ZIO.service[RoleAssignments]
+        events = PlatformNotificationEvents(
+          service,
+          roles,
+          dms.archive.core.LegalHoldService(audit),
+          Some(workflow),
+          Some(groups)
+        )
+        documents = PolicyNotificationDocuments(service, workflow, authz, roles, groups)
+        dead      = dms.db.queue.OutboxEvent(
+          1L,
+          tenantId,
+          "document",
+          doc,
+          dms.documents.Publication.DeadEvent,
+          dms.db.Jsonb(s"""{"documentId":"$doc","versionId":"$version","reason":"invalid"}"""),
+          None,
+          0
+        )
+        notices = (at: Ahead) => at(s.app.transact(tenantId)(events.describe(dead)))
+        facts   = (at: Ahead) =>
+          at(
+            s.app.transact(tenantId)(
+              documents.visibleTo(
+                tenantId,
+                voter,
+                dms.notifications.DocumentRef(dms.kernel.DocumentId(doc), Some(version))
+              )
+            )
+          )
+        during   <- notices(inPeriod)
+        named    <- facts(inPeriod)
+        over     <- notices(afterward)
+        notNamed <- facts(afterward)
+        forDeputy = (all: List[dms.notifications.Notice]) => all.find(_.recipients == List(voter))
+      yield assertTrue(
+        forDeputy(during).exists(_.params.get("canWithdraw").contains("true")),
+        forDeputy(during).exists(_.params.get("canRead").contains("true")),
+        forDeputy(during).exists(_.params.get("canRetry").contains("false")),
+        named.isDefined,
+        // The deputyship is over: the vote gives nothing any more, and the notice says so.
+        forDeputy(over).exists(_.params.get("canWithdraw").contains("false")),
+        forDeputy(over).exists(_.params.get("canRead").contains("false")),
+        notNamed.isEmpty,
+        // The approver holds the role: nothing changes for them.
+        during.find(_.recipients == List(approver)).exists(_.params.get("canWithdraw").contains("true"))
+      )
     },
     test("a deputy who approved a version withdraws it in the approver's name; nobody else gains (DMS-145)") {
       val now                      = Instant.now()
