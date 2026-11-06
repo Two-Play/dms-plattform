@@ -72,6 +72,8 @@ export const upload = {
     aside:
       'The file and the values entered in the previous steps are saved with the draft; the document number is assigned when it is created.',
     created: 'Document created with your file.',
+    valuesFailed:
+      'The document was created and your file is stored, but the values of its fields were not: {message} Enter them on the document page.',
     fileFailed:
       'The document was created, but the file was not taken over: {message} Upload it on the document page.',
   },

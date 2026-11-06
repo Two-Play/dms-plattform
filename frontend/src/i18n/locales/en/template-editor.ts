@@ -4,6 +4,10 @@ export const templateEditor = {
   fieldsUnavailable:
     'The fields of the document class could not be loaded; placeholders and expressions can still name fields by their key.',
   unsavedChanges: 'Unsaved changes',
+  conflict: {
+    text: 'Someone else saved this draft while you were editing it, so your changes were not saved. Loading the stored version replaces your changes.',
+    load: 'Load the stored version',
+  },
   jsonPending: 'The JSON in the advanced view has not been applied yet.',
   issuesAtElements: 'Each issue is also shown at the element it belongs to.',
   changedSinceCheck: 'The content has changed since this check; check again to update the list.',

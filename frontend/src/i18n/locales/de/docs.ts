@@ -39,6 +39,8 @@ export const docs: Translation<typeof en.docs> = {
       'nur sichtbar für Autor/in und Verantwortliche/n; vor dem Einreichen die berechtigten Gruppen benennen.',
   },
   new: {
+    fixed:
+      'Der Entwurf ist gespeichert: Seine Vorlage und die Art des Inhalts bleiben, wie sie sind.',
     title: 'Neues Dokument',
     description: 'Vorlage wählen, Felder ausfüllen und das Ergebnis in der Live-Vorschau prüfen.',
     template: 'Vorlage',
@@ -93,6 +95,7 @@ export const docs: Translation<typeof en.docs> = {
     fromPartnerMaster: 'Aus dem Partnerstamm – vom System übernommen, nicht bearbeitbar',
     pickPartnerAbove: 'Oben einen Partner wählen',
     oneValuePerLine: 'Ein Wert pro Zeile',
+    oneAmountPerLine: 'Ein Betrag mit Währung pro Zeile, z. B. {example}',
     currency: '{label} Währung',
     select: 'Auswählen …',
     yes: 'Ja',
@@ -118,7 +121,7 @@ export const docs: Translation<typeof en.docs> = {
     option: 'Bitte eine der Optionen wählen.',
     yesNo: 'Bitte Ja oder Nein wählen.',
     documentId: 'Bitte eine Dokument-ID (UUID) eingeben.',
-    amountMissing: 'Bitte einen Betrag eingeben.',
+    amountCurrency: 'Bitte die Währung ergänzen, z. B. {example}.',
     amount: 'Bitte einen Betrag eingeben, z. B. 1250,50.',
     currency: 'Bitte einen Währungscode eingeben, z. B. EUR.',
     currencies: 'Zulässige Währungen: {currencies}.',

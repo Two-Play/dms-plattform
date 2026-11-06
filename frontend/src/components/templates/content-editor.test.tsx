@@ -553,6 +553,102 @@ describe('Visual template editor', () => {
     })
   })
 
+  describe('changes saved elsewhere (DMS-168)', () => {
+    const stamped = (n: number): TemplateVersion => ({
+      ...version(n, 'Draft'),
+      updatedAt: '2026-10-20T10:00:00.123456Z',
+    })
+    const paragraphTitle = () => {
+      const title = screen.getAllByRole('textbox', { name: 'Title' })[0]
+      if (!title) throw new Error('no title')
+      return title
+    }
+
+    it('saves on the state it loaded, and on what the save answered after that', async () => {
+      versions = [version(1, 'Released'), stamped(2)]
+      const { put, user } = await openDraft()
+      put.mockImplementationOnce((_p, init) => {
+        versions = [
+          version(1, 'Released'),
+          { ...stamped(2), content: init.body.content, updatedAt: '2026-10-20T10:05:00Z' },
+        ]
+        return ok(versions.at(-1))
+      })
+
+      await user.type(paragraphTitle(), '!')
+      await user.click(screen.getByRole('button', { name: 'Save draft' }))
+      await screen.findByText('Draft saved.')
+      await user.type(paragraphTitle(), '?')
+      await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+      await waitFor(() => {
+        expect(put).toHaveBeenCalledTimes(2)
+      })
+      expect(put.mock.calls[0]?.[1].body).toMatchObject({
+        expectedUpdatedAt: '2026-10-20T10:00:00.123456Z',
+      })
+      expect(put.mock.calls[1]?.[1].body).toMatchObject({
+        expectedUpdatedAt: '2026-10-20T10:05:00Z',
+      })
+    })
+
+    it('shows the conflict, keeps the input and offers the stored version', async () => {
+      versions = [version(1, 'Released'), stamped(2)]
+      const { put, user } = await openDraft()
+      const other: TemplateContent = {
+        ...content,
+        sections: (content.sections ?? []).map((s, i) => (i === 0 ? { ...s, title: 'Scope' } : s)),
+      }
+      put.mockImplementationOnce(() => {
+        versions = [
+          version(1, 'Released'),
+          { ...stamped(2), content: other, updatedAt: '2026-10-20T10:07:00Z' },
+        ]
+        return failed(409, { code: 'conflict', message: 'the draft was saved in the meantime' })
+      })
+
+      await user.type(paragraphTitle(), '!')
+      await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+      const alert = await screen.findByText(/Someone else saved this draft/)
+      expect(alert.closest('[role="alert"]')).not.toBeNull()
+      expect(paragraphTitle()).toHaveValue('Introduction!')
+
+      await user.click(screen.getByRole('button', { name: 'Load the stored version' }))
+      await waitFor(() => {
+        expect(paragraphTitle()).toHaveValue('Scope')
+      })
+      expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+      expect(screen.queryByText(/Someone else saved this draft/)).not.toBeInTheDocument()
+
+      await user.type(paragraphTitle(), '!')
+      await user.click(screen.getByRole('button', { name: 'Save draft' }))
+      await waitFor(() => {
+        expect(put).toHaveBeenCalledTimes(2)
+      })
+      expect(put.mock.calls[1]?.[1].body).toMatchObject({
+        expectedUpdatedAt: '2026-10-20T10:07:00Z',
+      })
+    })
+  })
+
+  describe('whole numbers of blocks (DMS-168)', () => {
+    it('takes digits only: nothing else changes the number', async () => {
+      const { put, user } = await openDraft()
+      const clause = screen.getByLabelText('Clause version')
+
+      await user.clear(clause)
+      await user.type(clause, '1,5e')
+      expect(clause).toHaveValue('15')
+
+      await user.click(screen.getByRole('button', { name: 'Save draft' }))
+      await waitFor(() => {
+        expect(put).toHaveBeenCalled()
+      })
+      expect(JSON.stringify(savedContent(put))).toContain('"version":15')
+    })
+  })
+
   it('shows released versions read-only', async () => {
     renderAt(`/templates/${templateId}?version=1`)
     await screen.findByRole('heading', { level: 4, name: /Introduction/ })

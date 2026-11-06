@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { t } from '@/i18n'
 import { ALLOWED_GROUPS_FIELD, groupKeys, groupsInput, visibleFields } from './access-groups'
 import {
+  amountExample,
   fieldControlId,
   formOrder,
   TITLE_FIELD,
@@ -136,7 +137,11 @@ function FieldControl({ field, input, error, onChange }: FieldProps) {
       <Textarea
         {...common}
         rows={3}
-        placeholder={t('docs.form.oneValuePerLine')}
+        placeholder={
+          fieldType.type === 'Amount'
+            ? t('docs.form.oneAmountPerLine', { example: amountExample(fieldType) })
+            : t('docs.form.oneValuePerLine')
+        }
         value={text}
         onChange={(e) => {
           onChange(e.target.value)

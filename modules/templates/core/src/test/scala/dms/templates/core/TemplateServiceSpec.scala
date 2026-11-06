@@ -201,6 +201,33 @@ object TemplateServiceSpec extends ZIOSpecDefault:
         rejected == TemplateError.Lifecycle(TemplateLifecycleError.NotEditable(TemplateStatus.Testing))
       )
     },
+    test("a change made on an older state of the draft does not overwrite what was saved since (DMS-168)") {
+      for
+        t       <- newTenant
+        created <- run(t)(_.create(draft(t), designer))
+        id     = created.templateId
+        loaded = created.updatedAt
+        first <- run(t)(
+          _.updateDraft(id, 1, draft(t, name = "First").copy(expectedUpdatedAt = loaded), designer)
+        )
+        refused <- run(t)(
+          _.updateDraft(id, 1, draft(t, name = "Second").copy(expectedUpdatedAt = loaded), designer2)
+        ).flip
+        kept   <- run(t)(_.version(id, 1))
+        second <- run(t)(
+          _.updateDraft(id, 1, draft(t, name = "Second").copy(expectedUpdatedAt = first.updatedAt), designer2)
+        )
+        unchecked <- run(t)(_.updateDraft(id, 1, draft(t, name = "Third"), designer))
+      yield assertTrue(
+        loaded.isDefined,
+        first.updatedAt != loaded,
+        refused == TemplateError.Conflict("the draft was saved in the meantime"),
+        kept.name == "First",
+        kept.editedBy.isEmpty,
+        second.name == "Second",
+        unchecked.name == "Third"
+      )
+    },
     test("release follows the four-eyes principle; creator and editors cannot release") {
       for
         t       <- newTenant

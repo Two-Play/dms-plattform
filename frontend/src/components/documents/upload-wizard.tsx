@@ -40,8 +40,9 @@ import { DocumentEditor } from './new-document-page'
 import { WordFieldHelp } from './word-field-help'
 import { WordFieldInput, WordFieldValue } from './word-field-input'
 import { InlineError, TechnicalDetail } from '@/components/shared/error-state'
-import { UserFacingError } from '@/api/errors'
-import { errorText } from '@/components/shared/error-messages'
+import { ApiRequestError, UserFacingError } from '@/api/errors'
+import { errorText, issueText } from '@/components/shared/error-messages'
+import { UnsavedChangesGuard } from '@/components/templates/editor/unsaved-changes'
 
 const STEPS = ['file', 'fields', 'preview', 'purpose'] as const
 type Step = (typeof STEPS)[number]
@@ -90,6 +91,8 @@ export function UploadWizard({
   const [values, setValues] = useState<Record<string, string>>({})
   const heading = useRef<HTMLHeadingElement>(null)
   const first = useRef(true)
+  // The metadata form guards its own input; two guards would ask twice.
+  const [formDirty, setFormDirty] = useState(false)
   const language: DocumentLanguage = getLocale() === 'de' ? 'de' : 'en'
 
   // Each step moves the focus to its heading, so screen readers announce it.
@@ -129,6 +132,8 @@ export function UploadWizard({
         description={t('upload.description')}
         breadcrumbs={breadcrumbs}
       />
+      {/* Nothing is stored until the last step, which leaves with `ignoreBlocker` (DMS-168). */}
+      <UnsavedChangesGuard dirty={analysis !== undefined && !formDirty} />
       <Stepper step={step} reachable={(s) => STEPS.indexOf(s) < index} onGo={go} />
       <p className="sr-only" aria-live="polite">
         {t('upload.steps.current', {
@@ -198,6 +203,7 @@ export function UploadWizard({
             go('preview')
           }}
           onDocumentCreated={onDocumentCreated}
+          onFormDirtyChange={setFormDirty}
           onTemplateCreated={onTemplateCreated}
           uploadFile={uploadFile}
           uploadTemplate={uploadTemplate}
@@ -588,6 +594,7 @@ function PurposeStep({
   canTemplate,
   onBack,
   onDocumentCreated,
+  onFormDirtyChange,
   onTemplateCreated,
   uploadFile,
   uploadTemplate,
@@ -600,6 +607,7 @@ function PurposeStep({
   canTemplate: boolean
   onBack: () => void
   onDocumentCreated?: (documentId: string) => void
+  onFormDirtyChange: (dirty: boolean) => void
   onTemplateCreated?: (templateId: string) => void
   uploadFile?: (documentId: string) => UploadFile<DocumentVersionView>
   uploadTemplate?: (templateId: string, version: number) => UploadFile<WordTemplate>
@@ -677,6 +685,7 @@ function PurposeStep({
             analysis={analysis}
             values={values}
             onCreated={onDocumentCreated}
+            onDirtyChange={onFormDirtyChange}
             uploadFile={uploadFile}
           />
         )}
@@ -689,18 +698,26 @@ function PurposeStep({
   )
 }
 
+/** Why the server refused values: the issues it names, else the text for its answer. */
+function refusal(error: unknown): string {
+  const issues = error instanceof ApiRequestError ? error.issues : []
+  return issues.length > 0 ? issues.map(issueText).join(' ') : errorText(error)
+}
+
 /** As document: choose the class, then title and metadata in the usual form; saving stores the file. */
 function AsDocument({
   file,
   analysis,
   values,
   onCreated,
+  onDirtyChange,
   uploadFile,
 }: {
   file: File
   analysis: UploadAnalysis
   values: Record<string, string>
   onCreated?: (documentId: string) => void
+  onDirtyChange?: (dirty: boolean) => void
   uploadFile?: (documentId: string) => UploadFile<DocumentVersionView>
 }) {
   const client = useApiClient()
@@ -724,8 +741,12 @@ function AsDocument({
   const store = async (documentId: string) => {
     try {
       await (uploadFile ?? uploadOriginal)(documentId)(file, () => undefined)
-      if (hasManual) await saveWordValues(client, documentId, values)
-      toast(t('upload.document.created'))
+      try {
+        if (hasManual) await saveWordValues(client, documentId, values)
+        toast(t('upload.document.created'))
+      } catch (e) {
+        toast(t('upload.document.valuesFailed', { message: refusal(e) }), 'error')
+      }
     } catch (e) {
       toast(t('upload.document.fileFailed', { message: errorText(e) }), 'error')
     }
@@ -745,6 +766,7 @@ function AsDocument({
           afterCreate={store}
           onCreated={onCreated}
           onSubmitted={onCreated}
+          onDirtyChange={onDirtyChange}
           aside={
             <Card>
               <CardContent className="pt-6 text-sm text-muted-foreground">

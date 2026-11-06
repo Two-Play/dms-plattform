@@ -75,6 +75,8 @@ export const upload: Translation<typeof en.upload> = {
     aside:
       'Die Datei und die in den vorigen Schritten eingegebenen Werte werden mit dem Entwurf gespeichert; die Dokumentnummer wird beim Anlegen vergeben.',
     created: 'Dokument mit Ihrer Datei angelegt.',
+    valuesFailed:
+      'Das Dokument wurde angelegt und Ihre Datei gespeichert, die Werte ihrer Felder aber nicht: {message} Tragen Sie sie auf der Dokumentseite ein.',
     fileFailed:
       'Das Dokument wurde angelegt, die Datei aber nicht übernommen: {message} Laden Sie sie auf der Dokumentseite hoch.',
   },

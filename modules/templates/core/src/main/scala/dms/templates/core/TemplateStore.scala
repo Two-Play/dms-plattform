@@ -27,14 +27,15 @@ private[core] object TemplateStore:
       OffsetDateTime,
       Jsonb,
       Option[String],
-      Option[OffsetDateTime]
+      Option[OffsetDateTime],
+      OffsetDateTime
   )
 
   // The column list is repeated in each query: Magnum binds parameters only for literal sql"" fragments.
 
   def versions(id: TemplateId)(using DbTx): List[TemplateVersion] =
     sql"""select template_id, version, name, description, document_class_id, document_class_version, status, content,
-                 created_by, created_at, to_jsonb(edited_by), released_by, released_at
+                 created_by, created_at, to_jsonb(edited_by), released_by, released_at, updated_at
           from dms.template_version where template_id = ${id.value} order by version"""
       .query[Row]
       .run()
@@ -45,18 +46,18 @@ private[core] object TemplateStore:
     val query =
       if forUpdate then
         sql"""select template_id, version, name, description, document_class_id, document_class_version, status, content,
-                 created_by, created_at, to_jsonb(edited_by), released_by, released_at
+                 created_by, created_at, to_jsonb(edited_by), released_by, released_at, updated_at
               from dms.template_version where template_id = ${id.value} and version = $version for update"""
       else
         sql"""select template_id, version, name, description, document_class_id, document_class_version, status, content,
-                 created_by, created_at, to_jsonb(edited_by), released_by, released_at
+                 created_by, created_at, to_jsonb(edited_by), released_by, released_at, updated_at
               from dms.template_version where template_id = ${id.value} and version = $version"""
     query.query[Row].run().headOption.map(toVersion)
 
   /** The latest version of every template, without the upload templates of classes (V32). */
   def latestVersions()(using DbTx): List[TemplateVersion] =
     sql"""select distinct on (template_id) template_id, version, name, description, document_class_id, document_class_version, status, content,
-                 created_by, created_at, to_jsonb(edited_by), released_by, released_at
+                 created_by, created_at, to_jsonb(edited_by), released_by, released_at, updated_at
           from dms.template_version v
           where not exists (select 1 from dms.template t
                             where t.id = v.template_id and t.file_upload_class_id is not null)
@@ -69,7 +70,7 @@ private[core] object TemplateStore:
   /** All released versions, by name and version, without the upload templates of classes (V32). */
   def released()(using DbTx): List[TemplateVersion] =
     sql"""select template_id, version, name, description, document_class_id, document_class_version, status, content,
-                 created_by, created_at, to_jsonb(edited_by), released_by, released_at
+                 created_by, created_at, to_jsonb(edited_by), released_by, released_at, updated_at
           from dms.template_version v
           where status = 'Released'
             and not exists (select 1 from dms.template t
@@ -171,7 +172,8 @@ private[core] object TemplateStore:
       createdAt,
       editedBy,
       releasedBy,
-      releasedAt
+      releasedAt,
+      updatedAt
     ) = row
     TemplateVersion(
       TemplateId(id),
@@ -190,5 +192,6 @@ private[core] object TemplateStore:
       releasedAt.map(_.toInstant),
       editedBy.value
         .fromJson[List[String]]
-        .fold(e => throw IllegalStateException(s"edited_by of template $id: $e"), _.map(UserId(_)))
+        .fold(e => throw IllegalStateException(s"edited_by of template $id: $e"), _.map(UserId(_))),
+      Some(updatedAt.toInstant)
     )

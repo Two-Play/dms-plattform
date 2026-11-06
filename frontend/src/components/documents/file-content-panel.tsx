@@ -30,6 +30,7 @@ import { t } from '@/i18n'
 import { formatDateTime, formatFileSize } from '@/i18n/format'
 import { toast } from '@/lib/toast'
 import { UseAsTemplate } from './use-as-template'
+import { UnsavedChangesGuard } from '@/components/templates/editor/unsaved-changes'
 import { WordFieldHelp } from './word-field-help'
 import { WordFieldInput, WordFieldValue } from './word-field-input'
 import { errorText } from '@/components/shared/error-messages'
@@ -225,14 +226,15 @@ function WordFieldsCard({
   const queryClient = useQueryClient()
   const fields = useQuery(wordFieldsQuery(client, documentId, version.id))
   const [values, setValues] = useState<Record<string, string> | undefined>(undefined)
-  const current =
-    values ??
-    Object.fromEntries(
-      (fields.data?.fields ?? [])
-        .filter((f) => f.source === 'Manual')
-        .map((f) => [f.key, f.value ?? '']),
-    )
+  const stored = Object.fromEntries(
+    (fields.data?.fields ?? [])
+      .filter((f) => f.source === 'Manual')
+      .map((f) => [f.key, f.value ?? '']),
+  )
+  const current = values ?? stored
   const canEdit = editable && (fields.data?.editable ?? false)
+  // A change that is taken back again is no change.
+  const dirty = canEdit && Object.keys(current).some((k) => current[k] !== (stored[k] ?? ''))
   const save = useMutation({
     mutationFn: () => saveWordValues(client, documentId, current),
     onSuccess: () => {
@@ -293,6 +295,7 @@ function WordFieldsCard({
           </form>
         )}
         {canEdit && <WordFieldHelp />}
+        {canEdit && <UnsavedChangesGuard dirty={dirty} />}
       </CardContent>
     </Card>
   )

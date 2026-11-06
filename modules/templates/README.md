@@ -52,7 +52,7 @@ Administration requires `EditTemplates` (template designer); `TemplateApi`, `Tem
 | GET | `/api/v1/admin/templates/{id}` | All versions |
 | GET | `/api/v1/admin/templates/{id}/versions/{version}` | One version |
 | POST | `/api/v1/admin/templates/{id}/versions` | Next version as a draft (409 while another one is open) |
-| PUT | `/api/v1/admin/templates/{id}/versions/{version}` | Change a draft (409 otherwise) |
+| PUT | `/api/v1/admin/templates/{id}/versions/{version}` | Change a draft (409 otherwise); with `expectedUpdatedAt`, the `updatedAt` it was loaded with, also 409 if it moved on since (DMS-168) |
 | POST | `/api/v1/admin/templates/{id}/versions/{version}/test` | Test mode with given values or generated sample data, with branch coverage; every case also rendered as HTML like the live preview (`html`, DMS-98); `computedHints` and `conditionHints` on missing values (DMS-85) |
 | GET | `/api/v1/admin/templates/{id}/versions/{version}/fields` | Fields of a version in any status (same shape as the catalog's fields endpoint), for the template pages (DMS-98); 422 `invalid_content` if the content does not compile |
 | POST | `/api/v1/admin/templates/{id}/versions/{version}/status` | Status change (DMS-35); `Released` requires `ReleaseTemplate`: a template designer other than the creator and editors |

@@ -34,7 +34,9 @@ final case class TemplateVersion(
     createdAt: Instant,
     releasedBy: Option[UserId] = None,
     releasedAt: Option[Instant] = None,
-    editedBy: List[UserId] = Nil
+    editedBy: List[UserId] = Nil,
+    /** When the stored row last changed; known once the version was read from the store. */
+    updatedAt: Option[Instant] = None
 ):
   /** Everyone who created or changed this version. */
   def contributors: Set[UserId] = editedBy.toSet + createdBy

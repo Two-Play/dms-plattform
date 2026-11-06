@@ -9,6 +9,7 @@ import dms.templates.*
 import zio.*
 import zio.json.ast.Json
 
+import java.time.Instant
 import java.util.UUID
 
 enum TemplateError:
@@ -45,7 +46,9 @@ final case class TemplateDraft(
     description: Option[String],
     documentClassId: UUID,
     documentClassVersion: Int,
-    content: TemplateContent
+    content: TemplateContent,
+    /** When a change: the stored state it was made on; a draft that moved on since is not overwritten. */
+    expectedUpdatedAt: Option[Instant] = None
 )
 
 /** Result of the test mode: each case with its resolution (or why it failed) and the branch coverage.
@@ -105,8 +108,9 @@ final class TemplateService(audit: AuditTrail, profiles: ProfileSource, limits: 
         TemplateStore.insertTemplate(version.templateId, actor)
         TemplateStore.insertVersion(version)
       }
-      _ <- record(actor, "template.created", version, Json.Obj())
-    yield version
+      _      <- record(actor, "template.created", version, Json.Obj())
+      stored <- this.version(version.templateId, version.version)
+    yield stored
 
   /** Adds the next version as a draft. A template has at most one version in Draft or Testing at a time. */
   def newVersion(id: TemplateId, draft: TemplateDraft, actor: UserId): IO[TemplateError, TemplateVersion] =
@@ -134,8 +138,9 @@ final class TemplateService(audit: AuditTrail, profiles: ProfileSource, limits: 
       )
       _ <- sql(TemplateStore.insertVersion(version))
         .mapError(conflict(s"template ${id.value} was changed concurrently"))
-      _ <- record(actor, "template.version-created", version, Json.Obj())
-    yield version
+      _      <- record(actor, "template.version-created", version, Json.Obj())
+      stored <- this.version(id, version.version)
+    yield stored
 
   /** Changes a draft. */
   def updateDraft(
@@ -148,6 +153,9 @@ final class TemplateService(audit: AuditTrail, profiles: ProfileSource, limits: 
       current <- locked(id, number)
       _       <- ZIO.unless(TemplateLifecycle.isEditable(current.status))(
         ZIO.fail(TemplateError.Lifecycle(TemplateLifecycleError.NotEditable(current.status)))
+      )
+      _ <- ZIO.when(draft.expectedUpdatedAt.exists(expected => !current.updatedAt.contains(expected)))(
+        ZIO.fail(TemplateError.Conflict("the draft was saved in the meantime"))
       )
       _ <- validate(draft)
       changed = current.copy(

@@ -2,7 +2,7 @@ import type { FieldValue } from '@/api/documents'
 import type { Partner, ReferenceField } from '@/api/partners'
 import type { MetadataValue, TemplateField } from '@/api/templates'
 import { t } from '@/i18n'
-import { formatNumber, formatPlainDate } from '@/i18n/format'
+import { formatPlainDate } from '@/i18n/format'
 import { numberToText } from '@/i18n/numbers'
 import { initialInput, initialInputs, type FieldInput, type FormInputs } from './field-values'
 
@@ -13,8 +13,9 @@ function singleText(value: MetadataValue): string {
     case 'Date':
       return value.value
     case 'Number':
-    case 'Amount':
       return numberToText(value.value)
+    case 'Amount':
+      return `${numberToText(value.value)} ${value.currency}`
     case 'Selection':
       return value.code
     case 'YesNo':
@@ -44,13 +45,12 @@ export function inputFromValue(field: TemplateField, value: MetadataValue): Fiel
   return value.type === 'Many' ? initialInput(field) : singleText(value)
 }
 
-/** A stored value as plain text for reading, e.g. `1250.5 EUR` or `Yes`. */
+/**
+ * A stored value as plain text for reading, e.g. `1,250.5 EUR` or `Yes`. Numbers keep all their decimals: a
+ * regulated document shows what is stored, not a rounded value (DMS-168).
+ */
 export function displayValue(value: MetadataValue): string {
   switch (value.type) {
-    case 'Amount':
-      return `${formatNumber(value.value)} ${value.currency}`
-    case 'Number':
-      return formatNumber(value.value)
     case 'Date':
       return formatPlainDate(value.value)
     case 'YesNo':
