@@ -48,6 +48,12 @@ function CaseDetails({
 }) {
   const tasks = (workflowCase.tasks ?? []).filter((task) => task.round === workflowCase.round)
   const votes = workflowCase.votes ?? []
+  // Votes name their step by key; its name is on the task, also for rounds the table does not show.
+  const voteStep = (vote: { taskId: string; step: string }) =>
+    stepLabel({
+      step: vote.step,
+      stepName: workflowCase.tasks?.find((task) => task.id === vote.taskId)?.stepName ?? vote.step,
+    })
   const current = tasks.find((task) => task.step === workflowCase.currentStep)
   return (
     <section
@@ -147,7 +153,7 @@ function CaseDetails({
               {t('docPanels.workflow.voteDetail', {
                 decision: statusLabel(v.decision),
                 round: v.round,
-                step: v.step,
+                step: voteStep(v),
               })}
               {v.reason && <> – {v.reason}</>}
               {v.invalidatedAt && (
@@ -222,6 +228,7 @@ export function WorkflowPanel({
   title,
   versions,
   withdrawableVersion,
+  draftVersion,
 }: {
   documentId: string
   /** Document title, shown in the vote dialog. */
@@ -230,16 +237,26 @@ export function WorkflowPanel({
   versions: Record<string, string>
   /** The version the caller may withdraw now, if any. */
   withdrawableVersion?: string
+  /** The version the document is shown with, if that is a draft. */
+  draftVersion?: string
 }) {
   const client = useApiClient()
   const workflow = useQuery(documentWorkflowQuery(client, documentId))
+  const cases = workflow.data
+  // A later draft has its workflow ahead of it, whatever the versions before it went through.
+  const beforeSubmission =
+    cases !== undefined &&
+    (cases.length === 0 ||
+      (draftVersion !== undefined && !cases.some((c) => c.versionId === draftVersion)))
   return (
     <Card>
       <CardHeader>
         <CardTitle>
           <h2>{t('docPanels.workflow.title')}</h2>
         </CardTitle>
-        <CardDescription>{t('docPanels.workflow.description')}</CardDescription>
+        {beforeSubmission && (
+          <CardDescription>{t('docPanels.workflow.description')}</CardDescription>
+        )}
       </CardHeader>
       <CardContent className="space-y-3">
         <MyOpenTasks documentId={documentId} title={title} />

@@ -1,6 +1,6 @@
 package dms.app
 
-import dms.authz.{Action, Confidentiality, Policy}
+import dms.authz.{Action, Policy}
 import dms.documents.core.{DocumentDetails, DocumentError}
 import dms.documents.metadata.CoreFields
 import dms.documents.{ConfidentialityLowering, DocumentVersion, Versioning}
@@ -179,11 +179,8 @@ object ConfidentialityLoweringApi:
       .flatten
       .map(b => CoreFields.confidentialityLevel(b.accessMetadata))
     ctx.allowed(Action.EditDraft, resource).map { mayEdit =>
-      // Only the highest level counts: whoever is cleared for it is cleared for the others.
-      val highest = v.lowerings.map(_.from).maxByOption(CoreFields.ConfidentialityLevels.indexOf)
-      val cleared = highest.forall(level =>
-        Policy.clearedFor(ctx.subject, resource.copy(confidentiality = Confidentiality.valueOf(level)))
-      )
+      val cleared =
+        Policy.clearedFor(ctx.subject, DocumentApi.loweringResource(ctx.subject.tenantId, details, v))
       LoweringsView(
         v.id,
         v.label,

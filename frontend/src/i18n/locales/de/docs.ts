@@ -201,6 +201,8 @@ export const docs: Translation<typeof en.docs> = {
       Confidential: 'Vertraulich',
       StrictlyConfidential: 'Streng vertraulich',
     },
+    levelProposed: '{level} ab der Veröffentlichung; bis dahin bleibt der Zugriff auf {access}',
+    levelNeverInForce: '{level} wurde nie wirksam; der Zugriff bleibt auf {access}',
   },
   pdf: {
     download: 'PDF herunterladen',

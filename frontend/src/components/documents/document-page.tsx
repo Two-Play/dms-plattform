@@ -74,7 +74,8 @@ export function AccessNote({ document }: { document: DocumentView }) {
   const values: Record<string, MetadataValue | undefined> = Object.fromEntries(
     Object.entries(document.current.values).map(([key, field]) => [key, field.value]),
   )
-  const level = confidentialityOf(values)
+  // A version whose lowering was approved states the new level, while access stays at the old one (ADR 0083).
+  const level = document.current.accessFloor ?? confidentialityOf(values)
   const restricted = isRestrictedLevel(level)
   const groups = useGroups(restricted)
   if (!restricted || level === undefined) return null
@@ -296,6 +297,9 @@ export function DocumentPage({
             title={document.data.title}
             versions={{ [document.data.current.id]: document.data.current.version }}
             withdrawableVersion={document.data.withdrawable?.versionId}
+            draftVersion={
+              document.data.current.status === 'Draft' ? document.data.current.id : undefined
+            }
           />
           <VersionHistory documentId={document.data.id} shownId={shown.id} />
         </>

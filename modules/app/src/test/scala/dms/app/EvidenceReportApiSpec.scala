@@ -505,6 +505,36 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
             where id = $version""".update.run()
     }
 
+  /** Leaves `version` as destruction does: without values. */
+  private def emptied(version: UUID) =
+    ownerQuery {
+      val _ = sql"set local session_replication_role = replica".update.run()
+      sql"""update dms.document_version
+            set status = 'Destroyed', field_values = '{}'::jsonb, content_removed_at = now(),
+                content_removed_by = ${records.value}
+            where id = $version""".update.run()
+    }
+
+  /** Makes `version` one that took effect at a level lowered from `Confidential` (ADR 0083). */
+  private def lowered(version: UUID) =
+    val id = UUID.randomUUID()
+    ownerQuery {
+      val _ = sql"set local session_replication_role = replica".update.run()
+      val _ = sql"""update dms.document_version v
+                    set status = 'Published', published_at = now(), released_at = now(),
+                        released_by = ${approver.value}, metadata_snapshot = o.metadata_snapshot,
+                        rendition_key = o.rendition_key, rendition_version = o.rendition_version,
+                        rendition_sha256 = o.rendition_sha256
+                    from dms.document_version o
+                    where v.id = $version and o.document_id = v.document_id and o.id <> v.id
+                      and o.metadata_snapshot is not null""".update.run()
+      sql"""insert into dms.document_confidentiality_lowering
+              (id, tenant_id, version_id, from_level, to_level, reason, requested_by, status, decided_by,
+               decided_at)
+            values ($id, ${tenantId.value}, $version, 'Confidential', 'Internal', 'Not secret any more',
+                    ${author.value}, 'Approved', ${approver.value}, now())""".update.run()
+    }
+
   private def createReport(user: UserId, doc: UUID, archive: Option[RenditionArchive] = None) =
     call(user, "POST", s"/api/v1/documents/$doc/evidence-report", archive = archive)
 
@@ -726,6 +756,24 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         forOtherUnit.status == Status.Forbidden,
         notCleared.status == Status.Forbidden,
         storedHidden.status == Status.Forbidden
+      )
+    },
+    test("what was written at the old level of a lowering needs clearance for it (ADR 0083)") {
+      for
+        doc  <- publishedDocument("Herabstufung AG")
+        next <- nextVersion(doc.id)
+        // The older version at the old level is gone, and with it what used to stop the caller.
+        _       <- emptied(doc.current.id)
+        plain   <- createReport(auditor, doc.id)
+        _       <- lowered(next)
+        refused <- createReport(auditor, doc.id)
+        // Destroyed itself, the version names no access groups any more, so nobody would be cleared.
+        _      <- emptied(next)
+        afters <- createReport(auditor, doc.id)
+      yield assertTrue(
+        plain.status == Status.Created,
+        refused.status == Status.Forbidden,
+        afters.status == Status.Created
       )
     },
     test("retention rights follow what stands for the document (DMS-155)") {

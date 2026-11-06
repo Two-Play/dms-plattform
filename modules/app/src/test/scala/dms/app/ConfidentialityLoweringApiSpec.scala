@@ -342,6 +342,14 @@ object ConfidentialityLoweringApiSpec extends ZIOSpecDefault:
   private def vote(user: UserId, task: TaskView) =
     call(user, "POST", s"/api/v1/workflow/tasks/${task.id}/votes", Some(CastVote("Approve", None).toJson))
 
+  private def voteWith(user: UserId, task: TaskView, reason: String) =
+    call(
+      user,
+      "POST",
+      s"/api/v1/workflow/tasks/${task.id}/votes",
+      Some(CastVote("Approve", Some(reason)).toJson)
+    )
+
   /** Submits the open version and takes it through review and approval; rendered with stand-ins. */
   private def approve(doc: UUID, submitter: UserId): ZIO[Env, Any, Unit] =
     for
@@ -692,6 +700,27 @@ object ConfidentialityLoweringApiSpec extends ZIOSpecDefault:
           level(done.current) == selection("Confidential")
         )
       },
+      test("a draft that went up takes its request along at submission, and the audit trail says so") {
+        for
+          pair <- later()
+          (doc, draft) = pair
+          _         <- ask(member, doc.id)
+          _         <- save(member, doc.id, values(level = Some("StrictlyConfidential")))
+          submitted <- call(member, "POST", s"/api/v1/documents/${doc.id}/submit")
+          after     <- state(member, doc.id, draft.id).map(as[LoweringsView])
+          audit     <- auditEntries(doc.id)
+        yield assertTrue(
+          submitted.status == Status.Ok,
+          after.requests.map(_.from) == List("StrictlyConfidential"),
+          audit.exists((action, actor, reason, details) =>
+            action == "document.confidentiality-lowering-followed" && actor == member.value &&
+              reason.contains("No longer sensitive") &&
+              details.contains("\"previousFrom\": \"Confidential\"") &&
+              details.contains("\"from\": \"StrictlyConfidential\"") &&
+              details.contains("\"to\": \"Internal\"")
+          )
+        )
+      },
       test("a return before the step leaves the request open, and asking after a return adds the step") {
         for
           pair <- later()
@@ -747,15 +776,26 @@ object ConfidentialityLoweringApiSpec extends ZIOSpecDefault:
         yield assertTrue(
           decided.status == Status.Ok,
           level(stated) == selection("Internal"),
+          stated.accessFloor.contains("Confidential"),
           waiting.level == "Internal",
           waiting.accessLevel == "Confidential",
           !early.contains(draft.id),
           !approved.contains(draft.id),
           outside.contains(draft.id),
+          outside.get(draft.id).exists(_.accessFloor.isEmpty),
           !outside.contains(valid.current.id),
           inForce.accessLevel == "Internal",
           case_.status == "Approved",
           case_.approval.exists(_.contentSha256 == case_.contentSha256),
+          // Earlier votes carry the checksum from before the change: the audit entry explains the two.
+          audit.exists((action, _, _, details) =>
+            action == "document.confidentiality-lowering-approved" &&
+              details.contains(s"\"contentSha256After\": \"${case_.contentSha256}\"") &&
+              case_.votes.headOption.exists(v =>
+                v.contentSha256 != case_.contentSha256 &&
+                  details.contains(s"\"contentSha256Before\": \"${v.contentSha256}\"")
+              )
+          ),
           audit.exists((action, _, reason, details) =>
             action == "document.confidentiality-lowered" && reason.contains("No longer sensitive") &&
               details.contains("\"from\": \"Confidential\"") && details.contains("\"to\": \"Internal\"") &&
@@ -800,16 +840,26 @@ object ConfidentialityLoweringApiSpec extends ZIOSpecDefault:
         for
           triple <- inLoweringStep()
           (doc, draft, task) = triple
-          _       <- vote(approver, task)
+          _       <- voteWith(approver, task, "The board agreed")
           _       <- renderPending
           _       <- publishDue
           cleared <- state(member, doc.id, draft.id).map(as[LoweringsView])
           reader  <- state(outsider, doc.id, draft.id)
+          inGroup <- call(member, "GET", s"/api/v1/documents/${doc.id}/workflow")
+          outside <- call(outsider, "GET", s"/api/v1/documents/${doc.id}/workflow")
+          step = (r: Response) =>
+            as[List[WorkflowCaseView]](r).flatMap(_.votes).filter(_.step == WorkflowDefinition.LoweringStep)
         yield assertTrue(
           cleared.requests.map(_.reason) == List("No longer sensitive"),
+          cleared.requests.flatMap(_.decisionReason) == List("The board agreed"),
           reader.status == Status.Ok,
           as[LoweringsView](reader).requests.isEmpty,
-          !reader.text.contains("No longer sensitive")
+          !reader.text.contains("No longer sensitive"),
+          // The vote of the additional step is the same text.
+          step(inGroup).map(_.reason) == List(Some("The board agreed")),
+          outside.status == Status.Ok,
+          step(outside).map(v => (v.decision, v.reason)) == List(("Approve", None)),
+          !outside.text.contains("The board agreed")
         )
       }
     ),

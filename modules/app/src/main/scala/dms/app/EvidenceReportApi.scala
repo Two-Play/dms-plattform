@@ -321,7 +321,10 @@ object EvidenceReportApi:
 
   /** The report is about the document, so the role and its scope are decided on the governing versions. It
     * also shows every version, with votes, reasons and file names, so the caller must be cleared for each of
-    * them, including those that have no say in the scope (DMS-155, ADR 0072).
+    * them, including those that have no say in the scope (DMS-155, ADR 0072). What was written about lowering
+    * a version counts at the level it was written at (ADR 0083, decision 14): an older version would stop the
+    * caller at that level only as long as it keeps its values. A version without values has no access groups
+    * left to decide on, so it counts as it does for every other destroyed version.
     */
   private def authorize(ctx: DocumentApi.Context, tenant: TenantId, details: DocumentDetails) =
     for
@@ -333,6 +336,9 @@ object EvidenceReportApi:
       )
       _ <- ZIO.foreachDiscard(details.versions)(v =>
         ctx.checkCleared(Action.GenerateEvidenceReport, DocumentApi.resource(tenant, details, v))
+      )
+      _ <- ZIO.foreachDiscard(details.versions.filter(v => v.lowerings.nonEmpty && v.values.nonEmpty))(v =>
+        ctx.checkCleared(Action.GenerateEvidenceReport, DocumentApi.loweringResource(tenant, details, v))
       )
     yield ()
 

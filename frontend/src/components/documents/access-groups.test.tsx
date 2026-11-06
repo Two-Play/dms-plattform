@@ -207,4 +207,35 @@ describe('access groups of confidential documents (DMS-101)', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('Strictly confidential:')).toBeInTheDocument()
   })
+
+  it('names the level access stays at while the version states a lower one', async () => {
+    const get = vi.fn(() =>
+      Promise.resolve({ data: groups, response: new Response(null, { status: 200 }) }),
+    )
+    const client = { GET: get } as unknown as ApiClient
+    const document = {
+      current: {
+        accessFloor: 'Confidential',
+        values: {
+          confidentiality: { value: { type: 'Selection', code: 'Internal' }, origin: 'Manual' },
+          allowedGroups: {
+            value: { type: 'Many', values: [{ type: 'Text', value: 'management' }] },
+            origin: 'Manual',
+          },
+        },
+      },
+    } as unknown as DocumentView
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ApiClientProvider client={client}>
+          <AccessNote document={document} />
+        </ApiClientProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(
+      await screen.findByText(/visible to the author, the owner and members of Management/),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Confidential:')).toBeInTheDocument()
+  })
 })

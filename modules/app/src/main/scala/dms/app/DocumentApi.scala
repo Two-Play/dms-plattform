@@ -1,7 +1,17 @@
 package dms.app
 
 import dms.archive.core.LegalHoldStore
-import dms.authz.{AccessDenied, Action, Authorizer, DocumentResource, Groups, Policy, Resource, Subject}
+import dms.authz.{
+  AccessDenied,
+  Action,
+  Authorizer,
+  Confidentiality,
+  DocumentResource,
+  Groups,
+  Policy,
+  Resource,
+  Subject
+}
 import dms.db.{Db, DbError}
 import dms.documents.*
 import dms.documents.core.*
@@ -216,7 +226,12 @@ final case class DocumentVersionView(
       */
     withdrawal: Option[WithdrawalView] = None,
     /** Everyone who started or changed this version, sorted: none of them approves it (ADR 0075). */
-    editors: List[String] = Nil
+    editors: List[String] = Nil,
+    /** The level access is decided on where the version states a lower one: an approved lowering takes effect
+      * only with the publication of this version, and never if it is not published (ADR 0083). Empty
+      * otherwise.
+      */
+    accessFloor: Option[String] = None
 ) derives JsonCodec,
       Schema
 
@@ -1287,6 +1302,22 @@ object DocumentApi:
       participants.getOrElse(v.id, Set.empty)
     )
 
+  /** The resource of what was written about lowering a version: requests and decisions stay at the highest
+    * level one was made at, also after the lower level took effect (ADR 0083, decision 14). Only the level
+    * differs from [[resource]]: the access groups stay in the values of the version.
+    */
+  private[app] def loweringResource(
+      tenant: dms.kernel.TenantId,
+      details: DocumentDetails,
+      v: DocumentVersion
+  ): Resource =
+    val own = resource(tenant, details, v)
+    // Only the highest level counts: whoever is cleared for it is cleared for the others.
+    v.lowerings
+      .map(_.from)
+      .maxByOption(CoreFields.ConfidentialityLevels.indexOf)
+      .fold(own)(level => own.copy(confidentiality = Confidentiality.valueOf(level)))
+
   /** The resources a right on the document as a whole is decided on: every governing version must permit it
     * (DMS-155, ADR 0072).
     */
@@ -1389,7 +1420,8 @@ object DocumentApi:
       file = v.file.map(fileView(v.documentId.value, _)),
       withdrawal =
         v.withdrawal.map(w => WithdrawalView(w.at, w.by.value, w.reason, w.actingFor.map(_.value))),
-      editors = v.authors.map(_.value).toList.sorted
+      editors = v.authors.map(_.value).toList.sorted,
+      accessFloor = v.accessFloor
     )
 
   private[app] def fileView(documentId: UUID, f: VersionFile): VersionFileView =

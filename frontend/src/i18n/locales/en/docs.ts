@@ -198,6 +198,8 @@ export const docs = {
       Confidential: 'Confidential',
       StrictlyConfidential: 'Strictly confidential',
     },
+    levelProposed: '{level} from its publication on; until then access stays at {access}',
+    levelNeverInForce: '{level} never took effect; access stays at {access}',
   },
   pdf: {
     download: 'Download PDF',
