@@ -168,7 +168,8 @@ export const errors: Translation<typeof en.errors> = {
     body_too_large: 'Die Anfrage ist zu groß.',
     database_error:
       'Die Anfrage konnte nicht abgeschlossen werden. Bitte versuchen Sie es gleich noch einmal.',
-    document_too_long: 'Das Dokument ist zu lang, um daraus ein PDF zu erzeugen. Kürzen oder teilen Sie es.',
+    document_too_long:
+      'Das Dokument ist zu lang, um daraus ein PDF zu erzeugen. Kürzen oder teilen Sie es.',
     file_not_convertible: 'Dateien dieses Typs können nicht als PDF/A archiviert werden.',
     file_type_mismatch: 'Der Inhalt dieser Datei passt nicht zu ihrem Dateityp.',
     four_eyes: 'Das muss jemand anderes bestätigen: Es gilt das Vier-Augen-Prinzip.',
