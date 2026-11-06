@@ -115,8 +115,11 @@ trait PdfRenderer:
 
 /** @param url
   *   base URL of the rendering worker, e.g. `http://localhost:9180`
+  * @param parallelJobs
+  *   rendition jobs at a time per application instance (ADR 0079). A worker prints one page at a time: more
+  *   jobs than worker replicas only wait in the worker, and run into `timeoutSeconds` there.
   */
-final case class RendererConfig(url: String, timeoutSeconds: Int = 60)
+final case class RendererConfig(url: String, timeoutSeconds: Int = 60, parallelJobs: Int = 1)
 
 /** The rendering worker (`workers/rendering`, WeasyPrint) over HTTP: `POST /render`. */
 final class WeasyPrintRenderer(client: HttpClient, config: RendererConfig) extends PdfRenderer:

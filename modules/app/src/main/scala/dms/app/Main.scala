@@ -49,7 +49,12 @@ object Main extends ZIOAppDefault:
     RenditionStatusApi.Env
 
   private[app] val apiEndpoints: List[ZServerEndpoint[Env, ZioStreams]] =
-    List(HealthApi.health.widen[Env], ReadinessApi.ready.widen[Env], MeApi.me.widen[Env]) ++
+    List(
+      HealthApi.health.widen[Env],
+      ReadinessApi.ready.widen[Env],
+      MetricsApi.metrics.widen[Env],
+      MeApi.me.widen[Env]
+    ) ++
       UserApi.endpoints.map(_.widen[Env]) ++
       DocumentClassApi.endpoints.map(_.widen[Env]) ++
       AcknowledgementSettingsApi.endpoints.map(_.widen[Env]) ++

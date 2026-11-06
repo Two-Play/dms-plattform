@@ -32,7 +32,8 @@ request; `422` the page cannot be rendered (e.g. an external reference); `500` u
 
 One render runs at a time per container (WeasyPrint is not documented as thread-safe); scale with replicas. Further requests wait
 in the worker, and a render whose caller gave up still runs to its end; the application keeps on-demand PDFs from piling up here
-(`dms.onDemandPdf`, ADR 0073).
+(`dms.onDemandPdf`, ADR 0073), and runs as many rendition jobs at a time as `dms.rendering.parallelJobs` says (ADR 0079).
+`scripts/loadtest/render_bench.py` measures a worker.
 
 ## Isolation
 

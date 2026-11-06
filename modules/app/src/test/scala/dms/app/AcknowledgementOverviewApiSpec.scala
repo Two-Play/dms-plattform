@@ -13,6 +13,7 @@ import dms.audit.AuditTrail
 import dms.audit.core.{AuditTrailLive, TsaTrust}
 import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
 import dms.db.{Db, DbConfig, DbError, Migrations}
+import dms.integration.{JobRunner, WorkerConfig}
 import dms.documents.*
 import dms.documents.LifecycleEvent.*
 import dms.documents.core.*
@@ -84,7 +85,8 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
       policyClass: UUID,
       generalClass: UUID,
       hrPolicy: DocumentVersion,
-      general: DocumentVersion
+      general: DocumentVersion,
+      generalTemplate: TemplateId
   )
 
   final case class Setup(app: Db, owner: Db, fixture: Fixture)
@@ -207,7 +209,7 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
             hrPolicy        <- document(documents, hrTemplate, "Leave policy", values(ownerA, "HR"))
             generalPolicy <- document(documents, generalTemplate, "Expense policy", values(ownerB, "Finance"))
             _             <- acks.markOpened(hrPolicy, hr1) *> acks.acknowledge(hrPolicy, hr1)
-          yield Fixture(policy.classId.value, general.classId.value, hrPolicy, generalPolicy)
+          yield Fixture(policy.classId.value, general.classId.value, hrPolicy, generalPolicy, generalTemplate)
         )
         .mapError(e => RuntimeException(e.toString))
         .orDie
@@ -338,7 +340,11 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
   private def auditCount(action: String) =
     system(sql"select count(*) from dms.audit_event where action = $action".query[Long].run().head)
 
-  private def reminderJobs =
+  private def reminderJobs
+      : ZIO[Db & DocumentService & AcknowledgementService, Nothing, AcknowledgementReminderJobs] =
+    reminderJobs(AcknowledgementReminderConfig.DefaultPageSize)
+
+  private def reminderJobs(pageSize: Int) =
     for
       db        <- ZIO.service[Db]
       documents <- ZIO.service[DocumentService]
@@ -349,8 +355,44 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
       acks,
       RoleAssignments.Postgres,
       Groups.Postgres,
-      AcknowledgementReminderConfig(defaultDays = 14)
+      AcknowledgementReminderConfig(defaultDays = 14, pageSize = pageSize)
     )
+
+  /** Published versions of the class without recipient settings: every reader, every 14 days. */
+  private def publishedRollout(f: Fixture, name: String, count: Int) =
+    for
+      db        <- ZIO.service[Db]
+      documents <- ZIO.service[DocumentService]
+      versions  <- db
+        .transact(tenantId)(
+          ZIO.foreach((1 to count).toList)(i =>
+            document(documents, f.generalTemplate, s"$name $i", values(ownerB, "Finance"))
+          )
+        )
+        .orDieWith(e => RuntimeException(e.toString))
+    yield versions.map(_.id)
+
+  private def ddl(statement: String) =
+    system(summon[DbTx].connection.createStatement().execute(statement))
+
+  private def clockAt(instant: Instant) =
+    Clock.ClockJava(java.time.Clock.fixed(instant, ZoneId.of("UTC")))
+
+  /** `(version, reader)` of every reader named in the events of `eventType`, once per mention. */
+  private def noticed(eventType: String, versions: List[UUID]) =
+    system(
+      sql"""select (payload ->> 'versionId')::uuid, reader
+            from dms.outbox_event, jsonb_array_elements_text(payload -> 'userIds') reader
+            where event_type = $eventType""".query[(UUID, String)].run().toList
+    ).map(_.filter((version, _) => versions.contains(version)))
+
+  private def remindedOnce(versions: List[UUID]) =
+    system(
+      sql"select version_id, user_id from dms.acknowledgement_reminder where kind = 'automatic'"
+        .query[(UUID, String)]
+        .run()
+        .toList
+    ).map(_.filter((version, _) => versions.contains(version)))
 
   private def change(roles: List[String], groups: List[String], units: List[String], days: Option[Int]) =
     Some(AcknowledgementSettingsChange(roles, groups, units, days).toJson)
@@ -779,6 +821,125 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
         dropped._1 == Status.NoContent,
         audited >= 3L,
         general.versions.map(v => (v.recipients.everyReader, v.audience)) == List((true, 6))
+      )
+    },
+    test("the check goes through the versions page by page; a failure midway loses and doubles nothing") {
+      for
+        f        <- fixture
+        versions <- publishedRollout(f, "Paged rollout", 7)
+        jobs     <- reminderJobs(pageSize = 3)
+        db       <- ZIO.service[Db]
+        now      <- Clock.instant
+        // The instance fails after recording the requests and reminders of this version, at its last write.
+        broken = versions.sorted.apply(3)
+        _ <- ddl(s"""create function dms.test_fail_notice() returns trigger language plpgsql as $$$$
+                     begin
+                       if new.event_type = '${AcknowledgementService.ReminderEvent}'
+                          and new.payload ->> 'versionId' = '$broken' then
+                         raise exception 'instance gone';
+                       end if;
+                       return new;
+                     end $$$$""")
+        _ <- ddl("""create trigger test_fail_notice before insert on dms.outbox_event
+                    for each row execute function dms.test_fail_notice()""")
+        runner = JobRunner(db, jobs.handlers, WorkerConfig("test-reminders", retryBase = 1.hour))
+        drain  = ZIO.withClock(clockAt(now.plusSeconds(15 * 86400L)))(runner.runOnce.repeatUntil(_ == 0))
+        _     <- ZIO.withClock(clockAt(now.plusSeconds(15 * 86400L)))(jobs.tick)
+        _     <- drain
+        pages <- system(
+          sql"""select status, last_error is not null from dms.job
+                where kind = ${AcknowledgementReminderJobs.CheckKind} and tenant_id = ${tenantId.value}
+                  and (idempotency_key like '%:after:%' or payload = '{}') and created_at > ${now
+              .atOffset(java.time.ZoneOffset.UTC)}""".query[(String, Boolean)].run().toList
+        )
+        partly <- remindedOnce(versions)
+        asked  <- system(
+          sql"select count(*) from dms.acknowledgement_request where version_id = $broken"
+            .query[Long]
+            .run()
+            .head
+        )
+        _ <- ddl("drop trigger test_fail_notice on dms.outbox_event")
+        _ <- ddl("drop function dms.test_fail_notice()")
+        // the backoff is over
+        _ <- system(
+          sql"""update dms.job set run_at = now()
+                where kind = ${AcknowledgementReminderJobs.CheckKind} and status = 'queued'""".update.run()
+        )
+        _         <- drain
+        reminders <- remindedOnce(versions)
+        notices   <- noticed(AcknowledgementService.ReminderEvent, versions)
+        requests  <- noticed(AcknowledgementService.RequestEvent, versions)
+        // Later runs find nothing left of this round.
+        again <- jobs.check(tenantId, now.plusSeconds(15 * 86400L + 3600L), Some(broken))
+      yield assertTrue(
+        // 9 and more versions by 3: every page ran, and the failed one did not stop the pages after it
+        pages.size >= 3,
+        pages.count(_._1 == "queued") == 1,
+        pages.count(_._2) == 1,
+        pages.count(_._1 == "done") == pages.size - 1,
+        // nothing of the broken version is left, everything of the others
+        !partly.exists(_._1 == broken),
+        partly.map(_._1).distinct.size == versions.size - 1,
+        asked == 0L,
+        reminders.map(_._1).distinct.size == versions.size,
+        reminders.groupBy(_._1).values.forall(_.size == reminders.size / versions.size),
+        // once per reader, in the records and in what the notifications module gets
+        reminders.distinct.size == reminders.size,
+        notices.sorted == reminders.sorted,
+        requests.sorted == reminders.sorted,
+        again == 0
+      )
+    },
+    test("instances checking at the same time remind everyone once") {
+      for
+        f        <- fixture
+        versions <- publishedRollout(f, "Parallel rollout", 5)
+        jobs     <- reminderJobs(pageSize = 2)
+        now      <- Clock.instant
+        at = now.plusSeconds(15 * 86400L)
+        results   <- jobs.check(tenantId, at) <&> jobs.check(tenantId, at) <&> jobs.check(tenantId, at)
+        reminders <- remindedOnce(versions)
+        notices   <- noticed(AcknowledgementService.ReminderEvent, versions)
+      yield assertTrue(
+        reminders.map(_._1).distinct.size == versions.size,
+        reminders.distinct.size == reminders.size,
+        notices.sorted == reminders.sorted,
+        // earlier versions of this suite may be due as well
+        results._1 + results._2 + results._3 >= reminders.size
+      )
+    },
+    test("a reminder or request to many readers goes out in several events, in one transaction") {
+      for
+        f    <- fixture
+        db   <- ZIO.service[Db]
+        acks <- ZIO.service[AcknowledgementService]
+        ids  <- publishedRollout(f, "Large rollout", 1)
+        readers = (1 to 2500).toList.map(i => UserId(f"mass-reader-$i%04d"))
+        target  = ReminderTarget(f.general.documentId, ids.head, "1.0", "Large rollout")
+        asked <- db
+          .transact(tenantId)(acks.request(target, readers, Instant.now(), notify = true))
+          .mapError(_.toString)
+        first <- db.transact(tenantId)(acks.remindAutomatically(target, readers, 1)).mapError(_.toString)
+        twice <- db.transact(tenantId)(acks.remindAutomatically(target, readers, 1)).mapError(_.toString)
+        reminderEvents <- system(
+          sql"""select count(*) from dms.outbox_event
+                where event_type = ${AcknowledgementService.ReminderEvent}
+                  and payload ->> 'versionId' = ${ids.head.toString}""".query[Long].run().head
+        )
+        requestEvents <- system(
+          sql"""select count(*) from dms.outbox_event
+                where event_type = ${AcknowledgementService.RequestEvent}
+                  and payload ->> 'versionId' = ${ids.head.toString}""".query[Long].run().head
+        )
+        notices <- noticed(AcknowledgementService.ReminderEvent, ids)
+      yield assertTrue(
+        asked == readers,
+        first == readers,
+        twice.isEmpty,
+        reminderEvents == 3L,
+        requestEvents == 3L,
+        notices.map(_._2).sorted == readers.map(_.value)
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

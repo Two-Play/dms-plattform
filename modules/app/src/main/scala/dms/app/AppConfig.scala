@@ -98,6 +98,8 @@ final case class WorkflowSettings(
   *   the class nor the tenant sets it (DMS-100); 0: no automatic reminders
   * @param acknowledgementReminderCheckSeconds
   *   how often the reminder check runs per tenant
+  * @param acknowledgementReminderPageSize
+  *   how many versions one job of the reminder check looks at (DMS-137)
   */
 final case class DocumentsConfig(
     editorialChangeThresholdPercent: Int,
@@ -105,7 +107,8 @@ final case class DocumentsConfig(
     publicationCheckSeconds: Int,
     reviewCheckSeconds: Int,
     acknowledgementReminderDays: Int = AcknowledgementReminderConfig.DefaultDays,
-    acknowledgementReminderCheckSeconds: Int = 3600
+    acknowledgementReminderCheckSeconds: Int = 3600,
+    acknowledgementReminderPageSize: Int = AcknowledgementReminderConfig.DefaultPageSize
 ):
   def settings: DocumentSettings =
     DocumentSettings(editorialChangeThresholdPercent / 100.0, minorVersionsRequireAcknowledgement)
@@ -113,7 +116,8 @@ final case class DocumentsConfig(
   def reminders: AcknowledgementReminderConfig =
     AcknowledgementReminderConfig(
       acknowledgementReminderDays.max(0).min(dms.documents.AcknowledgementSettings.MaxReminderDays),
-      zio.Duration.fromSeconds(acknowledgementReminderCheckSeconds.max(1).toLong)
+      zio.Duration.fromSeconds(acknowledgementReminderCheckSeconds.max(1).toLong),
+      acknowledgementReminderPageSize.max(1)
     )
 
 /** Search index in OpenSearch (DMS-51, ADR 0029).

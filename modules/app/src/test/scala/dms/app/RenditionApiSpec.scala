@@ -14,7 +14,7 @@ import dms.archive.core.ObjectRetentionSync
 import dms.audit.AuditTrail
 import dms.audit.core.{AuditTrailLive, TsaTrust}
 import dms.authz.{Authorizer, Groups, Role, RoleAssignment, RoleAssignments}
-import dms.db.queue.OutboxEvent
+import dms.db.queue.{JobQueue, OutboxEvent}
 import dms.db.{Db, DbConfig, DbError, Jsonb, Migrations}
 import dms.documents.core.*
 import dms.documents.metadata.*
@@ -1322,6 +1322,57 @@ object RenditionApiSpec extends ZIOSpecDefault:
         chain.ok,
         retried.status == Status.Ok,
         requeued.exists((status, attempts, _) => status == "queued" && attempts == 0)
+      )
+    },
+    test("the depth of the rendering queue can be read as a metric, across tenants") {
+      val routes                             = ZioHttpInterpreter().toHttp(MetricsApi.metrics)
+      def metric(text: String, name: String) =
+        text.linesIterator.collectFirst {
+          case line if line.startsWith(name + " ") => line.stripPrefix(name + " ").toDouble
+        }
+      def read =
+        ZIO
+          .scoped(routes.runZIO(Request.get(URL.decode("/metrics").toOption.get)))
+          .flatMap(r => r.body.asString.map((r.status, r.headers.get("Content-Type"), _)).orDie)
+      val other = TenantId.random()
+      def key   = Some(UUID.randomUUID().toString)
+      for
+        s <- setup.await
+        _ <- ownerQuery(
+          sql"insert into dms.tenant (id, name) values (${other.value}, ${"Other tenant"})".update.run()
+        )
+        before <- read
+        now    <- Clock.instant
+        _      <- s.app.transact(tenantId)(
+          JobQueue.enqueue(
+            RenditionRequest.JobKind,
+            idempotencyKey = key,
+            runAt = Some(now.minusSeconds(120))
+          )
+        )
+        _ <- s.app.transact(other)(JobQueue.enqueue(RenditionRequest.JobKind, idempotencyKey = key))
+        _ <- s.app.transact(other)(
+          JobQueue.enqueue(RenditionRequest.JobKind, idempotencyKey = key, runAt = Some(now.plusSeconds(600)))
+        )
+        // another kind does not count
+        _     <- s.app.transact(other)(JobQueue.enqueue("search.other-kind", idempotencyKey = key))
+        after <- read
+        // the jobs have no valid payload: they must not reach a later test
+        _ <- ownerQuery(
+          sql"""update dms.job set status = 'done' where status = 'queued' and payload = '{}'
+                and kind in (${RenditionRequest.JobKind}, 'search.other-kind')""".update.run()
+        )
+        due     = """dms_rendering_queue_depth{state="due"}"""
+        delayed = """dms_rendering_queue_depth{state="delayed"}"""
+        oldest  = "dms_rendering_queue_oldest_seconds"
+      yield assertTrue(
+        before._1 == Status.Ok,
+        after._2.exists(_.startsWith("text/plain; version=0.0.4")),
+        metric(after._3, due).zip(metric(before._3, due)).exists((a, b) => a - b == 2),
+        metric(after._3, delayed).zip(metric(before._3, delayed)).exists((a, b) => a - b == 1),
+        metric(after._3, """dms_rendering_queue_depth{state="running"}""").isDefined,
+        metric(after._3, oldest).exists(_ >= 120),
+        !after._3.contains(tenantId.value.toString)
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

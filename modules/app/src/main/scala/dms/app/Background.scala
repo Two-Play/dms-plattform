@@ -140,9 +140,22 @@ object Background:
           notices.handlers ++ deadlineJobs.handlers ++ failures.handlers +
           (RenditionRequest.JobKind -> rendering.handle)
       )
-      runner     = JobRunner(db, lanes._1, WorkerConfig(s"${workerName(config)}-jobs"))
-      bulkRunner = JobRunner(db, lanes._2, WorkerConfig(s"${workerName(config)}-bulk"))
-      relay      = OutboxRelay(
+      runner     = JobRunner(db, lanes.regular, WorkerConfig(s"${workerName(config)}-jobs"))
+      bulkRunner = JobRunner(db, lanes.bulk, WorkerConfig(s"${workerName(config)}-bulk"))
+      // One job per claim: what is claimed waits for this runner, while another one may have nothing to do.
+      renditions = List.tabulate(config.rendering.parallelJobs.max(1))(i =>
+        JobRunner(
+          db,
+          lanes.renditions,
+          WorkerConfig(s"${workerName(config)}-renditions-$i", batchSize = 1)
+        ).run
+      )
+      reminderRunner = JobRunner(
+        db,
+        lanes.reminders,
+        WorkerConfig(s"${workerName(config)}-reminders", batchSize = 1)
+      )
+      relay = OutboxRelay(
         db,
         event =>
           failures.deliver(event) *> searchJobs.deliver(event) *> webhooks.deliver(event) *>
@@ -151,6 +164,8 @@ object Background:
       )
       nothing <- runner.run
         .raceFirst(bulkRunner.run)
+        .raceFirst(renditions.reduce[UIO[Nothing]]((a, b) => a.raceFirst(b)))
+        .raceFirst(reminderRunner.run)
         .raceFirst(relay.run)
         .raceFirst(jobs.schedule)
         .raceFirst(publications.schedule)
@@ -170,13 +185,28 @@ object Background:
   /** Kinds that fan out to many recipients: one publication makes a delivery per reader. */
   private[app] val BulkJobKinds: Set[String] = Set(NotificationJobs.DeliverKind, WebhookJobs.DeliverKind)
 
-  /** The handlers of the regular jobs and of the bulk jobs. Bulk jobs have a worker of their own, so
-    * thousands of deliveries never hold up a rendition or a publication behind them (business concept 14.2,
-    * ADR 0056).
+  /** The handlers of each lane of jobs. A lane has a worker of its own: thousands of deliveries never hold up
+    * a rendition or a publication behind them (business concept 14.2, ADR 0056). Renditions take seconds each
+    * and the reminder checks of all tenants take a good part of every hour at full volume, so neither waits
+    * behind other jobs nor holds them up (ADR 0079).
     */
-  private[app] def jobLanes[H](handlers: Map[String, H]): (Map[String, H], Map[String, H]) =
-    val (bulk, regular) = handlers.partition((kind, _) => BulkJobKinds(kind))
-    (regular, bulk)
+  private[app] final case class JobLanes[H](
+      regular: Map[String, H],
+      bulk: Map[String, H],
+      renditions: Map[String, H],
+      reminders: Map[String, H]
+  )
+
+  private[app] def jobLanes[H](handlers: Map[String, H]): JobLanes[H] =
+    def only(kinds: String => Boolean) = handlers.filter((kind, _) => kinds(kind))
+    val renditions                     = Set(RenditionRequest.JobKind)
+    val reminders                      = Set(AcknowledgementReminderJobs.CheckKind)
+    JobLanes(
+      only(kind => !BulkJobKinds(kind) && !renditions(kind) && !reminders(kind)),
+      only(BulkJobKinds),
+      only(renditions),
+      only(reminders)
+    )
 
   private def secureWebhookSecrets(db: Db, settings: WebhookSettings): UIO[Unit] =
     ZIO

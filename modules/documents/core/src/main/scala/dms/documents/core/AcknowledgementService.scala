@@ -327,6 +327,20 @@ final class AcknowledgementService(audit: AuditTrail):
           .toMap
       )
 
+  /** The settings that applied when the version became valid, by primary key. */
+  def audienceOf(versionId: UUID): IO[AcknowledgementError, Option[VersionAudience]] =
+    sql(
+      sql"""select version_id, source, source_class_id, array_to_json(recipient_roles)::text,
+                   array_to_json(recipient_groups)::text, array_to_json(recipient_units)::text, reminder_days,
+                   recorded_at
+            from dms.version_acknowledgement_audience
+            where version_id = $versionId"""
+        .query[AudienceRow]
+        .run()
+        .headOption
+        .map(toAudience)
+    )
+
   /** The settings of every version that is valid and requires acknowledgement now. */
   def audiencesOfValid: IO[AcknowledgementError, Map[UUID, VersionAudience]] =
     sql(
@@ -399,7 +413,8 @@ final class AcknowledgementService(audit: AuditTrail):
     yield now
 
   /** Sends the automatic reminder `round` to those of `readers` who did not get it yet (idempotent: recorded
-    * once per version, reader and round). Returns the readers reminded now.
+    * once per version, reader and round, with one statement however many readers there are). Returns the
+    * readers reminded now.
     */
   def remindAutomatically(
       target: ReminderTarget,
@@ -409,41 +424,35 @@ final class AcknowledgementService(audit: AuditTrail):
     for
       now   <- databaseNow
       fresh <- sql(
-        readers.distinct.flatMap(reader =>
-          sql"""insert into dms.acknowledgement_reminder (tenant_id, version_id, user_id, kind, round, sent_at)
-                values (dms.current_tenant(), ${target.versionId}, ${reader.value}, 'automatic', $round,
-                        ${utc(now)})
-                on conflict (version_id, user_id, round) where kind = 'automatic' do nothing
-                returning user_id""".query[String].run().map(UserId(_))
-        )
+        sql"""insert into dms.acknowledgement_reminder (tenant_id, version_id, user_id, kind, round, sent_at)
+              select dms.current_tenant(), ${target.versionId}, reader, 'automatic', $round, ${utc(now)}
+              from jsonb_array_elements_text(${json(readers.map(_.value).toSet)}) reader
+              on conflict (version_id, user_id, round) where kind = 'automatic' do nothing
+              returning user_id""".query[String].run().map(UserId(_)).toList.sortBy(_.value)
       )
       _ <- ZIO.unless(fresh.isEmpty)(reminded(target, fresh, "automatic", Some(round), ReminderActor))
     yield fresh
 
-  /** When the recipients of each version were first asked to acknowledge it (DMS-130); versions without
-    * requests are missing.
-    */
-  def requests(versionIds: Set[UUID]): IO[AcknowledgementError, Map[UUID, Map[UserId, Instant]]] =
-    if versionIds.isEmpty then ZIO.succeed(Map.empty)
-    else
-      sql(
-        sql"""select version_id, user_id, requested_at from dms.acknowledgement_request
-              where version_id::text in (select jsonb_array_elements_text(${json(
-            versionIds.map(_.toString)
-          )}))"""
-          .query[(UUID, String, OffsetDateTime)]
-          .run()
-          .groupMap(_._1)((_, user, at) => UserId(user) -> at.toInstant)
-          .view
-          .mapValues(_.toMap)
-          .toMap
-      )
+  /** When the recipients of the version were first asked to acknowledge it (DMS-130). */
+  def requestsOf(versionId: UUID): IO[AcknowledgementError, Map[UserId, Instant]] =
+    sql(
+      sql"""select user_id, requested_at from dms.acknowledgement_request where version_id = $versionId"""
+        .query[(String, OffsetDateTime)]
+        .run()
+        .map((user, at) => UserId(user) -> at.toInstant)
+        .toMap
+    )
 
-  /** Versions valid before notifications were delivered (migration V34) whose recipients are not recorded as
-    * asked yet; see [[request]].
+  /** Whether the version was valid before notifications were delivered (migration V34) and its recipients are
+    * not recorded as asked yet; see [[request]].
     */
-  def requestBaselines: IO[AcknowledgementError, Set[UUID]] =
-    sql(sql"select version_id from dms.acknowledgement_request_baseline".query[UUID].run().toSet)
+  def hasRequestBaseline(versionId: UUID): IO[AcknowledgementError, Boolean] =
+    sql(
+      sql"select count(*) from dms.acknowledgement_request_baseline where version_id = $versionId"
+        .query[Long]
+        .run()
+        .head > 0
+    )
 
   /** Records `readers` as asked to acknowledge the version at `at`, unless they were asked before, and
     * returns those recorded now. With `notify` the request goes to the outbox
@@ -459,12 +468,11 @@ final class AcknowledgementService(audit: AuditTrail):
   ): IO[AcknowledgementError, List[UserId]] =
     for
       fresh <- sql(
-        readers.distinct.flatMap(reader =>
-          sql"""insert into dms.acknowledgement_request (tenant_id, version_id, user_id, requested_at, notified)
-                values (dms.current_tenant(), ${target.versionId}, ${reader.value}, ${utc(at)}, $notify)
-                on conflict (version_id, user_id) do nothing
-                returning user_id""".query[String].run().map(UserId(_))
-        )
+        sql"""insert into dms.acknowledgement_request (tenant_id, version_id, user_id, requested_at, notified)
+              select dms.current_tenant(), ${target.versionId}, reader, ${utc(at)}, $notify
+              from jsonb_array_elements_text(${json(readers.map(_.value).toSet)}) reader
+              on conflict (version_id, user_id) do nothing
+              returning user_id""".query[String].run().map(UserId(_)).toList.sortBy(_.value)
       )
       _ <- ZIO.unless(notify)(
         sql(
@@ -488,23 +496,25 @@ final class AcknowledgementService(audit: AuditTrail):
             )
           )
           .mapError(AcknowledgementError.Database(_)) *>
-          Outbox
-            .publish(
-              "document",
-              target.documentId.value,
-              RequestEvent,
-              Jsonb(
-                Json
-                  .Obj(
-                    "documentId" -> Json.Str(target.documentId.value.toString),
-                    "versionId"  -> Json.Str(target.versionId.toString),
-                    "version"    -> Json.Str(target.versionLabel),
-                    "userIds"    -> Json.Arr(Chunk.fromIterable(fresh.map(u => Json.Str(u.value))))
-                  )
-                  .toJson
+          ZIO.foreachDiscard(fresh.grouped(NoticeRecipients).toList)(readers =>
+            Outbox
+              .publish(
+                "document",
+                target.documentId.value,
+                RequestEvent,
+                Jsonb(
+                  Json
+                    .Obj(
+                      "documentId" -> Json.Str(target.documentId.value.toString),
+                      "versionId"  -> Json.Str(target.versionId.toString),
+                      "version"    -> Json.Str(target.versionLabel),
+                      "userIds"    -> Json.Arr(Chunk.fromIterable(readers.map(u => Json.Str(u.value))))
+                    )
+                    .toJson
+                )
               )
-            )
-            .mapError(AcknowledgementError.Database(_))
+              .mapError(AcknowledgementError.Database(_))
+          )
       )
     yield fresh
 
@@ -523,14 +533,14 @@ final class AcknowledgementService(audit: AuditTrail):
         "readers"   -> Json.Num(readers.size)
       ) ++ round.map(r => "round" -> Json.Num(r)))*
     )
-    val payload = Json.Obj(
+    def payload(recipients: List[UserId]) = Json.Obj(
       (List(
         "documentId" -> Json.Str(target.documentId.value.toString),
         "versionId"  -> Json.Str(target.versionId.toString),
         "version"    -> Json.Str(target.versionLabel),
         "title"      -> Json.Str(target.title),
         "kind"       -> Json.Str(kind),
-        "userIds"    -> Json.Arr(Chunk.fromIterable(readers.map(u => Json.Str(u.value))))
+        "userIds"    -> Json.Arr(Chunk.fromIterable(recipients.map(u => Json.Str(u.value))))
       ) ++ round.map(r => "round" -> Json.Num(r)))*
     )
     for
@@ -545,9 +555,11 @@ final class AcknowledgementService(audit: AuditTrail):
           )
         )
         .mapError(AcknowledgementError.Database(_))
-      _ <- Outbox
-        .publish("document", target.documentId.value, ReminderEvent, Jsonb(payload.toJson))
-        .mapError(AcknowledgementError.Database(_))
+      _ <- ZIO.foreachDiscard(readers.grouped(NoticeRecipients).toList)(recipients =>
+        Outbox
+          .publish("document", target.documentId.value, ReminderEvent, Jsonb(payload(recipients).toJson))
+          .mapError(AcknowledgementError.Database(_))
+      )
     yield ()
 
   private def recordSettings(actor: UserId, action: String, classId: Option[UUID], details: Json.Obj) =
@@ -595,6 +607,12 @@ object AcknowledgementService:
 
   /** Outbox event asking recipients for their acknowledgement, for the notifications module (DMS-130). */
   val RequestEvent = "document.acknowledgement-requested"
+
+  /** At most this many readers per outbox event of a reminder or request. The notifications module fans an
+    * event out in one transaction, a few statements per reader, so the event bounds that transaction
+    * (DMS-137).
+    */
+  val NoticeRecipients = 1000
 
   /** Records the acknowledgement settings that apply to `versionId` of class `classId` now (DMS-100, ADR
     * 0048). Called when a version that requires acknowledgement becomes valid, in the same transaction.
