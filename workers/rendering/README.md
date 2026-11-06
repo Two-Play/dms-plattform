@@ -8,7 +8,7 @@ completes the approval.
 ## Run
 
 ```bash
-docker compose up -d rendering        # http://localhost:9180, see compose.yaml
+docker compose up -d worker-gateway   # http://localhost:9180 through the gateway, see compose.yaml
 curl -s localhost:9180/health         # {"status": "ok", "renderer": "WeasyPrint 70.0; pydyf 0.13.0; worker 1"}
 ```
 
@@ -33,6 +33,12 @@ request; `422` the page cannot be rendered (e.g. an external reference); `500` u
 One render runs at a time per container (WeasyPrint is not documented as thread-safe); scale with replicas. Further requests wait
 in the worker, and a render whose caller gave up still runs to its end; the application keeps on-demand PDFs from piling up here
 (`dms.onDemandPdf`, ADR 0073).
+
+## Isolation
+
+The worker refuses every reference itself (`NoFetching`). As a second line it has the same network rule as the conversion worker
+(DMS-160, [ADR 0076](../../docs/adr/0076-worker-network-office-parsing-limits-and-field-formats.md)): no outbound network, on the
+internal network `workers` of `compose.yaml`, reachable through `worker-gateway`.
 
 ## Image identity (DMS-93, ADR 0055)
 

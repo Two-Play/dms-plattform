@@ -66,6 +66,10 @@ object NotificationTemplates:
       "Grund: Das PDF besteht die Prüfung gegen den Archivstandard nicht.",
       "Reason: the PDF does not pass the check against the archive standard."
     ),
+    "too_complex" -> (
+      "Grund: Die Originaldatei ist zu groß oder zu komplex, um ihre Felder zu füllen.",
+      "Reason: the original file is too large or too complex to fill its fields."
+    ),
     "invalid" -> (
       "Grund: Die Version lässt sich in ihrem jetzigen Zustand nicht verarbeiten.",
       "Reason: the version cannot be processed in its current state."

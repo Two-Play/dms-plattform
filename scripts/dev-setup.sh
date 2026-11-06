@@ -79,7 +79,7 @@ fi
 if ! $SEED_ONLY; then
   if $COMPOSE; then
     step "Starting services (docker compose up -d --build --wait)"
-    (cd "$ROOT" && docker compose up -d --build --wait db zitadel-db objectstore rendering opensearch mailpit)
+    (cd "$ROOT" && docker compose up -d --build --wait db zitadel-db objectstore worker-gateway opensearch mailpit)
     # zitadel has no health check; objectstore-init runs once and exits.
     (cd "$ROOT" && docker compose up -d zitadel objectstore-init)
   fi

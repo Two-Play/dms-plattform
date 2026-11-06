@@ -20,6 +20,7 @@ object ProductionProfileSpec extends ZIOSpecDefault:
       dms.audit { tsaUrl = "https://tsa.example.com", tsaTrustedCertificates = ["/etc/dms/tsa.pem"] }
       dms.search { url = "https://search.example.com", username = "dms", password = "$secret", replicas = 1 }
       dms.partners.directory = "http"
+      dms.conversion.outboundBlocked = true
       dms.users.token = "$secret"
       dms.webhooks.secretKeys = "${WebhookSecretKeys.generate("2026-11")}"
       dms.notifications { appBaseUrl = "https://dms.example.com", smtp { host = "mail.example.com" } }
@@ -52,6 +53,9 @@ object ProductionProfileSpec extends ZIOSpecDefault:
     },
     test("refuses hosts exempted from the protection of webhooks") {
       refusedFor("dms.webhooks.allowedHosts", """dms.webhooks.allowedHosts = "localhost"""")
+    },
+    test("refuses a conversion worker that is not stated to have no outbound network") {
+      refusedFor("dms.conversion.outboundBlocked", "dms.conversion.outboundBlocked = false")
     },
     test("refuses an issuer without https") {
       refusedFor("dms.auth.issuer", """dms.auth.issuer = "http://localhost:8085"""")

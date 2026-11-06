@@ -44,9 +44,12 @@ Set `DMS_PROFILE=production`. The application then refuses to start with the set
 - [ ] The rendering and conversion workers are only reachable from the application; their images are pinned by digest (`DMS_RENDERING_IMAGE`, `DMS_CONVERSION_IMAGE`, ADR 0055).
 - [ ] The rendering worker is rolled out before or with an application that prints plain draft PDFs (ADR 0073): an older worker refuses them and draft PDFs fail with 422.
 - [ ] The limits of on-demand PDFs fit the deployment (`DMS_ON_DEMAND_PDF_*`, ADR 0073): the in-flight limits hold per application instance, so the worker can get as many times the value as there are instances. The rates hold over all instances.
+- [ ] **refused** The rendering and conversion workers have no outbound network: no route and no proxy to the company network or the internet, for example a Docker network with `internal: true` or a Kubernetes NetworkPolicy without egress (ADR 0076). Documents can name external content, and for HTML stylesheets only the network stops LibreOffice. Try it from inside the worker: `python -c "import socket; socket.create_connection(('<a host of your network>', 443), 3)"` must fail. Then confirm with `DMS_CONVERSION_OUTBOUND_BLOCKED=true`; the application cannot see the network itself, so this setting is your statement, not a measurement.
 - [ ] The load balancer checks `GET /ready`; `DMS_HTTP_DRAIN_SECONDS` is at least its interval. The orchestrator's stop timeout is longer than `drainSeconds` + `shutdownGraceSeconds` + 10 s.
 
 ### Logs and monitoring
+
+- [ ] Heap: reading an Office file can take about 1 GiB; one runs at a time per 2 GiB of JVM heap, at most four (ADR 0076). Give the application at least 2 GiB beyond the library cache.
 
 - [ ] `DMS_LOG_APPENDER=JSON` writes one JSON object per line.
 - [ ] Alerts on: `/ready` not 200, `level=ERROR`, 503 answers (the database is overloaded), dead jobs (`select kind, count(*) from dms.job where status = 'dead' group by 1`), the age of the oldest unpublished outbox event.

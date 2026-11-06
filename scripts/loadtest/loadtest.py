@@ -191,7 +191,7 @@ def cmd_up() -> None:
     if not (STAGE / "app").exists():
         ds.fail(f"missing {STAGE / 'app'}; run `sbt app/stage` first")
     subprocess.run(COMPOSE + ["up", "-d", "--wait", "--wait-timeout", "180", "db", "objectstore", "opensearch",
-                              "rendering", "conversion"], check=True)
+                              "worker-gateway"], check=True)
     subprocess.run(COMPOSE + ["up", "objectstore-init"], check=True, stdout=subprocess.DEVNULL)
     migrate()
 

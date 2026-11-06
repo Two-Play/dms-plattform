@@ -25,19 +25,23 @@ enum RenderingError:
     */
   case Invalid(message: String)
 
+  /** The original is too large or too complex to fill its fields (DMS-160, ADR 0076). */
+  case TooComplex(message: String)
+
   /** A stored rendition does not match its checksum. */
   case Integrity(message: String)
 
   case Database(error: DbError)
 
   /** A stable code of the kind of failure, for clients that explain it (DMS-93): `unavailable`, `rejected`,
-    * `not_archivable`, `invalid`, `integrity` or `database`.
+    * `not_archivable`, `invalid`, `too_complex`, `integrity` or `database`.
     */
   def code: String = this match
     case Unavailable(_)   => "unavailable"
     case Rejected(_)      => "rejected"
     case NotArchivable(_) => "not_archivable"
     case Invalid(_)       => "invalid"
+    case TooComplex(_)    => "too_complex"
     case Integrity(_)     => "integrity"
     case Database(_)      => "database"
 
@@ -47,9 +51,10 @@ enum RenderingError:
     case NotArchivable(report) =>
       s"the PDF is not valid ${report.standard.label} (${report.validator}): " +
         report.failures.take(5).mkString("; ")
-    case Invalid(m)   => m
-    case Integrity(m) => m
-    case Database(e)  => s"database error: $e"
+    case Invalid(m)    => m
+    case TooComplex(m) => m
+    case Integrity(m)  => m
+    case Database(e)   => s"database error: $e"
 
 /** A page to print.
   *

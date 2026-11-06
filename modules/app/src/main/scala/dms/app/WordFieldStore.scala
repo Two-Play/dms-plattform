@@ -71,7 +71,7 @@ private[app] object WordFieldStore:
   final case class Stored(xml: Map[String, String], properties: Map[String, String], filled: Boolean)
 
   /** The values stored in a package: those of the custom XML part and those of the custom properties. */
-  def read(entries: Entries): Either[String, Stored] =
+  def read(entries: Entries): Either[OfficeProblem, Stored] =
     for
       items <- OfficePackage.parse(entries, ItemPart.matches, Kind)
       props <- OfficePackage.parse(entries, _ == PropertiesPart, Kind)
@@ -92,12 +92,14 @@ private[app] object WordFieldStore:
   /** The entries to replace or add so that the package carries `values` (by key) in its custom XML part and
     * custom properties. Nothing is added to a package without such parts when there are no values.
     */
-  def write(entries: Entries, values: Map[String, String]): Either[String, Entries] =
+  def write(entries: Entries, values: Map[String, String]): Either[OfficeProblem, Entries] =
     OfficePackage.attempt {
       val byName = entries.toMap
       val sorted = values.toList.sortBy(_._1)
       val parsed =
-        OfficePackage.parse(entries, n => ItemPart.matches(n), Kind).fold(m => throw Exception(m), identity)
+        OfficePackage
+          .parse(entries, n => ItemPart.matches(n), Kind)
+          .fold(p => throw OfficePackage.Failed(p), identity)
       val ours    = parsed.find((_, doc) => isFields(doc.getDocumentElement)).map(_._1)
       val hasProp = byName.contains(PropertiesPart)
       if values.isEmpty && ours.isEmpty && !hasProp then Nil
@@ -244,7 +246,7 @@ private[app] object WordFieldStore:
   private def parse(bytes: Array[Byte]): Document =
     OfficePackage
       .parse(List("part" -> bytes), _ => true, Kind)
-      .fold(m => throw IllegalArgumentException(m), _.head._2)
+      .fold(p => throw OfficePackage.Failed(p), _.head._2)
 
   private def document(xml: String): Document = parse(xml.getBytes(UTF_8))
 

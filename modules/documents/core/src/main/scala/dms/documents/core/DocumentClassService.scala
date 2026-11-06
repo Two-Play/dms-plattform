@@ -124,7 +124,7 @@ final class DocumentClassService(audit: AuditTrail):
             draft.review.getOrElse(if parent.isDefined then ReviewPolicy.inherit else ReviewPolicy.default)
           )
           _ <- reviewProblems(cls)
-          _ <- resolve(cls)
+          _ <- resolve(cls).flatMap(supportedPatterns)
         yield cls
       }
       _ <- sql {
@@ -156,7 +156,7 @@ final class DocumentClassService(audit: AuditTrail):
             review = draft.review.getOrElse(latest.review)
           )
           _ <- reviewProblems(cls)
-          _ <- resolve(cls)
+          _ <- resolve(cls).flatMap(supportedPatterns)
         yield cls
       }
       _ <- sql(MetadataStore.insertClassVersion(next, actor.value))
@@ -334,6 +334,10 @@ object DocumentClassService:
   private def reviewProblems(cls: DocumentClassVersion): Either[MetadataError, Unit] =
     val problems = cls.review.problems ++
       Option.when(cls.review.inherited && cls.parent.isEmpty)("a root class has nothing to inherit").toList
+    Either.cond(problems.isEmpty, (), MetadataError.Invalid(problems))
+
+  private def supportedPatterns(profile: MetadataProfile): Either[MetadataError, Unit] =
+    val problems = Profiles.outdatedPatterns(profile)
     Either.cond(problems.isEmpty, (), MetadataError.Invalid(problems))
 
   private def noParent(draft: ClassDraft): Either[MetadataError, Option[ClassRef]] =

@@ -38,6 +38,23 @@ object ValidationSpec extends ZIOSpecDefault:
           issues(t, V.Number(1)) == List(IssueKind.WrongType("Text", "Number"))
         )
       },
+      test("text: a value beyond what a format may read is refused, not matched (DMS-160)") {
+        val t     = field(FieldType.Text(pattern = Some("[A-Z]+")))
+        val plain = field(FieldType.Text())
+        val long  = "A" * (FieldPattern.MaxValueLength + 1)
+        assertTrue(
+          issues(t, V.Text("A" * FieldPattern.MaxValueLength)).isEmpty,
+          issues(t, V.Text(long)).exists(_.isInstanceOf[IssueKind.OutOfRange]),
+          issues(plain, V.Text(long)).isEmpty
+        )
+      },
+      test("text: a format saved before RE2 does not crash the check (DMS-160)") {
+        val t = field(FieldType.Text(pattern = Some("(?=A)[A-Z]+")))
+        assertTrue(
+          issues(t, V.Text("ABC")).isEmpty,
+          issues(t, V.Text("BCD")) == List(IssueKind.PatternMismatch("(?=A)[A-Z]+"))
+        )
+      },
       test("number: range and decimal places") {
         assertTrue(
           issues(serviceLevel, V.Number(BigDecimal("99.5"))).isEmpty,

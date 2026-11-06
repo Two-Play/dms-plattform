@@ -167,14 +167,16 @@ object FileVersions:
       bytes <- ZIO.serviceWithZIO[FileVersions](_.original(file))
       out   <-
         if OfficeFields.fillable(file.name) && file.fields.nonEmpty then
-          ZIO
-            .fromEither(
-              OfficeFields
-                .fill(file.name, bytes.toArray, WordFilling.values(details, v, file, names, approval))
-            )
-            .mapBoth(m => RenderingError.Invalid(s"version ${v.label}: $m"), Chunk.fromArray)
+          OfficeGate(
+            OfficeFields.fill(file.name, bytes.toArray, WordFilling.values(details, v, file, names, approval))
+          ).mapBoth(failure(s"version ${v.label}: "), Chunk.fromArray)
         else ZIO.succeed(bytes)
     yield out
+
+  /** A file that cannot be filled as a failure of the rendering that needs it. */
+  private[app] def failure(prefix: String)(problem: OfficeProblem): RenderingError = problem match
+    case OfficeProblem.Unreadable(m) => RenderingError.Invalid(prefix + m)
+    case OfficeProblem.TooComplex(m) => RenderingError.TooComplex(prefix + m)
 
   /** The approval to print for a version: the workflow approval (deputy included), else the release. */
   def approvalOf(v: DocumentVersion, approval: Option[Approval]): Option[WordFilling.ApprovalFacts] =
@@ -255,7 +257,8 @@ object FileDocumentApi:
           "are read from its content controls (tag = field key, `dms:` prefix = automatic; check boxes, date " +
           "pickers, drop-down lists and repeating sections typed) and `{{key}}` placeholders, those of an Excel " +
           "workbook (XLSX) or PowerPoint presentation (PPTX) from its `{{key}}` placeholders. 409 for structured documents and if the version is not a draft, 413 above the size " +
-          "limit of attachments, 422 for blocked types, unreadable DOCX (`invalid_docx`), XLSX or PPTX " +
+          "limit of attachments, 422 for blocked types, files too large or too complex to read " +
+          "(`office_file_too_complex`), unreadable DOCX (`invalid_docx`), XLSX or PPTX " +
           "(`invalid_office_file`), types that cannot be converted into " +
           "PDF/A (`file_not_convertible`) and files whose content does not fit their extension " +
           "(`file_type_mismatch`, e.g. a PDF named .xlsx), 422 `attachment_infected`, 503 if the virus scanner " +
@@ -716,11 +719,7 @@ object FileDocumentApi:
       ZIO
         .attemptBlocking(Files.readAllBytes(spooled.path))
         .orDie
-        .flatMap(bytes =>
-          ZIO
-            .fromEither(OfficeFields.scan(name, bytes))
-            .mapError(m => (StatusCode.UnprocessableEntity, ApiError(code, m)))
-        )
+        .flatMap(bytes => OfficeGate(OfficeFields.scan(name, bytes)).mapError(OfficeProblem.response(code)))
         .map(WordFields.merge(_, previous))
 
   private def createWordDocument(

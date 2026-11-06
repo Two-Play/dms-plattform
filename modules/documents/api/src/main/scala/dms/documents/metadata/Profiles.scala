@@ -2,8 +2,6 @@ package dms.documents.metadata
 
 import dms.documents.DocumentStatus
 
-import java.util.regex.PatternSyntaxException
-
 /** Why a class version cannot be resolved into a profile. */
 enum ProfileError:
   /** A class version does not pin the version given as its parent in the chain. */
@@ -121,7 +119,7 @@ object Profiles:
   private def checkType(fieldType: FieldType): List[String] = fieldType match
     case FieldType.Text(maxLength, pattern) =>
       maxLength.filter(_ < 1).map(_ => "maxLength must be at least 1").toList ++
-        pattern.flatMap(p => compileError(p)).toList
+        pattern.flatMap(FieldPattern.problem).toList
     case FieldType.Number(min, max, scale) =>
       range(min, max) ++ scale.filter(_ < 0).map(_ => "scale must not be negative").toList
     case FieldType.Amount(min, max, currencies) =>
@@ -144,11 +142,21 @@ object Profiles:
     case (Some(a), Some(b)) if a > b => List("min must not be greater than max")
     case _                           => Nil
 
-  private def compileError(pattern: String): Option[String] =
-    try
-      java.util.regex.Pattern.compile(pattern)
-      None
-    catch case e: PatternSyntaxException => Some(s"invalid pattern: ${e.getDescription}")
+  /** Field formats of a profile that could not be saved today (DMS-160, ADR 0076): existing field definition
+    * versions keep working for the documents on them, but a class that is saved must not use them any more.
+    */
+  def outdatedPatterns(profile: MetadataProfile): List[String] =
+    profile.fields.flatMap { f =>
+      f.definition.fieldType match
+        case FieldType.Text(_, Some(pattern)) =>
+          FieldPattern
+            .problem(pattern)
+            .map(p =>
+              s"field ${f.key} version ${f.definition.version}: $p; give the field a new version with a " +
+                "format that is supported and bind it"
+            )
+        case _ => None
+    }
 
   /** Builds the next version of a field definition from the requested changes.
     *

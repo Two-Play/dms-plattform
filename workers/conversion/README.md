@@ -14,8 +14,8 @@ Used for:
 ## Run
 
 ```bash
-docker compose up -d conversion       # http://localhost:9181, see compose.yaml
-curl -s localhost:9181/health         # {"status": "ok", "converter": "LibreOffice 25.2.3.2 …; worker 1"}
+docker compose up -d worker-gateway   # http://localhost:9181 through the gateway, see compose.yaml
+curl -s localhost:9181/health         # {"status": "ok", "converter": "LibreOffice 25.2.3.2 …; worker 2"}
 curl -s --data-binary @Vertrag.docx -o Vertrag.pdf "localhost:9181/convert?target=pdf/a-2b&name=Vertrag.docx"
 ```
 
@@ -30,7 +30,7 @@ The application finds it at `dms.conversion.url` (`DMS_CONVERSION_URL`, default 
 
 | Target | Accepted extensions | Result |
 |---|---|---|
-| `pdf/a-2b` | doc, docx, docm, dot, dotx, dotm, odt, ott, rtf, txt, html, htm, xls, xlsx, xlsm, xlt, xltx, ods, ots, csv, ppt, pptx, pps, ppsx, pot, potx, odp, otp, odg, otg, vsd, vsdx, pdf | PDF/A-2b (`SelectPdfVersion` 2 of LibreOffice's PDF export) |
+| `pdf/a-2b` | doc, docx, docm, dot, dotx, dotm, odt, ott, rtf, txt, html, htm (not for new uploads, see Isolation), xls, xlsx, xlsm, xlt, xltx, ods, ots, csv, ppt, pptx, pps, ppsx, pot, potx, odp, otp, odg, otg, vsd, vsdx, pdf | PDF/A-2b (`SelectPdfVersion` 2 of LibreOffice's PDF export) |
 | `docx` | html, htm, odt, rtf, doc | Word document (`MS Word 2007 XML`); HTML is opened in Writer |
 
 The extension of `name` selects the import filter and the PDF export filter (Writer, Calc, Impress, Draw).
@@ -47,9 +47,25 @@ checks DOCX files itself when they are uploaded (fields are read from them), and
 
 Every conversion runs in its own temporary directory with its own LibreOffice profile (`-env:UserInstallation`), deleted
 afterwards; one conversion at a time per container, scale with replicas. LibreOffice runs as an unprivileged user on a read-only
-file system with `/tmp` as tmpfs. The command line is fixed; no user input reaches it except the file and its extension. Run the
-container without outbound network in production (macros are not executed in headless conversion, but linked content could be
-fetched otherwise).
+file system with `/tmp` as tmpfs. The command line is fixed; no user input reaches it except the file and its extension. Macros
+are not executed in headless conversion.
+
+Documents can name external content, and LibreOffice loads it unless it is stopped (DMS-160,
+[ADR 0076](../../docs/adr/0076-worker-network-office-parsing-limits-and-field-formats.md)). Measured on the pinned LibreOffice 25.2.3:
+
+| Reference in the document | Without protection | With the seeded profile |
+|---|---|---|
+| Image over http: HTML `<img>`, ODT `draw:image`, DOCX `r:link` | fetched | not fetched |
+| Image through `file://` | embedded into the PDF | not embedded |
+| HTML stylesheet over http (`<link rel="stylesheet">`) | fetched | **still fetched** |
+| Image in a `data:` URI | embedded | embedded |
+
+Every profile is seeded with `BlockUntrustedRefererLinks=true` (`PROFILE_SETTINGS` in `server.py`). Stylesheets are stopped only by
+the network, so the container must run **without outbound network**: `compose.yaml` puts it on the internal network `workers`,
+reachable through `worker-gateway`. In production that is a mandatory item of the
+[checklist](../../docs/operations/production.md), and the application refuses to start until the operator confirms it with
+`DMS_CONVERSION_OUTBOUND_BLOCKED=true`. HTML files are not accepted as uploads any more; the worker still converts the application's
+own pages into Word and HTML originals uploaded before.
 
 ## Pinning
 

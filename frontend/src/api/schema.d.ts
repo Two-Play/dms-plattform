@@ -219,7 +219,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Validates metadata values against the class profile for a target status: required fields of that status, types and rules. Missing fields are reported with their stable key and label. */
+    /** @description Validates metadata values against the class profile for a target status: required fields of that status, types and rules. Missing fields are reported with their stable key and label. Requires the author, owner or reviewer role for the class, whatever the organizational unit; 403 otherwise. */
     post: operations['postApiV1Document-classesIdValidate']
     delete?: never
     options?: never
@@ -1030,7 +1030,7 @@ export interface paths {
       cookie?: never
     }
     get?: never
-    /** @description Uploads the original of a file document into its draft (the next working state), replacing the previous file. Stored unchanged with its SHA-256, which the approval binds. The fields of a Word document (DOCX) are read from its content controls (tag = field key, `dms:` prefix = automatic; check boxes, date pickers, drop-down lists and repeating sections typed) and `{{key}}` placeholders, those of an Excel workbook (XLSX) or PowerPoint presentation (PPTX) from its `{{key}}` placeholders. 409 for structured documents and if the version is not a draft, 413 above the size limit of attachments, 422 for blocked types, unreadable DOCX (`invalid_docx`), XLSX or PPTX (`invalid_office_file`), types that cannot be converted into PDF/A (`file_not_convertible`) and files whose content does not fit their extension (`file_type_mismatch`, e.g. a PDF named .xlsx), 422 `attachment_infected`, 503 if the virus scanner or object storage is unavailable. */
+    /** @description Uploads the original of a file document into its draft (the next working state), replacing the previous file. Stored unchanged with its SHA-256, which the approval binds. The fields of a Word document (DOCX) are read from its content controls (tag = field key, `dms:` prefix = automatic; check boxes, date pickers, drop-down lists and repeating sections typed) and `{{key}}` placeholders, those of an Excel workbook (XLSX) or PowerPoint presentation (PPTX) from its `{{key}}` placeholders. 409 for structured documents and if the version is not a draft, 413 above the size limit of attachments, 422 for blocked types, files too large or too complex to read (`office_file_too_complex`), unreadable DOCX (`invalid_docx`), XLSX or PPTX (`invalid_office_file`), types that cannot be converted into PDF/A (`file_not_convertible`) and files whose content does not fit their extension (`file_type_mismatch`, e.g. a PDF named .xlsx), 422 `attachment_infected`, 503 if the virus scanner or object storage is unavailable. */
     put: operations['putApiV1DocumentsIdFile']
     post?: never
     delete?: never
@@ -1184,7 +1184,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Analyses a file before it becomes a document or a template (DMS-127); nothing is stored. The fields of a Word document (content controls, {{key}} placeholders) or of an Excel/PowerPoint file ({{key}} placeholders) with defaults; manual fields with the value the file carries (a document filled by the platform keeps its values in a custom XML part and custom properties), automatic fields with the value known before creation (author, title, version, status). Requires the author, owner or template designer role. 422 like the upload of an original (blocked, not convertible, content not fitting the extension, unreadable), 413 above the size limit. */
+    /** @description Analyses a file before it becomes a document or a template (DMS-127); nothing is stored. The fields of a Word document (content controls, {{key}} placeholders) or of an Excel/PowerPoint file ({{key}} placeholders) with defaults; manual fields with the value the file carries (a document filled by the platform keeps its values in a custom XML part and custom properties), automatic fields with the value known before creation (author, title, version, status). Requires the author, owner or template designer role. 422 like the upload of an original (blocked, not convertible, content not fitting the extension, unreadable, `office_file_too_complex` for a file too large or too complex to read), 413 above the size limit. */
     post: operations['postApiV1UploadsFields']
     delete?: never
     options?: never

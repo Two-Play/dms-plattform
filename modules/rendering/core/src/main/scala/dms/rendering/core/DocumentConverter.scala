@@ -51,7 +51,11 @@ object DocumentConverter:
   def isPdf(bytes: Chunk[Byte]): Boolean =
     bytes.length >= 5 && String(bytes.take(5).toArray, StandardCharsets.US_ASCII) == "%PDF-"
 
-  /** File name extensions the conversion worker accepts (LibreOffice import filters it is tested with). */
+  /** File name extensions accepted for originals (LibreOffice import filters the conversion worker is tested
+    * with). Not HTML (DMS-160, ADR 0076): an uploaded page can load stylesheets from anywhere, which no
+    * setting of LibreOffice stops. The worker keeps converting HTML for the Word export of the platform's own
+    * pages and for originals uploaded before.
+    */
   val ConvertibleExtensions: Set[String] = Set(
     "doc",
     "docx",
@@ -63,8 +67,6 @@ object DocumentConverter:
     "ott",
     "rtf",
     "txt",
-    "html",
-    "htm",
     "xls",
     "xlsx",
     "xlsm",
@@ -105,7 +107,7 @@ object DocumentConverter:
       List("dot", "xls", "xlt", "ppt", "pps", "pot", "vsd").map(_ -> Signature.Ole) ++
       // Word can save RTF content under .doc; such files are common in older stocks.
       Map("doc" -> Signature.OleOrRtf, "pdf" -> Signature.Pdf, "rtf" -> Signature.Rtf) ++
-      List("txt", "csv", "html", "htm").map(_ -> Signature.Text)
+      List("txt", "csv").map(_ -> Signature.Text)
 
   private val ZipMagic = Array[Byte](0x50, 0x4b, 0x03, 0x04)
   private val OleMagic = Array(0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1).map(_.toByte)
@@ -153,8 +155,16 @@ object DocumentConverter:
   *   base URL of the conversion worker, e.g. `http://localhost:9181`
   * @param previewCacheMegabytes
   *   in-memory budget for converted previews of file versions (DMS-121, ADR 0044); 0 disables the cache
+  * @param outboundBlocked
+  *   the operator states that the worker has no outbound network; the application cannot see that itself
+  *   (DMS-160, ADR 0076)
   */
-final case class ConverterConfig(url: String, timeoutSeconds: Int = 120, previewCacheMegabytes: Int = 64)
+final case class ConverterConfig(
+    url: String,
+    timeoutSeconds: Int = 120,
+    previewCacheMegabytes: Int = 64,
+    outboundBlocked: Boolean = false
+)
 
 /** The conversion worker (`workers/conversion`) over HTTP: `POST /convert?target=…&name=…` with the file as
   * body.

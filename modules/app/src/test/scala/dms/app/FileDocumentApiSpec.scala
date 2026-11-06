@@ -1236,6 +1236,29 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
           audit.contains(FileDocumentApi.FilledFileAction)
         )
     },
+    test("a file too large to read is refused with its own code, HTML pages are not taken (DMS-160)") {
+      val bytes = java.io.ByteArrayOutputStream()
+      val zip   = java.util.zip.ZipOutputStream(bytes)
+      zip.putNextEntry(java.util.zip.ZipEntry("word/document.xml"))
+      zip.write("<x>".getBytes(UTF_8) ++ Array.fill[Byte](64 * 1024 * 1024)(' ') ++ "</x>".getBytes(UTF_8))
+      zip.closeEntry()
+      zip.close()
+      val page =
+        """<html><head><link rel="stylesheet" href="http://intern/x.css"></head></html>""".getBytes(UTF_8)
+      for
+        _       <- setup.await
+        bomb    <- form(author, "/api/v1/uploads/fields", "Vertrag.docx", bytes.toByteArray)
+        preview <- form(author, "/api/v1/uploads/preview.pdf", "Vertrag.docx", bytes.toByteArray)
+        html    <- form(author, "/api/v1/uploads/preview.pdf", "Seite.html", page)
+        htm     <- form(author, "/api/v1/uploads/fields", "Seite.HTM", page)
+      yield assertTrue(
+        bomb.status == Status.UnprocessableEntity,
+        bomb.error.contains("office_file_too_complex"),
+        preview.error.contains("office_file_too_complex"),
+        html.error.contains("file_not_convertible"),
+        htm.error.contains("file_not_convertible")
+      )
+    },
     test("an uploaded Word file becomes a document of a class through its upload template (DMS-127)") {
       for
         s             <- setup.await
