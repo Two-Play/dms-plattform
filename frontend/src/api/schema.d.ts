@@ -5533,6 +5533,8 @@ export interface components {
       /** Format: int32 */
       documentClassVersion: number
       content: components['schemas']['TemplateContent']
+      /** Format: date-time */
+      expectedUpdatedAt?: string
     }
     /** TemplateVersionUseView */
     TemplateVersionUseView: {
@@ -5563,6 +5565,8 @@ export interface components {
       releasedBy?: string
       /** Format: date-time */
       releasedAt?: string
+      /** Format: date-time */
+      updatedAt?: string
     }
     /** TenantLanguageView */
     TenantLanguageView: {

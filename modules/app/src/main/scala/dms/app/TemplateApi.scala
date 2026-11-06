@@ -66,7 +66,9 @@ final case class TemplateRequest(
     documentClassId: UUID,
     /** The class profile version the placeholders refer to. */
     documentClassVersion: Int,
-    content: TemplateContent
+    content: TemplateContent,
+    /** Changing a draft: the `updatedAt` it was loaded with; a draft that moved on since answers 409. */
+    expectedUpdatedAt: Option[Instant] = None
 ) derives JsonCodec,
       Schema
 
@@ -84,7 +86,8 @@ final case class TemplateVersionView(
     createdAt: Instant,
     editedBy: List[String],
     releasedBy: Option[String],
-    releasedAt: Option[Instant]
+    releasedAt: Option[Instant],
+    updatedAt: Option[Instant] = None
 ) derives JsonCodec,
       Schema
 
@@ -282,7 +285,10 @@ object TemplateApi:
       .in(admin / templateId / "versions" / versionNo)
       .in(jsonBody[TemplateRequest])
       .out(jsonBody[TemplateVersionView])
-      .description("Changes a draft; versions in any other status cannot be changed (409)")
+      .description(
+        "Changes a draft; versions in any other status cannot be changed (409), nor can a draft that has " +
+          "moved past `expectedUpdatedAt` (409)"
+      )
       .tag("Templates")
       .serverLogic(p =>
         (id, v, req) => designer(p)(_.updateDraft(TemplateId(id), v, draft(req), p.userId)).map(view)
@@ -329,7 +335,14 @@ object TemplateApi:
     List(list, create, check, get, getVersion, newVersion, updateDraft, test, fields)
 
   private def draft(req: TemplateRequest): TemplateDraft =
-    TemplateDraft(req.name, req.description, req.documentClassId, req.documentClassVersion, req.content)
+    TemplateDraft(
+      req.name,
+      req.description,
+      req.documentClassId,
+      req.documentClassVersion,
+      req.content,
+      req.expectedUpdatedAt
+    )
 
   /** Runs `f` in a transaction of the caller's tenant after checking `EditTemplates`. */
   private[app] def designer[A](principal: Principal)(
@@ -393,7 +406,8 @@ object TemplateApi:
       v.createdAt,
       v.editedBy.map(_.value),
       v.releasedBy.map(_.value),
-      v.releasedAt
+      v.releasedAt,
+      v.updatedAt
     )
 
   private def locationView(l: Location): LocationView =

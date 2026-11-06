@@ -8,6 +8,7 @@ import { ApiClientProvider } from '@/api/context'
 import type { TemplateFields } from '@/api/templates'
 import type { UploadAnalysis } from '@/api/uploads'
 import { setLocale } from '@/i18n'
+import { getToasts } from '@/lib/toast'
 import { UploadWizard } from './upload-wizard'
 
 const classId = '7c1e2f0a-0000-4000-8000-0000000000c1'
@@ -86,7 +87,7 @@ type Reply = Promise<{ data: unknown; error: unknown; response: Response }>
 const ok = (data: unknown, status = 200): Reply =>
   Promise.resolve({ data, error: undefined, response: new Response(null, { status }) })
 
-async function setup(roles: string[], uploaded: UploadAnalysis = analysis) {
+async function setup(roles: string[], uploaded: UploadAnalysis = analysis, saveReply?: Reply) {
   const get = vi.fn((path: string) => {
     switch (path) {
       case '/api/v1/me':
@@ -119,7 +120,7 @@ async function setup(roles: string[], uploaded: UploadAnalysis = analysis) {
         return ok({ id: documentId, current: { version: '1.0-draft.1' } }, 201)
     }
   })
-  const put = vi.fn(() => ok({ id: 'v-1', version: '1.0-draft.3' }))
+  const put = vi.fn((): Reply => saveReply ?? ok({ id: 'v-1', version: '1.0-draft.3' }))
   const client = { GET: get, POST: post, PUT: put } as unknown as ApiClient
   const uploadFile = vi.fn(() => vi.fn(() => Promise.resolve({ id: 'v-1' })))
   const uploadTemplateFile = vi.fn(() => vi.fn(() => Promise.resolve({ templateId })))
@@ -141,6 +142,7 @@ async function setup(roles: string[], uploaded: UploadAnalysis = analysis) {
     </QueryClientProvider>,
   )
   return {
+    router,
     get,
     post,
     put,
@@ -226,6 +228,71 @@ describe('Upload document wizard (DMS-127)', () => {
     expect(put).toHaveBeenCalledWith('/api/v1/documents/{id}/word-fields', {
       params: { path: { id: documentId } },
       body: { values: { customer: 'ACME GmbH' } },
+    })
+  })
+
+  it('says why the values were refused, and that the file is stored (DMS-168)', async () => {
+    const refused: Reply = Promise.resolve({
+      data: undefined,
+      error: {
+        code: 'invalid_values',
+        message: 'refused',
+        issues: [{ field: 'customer', label: 'Customer', code: 'too_long', message: 'Too long.' }],
+      },
+      response: new Response(null, { status: 422 }),
+    })
+    const { onDocumentCreated, user } = await setup(['Author'], analysis, refused)
+    await throughPreview(user)
+    await user.selectOptions(await screen.findByLabelText('Document class'), classId)
+    await user.click(screen.getByRole('button', { name: 'Continue with the metadata' }))
+    await screen.findByLabelText(/Title/)
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    await waitFor(() => {
+      expect(onDocumentCreated).toHaveBeenCalledWith(documentId)
+    })
+    const messages = getToasts().map((toast) => toast.message)
+    expect(messages.join(' ')).not.toContain('file was not taken over')
+    expect(messages).toContainEqual(
+      expect.stringContaining(
+        'your file is stored, but the values of its fields were not: Too long.',
+      ),
+    )
+  })
+
+  describe('unsaved work in the steps (DMS-168)', () => {
+    it('does not ask before a file was chosen', async () => {
+      const { router } = await setup(['Author'])
+      router.history.push('/elsewhere')
+      expect(await screen.findByText('Elsewhere')).toBeInTheDocument()
+    })
+
+    it('asks before leaving with a chosen file, and stays on "stay"', async () => {
+      const { router, user } = await setup(['Author'])
+      await user.upload(screen.getByLabelText('File'), docx())
+      const customer = await screen.findByLabelText(/Customer/)
+      await user.type(customer, ' GmbH')
+
+      router.history.push('/elsewhere')
+      const dialog = await screen.findByRole('dialog', { name: 'Leave without saving?' })
+      await user.click(within(dialog).getByRole('button', { name: 'Stay on the page' }))
+
+      expect(router.state.location.pathname).toBe('/')
+      expect(screen.getByLabelText(/Customer/)).toHaveValue('ACME GmbH')
+    })
+
+    it('asks once when the metadata form has unsaved input too', async () => {
+      const { router, user } = await setup(['Author'])
+      await throughPreview(user)
+      await user.selectOptions(await screen.findByLabelText('Document class'), classId)
+      await user.click(screen.getByRole('button', { name: 'Continue with the metadata' }))
+      await user.type(await screen.findByLabelText(/Title/), ' ACME')
+
+      router.history.push('/elsewhere')
+      const dialog = await screen.findByRole('dialog', { name: 'Leave without saving?' })
+      await user.click(within(dialog).getByRole('button', { name: 'Discard and leave' }))
+
+      expect(await screen.findByText('Elsewhere')).toBeInTheDocument()
     })
   })
 

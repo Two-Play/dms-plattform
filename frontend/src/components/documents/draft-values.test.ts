@@ -163,6 +163,21 @@ describe('numbers in the form (DMS-165)', () => {
     }
     expect(convert(many, inputFromValue(many, list))).toEqual({ kind: 'value', value: list })
   })
+
+  it.each(['de', 'en'] as const)('returns multiple amounts untouched in %s (DMS-168)', (locale) => {
+    setLocale(locale)
+    const fees: TemplateField = { ...amount, multiple: true }
+    const list: MetadataValue = {
+      type: 'Many',
+      values: [
+        { type: 'Amount', value: 1250.5, currency: 'EUR' },
+        { type: 'Amount', value: -3, currency: 'CHF' },
+      ],
+    }
+    const text = inputFromValue(fees, list)
+    expect(text).toBe(locale === 'de' ? '1.250,5 EUR\n-3 CHF' : '1,250.5 EUR\n-3 CHF')
+    expect(convert(fees, text)).toEqual({ kind: 'value', value: list })
+  })
 })
 
 describe('displayValue', () => {
@@ -170,5 +185,16 @@ describe('displayValue', () => {
     expect(displayValue(stored.fee as MetadataValue)).toBe('1,250.5 CHF')
     expect(displayValue(stored.international as MetadataValue)).toBe('No')
     expect(displayValue(stored.tags as MetadataValue)).toBe('one, two')
+  })
+
+  it('shows every stored decimal (DMS-168)', () => {
+    expect(displayValue({ type: 'Number', value: 1.2345 })).toBe('1.2345')
+    expect(displayValue({ type: 'Amount', value: 1234.56789, currency: 'EUR' })).toBe(
+      '1,234.56789 EUR',
+    )
+    setLocale('de')
+    expect(displayValue({ type: 'Number', value: 1.2345 })).toBe('1,2345')
+    expect(displayValue({ type: 'Number', value: 1250000.125 })).toBe('1.250.000,125')
+    expect(displayValue({ type: 'Number', value: -0.00001 })).toBe('-0,00001')
   })
 })

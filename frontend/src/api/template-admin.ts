@@ -148,7 +148,10 @@ export async function checkContent(
   return data
 }
 
-/** Saves a draft version (PUT); 422 `invalid_content` for content that does not compile. */
+/**
+ * Saves a draft version (PUT); 422 `invalid_content` for content that does not compile. `expectedUpdatedAt` is
+ * the state the change was made on, so a draft that moved on answers 409 instead of being overwritten.
+ */
 export async function saveDraft(
   client: ApiClient,
   templateId: string,

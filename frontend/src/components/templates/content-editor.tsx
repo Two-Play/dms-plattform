@@ -45,6 +45,8 @@ type Outcome =
   | { kind: 'valid' }
   | { kind: 'issues'; issues: ContentIssue[]; placed: Map<string, ContentIssue[]>; checked: string }
   | { kind: 'error'; message: string }
+  /** Someone else saved the draft since it was loaded; nothing was stored (DMS-168). */
+  | { kind: 'conflict' }
 
 function focusLater(elementId: string) {
   requestAnimationFrame(() => {
@@ -155,7 +157,7 @@ export function ContentEditor({
   readOnly?: boolean
   /** Told whether the editor holds changes that are not saved (DMS-165). */
   onDirtyChange?: (dirty: boolean) => void
-  /** Told the key (`contentKey`) of what was just stored. */
+  /** Told the key (`contentKey`) of what was just stored or loaded from the store. */
   onSaved?: (key: string) => void
 }) {
   const client = useApiClient()
@@ -164,6 +166,9 @@ export function ContentEditor({
   const [content, setContent] = useState(() => toEditor(version.content))
   // The content last loaded or saved, in the editor's canonical form.
   const [saved, setSaved] = useState(() => contentKey(content))
+  // The stored state the content is based on: a save must not overwrite anything newer.
+  const [base, setBase] = useState(version.updatedAt)
+  const [seenUpdate, setSeenUpdate] = useState(version.updatedAt)
   const [outcome, setOutcome] = useState<Outcome | undefined>()
   const [advanced, setAdvanced] = useState(false)
   const [jsonDraft, setJsonDraft] = useState<string | undefined>()
@@ -173,6 +178,11 @@ export function ContentEditor({
   const key = contentKey(content)
   const dirty = !readOnly && (key !== saved || jsonDraft !== undefined)
   useReportDirty(dirty, onDirtyChange)
+  // Unchanged content can follow the stored state, changed content stays on what it was made on.
+  if (version.updatedAt !== seenUpdate) {
+    setSeenUpdate(version.updatedAt)
+    if (!dirty) setBase(version.updatedAt)
+  }
 
   const fieldVars = useMemo(() => fieldVariables(fields.data), [fields.data])
   const scope: ScopeVariable[] = useMemo(
@@ -233,19 +243,24 @@ export function ContentEditor({
 
   const save = useMutation({
     mutationFn: (snapshot: EditorContent) =>
-      saveDraft(
-        client,
-        version.templateId,
-        version.version,
-        requestOf(version, fromEditor(snapshot)),
-      ),
-    onSuccess: async (_data, snapshot) => {
+      saveDraft(client, version.templateId, version.version, {
+        ...requestOf(version, fromEditor(snapshot)),
+        expectedUpdatedAt: base,
+      }),
+    onSuccess: async (data, snapshot) => {
+      setBase(data.updatedAt)
       setSaved(contentKey(snapshot))
       onSaved?.(contentKey(snapshot))
       setOutcome({ kind: 'saved' })
       await queryClient.invalidateQueries({ queryKey: ['template-admin'] })
     },
     onError: async (e, snapshot) => {
+      if (e instanceof ApiRequestError && e.status === 409 && e.code === 'conflict') {
+        // Loaded now, so "load the stored version" has it at hand.
+        await queryClient.invalidateQueries({ queryKey: ['template-admin'] })
+        setOutcome({ kind: 'conflict' })
+        return
+      }
       // The save answer describes the issues as one text; the check endpoint gives them with locations.
       if (e instanceof ApiRequestError && e.code === 'invalid_content') {
         try {
@@ -263,6 +278,17 @@ export function ContentEditor({
   })
 
   const busy = checkMutation.isPending || save.isPending
+
+  /** Replaces the input with what is stored now; the way on after a conflict. */
+  const loadStored = () => {
+    const stored = toEditor(version.content)
+    setContent(stored)
+    setSaved(contentKey(stored))
+    setBase(version.updatedAt)
+    setJsonDraft(undefined)
+    setOutcome(undefined)
+    onSaved?.(contentKey(stored))
+  }
   const update = (patch: Partial<EditorContent>) => {
     setContent((c) => ({ ...c, ...patch }))
   }
@@ -380,6 +406,14 @@ export function ContentEditor({
               <p role="alert" className="text-sm text-destructive">
                 {outcome.message}
               </p>
+            )}
+            {outcome?.kind === 'conflict' && (
+              <div role="alert" className="space-y-2 text-sm text-destructive">
+                <p>{t('templateEditor.conflict.text')}</p>
+                <Button size="sm" variant="outline" onClick={loadStored}>
+                  {t('templateEditor.conflict.load')}
+                </Button>
+              </div>
             )}
             {outcome?.kind === 'issues' && (
               <div

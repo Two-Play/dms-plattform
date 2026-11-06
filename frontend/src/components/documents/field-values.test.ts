@@ -168,6 +168,60 @@ describe('field values', () => {
     })
   })
 
+  describe('multiple amounts (DMS-168)', () => {
+    const fees = field('fees', { type: 'Amount' }, { multiple: true })
+    const swiss = field('fees', { type: 'Amount', currencies: ['CHF'] }, { multiple: true })
+    const two = field('fees', { type: 'Amount', currencies: ['EUR', 'CHF'] }, { multiple: true })
+    const amount = (value: number, currency: string) =>
+      ({ type: 'Amount', value, currency }) as const
+
+    it('reads one amount with its currency per line', () => {
+      expect(convert(fees, '1,250.50 EUR\n3 chf')).toEqual({
+        kind: 'value',
+        value: { type: 'Many', values: [amount(1250.5, 'EUR'), amount(3, 'CHF')] },
+      })
+      setLocale('de')
+      expect(convert(fees, '1.250,50 EUR')).toEqual({
+        kind: 'value',
+        value: { type: 'Many', values: [amount(1250.5, 'EUR')] },
+      })
+    })
+
+    it('takes the currency of a line without one only when no other is possible', () => {
+      expect(convert(swiss, '12.50')).toEqual({
+        kind: 'value',
+        value: { type: 'Many', values: [amount(12.5, 'CHF')] },
+      })
+      expect(convert(two, '12.50')).toEqual({
+        kind: 'invalid',
+        message: 'Value 1: Add the currency, e.g. 12.5 EUR.',
+      })
+      expect(convert(fees, '12.50')).toEqual({
+        kind: 'invalid',
+        message: 'Value 1: Add the currency, e.g. 12.5 EUR.',
+      })
+    })
+
+    it('applies the rules of a single amount to every line', () => {
+      expect(convert(two, '1 EUR\n2 USD')).toEqual({
+        kind: 'invalid',
+        message: 'Value 2: Allowed currencies: EUR, CHF.',
+      })
+      expect(convert(fees, 'abc EUR').kind).toBe('invalid')
+      expect(convert(fees, 'abc').kind).toBe('invalid')
+      expect(
+        convert(field('f', { type: 'Amount', min: 10 }, { multiple: true }), '5 EUR'),
+      ).toMatchObject({ kind: 'invalid', message: 'Value 1: Must be at least 10.' })
+    })
+  })
+
+  it('names the limits of a field with all their digits (DMS-168)', () => {
+    expect(convert(field('n', { type: 'Number', min: 0.12345 }), '0.1')).toEqual({
+      kind: 'invalid',
+      message: 'Must be at least 0.12345.',
+    })
+  })
+
   it('mirrors the rules in the English UI (DMS-165)', () => {
     const number = field('n', { type: 'Number' })
     expect(convert(number, '1,250.50')).toEqual({

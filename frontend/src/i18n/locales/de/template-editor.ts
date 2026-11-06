@@ -6,6 +6,10 @@ export const templateEditor: Translation<typeof en.templateEditor> = {
   fieldsUnavailable:
     'Die Felder der Dokumentenklasse konnten nicht geladen werden; Platzhalter und Ausdrücke können Felder weiterhin über ihren Schlüssel nennen.',
   unsavedChanges: 'Ungespeicherte Änderungen',
+  conflict: {
+    text: 'Jemand anderes hat diesen Entwurf während Ihrer Bearbeitung gespeichert, darum wurden Ihre Änderungen nicht gespeichert. Das Laden des gespeicherten Stands ersetzt Ihre Änderungen.',
+    load: 'Gespeicherten Stand laden',
+  },
   jsonPending: 'Das JSON in der erweiterten Ansicht ist noch nicht übernommen.',
   issuesAtElements: 'Jedes Problem wird auch am betroffenen Element angezeigt.',
   changedSinceCheck:

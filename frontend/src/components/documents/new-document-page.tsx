@@ -82,15 +82,24 @@ export function NewDocumentPage({
   const [language, setLanguage] = useState<DocumentLanguage>(getLocale)
   const [ownFile, setOwnFile] = useState(false)
   const [dirty, setDirty] = useState(false)
+  // The first save made the document: the form goes on editing it, and another template or kind would
+  // start a new form whose save creates a second document (DMS-168).
+  const [created, setCreated] = useState(false)
   // Another template or kind starts an empty form: with unsaved input the change waits for an answer.
   const [pending, setPending] = useState<Choice | undefined>(undefined)
   const apply = (choice: Choice) => {
+    if (created) return
     if (choice.selected !== undefined) setSelected(choice.selected)
     if (choice.ownFile !== undefined) setOwnFile(choice.ownFile)
   }
   const choose = (choice: Choice) => {
     if (dirty) setPending(choice)
     else apply(choice)
+  }
+  const markCreated = () => {
+    setCreated(true)
+    setPending(undefined)
+    return Promise.resolve()
   }
   const entry = catalog.data?.find((e) => `${e.templateId}:${e.version}` === selected)
   const wordKeys = new Set((words.data ?? []).map((w) => `${w.templateId}:${String(w.version)}`))
@@ -111,7 +120,8 @@ export function NewDocumentPage({
             id="template"
             className={selectClass}
             value={selected}
-            disabled={!catalog.data}
+            disabled={!catalog.data || created}
+            aria-describedby={created ? 'document-fixed' : undefined}
             onChange={(e) => {
               choose({ selected: e.target.value })
             }}
@@ -130,6 +140,11 @@ export function NewDocumentPage({
           {entry?.description && (
             <p className="text-xs text-muted-foreground">{entry.description}</p>
           )}
+          {created && (
+            <p id="document-fixed" className="text-xs text-muted-foreground">
+              {t('docs.new.fixed')}
+            </p>
+          )}
           {catalog.isError && (
             <ErrorState error={catalog.error} onRetry={() => void catalog.refetch()} />
           )}
@@ -147,6 +162,7 @@ export function NewDocumentPage({
               type="radio"
               name="content-kind"
               checked={!ownFile}
+              disabled={created}
               onChange={() => {
                 choose({ ownFile: false })
               }}
@@ -158,6 +174,7 @@ export function NewDocumentPage({
               type="radio"
               name="content-kind"
               checked={ownFile}
+              disabled={created}
               onChange={() => {
                 choose({ ownFile: true })
               }}
@@ -175,6 +192,7 @@ export function NewDocumentPage({
           onSubmitted={onSubmitted}
           kind={kind}
           onCreated={onCreated}
+          afterCreate={markCreated}
           onDirtyChange={setDirty}
           aside={
             <Card>

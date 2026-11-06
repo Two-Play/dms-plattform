@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
@@ -7,6 +7,7 @@ import { ApiClientProvider } from '@/api/context'
 import type { DocumentVersionView } from '@/api/partners'
 import type { UploadFile, WordFields } from '@/api/word'
 import { setLocale } from '@/i18n'
+import { routed } from '@/test/routed'
 import { FileContentPanel } from './file-content-panel'
 
 const documentId = '7c1e2f0a-0000-4000-8000-0000000000d2'
@@ -117,7 +118,7 @@ const typedFields = (editable: boolean, values: Record<string, string> = {}): Wo
   ],
 })
 
-function renderPanel(
+async function renderPanel(
   v: DocumentVersionView,
   editable: boolean,
   upload?: UploadFile<DocumentVersionView>,
@@ -139,19 +140,21 @@ function renderPanel(
   )
   const client = { GET: get, PUT: put, POST: post } as unknown as ApiClient
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const { router, element } = routed(
+    <FileContentPanel documentId={documentId} version={v} editable={editable} upload={upload} />,
+  )
+  await router.load()
   render(
     <QueryClientProvider client={queryClient}>
-      <ApiClientProvider client={client}>
-        <FileContentPanel documentId={documentId} version={v} editable={editable} upload={upload} />
-      </ApiClientProvider>
+      <ApiClientProvider client={client}>{element}</ApiClientProvider>
     </QueryClientProvider>,
   )
-  return { get, put, post, user: userEvent.setup({ applyAccept: false }) }
+  return { router, get, put, post, user: userEvent.setup({ applyAccept: false }) }
 }
 
 describe('Content of a file document (DMS-115)', () => {
   it('shows the original and the Word fields; the author enters the manual fields', async () => {
-    const { put, user } = renderPanel(version('Draft'), true)
+    const { put, user } = await renderPanel(version('Draft'), true)
 
     expect(screen.getByText('Wartungsvertrag.docx')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Download original' })).toBeInTheDocument()
@@ -172,9 +175,38 @@ describe('Content of a file document (DMS-115)', () => {
     expect(screen.getByText('How to mark fields in Word')).toBeInTheDocument()
   })
 
+  it('asks before leaving with changed field values, until they are saved (DMS-168)', async () => {
+    const { router, user } = await renderPanel(version('Draft'), true)
+    const customer = await screen.findByRole('textbox', { name: /Kunde/ })
+    await user.type(customer, 'A')
+
+    router.history.push('/elsewhere')
+    const dialog = await screen.findByRole('dialog', { name: 'Leave without saving?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Stay on the page' }))
+    expect(router.state.location.pathname).toBe('/')
+    expect(screen.getByRole('textbox', { name: /Kunde/ })).toHaveValue('A')
+
+    await user.click(screen.getByRole('button', { name: 'Save field values' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+    router.history.push('/elsewhere')
+    expect(await screen.findByText('Elsewhere')).toBeInTheDocument()
+  })
+
+  it('does not ask after a change was taken back (DMS-168)', async () => {
+    const { router, user } = await renderPanel(version('Draft'), true)
+    const customer = await screen.findByRole('textbox', { name: /Kunde/ })
+    await user.type(customer, 'A')
+    await user.clear(customer)
+
+    router.history.push('/elsewhere')
+    expect(await screen.findByText('Elsewhere')).toBeInTheDocument()
+  })
+
   it('uploads a new file only of a convertible type', async () => {
     const upload = vi.fn<UploadFile<DocumentVersionView>>(() => Promise.resolve(version('Draft')))
-    const { user } = renderPanel(version('Draft'), true, upload)
+    const { user } = await renderPanel(version('Draft'), true, upload)
     const input = screen.getByLabelText('Replace file…', { selector: 'input' })
 
     await user.upload(input, new File(['x'], 'archive.zip'))
@@ -190,7 +222,7 @@ describe('Content of a file document (DMS-115)', () => {
   })
 
   it('an approved version is read-only and loads its PDF preview on request', async () => {
-    const { get, user } = renderPanel(version('Published', 'Plan.pdf'), false)
+    const { get, user } = await renderPanel(version('Published', 'Plan.pdf'), false)
 
     expect(screen.queryByRole('button', { name: /Replace file/ })).not.toBeInTheDocument()
     // not a Word file: no fields, no filled Word document
@@ -206,7 +238,7 @@ describe('Content of a file document (DMS-115)', () => {
   })
 
   it('the fields of a frozen version are shown read-only', async () => {
-    renderPanel(version('Published'), false)
+    await renderPanel(version('Published'), false)
     expect(
       await screen.findByText('The field values are frozen with the version.'),
     ).toBeInTheDocument()
@@ -216,7 +248,7 @@ describe('Content of a file document (DMS-115)', () => {
   })
 
   it('typed fields: check box, choice and rows that can be added and removed (DMS-122)', async () => {
-    const { put, user } = renderPanel(
+    const { put, user } = await renderPanel(
       version('Draft'),
       true,
       undefined,
@@ -264,7 +296,7 @@ describe('Content of a file document (DMS-115)', () => {
 
   it('shows typed values read-only and speaks German', async () => {
     setLocale('de')
-    renderPanel(
+    await renderPanel(
       version('Published', 'Budget.xlsx'),
       false,
       undefined,
@@ -288,7 +320,7 @@ describe('Content of a file document (DMS-115)', () => {
 
   it('German labels of the inputs for rows', async () => {
     setLocale('de')
-    const { user } = renderPanel(version('Draft'), true, undefined, typedFields(true))
+    const { user } = await renderPanel(version('Draft'), true, undefined, typedFields(true))
     expect(await screen.findByText('Noch keine Zeilen.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Zeile hinzufügen' }))
     expect(screen.getByRole('textbox', { name: 'Item, Zeile 1' })).toBeInTheDocument()
@@ -297,9 +329,13 @@ describe('Content of a file document (DMS-115)', () => {
   })
 
   it('designers use a Word document as template, without its values (DMS-127)', async () => {
-    const { post, user } = renderPanel(version('Published'), false, undefined, fields(false), [
-      'TemplateDesigner',
-    ])
+    const { post, user } = await renderPanel(
+      version('Published'),
+      false,
+      undefined,
+      fields(false),
+      ['TemplateDesigner'],
+    )
     await user.click(await screen.findByRole('button', { name: 'Use as template…' }))
     const name = screen.getByLabelText('Name of the template')
     expect(name).toHaveValue('Wartungsvertrag')
@@ -323,13 +359,13 @@ describe('Content of a file document (DMS-115)', () => {
   })
 
   it('only designers see "Use as template", and only for Word documents', async () => {
-    renderPanel(version('Published'), false, undefined, fields(false), ['Author'])
+    await renderPanel(version('Published'), false, undefined, fields(false), ['Author'])
     expect(await screen.findByText('VT-2026-0007')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Use as template…' })).not.toBeInTheDocument()
   })
 
   it('no "Use as template" for other files', async () => {
-    renderPanel(version('Published', 'Budget.xlsx'), false, undefined, fields(false), [
+    await renderPanel(version('Published', 'Budget.xlsx'), false, undefined, fields(false), [
       'TemplateDesigner',
     ])
     expect(await screen.findByText('VT-2026-0007')).toBeInTheDocument()
@@ -338,7 +374,7 @@ describe('Content of a file document (DMS-115)', () => {
 
   it('"Use as template" speaks German', async () => {
     setLocale('de')
-    const { user } = renderPanel(version('Published'), false, undefined, fields(false), [
+    const { user } = await renderPanel(version('Published'), false, undefined, fields(false), [
       'TemplateDesigner',
     ])
     await user.click(await screen.findByRole('button', { name: 'Als Vorlage verwenden …' }))

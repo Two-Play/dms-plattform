@@ -1,13 +1,14 @@
 import type { FieldType, MetadataValue, TemplateField } from '@/api/templates'
 import { t } from '@/i18n'
 import { formatPlainDate } from '@/i18n/format'
-import { parseNumberText } from '@/i18n/numbers'
+import { numberToText, parseNumberText } from '@/i18n/numbers'
 
 /**
  * Raw form input of a field, before conversion:
  * - single values: the input text (`''` when empty); yes/no as `'true'`/`'false'`; selections as the code
  * - amounts: amount text and currency code
- * - multiple selections: the selected codes; other multiple fields: one value per line
+ * - multiple selections: the selected codes; other multiple fields: one value per line, an amount with
+ *   its currency (`1.250,50 EUR`)
  */
 export type FieldInput = string | string[] | { amount: string; currency: string }
 
@@ -46,8 +47,12 @@ function range(
   min: number | undefined,
   max: number | undefined,
 ): string | undefined {
-  if (min !== undefined && value < min) return t('docs.validation.atLeast', { min })
-  if (max !== undefined && value > max) return t('docs.validation.atMost', { max })
+  if (min !== undefined && value < min) {
+    return t('docs.validation.atLeast', { min: numberToText(min) })
+  }
+  if (max !== undefined && value > max) {
+    return t('docs.validation.atMost', { max: numberToText(max) })
+  }
   return undefined
 }
 
@@ -129,8 +134,37 @@ function convertSingle(fieldType: FieldType, text: string): Converted {
       if (!UUID.test(trimmed)) return { kind: 'invalid', message: t('docs.validation.documentId') }
       return { kind: 'value', value: { type: 'DocumentRef', documentId: trimmed } }
     case 'Amount':
-      return { kind: 'invalid', message: t('docs.validation.amountMissing') }
+      return convertAmountLine(fieldType, trimmed)
   }
+}
+
+const AMOUNT_LINE = /^(.+?)\s*([A-Za-z]{3})$/
+
+/** The currency of a line that names none: only one the field cannot have any other than. */
+function onlyCurrency(fieldType: Extract<FieldType, { type: 'Amount' }>): string | undefined {
+  const allowed = fieldType.currencies ?? []
+  return allowed.length === 1 ? allowed[0] : undefined
+}
+
+/** One line of a multiple amount field, as `singleText` writes it: the amount, then its currency. */
+function convertAmountLine(
+  fieldType: Extract<FieldType, { type: 'Amount' }>,
+  line: string,
+): Converted {
+  const match = AMOUNT_LINE.exec(line)
+  if (match) return convertAmount(fieldType, { amount: match[1] ?? '', currency: match[2] ?? '' })
+  const currency = onlyCurrency(fieldType)
+  if (currency !== undefined) return convertAmount(fieldType, { amount: line, currency })
+  // A line shows no default like the currency control of a single amount: a guess could store a wrong one.
+  return {
+    kind: 'invalid',
+    message: t('docs.validation.amountCurrency', { example: amountExample(fieldType) }),
+  }
+}
+
+/** An amount as a line of a multiple amount field, for hints. */
+export function amountExample(fieldType: Extract<FieldType, { type: 'Amount' }>): string {
+  return `${numberToText(12.5)} ${fieldType.currencies?.[0] ?? 'EUR'}`
 }
 
 function convertAmount(

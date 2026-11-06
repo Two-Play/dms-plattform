@@ -357,6 +357,23 @@ describe('NewDocumentPage', () => {
       expect(await screen.findByText('Elsewhere')).toBeInTheDocument()
     })
 
+    it('keeps template and kind after the first save, so no second document starts (DMS-168)', async () => {
+      const { post } = setup()
+      const user = await chooseTemplate()
+      await user.type(fieldControl('Title'), 'Contract')
+      await user.click(screen.getByRole('button', { name: 'Save draft' }))
+      await saved()
+
+      expect(screen.getByLabelText('Template')).toBeDisabled()
+      expect(screen.getByRole('radio', { name: 'Upload a file after saving' })).toBeDisabled()
+      expect(screen.getByRole('radio', { name: 'Edited here (structured)' })).toBeDisabled()
+      expect(
+        screen.getByText('The draft is saved: its template and kind of content stay as they are.'),
+      ).toBeInTheDocument()
+      expect(fieldControl('Title')).toHaveValue('Contract')
+      expect(post.mock.calls.filter(([path]) => path === '/api/v1/documents')).toHaveLength(1)
+    })
+
     it('asks before another content kind replaces the form, and keeps it on "keep"', async () => {
       setup()
       const user = await chooseTemplate()

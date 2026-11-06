@@ -28,7 +28,7 @@ function UploadRoute() {
         void navigate({ to: '/documents/$documentId', params: { documentId }, ignoreBlocker: true })
       }}
       onTemplateCreated={(templateId) => {
-        void navigate({ to: '/templates/$templateId', params: { templateId } })
+        void navigate({ to: '/templates/$templateId', params: { templateId }, ignoreBlocker: true })
       }}
     />
   )

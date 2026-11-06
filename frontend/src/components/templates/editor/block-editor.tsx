@@ -42,6 +42,41 @@ import { inlineText } from './inline-schema'
 import { ReorderControls } from './reorder'
 import { useDragReorder } from './use-drag-reorder'
 
+/**
+ * A count or version: digits only, the same in every language. Anything else is not taken over, so neither a
+ * decimal separator nor an exponent can turn the input into another number; empty counts as 0.
+ */
+function WholeNumberInput({
+  id,
+  value,
+  readOnly,
+  invalid,
+  onChange,
+  className,
+}: {
+  id: string
+  value: number
+  readOnly: boolean
+  invalid: boolean
+  onChange: (value: number) => void
+  className: string
+}) {
+  return (
+    <Input
+      id={id}
+      inputMode="numeric"
+      maxLength={6}
+      value={String(value)}
+      readOnly={readOnly}
+      aria-invalid={invalid ? true : undefined}
+      onChange={(e) => {
+        if (/^\d*$/.test(e.target.value)) onChange(Number(e.target.value))
+      }}
+      className={className}
+    />
+  )
+}
+
 function blockName(block: EditorBlock): string {
   const type = t(`templateEditor.blockTypes.${block.type}`)
   if (block.type === 'Heading' || block.type === 'Paragraph') {
@@ -393,16 +428,13 @@ function BlockBody({
           </div>
           <div className="space-y-1">
             <Label htmlFor={`${id}-version`}>{t('templateEditor.clause.version')}</Label>
-            <Input
+            <WholeNumberInput
               id={`${id}-version`}
-              type="number"
-              min={1}
-              step={1}
               value={block.version}
               readOnly={env.readOnly}
-              aria-invalid={hasPart(issues, 'version') || block.version < 1 ? true : undefined}
-              onChange={(e) => {
-                onChange({ ...block, version: Math.trunc(Number(e.target.value)) })
+              invalid={hasPart(issues, 'version') || block.version < 1}
+              onChange={(version) => {
+                onChange({ ...block, version })
               }}
               className="w-24"
             />
@@ -663,16 +695,13 @@ function TableEditor({
           <Label htmlFor={`${id}-header`} className="text-xs">
             {t('templateEditor.table.headerRows')}
           </Label>
-          <Input
+          <WholeNumberInput
             id={`${id}-header`}
-            type="number"
-            min={0}
-            max={block.rows.length}
             value={block.headerRows}
             readOnly={env.readOnly}
-            aria-invalid={hasPart(issues, 'headerRows') ? true : undefined}
-            onChange={(e) => {
-              onChange({ ...block, headerRows: Math.trunc(Number(e.target.value)) })
+            invalid={hasPart(issues, 'headerRows')}
+            onChange={(headerRows) => {
+              onChange({ ...block, headerRows })
             }}
             className="w-20"
           />
