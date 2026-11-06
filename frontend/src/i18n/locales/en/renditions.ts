@@ -17,6 +17,10 @@ export const renditions = {
   none: 'No archive PDF was requested for this version.',
   cause: 'Cause:',
   technicalDetail: 'Technical detail',
+  withdrawHint:
+    'If a retry cannot help, you can withdraw the version with the action above and then start a new one.',
+  withdrawHintOthers:
+    'If a retry cannot help, holders of the owner role or those who approved the version can withdraw it; a new version can then be started.',
   causes: {
     unavailable:
       'The rendering or conversion service or the object storage could not be reached. This is usually temporary.',
@@ -27,6 +31,8 @@ export const renditions = {
     invalid: 'The version cannot be rendered in its current state.',
     too_complex: 'The original file is too large or too complex to fill its fields.',
     integrity: 'A stored file does not match its checksum.',
+    segregation_of_duties:
+      'The last approval came from someone who changed this version; the four-eyes rule does not allow it. A retry cannot help.',
     database: 'The database could not be reached.',
     timeout: 'The rendering did not finish in time.',
     internal: 'An internal error occurred in the platform.',

@@ -174,13 +174,14 @@ object EvidenceReportLayout:
           "Valid from"      -> v.validFrom.fold("–")(_.toString),
           "Published"       -> v.publishedAt.fold("–")(at),
           "Superseded by"   -> v.supersededBy.fold("–")(_.toString)
-        ) ++ v.withdrawal.toList.flatMap(w =>
-          List(
-            "Withdrawn, never valid" ->
-              (at(w.at) + s" by ${who(w.by)}" + w.actingFor.fold("")(p => s" on behalf of ${who(p)}")),
-            "Reason of the withdrawal" -> w.reason
+        ) ++ v.editors.toList.map(e => "Changed by" -> e.map(who).mkString(", ")) ++ v.withdrawal.toList
+          .flatMap(w =>
+            List(
+              "Withdrawn, never valid" ->
+                (at(w.at) + s" by ${who(w.by)}" + w.actingFor.fold("")(p => s" on behalf of ${who(p)}")),
+              "Reason of the withdrawal" -> w.reason
+            )
           )
-        )
       )
       v.rendition.filter(r => r.producedBy.isDefined || r.retention.isDefined).foreach { r =>
         add("<h3>Rendition</h3>\n")

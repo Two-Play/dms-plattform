@@ -331,7 +331,9 @@ object WorkflowApi:
           s"sign-in, proven by the OIDC ID token in header ${SecuredApi.IdTokenHeader} (401 " +
           "reauthentication_required: sign in again with OIDC max_age=0 or prompt=login and repeat the vote " +
           "with the new ID token). " +
-          "RequestChanges and Reject return the version to its author."
+          "RequestChanges and Reject return the version to its author. 403 segregation_of_duties if the caller " +
+          "or the person they stand in for created or changed the version (four-eyes rule, ADR 0075): whoever " +
+          "wrote part of a version does not vote on it."
       )
       .tag("Workflow")
       .serverLogic(p =>

@@ -64,6 +64,26 @@ export const compliance: Translation<typeof en.compliance> = {
   acknowledged: 'Zur Kenntnis genommen',
   ofAudience: '{acknowledged} von {audience}',
   whoLabel: 'Wer hat {title} {version} noch nicht zur Kenntnis genommen',
+  fourEyes: {
+    title: 'Vier-Augen-Prinzip: rückwirkende Prüfung',
+    description:
+      'Freigaben und zustimmende Stimmen von Personen, die die Version geändert haben. Sie waren zulässig, als sie abgegeben wurden, und bleiben gültig; die Regel erfasst Bearbeitende erst seit ihrer Änderung. Der Bericht dient Ihrer Entscheidung im Einzelfall.',
+    show: 'Befunde anzeigen',
+    none: 'Keine Befunde.',
+    noneText:
+      'Niemand, der eine Version geändert hat, hat sie freigegeben oder eine zustimmende Stimme abgegeben, die noch gilt.',
+    decision: 'Entscheidung',
+    person: 'Geändert und entschieden von',
+    decidedOn: 'Entschieden am',
+    changedOn: 'Zuerst geändert am',
+    deputy: 'über Vertretung',
+    stillOpen: 'Prüfung läuft noch',
+    kinds: {
+      Approval: 'Freigabe',
+      ApprovalVote: 'Zustimmende Stimme',
+      ReviewVote: 'Prüfstimme',
+    },
+  },
   who: 'Wer fehlt noch?',
   withoutOwner: 'Dokumente ohne Verantwortliche/n',
   withoutOwnerDetail: 'Gültige Dokumente, für die niemand verantwortlich ist',

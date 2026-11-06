@@ -52,7 +52,7 @@ lazy val templatesCore = templatesCoreModule.dependsOn(templatesApi, documentsAp
 lazy val documentsApi  = apiModule("documents")
   .dependsOn(templatesApi)
   .settings(libraryDependencies ++= Dependencies.re2j)
-lazy val documentsCore     = documentsCoreModule.dependsOn(documentsApi, templatesApi, auditApi)
+lazy val documentsCore     = documentsCoreModule.dependsOn(documentsApi, templatesApi, auditApi, renderingApi)
 lazy val workflowApi       = apiModule("workflow")
 lazy val workflowCore      = workflowCoreModule.dependsOn(workflowApi, documentsApi, auditApi)
 lazy val renderingApi      = apiModule("rendering")

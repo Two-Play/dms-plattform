@@ -488,6 +488,45 @@ object ComplianceApiSpec extends ZIOSpecDefault:
           trail.forall((actor, _, _) => actor == officer.value || actor == officerHr.value)
         )
     },
+    test("the four-eyes findings leave as CSV with the rights of the screen, audited and formula-safe") {
+      for
+        f <- fixture
+        version  = f.hrPolicy.id
+        document = f.hrPolicy.documentId.value
+        title <- asOwner(sql"select title from dms.document where id = $document".query[String].run().head)
+        _     <- asOwner(
+          sql"""insert into dms.document_version_editor (tenant_id, version_id, user_id)
+                values (${tenantId.value}, $version, ${approver.value}) on conflict do nothing""".update.run()
+        )
+        _ <- asOwner(
+          sql"""update dms.document set title = '=HYPERLINK("http://evil")' where id = $document""".update
+            .run()
+        )
+        viewedBefore <- audited(FourEyesReportApi.FindingsViewed).map(_.size)
+        csv          <- exportOf(officer, "four-eyes-findings", "?lang=de")
+        inScope      <- exportOf(officerHr, "four-eyes-findings")
+        denied       <- exportOf(readerAll, "four-eyes-findings")
+        trail        <- audited(ComplianceApi.ListExported)
+        viewedAfter  <- audited(FourEyesReportApi.FindingsViewed).map(_.size)
+        _            <- asOwner(sql"update dms.document set title = $title where id = $document".update.run())
+      yield
+        val rows = csv._2.split("\r\n").toList
+        assertTrue(
+          csv._1 == Status.Ok,
+          rows.head.contains("Dokument-ID;Titel;"),
+          rows.exists(r => r.contains(document.toString) && r.contains(";Approval;")),
+          csv._2.contains("'=HYPERLINK"),
+          !csv._2.contains(";=HYPERLINK"),
+          csv._2.contains(approver.value),
+          inScope._1 == Status.Ok,
+          inScope._2.contains(document.toString),
+          denied._1 == Status.Forbidden,
+          trail.exists((actor, _, details) =>
+            actor == officer.value && details.contains("four-eyes-findings") && details.contains("\"format\"")
+          ),
+          viewedAfter == viewedBefore
+        )
+    },
     test("a title or a name in an export cannot run as a formula") {
       for
         f <- fixture

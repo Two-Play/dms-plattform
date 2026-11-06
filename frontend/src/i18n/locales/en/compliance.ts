@@ -109,4 +109,23 @@ export const compliance = {
   remindedAgain: 'Next reminder from {date}',
   remindTooSoon: 'The readers were reminded less than 24 hours ago.',
   downloadNames: 'Download as CSV',
+  fourEyes: {
+    title: 'Four-eyes rule: retroactive check',
+    description:
+      'Approvals and approving votes by people who changed the version. They were allowed when they were given and stay valid; the rule covers editors since it changed. The report is for your decision on each case.',
+    show: 'Show the findings',
+    none: 'No findings.',
+    noneText: 'Nobody who changed a version has approved it or has an approving vote that stands.',
+    decision: 'Decision',
+    person: 'Changed by and decided',
+    decidedOn: 'Decided on',
+    changedOn: 'First changed on',
+    deputy: 'through deputy',
+    stillOpen: 'review still running',
+    kinds: {
+      Approval: 'Approval',
+      ApprovalVote: 'Approving vote',
+      ReviewVote: 'Review vote',
+    },
+  },
 } as const

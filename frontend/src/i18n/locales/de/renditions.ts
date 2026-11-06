@@ -18,6 +18,10 @@ export const renditions: Translation<typeof en.renditions> = {
   none: 'Für diese Version wurde kein Archiv-PDF angefordert.',
   cause: 'Ursache:',
   technicalDetail: 'Technische Details',
+  withdrawHint:
+    'Hilft ein erneuter Versuch nicht, können Sie die Version oben zurückziehen und danach eine neue Version beginnen.',
+  withdrawHintOthers:
+    'Hilft ein erneuter Versuch nicht, können Inhaber der Eigentümerrolle oder die Freigebenden die Version zurückziehen; danach lässt sich eine neue Version beginnen.',
   causes: {
     unavailable:
       'Der Rendering- oder Konvertierungsdienst oder der Objektspeicher war nicht erreichbar. Das ist meist vorübergehend.',
@@ -28,6 +32,8 @@ export const renditions: Translation<typeof en.renditions> = {
     invalid: 'Die Version kann in ihrem jetzigen Zustand nicht gerendert werden.',
     too_complex: 'Die Originaldatei ist zu groß oder zu komplex, um ihre Felder zu füllen.',
     integrity: 'Eine gespeicherte Datei stimmt nicht mit ihrer Prüfsumme überein.',
+    segregation_of_duties:
+      'Die letzte Freigabe stammt von jemandem, der diese Version geändert hat; das Vier-Augen-Prinzip lässt sie nicht zu. Ein erneuter Versuch hilft nicht.',
     database: 'Die Datenbank war nicht erreichbar.',
     timeout: 'Das Erzeugen wurde nicht rechtzeitig fertig.',
     internal: 'In der Plattform ist ein interner Fehler aufgetreten.',

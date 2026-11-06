@@ -126,6 +126,11 @@ function WithdrawForm({
 function description(version: WithdrawableVersion): string {
   const label = version.version
   const valid = version.validVersion
+  if (version.renditionFailed) {
+    return valid
+      ? t('withdrawVersion.descriptionUnrendered', { label, valid })
+      : t('withdrawVersion.descriptionUnrenderedNoValid', { label })
+  }
   if (version.publicationFailed) {
     return valid
       ? t('withdrawVersion.descriptionFailed', { label, valid })
@@ -139,8 +144,8 @@ function description(version: WithdrawableVersion): string {
 
 /**
  * "Withdraw version" on the document page (DMS-143, ADR 0059): stops an approved version before its valid-from
- * date, or later if its publication failed for good (DMS-145, ADR 0061), for callers the backend names the
- * version to (`withdrawable`: owner role or having approved it, as deputy too: DMS-145, ADR 0070, then
+ * date, or later if its publication failed for good (DMS-145, ADR 0061), or a version in approval whose
+ * rendition failed for good (DMS-163, ADR 0078), for callers the backend names the version to (`withdrawable`: owner role or having approved it, as deputy too: DMS-145, ADR 0070, then
  * `actingFor` names the approver). A confirmation dialog with a required reason.
  * The backend decides again; if the publication or a retry got there first, the dialog says so, and closing it
  * reloads the document.

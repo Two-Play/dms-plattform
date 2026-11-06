@@ -118,6 +118,30 @@ describe('Rendition status on the document page (DMS-93)', () => {
     })
   })
 
+  it('names the way out of a rendition that failed for good (DMS-163)', async () => {
+    renderWith(<RenditionStatusNotice documentId={documentId} versionId={versionId} canWithdraw />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'you can withdraw the version with the action above',
+    )
+  })
+
+  it('tells others who can withdraw, and offers no retry after a refusal of the four-eyes rule', async () => {
+    const refusal: RenditionStatus = {
+      ...failed,
+      lastError: { code: 'segregation_of_duties', message: 'the last approver changed it' },
+      canRetry: false,
+    }
+    renderWith(<RenditionStatusNotice documentId={documentId} versionId={versionId} />, {
+      load: () => ok(refusal),
+    })
+
+    const notice = await screen.findByRole('alert')
+    expect(notice).toHaveTextContent('The last approval came from someone who changed this version')
+    expect(notice).toHaveTextContent('holders of the owner role or those who approved the version')
+    expect(within(notice).queryByRole('button', { name: 'Retry now' })).not.toBeInTheDocument()
+  })
+
   it('shows an automatic retry without a button for callers who may not retry', async () => {
     renderWith(<RenditionStatusNotice documentId={documentId} versionId={versionId} />, {
       load: () => ok(retrying),

@@ -103,6 +103,7 @@ export const docPanels = {
     list: 'Versions',
     version: 'Version {label}',
     by: 'by',
+    changedBy: 'Changed by',
     changesSinceLabel: 'Changes in {version} since {previous}',
     changesSince: 'Changes since {previous}',
     compare: 'Compare selected versions',

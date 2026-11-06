@@ -128,7 +128,7 @@ object PublicationStatusApi:
                     .check(Action.RetryPublication, resource.copy(status = Some(DocumentStatus.Approved)))
                   // The lock first, the job and the status after it: a withdrawal of the failed version does the
                   // same, so that exactly one of the two wins (ADR 0061).
-                  locked <- ctx.service.lockForPublicationRetry(versionId)
+                  locked <- ctx.service.lockForJobRetry(versionId)
                   before <- jobOf(versionId)
                   state = before.map((job, _) => RenditionStatusApi.stateOf(job))
                   outcome <- before match

@@ -10,6 +10,10 @@ export const withdrawVersion = {
     'The publication of version {label} failed for good. If you withdraw it, it is never published, version {valid} stays valid and a new version can be started. Readers are not notified; the author, the approvers and the owner are. This cannot be undone.',
   descriptionFailedNoValid:
     'The publication of version {label} failed for good. If you withdraw it, it is never published and a new version can be started; the document has no valid version until that one is approved. The author, the approvers and the owner are notified. This cannot be undone.',
+  descriptionUnrendered:
+    'The archive PDF of version {label} could not be produced, so its approval cannot finish. If you withdraw it, it is never approved or published, version {valid} stays valid and a new version can be started. Readers are not notified; the author, the approvers and the owner are. This cannot be undone.',
+  descriptionUnrenderedNoValid:
+    'The archive PDF of version {label} could not be produced, so its approval cannot finish. If you withdraw it, it is never approved or published and a new version can be started from it; the document has no valid version until that one is approved. The author, the approvers and the owner are notified. This cannot be undone.',
   reason: 'Reason',
   reasonHint:
     'Why must this version not take effect? Shown in the version history and recorded in the audit trail.',

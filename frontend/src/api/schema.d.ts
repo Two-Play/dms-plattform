@@ -876,7 +876,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Stops an approved version before its valid-from date (DMS-143), or later if its publication failed for good (Failed, DMS-145): it goes to Withdrawn, is never published, the valid version stays valid and the document can get a new version. Requires Withdraw: the owner role or having approved this version. The reason is required (422), at most 4000 characters, and recorded in the audit trail. A deputy who approved the version may withdraw it while the deputyship stands, recorded on behalf of the approver. Author, approvers and owner are notified, readers are not. 409 with the code `version_published` if the publication got there first, `version_due` from its valid-from date on unless the publication failed for good (also if a retry got there first), `version_withdrawn` if it was withdrawn already, `version_not_approved` if it was never approved. */
+    /** @description Stops an approved version before its valid-from date (DMS-143), or later if its publication failed for good (Failed, DMS-145), or a version in approval whose archive rendition failed for good (Failed, DMS-163; its workflow case ends as Withdrawn): it goes to Withdrawn, is never published, the valid version stays valid and the document can get a new version. Requires Withdraw: the owner role or having approved this version. The reason is required (422), at most 4000 characters, and recorded in the audit trail. A deputy who approved the version may withdraw it while the deputyship stands, recorded on behalf of the approver. Author, approvers and owner are notified, readers are not. 409 with the code `version_published` if the publication got there first, `version_due` from its valid-from date on unless the publication failed for good (also if a retry got there first), `version_withdrawn` if it was withdrawn already, `version_not_approved` if it is not approved and its rendition did not fail for good. */
     post: operations['postApiV1DocumentsIdVersionsVersionidWithdraw']
     delete?: never
     options?: never
@@ -1405,7 +1405,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Requeues the rendering job of a version in approval whose rendition failed (Failed: starts over with all attempts) or waits for its next attempt (Retrying: runs now). 409 rendition_not_failed in any other state. Requires RetryRendition: the person named owner (without owner: the author) with any role covering the document, records managers and tenant administrators. Audited. */
+    /** @description Requeues the rendering job of a version in approval whose rendition failed (Failed: starts over with all attempts) or waits for its next attempt (Retrying: runs now). 409 rendition_not_failed in any other state, and if the four-eyes rule refused the approval (code segregation_of_duties): a retry cannot help then, the version can only be withdrawn. Requires RetryRendition: the person named owner (without owner: the author) with any role covering the document, records managers and tenant administrators. Audited. */
     post: operations['postApiV1DocumentsIdVersionsVersionidRenditionRetry']
     delete?: never
     options?: never
@@ -1797,7 +1797,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Casts a vote on a task. A reason is required except for Approve (422). Approval votes need a recent sign-in, proven by the OIDC ID token in header X-DMS-Id-Token (401 reauthentication_required: sign in again with OIDC max_age=0 or prompt=login and repeat the vote with the new ID token). RequestChanges and Reject return the version to its author. */
+    /** @description Casts a vote on a task. A reason is required except for Approve (422). Approval votes need a recent sign-in, proven by the OIDC ID token in header X-DMS-Id-Token (401 reauthentication_required: sign in again with OIDC max_age=0 or prompt=login and repeat the vote with the new ID token). RequestChanges and Reject return the version to its author. 403 segregation_of_duties if the caller or the person they stand in for created or changed the version (four-eyes rule, ADR 0075): whoever wrote part of a version does not vote on it. */
     post: operations['postApiV1WorkflowTasksTaskidVotes']
     delete?: never
     options?: never
@@ -2471,7 +2471,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description A list of the cockpit as CSV for spreadsheets: UTF-8 with byte order mark, semicolon-separated, with the same rights, scope and filters as the list on the screen; text that a spreadsheet would run as a formula starts with an apostrophe. Every export is recorded in the audit trail, which is why this is a POST. */
+    /** @description A list of the cockpit as CSV for spreadsheets: UTF-8 with byte order mark, semicolon-separated, with the same rights, scope and filters as the list on the screen; text that a spreadsheet would run as a formula starts with an apostrophe. Every export is recorded in the audit trail, which is why this is a POST. four-eyes-findings has no filters, like its list. */
     post: operations['postApiV1ComplianceExportsList']
     delete?: never
     options?: never
@@ -2490,6 +2490,23 @@ export interface paths {
     put?: never
     /** @description Reminds the owner of an overdue review (and the owner's deputies) or escalates it (also to the escalation targets of the deadline policy; without any, the compliance officers in scope, else the administrators). For compliance officers in scope. At most once per version, kind and 24 hours, for all officers together (429 notice_too_soon). 422 not_overdue if the review is not overdue, no_recipient if nobody can be reached, invalid without kind or reason. The reason is recorded in the audit trail, not sent. */
     post: operations['postApiV1ComplianceOverdue-reviewsDocumentidVersionidNotices']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/compliance/four-eyes-findings': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Retroactive check of the four-eyes rule (business concept 2.4, ADR 0078): approvals and approving votes that stand although the person changed the version, the newest first. Review votes count if the four-eyes setting of the class applied to them. They stay valid; the report shows them for a decision. For compliance officers, decided per version with MonitorCompliance, so only versions within their scope and clearance. Reading the report is recorded in the audit trail. */
+    get: operations['getApiV1ComplianceFour-eyes-findings']
+    put?: never
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -3882,6 +3899,7 @@ export interface components {
       publishedAt?: string
       file?: components['schemas']['VersionFileView']
       withdrawal?: components['schemas']['WithdrawalView']
+      editors?: string[]
     }
     /** DocumentView */
     DocumentView: {
@@ -3911,6 +3929,7 @@ export interface components {
       startVersionBlocked?: string
       canDiscardDraft: boolean
       withdrawable?: components['schemas']['WithdrawableVersionView']
+      changeCostsVote: boolean
       latestReleasedVersion?: string
     }
     /** EditorialCheckView */
@@ -4023,6 +4042,31 @@ export interface components {
        * @enum {string}
        */
       type: 'FormattingChanged'
+    }
+    /** FourEyesFindingView */
+    FourEyesFindingView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title: string
+      versionLabel: string
+      versionStatus: string
+      classPath?: string[]
+      unit?: string
+      owner?: string
+      kind: string
+      decidedBy: string
+      actingFor?: string
+      editor: string
+      step?: string
+      /** Format: int32 */
+      round?: number
+      /** Format: date-time */
+      decidedAt: string
+      /** Format: date-time */
+      firstChangedAt: string
+      caseOpen: boolean
     }
     /** GroupMemberView */
     GroupMemberView: {
@@ -5924,6 +5968,7 @@ export interface components {
       validFrom?: string
       validVersion?: string
       publicationFailed: boolean
+      renditionFailed: boolean
       actingFor?: string
     }
     /** WithdrawalView */
@@ -12785,7 +12830,7 @@ export interface operations {
       }
       header?: never
       path: {
-        /** @description overdue-reviews, acknowledgements, documents-without-owner or deviations */
+        /** @description overdue-reviews, acknowledgements, documents-without-owner, deviations or four-eyes-findings */
         list: string
       }
       cookie?: never
@@ -12854,6 +12899,33 @@ export interface operations {
         }
         content: {
           'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1ComplianceFour-eyes-findings': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['FourEyesFindingView'][]
         }
       }
       default: {

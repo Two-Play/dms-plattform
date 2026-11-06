@@ -141,6 +141,8 @@ export const docs: Translation<typeof en.docs> = {
     frozenHint: 'Der freigegebene Wortlaut, aus der eingefrorenen Version erzeugt.',
     region: 'Inhalt der Version {label}',
     olderVersion: 'Angezeigt wird Version {label}.',
+    changeCostsVote:
+      'Sie haben über diese Version abgestimmt oder halten eine Aufgabe dazu. Ändern Sie sie, zählen Sie als einer ihrer Autoren: Ihre Stimme gilt dann nicht mehr, und Sie können diese Version nicht mehr prüfen oder freigeben (Vier-Augen-Prinzip).',
     toCurrent: 'Aktuelle Version anzeigen',
   },
   meta: {

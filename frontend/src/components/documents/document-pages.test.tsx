@@ -104,6 +104,7 @@ function draftDocument(values: Record<string, FieldValue>, status = 'Draft'): Do
     canAssignNumber: false,
     canStartVersion: false,
     canDiscardDraft: false,
+    changeCostsVote: false,
     kind: 'Structured',
     current: {
       id: 'v1',

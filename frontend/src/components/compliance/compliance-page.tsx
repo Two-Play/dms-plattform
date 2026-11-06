@@ -45,6 +45,7 @@ import { t } from '@/i18n'
 import { formatDateTime, formatPlainDate as formatDate } from '@/i18n/format'
 import { toast } from '@/lib/toast'
 import { groupLabel, type CompliancePageSearch } from './compliance-params'
+import { FourEyesFindings } from './four-eyes-findings'
 
 const MAX_REASON = 500
 
@@ -1033,7 +1034,10 @@ function AcknowledgementList({ search }: { search: CompliancePageSearch }) {
   )
 }
 
-/** Compliance cockpit (US-15.1): key figures, figures per unit and owner, and their lists. */
+/**
+ * Compliance cockpit (US-15.1): key figures, figures per unit and owner, their lists, and the
+ * retroactive check of the four-eyes rule (DMS-163).
+ */
 export function CompliancePage() {
   const search = useSearch({ from: '/_app/compliance' })
   return (
@@ -1044,6 +1048,7 @@ export function CompliancePage() {
       {search.view === 'acknowledgements' && <AcknowledgementList search={search} />}
       {search.view === 'unowned' && <UnownedList search={search} />}
       {search.view === 'deviations' && <DeviationList search={search} />}
+      <FourEyesFindings />
     </div>
   )
 }

@@ -25,6 +25,7 @@ export type RenditionErrorCode =
   | 'invalid'
   | 'too_complex'
   | 'integrity'
+  | 'segregation_of_duties'
   | 'database'
   | 'timeout'
   | 'internal'
@@ -36,6 +37,7 @@ const ERROR_CODES: ReadonlySet<string> = new Set([
   'invalid',
   'too_complex',
   'integrity',
+  'segregation_of_duties',
   'database',
   'timeout',
   'internal',

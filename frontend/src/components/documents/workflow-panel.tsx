@@ -37,7 +37,15 @@ function DueDate({ dueAt }: { dueAt: string }) {
   )
 }
 
-function CaseDetails({ workflowCase, version }: { workflowCase: WorkflowCase; version: string }) {
+function CaseDetails({
+  workflowCase,
+  version,
+  withdrawableVersion,
+}: {
+  workflowCase: WorkflowCase
+  version: string
+  withdrawableVersion?: string
+}) {
   const tasks = (workflowCase.tasks ?? []).filter((task) => task.round === workflowCase.round)
   const votes = workflowCase.votes ?? []
   const current = tasks.find((task) => task.step === workflowCase.currentStep)
@@ -48,7 +56,11 @@ function CaseDetails({ workflowCase, version }: { workflowCase: WorkflowCase; ve
       data-testid="workflow-case"
     >
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <StatusBadge status={workflowCase.status} />
+        <StatusBadge
+          status={
+            workflowCase.status === 'Withdrawn' ? 'WithdrawnBeforeValid' : workflowCase.status
+          }
+        />
         <span>{t('docPanels.workflow.round', { round: workflowCase.round })}</span>
         {workflowCase.status === 'Running' && current && (
           <span className="text-muted-foreground">
@@ -74,6 +86,7 @@ function CaseDetails({ workflowCase, version }: { workflowCase: WorkflowCase; ve
         <RenditionStatusNotice
           documentId={workflowCase.documentId}
           versionId={workflowCase.versionId}
+          canWithdraw={withdrawableVersion === workflowCase.versionId}
         />
       )}
       {tasks.length > 0 && (
@@ -208,12 +221,15 @@ export function WorkflowPanel({
   documentId,
   title,
   versions,
+  withdrawableVersion,
 }: {
   documentId: string
   /** Document title, shown in the vote dialog. */
   title?: string
   /** Version labels by version id. */
   versions: Record<string, string>
+  /** The version the caller may withdraw now, if any. */
+  withdrawableVersion?: string
 }) {
   const client = useApiClient()
   const workflow = useQuery(documentWorkflowQuery(client, documentId))
@@ -242,6 +258,7 @@ export function WorkflowPanel({
               key={c.id}
               workflowCase={c}
               version={versions[c.versionId] ?? t('docPanels.workflow.earlierVersion')}
+              withdrawableVersion={withdrawableVersion}
             />
           ))}
       </CardContent>

@@ -83,6 +83,41 @@ object EvidenceReportSpec extends ZIOSpecDefault:
         !html.contains("Verified prefix")
       )
     },
+    test("the editors of a version are persons of the report, with their names (ADR 0078)") {
+      val version = EvidenceVersion(
+        UUID.randomUUID(),
+        "1.0",
+        "Published",
+        "Major",
+        None,
+        "author-1",
+        at,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        "b" * 64,
+        None,
+        Nil,
+        Nil,
+        requiresAcknowledgement = false,
+        None,
+        Nil,
+        editors = Some(List("author-1", "editor-1"))
+      )
+      val changed = stored.copy(versions = List(version))
+      val html    = EvidenceReportLayout.html(
+        EvidenceReport.named(changed, Map("editor-1" -> "Eva Editor")),
+        "a" * 64
+      )
+      assertTrue(
+        EvidenceReport.personIds(changed) == EvidenceReport.personIds(stored) + "editor-1",
+        html.contains("author-1, Eva Editor"),
+        html.contains("<td>Eva Editor</td><td>editor-1</td>")
+      )
+    },
     test(
       "names are recorded in the report and printed instead of the ids, which stay in a table (ADR 0077)"
     ) {

@@ -306,7 +306,7 @@ object VersionPublicationSpec extends ZIOSpecDefault:
 
   /** A retry as the API does it: the lock of the version first, then the job. */
   private def retry(s: DocumentService, version: UUID) =
-    s.lockForPublicationRetry(version).tap { v =>
+    s.lockForJobRetry(version).tap { v =>
       ZIO.when(v.status == Approved)(
         Db.sql(
           sql"""select dms.job_retry(${PublicationJobs.PublishKind}, idempotency_key) from dms.job

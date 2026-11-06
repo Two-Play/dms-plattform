@@ -2,7 +2,7 @@ import { ErrorState } from '@/components/shared/error-state'
 import { LoadingState } from '@/components/shared/states'
 import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useApiClient } from '@/api/context'
 import { documentVersionsQuery } from '@/api/versions'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,23 @@ import { formatDate } from '@/i18n/format'
 import { StatusBadge } from './status-badge'
 import { versionStatus } from './status-label'
 import { changeKindLabel } from './version-labels'
+
+/** Who changed a version besides the person who started it: none of them may approve it (ADR 0075). */
+function ChangedBy({ editors, author }: { editors: string[] | undefined; author: string }) {
+  const others = (editors ?? []).filter((e) => e !== author)
+  if (others.length === 0) return null
+  return (
+    <p className="text-muted-foreground">
+      {t('docPanels.history.changedBy')}{' '}
+      {others.map((editor, i) => (
+        <Fragment key={editor}>
+          {i > 0 && ', '}
+          <UserName id={editor} />
+        </Fragment>
+      ))}
+    </p>
+  )
+}
 
 /**
  * The versions of a document the caller may read (US-05.1, DMS-54), newest first, with the authors' change
@@ -92,6 +109,7 @@ export function VersionHistory({ documentId, shownId }: { documentId: string; sh
                       {version.changeReason && (
                         <p className="text-muted-foreground">{version.changeReason}</p>
                       )}
+                      <ChangedBy editors={version.editors} author={version.createdBy} />
                       {version.withdrawal && (
                         <p>
                           {t('withdrawVersion.neverValid', {

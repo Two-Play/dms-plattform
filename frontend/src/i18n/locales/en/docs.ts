@@ -139,6 +139,8 @@ export const docs = {
     frozenHint: 'The wording as approved, rendered from the frozen version.',
     region: 'Content of version {label}',
     olderVersion: 'You are looking at version {label}.',
+    changeCostsVote:
+      'You voted on this version or hold a task on it. If you change it, you count as one of its authors: your vote no longer counts, and you cannot review or approve this version any more (four-eyes rule).',
     toCurrent: 'Show the current version',
   },
   meta: {

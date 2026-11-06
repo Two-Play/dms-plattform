@@ -25,6 +25,7 @@ object FailureFollowUpsSpec extends ZIOSpecDefault:
     RenderingError.Invalid("no content"),
     RenderingError.TooComplex("too large"),
     RenderingError.Integrity("checksum"),
+    RenderingError.Refused("the last approver changed the version"),
     RenderingError.Database(DbError.NoTransaction)
   )
 

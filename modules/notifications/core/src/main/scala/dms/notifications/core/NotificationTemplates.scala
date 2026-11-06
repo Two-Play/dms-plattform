@@ -78,6 +78,10 @@ object NotificationTemplates:
       "Grund: Eine gespeicherte Datei passt nicht zu ihrer Prüfsumme.",
       "Reason: a stored file does not match its checksum."
     ),
+    "segregation_of_duties" -> (
+      "Grund: Die letzte Freigabe stammt von jemandem, der diese Version geändert hat. Das Vier-Augen-Prinzip lässt sie nicht zu.",
+      "Reason: the last approval came from someone who changed this version. The four-eyes rule does not allow it."
+    ),
     "database" -> (
       "Grund: Die Datenbank war nicht erreichbar.",
       "Reason: the database could not be reached."
@@ -313,9 +317,9 @@ object NotificationTemplates:
           en = s"${reminderSubjectEn}Archive PDF failed: $docShort"
         )(
           bodyDe =
-            s"${stillOpenDe}Das Archiv-PDF von $docDat konnte endgültig nicht erzeugt werden. $reasonDe Die Version bleibt in Freigabe, bis es vorliegt. $retryHintDe$failureDeputyDe",
+            s"${stillOpenDe}Das Archiv-PDF von $docDat konnte endgültig nicht erzeugt werden. $reasonDe Die Version bleibt in Freigabe, bis es vorliegt. $renditionWayOutDe$failureDeputyDe",
           bodyEn =
-            s"${stillOpenEn}The archive PDF of $doc could not be produced: every attempt failed. $reasonEn The version stays in approval until it exists. $retryHintEn$failureDeputyEn"
+            s"${stillOpenEn}The archive PDF of $doc could not be produced: every attempt failed. $reasonEn The version stays in approval until it exists. $renditionWayOutEn$failureDeputyEn"
         )(failureLink)
       case "failure.publication" =>
         r(
@@ -332,18 +336,22 @@ object NotificationTemplates:
         val reason = Option.when(ctx.document.isDefined)(p("reason"))
         // After a publication that failed for good the date may have passed (ADR 0061).
         val failed = params.get("publicationFailed").contains("true")
+        // Its archive PDF never came, so it was never approved either (ADR 0078).
+        val unrendered = params.get("renditionFailed").contains("true")
         // A deputy who approved the version acts for the approver (ADR 0070).
         val forDe = params.get("actingFor").fold("")(_ => s" i. V. für ${person("actingFor")}")
         val forEn = params.get("actingFor").fold("")(_ => s" on behalf of ${person("actingFor")}")
         r(de = s"Zurückgezogen: $docShort", en = s"Withdrawn: $docShort")(
           bodyDe = s"${person("withdrawnBy")}$forDe hat $doc " +
-            (if failed then
+            (if unrendered then "zurückgezogen, weil ihr Archiv-PDF nicht erzeugt werden konnte. "
+             else if failed then
                s"zurückgezogen, weil die Veröffentlichung${validFromDe} endgültig fehlgeschlagen ist. "
              else s"vor dem Gültigkeitsdatum${validFromDe} zurückgezogen. ") +
             "Die Version wird nicht veröffentlicht; was bisher galt, gilt weiter." +
             reason.fold("")(t => s" Begründung: $t"),
           bodyEn = s"${person("withdrawnBy")}$forEn withdrew $doc " +
-            (if failed then s"after its publication${validFromEn} failed for good. "
+            (if unrendered then "because its archive PDF could not be produced. "
+             else if failed then s"after its publication${validFromEn} failed for good. "
              else s"before its valid-from date${validFromEn}. ") +
             "The version will not be published; what applied so far still applies." +
             reason.fold("")(t => s" Reason: $t")
@@ -545,6 +553,34 @@ object NotificationTemplates:
 
     def withdrawHintDe: String = withdrawHint(de = true)
     def withdrawHintEn: String = withdrawHint(de = false)
+
+    /** What can be done about a dead rendition (ADR 0078): a retry, then the withdrawal. If the four-eyes
+      * rule refused the approval a retry changes nothing, so only the withdrawal is named. Those who cannot
+      * withdraw may not be able to read the version either, so their text names no page.
+      */
+    private def renditionWayOut(de: Boolean): String =
+      val refused = params.get("reason").contains("segregation_of_duties")
+      val canAct  = params.get("canWithdraw").contains("true")
+      val noRetry = if de then "Ein erneuter Versuch hilft nicht." else "A retry cannot help."
+      val who     =
+        if de then "Inhaber der Eigentümerrolle oder die Freigebenden"
+        else "holders of the owner role or those who approved the version"
+      val otherwise =
+        if de then
+          s"Hilft das nicht, können $who die Version zurückziehen; danach lässt sich eine neue Version beginnen."
+        else s"If that does not help, $who can withdraw it; a new version can then be started."
+      val others =
+        if de then s"$who können die Version zurückziehen; danach lässt sich eine neue Version beginnen."
+        else s"${who.capitalize} can withdraw it; a new version can then be started."
+      val yours =
+        if de then
+          "Sie können die Version auf der Dokumentseite zurückziehen und danach eine neue Version beginnen."
+        else "You can withdraw the version on the document page and then start a new one."
+      if refused then s"$noRetry ${if canAct then yours else others}"
+      else s"${retryHint(de)} ${if canAct then withdrawHint(de) else otherwise}"
+
+    def renditionWayOutDe: String = renditionWayOut(de = true)
+    def renditionWayOutEn: String = renditionWayOut(de = false)
 
     private def failureReason: (String, String) =
       params.get("reason").flatMap(FailureReasons.get).getOrElse(OtherFailure)

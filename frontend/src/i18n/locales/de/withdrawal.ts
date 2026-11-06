@@ -12,6 +12,10 @@ export const withdrawVersion: Translation<typeof en.withdrawVersion> = {
     'Die Veröffentlichung von Version {label} ist endgültig fehlgeschlagen. Ziehen Sie sie zurück, wird sie nie veröffentlicht, Version {valid} bleibt gültig, und eine neue Version kann begonnen werden. Leser werden nicht benachrichtigt, Autor, Freigebende und Eigentümer schon. Das lässt sich nicht rückgängig machen.',
   descriptionFailedNoValid:
     'Die Veröffentlichung von Version {label} ist endgültig fehlgeschlagen. Ziehen Sie sie zurück, wird sie nie veröffentlicht, und eine neue Version kann begonnen werden; das Dokument hat keine gültige Version, bis diese freigegeben ist. Autor, Freigebende und Eigentümer werden benachrichtigt. Das lässt sich nicht rückgängig machen.',
+  descriptionUnrendered:
+    'Das Archiv-PDF von Version {label} konnte nicht erzeugt werden, deshalb kann ihre Freigabe nicht abgeschlossen werden. Ziehen Sie sie zurück, wird sie nie freigegeben oder veröffentlicht, Version {valid} bleibt gültig, und eine neue Version kann begonnen werden. Leser werden nicht benachrichtigt, Autor, Freigebende und Eigentümer schon. Das lässt sich nicht rückgängig machen.',
+  descriptionUnrenderedNoValid:
+    'Das Archiv-PDF von Version {label} konnte nicht erzeugt werden, deshalb kann ihre Freigabe nicht abgeschlossen werden. Ziehen Sie sie zurück, wird sie nie freigegeben oder veröffentlicht, und aus ihr kann eine neue Version begonnen werden; das Dokument hat keine gültige Version, bis diese freigegeben ist. Autor, Freigebende und Eigentümer werden benachrichtigt. Das lässt sich nicht rückgängig machen.',
   reason: 'Begründung',
   reasonHint:
     'Warum darf diese Version nicht in Kraft treten? Wird in der Versionshistorie angezeigt und im Prüfpfad festgehalten.',

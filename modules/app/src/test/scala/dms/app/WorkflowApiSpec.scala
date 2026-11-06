@@ -68,6 +68,8 @@ object WorkflowApiSpec extends ZIOSpecDefault:
   private val voter     = UserId("deputy-5")
   // Author, reviewer and approver in one organizational unit only, so other tests do not meet them (DMS-159).
   private val colleague = UserId("colleague-1")
+  private val officer   = UserId("officer-1")
+  private val officerHr = UserId("officer-2")
 
   private val signingKey: RSAKey = RSAKeyGenerator(2048).keyID("key-1").generate()
 
@@ -136,6 +138,13 @@ object WorkflowApiSpec extends ZIOSpecDefault:
               RoleAssignments.Postgres.grant(u, RoleAssignment(Role.Reviewer), admin)
             )
             _ <- RoleAssignments.Postgres.grant(approver, RoleAssignment(Role.Approver), admin)
+            _ <- RoleAssignments.Postgres.grant(officer, RoleAssignment(Role.ComplianceOfficer), admin)
+            _ <- RoleAssignments.Postgres
+              .grant(
+                officerHr,
+                RoleAssignment(Role.ComplianceOfficer, organizationalUnit = Some("HR")),
+                admin
+              )
             _ <- ZIO.foreachDiscard(List(Role.Author, Role.Reviewer, Role.Approver))(r =>
               RoleAssignments.Postgres
                 .grant(colleague, RoleAssignment(r, organizationalUnit = Some(EditorsUnit)), admin)
@@ -260,6 +269,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
   private val routes =
     ZioHttpInterpreter().toHttp(
       DocumentApi.endpoints.map(_.widen[Env]) ++ WorkflowApi.endpoints.map(_.widen[Env]) ++
+        FourEyesReportApi.endpoints.map(_.widen[Env]) ++
         DeputyshipApi.endpoints.map(_.widen[Env]) ++ GroupApi.endpoints.map(_.widen[Env]) :+
         MeApi.me.widen[Env]
     )
@@ -314,6 +324,20 @@ object WorkflowApiSpec extends ZIOSpecDefault:
       s"/api/v1/documents/$doc/draft",
       Some(s"""{"values":{${inEditorsUnit(partner)}}}""")
     )
+
+  /** Records `user` as an editor of the version as V53 does, on top of what the workflow already let through.
+    */
+  private def recordEditor(version: UUID, user: UserId) =
+    setup.await.flatMap(s =>
+      s.owner.transactSystem(
+        Db.sql(
+          sql"""insert into dms.document_version_editor (tenant_id, version_id, user_id)
+                values (${tenantId.value}, $version, ${user.value})""".update.run()
+        )
+      )
+    )
+
+  private def findings(user: UserId) = call(user, "GET", "/api/v1/compliance/four-eyes-findings")
 
   /** The latest workflow of the class with the four-eyes rule on: earlier tests leave it off. */
   private def fourEyesOn =
@@ -1629,6 +1653,82 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         open.forall(t => t.kind == "Review" && !t.candidates.contains(colleague.value)),
         audit.nonEmpty
       )
+    },
+    test("a voter is told what a change costs before they make it; the version names its editors (DMS-163)") {
+      for
+        _       <- fourEyesOn
+        doc     <- draftDocument("Costly", Some(inEditorsUnit("Costly")))
+        _       <- submit(doc.id)
+        started <- cases(doc.id).map(_.head)
+        own = started.tasks.find(t => t.kind == "Review" && t.status == "Open").get
+        voted    <- vote(colleague, own, "Approve").map(as[WorkflowCaseView])
+        reviewed <- passReview(voted)
+        approval = reviewed.tasks.find(t => t.kind == "Approval" && t.status == "Open").get
+        whileOpen <- call(colleague, "GET", s"/api/v1/documents/${doc.id}").map(as[DocumentView])
+        _         <- vote(approver, approval, "Reject", Some("Wrong term"), 10)
+        before    <- call(colleague, "GET", s"/api/v1/documents/${doc.id}").map(as[DocumentView])
+        forAuthor <- call(author, "GET", s"/api/v1/documents/${doc.id}").map(as[DocumentView])
+        _         <- rewrite(colleague, doc.id, "Changed by the voter")
+        after     <- call(colleague, "GET", s"/api/v1/documents/${doc.id}").map(as[DocumentView])
+      yield assertTrue(
+        !whileOpen.changeCostsVote,
+        before.changeCostsVote,
+        !forAuthor.changeCostsVote,
+        !after.changeCostsVote,
+        before.current.editors == List(author.value),
+        after.current.editors == List(author.value, colleague.value).sorted
+      )
+    },
+    test("the retroactive report shows what the rule would refuse now, to officers in scope (DMS-163)") {
+      for
+        _      <- fourEyesOn
+        signed <- awaitingApproval("Signed by an editor")
+        (signedDoc, approval) = signed
+        _      <- vote(approver, approval, "Approve", signedInSecondsAgo = 10)
+        _      <- renderPending
+        closed <- cases(signedDoc).map(_.head)
+        _      <- recordEditor(closed.versionId, approver)
+        _      <- recordEditor(closed.versionId, reviewer1)
+        // Still running: the vote of an editor stands until the version is returned.
+        running <- awaitingApproval("Vote of an editor")
+        (runningDoc, _) = running
+        open <- cases(runningDoc).map(_.head)
+        _    <- recordEditor(open.versionId, reviewer2)
+        // Nobody on the list took part here.
+        clean     <- awaitingApproval("Clean")
+        cleanCase <- cases(clean._1).map(_.head)
+        // A review vote the rule did not apply to: the setting of the class was off.
+        _ <- call(
+          admin,
+          "POST",
+          "/api/v1/admin/workflows/contract",
+          Some(contractWorkflow.dropRight(1) + ""","fourEyes":false,"reason":"Two-person team"}""")
+        )
+        lenient     <- awaitingApproval("Rule off")
+        lenientCase <- cases(lenient._1).map(_.head)
+        _           <- recordEditor(lenientCase.versionId, reviewer1)
+        _           <- fourEyesOn
+        seen        <- findings(officer).map(as[List[FourEyesFindingView]])
+        elsewhere   <- findings(officerHr).map(as[List[FourEyesFindingView]])
+        denied      <- findings(reader)
+        audited     <- lastAudit(FourEyesReportApi.FindingsViewed)
+      yield
+        val of = (id: UUID) => seen.filter(_.versionId == id)
+        assertTrue(
+          of(closed.versionId).map(f => (f.kind, f.decidedBy, f.caseOpen)).toSet == Set(
+            ("Approval", approver.value, false),
+            ("ReviewVote", reviewer1.value, false)
+          ),
+          of(closed.versionId).forall(_.versionStatus == "Approved"),
+          of(closed.versionId).forall(_.title == "Contract Signed by an editor"),
+          of(open.versionId).map(f => (f.kind, f.decidedBy, f.caseOpen)) ==
+            List(("ReviewVote", reviewer2.value, true)),
+          of(cleanCase.versionId).isEmpty,
+          of(lenientCase.versionId).isEmpty,
+          elsewhere.isEmpty,
+          denied._1 == Status.Forbidden,
+          audited.exists(_._1 == officerHr.value)
+        )
     },
     test("a task of someone who changed the version moves on, and waits without anyone left (DMS-159)") {
       for

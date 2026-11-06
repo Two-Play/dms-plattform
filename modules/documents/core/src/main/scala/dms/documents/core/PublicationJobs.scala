@@ -5,6 +5,7 @@ import dms.db.queue.{ClaimedJob, JobQueue}
 import dms.db.{Db, DbError, Jsonb}
 import dms.documents.LifecycleError
 import dms.kernel.TenantId
+import dms.rendering.RenditionRequest
 import zio.*
 import zio.json.*
 import zio.json.ast.Json
@@ -106,6 +107,20 @@ object PublicationJobs:
       sql"""select status = 'dead' from dms.job
             where kind = $PublishKind and payload ->> 'versionId' = ${version.toString}
             order by id desc limit 1""".query[Boolean].run().headOption.getOrElse(false)
+    )
+
+  /** Whether the rendition of a version failed for good (DMS-163, ADR 0078): its one rendering job is dead.
+    * The same holds as for [[isDead]]: only a retry brings it back, under the row lock of the version.
+    */
+  def isRenditionDead(version: UUID): IO[DbError, Boolean] =
+    Db.sql(
+      sql"""select status = 'dead' from dms.job
+            where kind = ${RenditionRequest.JobKind}
+              and idempotency_key = ${RenditionRequest.idempotencyKey(version)}"""
+        .query[Boolean]
+        .run()
+        .headOption
+        .getOrElse(false)
     )
 
   private def versionOf(payload: Jsonb): Either[String, UUID] =

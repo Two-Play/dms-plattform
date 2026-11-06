@@ -108,6 +108,7 @@ export const docPanels: Translation<typeof en.docPanels> = {
     list: 'Versionen',
     version: 'Version {label}',
     by: 'von',
+    changedBy: 'Geändert von',
     changesSinceLabel: 'Änderungen in {version} seit {previous}',
     changesSince: 'Änderungen seit {previous}',
     compare: 'Ausgewählte Versionen vergleichen',

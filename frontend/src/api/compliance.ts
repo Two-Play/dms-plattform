@@ -28,7 +28,11 @@ export type NoticeKind = 'reminder' | 'escalation'
 
 /** The lists of the cockpit, by their name in the export path. */
 export type ComplianceList =
-  'overdue-reviews' | 'acknowledgements' | 'documents-without-owner' | 'deviations'
+  | 'overdue-reviews'
+  | 'acknowledgements'
+  | 'documents-without-owner'
+  | 'deviations'
+  | 'four-eyes-findings'
 
 /** Why the names of readers are looked at (purpose limitation). */
 export type AcknowledgementPurpose = 'escalation' | 'reminder'

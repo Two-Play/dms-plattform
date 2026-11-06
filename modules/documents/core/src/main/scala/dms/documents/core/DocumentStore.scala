@@ -435,15 +435,20 @@ private[core] object DocumentStore:
   /** Withdraws an approved version: the status, who did it and why in one statement; the database records the
     * time (migration V41).
     */
-  def withdrawApproved(id: UUID, actor: UserId, actingFor: Option[UserId], at: Instant, reason: String)(using
-      DbTx
-  ): Boolean =
+  def withdrawApproved(
+      id: UUID,
+      from: DocumentStatus,
+      actor: UserId,
+      actingFor: Option[UserId],
+      at: Instant,
+      reason: String
+  )(using DbTx): Boolean =
     val time = OffsetDateTime.ofInstant(at, ZoneOffset.UTC)
     sql"""update dms.document_version
           set status = ${DocumentStatus.Withdrawn.toString}, status_changed_at = $time,
               status_changed_by = ${actor.value}, withdrawn_by = ${actor.value}, withdrawal_reason = $reason,
               withdrawn_acting_for = ${actingFor.map(_.value)}, updated_at = $time
-          where id = $id and status = ${DocumentStatus.Approved.toString}""".update.run() == 1
+          where id = $id and status = ${from.toString}""".update.run() == 1
 
   /** Changes the status of a version. On approval (`snapshot`) the metadata snapshot, the approval and the
     * valid-from date are recorded; on supersession the successor (`supersededBy`).
