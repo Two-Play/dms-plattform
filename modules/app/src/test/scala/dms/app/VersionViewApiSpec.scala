@@ -20,6 +20,7 @@ import dms.integration.{JobRunner, WorkerConfig}
 import dms.kernel.{TemplateId, TenantId, UserId}
 import dms.rendering.core.*
 import dms.templates.*
+import dms.templates.core.ContentJson.given
 import dms.templates.core.{ProfileSource, TemplateDraft, TemplateService}
 import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
 import org.testcontainers.utility.DockerImageName
@@ -222,7 +223,7 @@ object VersionViewApiSpec extends ZIOSpecDefault:
   private val routes =
     ZioHttpInterpreter().toHttp(
       DocumentApi.endpoints.map(_.widen[Env]) ++ WorkflowApi.endpoints.map(_.widen[Env]) ++
-        VersionViewApi.endpoints.map(_.widen[Env])
+        VersionViewApi.endpoints.map(_.widen[Env]) ++ DraftContentApi.endpoints.map(_.widen[Env])
     )
 
   final case class Response(status: Status, headers: Headers, body: Chunk[Byte]):
@@ -391,6 +392,61 @@ object VersionViewApiSpec extends ZIOSpecDefault:
         !draft.html.contains("ACME"),
         draftByReader.status == Status.Forbidden,
         unknown.status == Status.NotFound
+      )
+    },
+    test("the live preview of a draft shows its own content; the standard text stays that of the template") {
+      val changed = content.copy(sections =
+        content.sections.map(s =>
+          if s.locked then
+            s.copy(blocks =
+              List(Block.Paragraph(List(Inline.Text("Abweichend "), Inline.Placeholder("contractPartner"))))
+            )
+          else s
+        )
+      )
+      for
+        s   <- setup.await
+        doc <- call(
+          author,
+          "POST",
+          "/api/v1/documents",
+          Some(s"""{"templateId":"${s.released.value}","templateVersion":1,"title":"Vertrag Acme",
+                  |"values":${values("Acme")}}""".stripMargin)
+        ).map(as[DocumentView])
+        path = s"/api/v1/documents/${doc.id}"
+        _ <- call(
+          author,
+          "POST",
+          s"$path/deviation-requests",
+          Some("""{"sectionId":"parties","reason":"Group company"}""")
+        )
+        saved <- call(author, "PUT", s"$path/draft", Some(s"""{"content":${changed.toJson}}"""))
+        version = as[DocumentVersionView](saved).id
+        body    = s"""{"values":${values("Unsaved GmbH")},"language":"de"}"""
+        preview <- call(author, "POST", s"$path/versions/$version/preview", Some(body))
+        hidden  <- call(reader, "POST", s"$path/versions/$version/preview", Some(body))
+        unknown <- call(author, "POST", s"$path/versions/${UUID.randomUUID()}/preview", Some(body))
+        badLang <- call(
+          author,
+          "POST",
+          s"$path/versions/$version/preview",
+          Some(s"""{"values":{},"language":"fr"}""")
+        )
+        standard <- call(author, "GET", s"$path/versions/$version/standard-text")
+        _        <- call(author, "POST", s"$path/submit")
+        late     <- call(author, "POST", s"$path/versions/$version/preview", Some(body))
+        html = as[PreviewView](preview).html
+      yield assertTrue(
+        preview.status == Status.Ok,
+        html.contains("Abweichend"),
+        html.contains("Unsaved GmbH"),
+        !html.contains("Zwischen"),
+        hidden.status == Status.Forbidden,
+        unknown.status == Status.NotFound,
+        badLang.status == Status.UnprocessableEntity,
+        standard.status == Status.Ok,
+        as[StandardTextView](standard).sections == content.sections.filter(_.locked),
+        late.status == Status.Conflict
       )
     },
     test("an open version prints as marked draft PDF with the change history; the download is audited") {

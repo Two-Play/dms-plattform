@@ -76,8 +76,13 @@ final case class Deviation(
 
 /** Deviation report (business concept 4.1/5, US-01.1): every change to the standard text of locked sections
   * of a document relative to its template, with location and the author's reason.
+  *
+  * @param requested
+  *   the active requests for locked template sections, also those without a change yet: a request alone gives
+  *   the document the additional review step (ADR 0071). Stored with the report, so a frozen version keeps
+  *   the decision it was submitted with; reports stored before ADR 0071 have none.
   */
-final case class DeviationReport(deviations: List[Deviation]):
+final case class DeviationReport(deviations: List[Deviation], requested: List[DeviationRequest] = Nil):
   def isEmpty: Boolean              = deviations.isEmpty
   def authorized: List[Deviation]   = deviations.filter(_.authorized)
   def unauthorized: List[Deviation] = deviations.filter(_.unauthorized)
@@ -85,15 +90,19 @@ final case class DeviationReport(deviations: List[Deviation]):
 object DeviationReport:
   import DeviationChange.*
 
-  /** True if the document contains at least one authorized deviation. The document workflow (sprint 6) calls
-    * this when a document is submitted and, if true, adds the additional review step of the document class
-    * (e.g. the legal department, business concept 6, "contract with clause deviation"). Unauthorized
-    * deviations never reach the workflow: [[EditRules.check]] rejects them before submission.
+  /** True if a locked section has an active deviation request, with or without a changed text (business
+    * concept US-01.1: the document gets the step once the author requests a deviation; ADR 0071), or if a
+    * report stored before that decision holds an authorized deviation. The document workflow calls this when
+    * a document is submitted and, if true, adds the additional review step of the document class (e.g. the
+    * legal department, business concept 6, "contract with clause deviation"). Unauthorized deviations never
+    * reach the workflow: [[EditRules.check]] rejects them before submission.
     */
-  def requiresExtraReview(report: DeviationReport): Boolean = report.deviations.exists(_.authorized)
+  def requiresExtraReview(report: DeviationReport): Boolean =
+    report.requested.nonEmpty || report.deviations.exists(_.authorized)
 
   /** Compares the locked sections of `template` with the sections of the same id in `document`. Editable and
-    * new sections are not reported. Requests are attached to all deviations of their section.
+    * new sections are not reported. Requests are attached to all deviations of their section, and those for
+    * locked sections are kept as [[DeviationReport.requested]].
     */
   def compare(
       template: TemplateContent,
@@ -115,7 +124,8 @@ object DeviationReport:
       val sectionRequests = requests.filter(_.sectionId == t.id)
       changes.map((location, change) => Deviation(location, change, sectionRequests))
     }
-    DeviationReport(deviations)
+    val locked = template.sections.filter(_.locked).map(_.id).toSet
+    DeviationReport(deviations, requests.filter(r => locked(r.sectionId)))
   end compare
 
   private type Found = List[(DeviationLocation, DeviationChange)]

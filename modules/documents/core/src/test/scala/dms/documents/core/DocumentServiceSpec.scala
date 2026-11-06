@@ -579,9 +579,9 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         duplicate.left.exists(_.isInstanceOf[DocumentError.Conflict]),
         request.reason == "The customer insists on affiliates",
         request.requestedBy == author,
-        // A request alone does not deviate yet.
+        // A request alone does not deviate yet, but it already gives the document the extra review (ADR 0071).
         afterRequest.deviations.isEmpty,
-        !afterRequest.requiresExtraReview,
+        afterRequest.requiresExtraReview,
         updated.content == deviating,
         updated.deviations.deviations.map(d => (d.section, d.change)) ==
           List(Parties -> DeviationChange.TextInserted("and its affiliates")),
@@ -650,15 +650,83 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         audit.exists(e => e.action == "document.deviation-withdrawn" && e.details.value.contains("parties"))
       )
     },
-    test("a submission without deviations does not require the extra review") {
+    test("a submission without requests does not require the extra review") {
       for
         f       <- fixture
         created <- create(f, reviewValues)
         (doc, _) = created
-        // A request without a change of the section is no deviation.
+        requested <- as(f.tenant)(_.requestDeviation(doc.id, Parties, "Not needed after all", author))
+        withdrawn <- as(f.tenant)(_.withdrawDeviation(doc.id, requested._1.id, author))
+        submitted <- as(f.tenant)(_.submit(doc.id, author))
+      yield assertTrue(
+        !withdrawn.requiresExtraReview,
+        submitted.deviations.isEmpty,
+        !submitted.requiresExtraReview
+      )
+    },
+    test("a request without a change requires the extra review and stays frozen with the version") {
+      for
+        f       <- fixture
+        created <- create(f, reviewValues)
+        (doc, _) = created
+        // A request without a change of the section is no deviation, but the concept gives it the step.
         _         <- as(f.tenant)(_.requestDeviation(doc.id, Parties, "Maybe later", author))
         submitted <- as(f.tenant)(_.submit(doc.id, author))
-      yield assertTrue(submitted.deviations.isEmpty, !submitted.requiresExtraReview)
+        stored    <- as(f.tenant)(_.get(doc.id)).map(_.versions.head)
+      yield assertTrue(
+        submitted.deviations.isEmpty,
+        submitted.requiresExtraReview,
+        stored.requiresExtraReview
+      )
+    },
+    test("a draft of an older report gets the extra review of its active request at submission") {
+      for
+        f       <- fixture
+        created <- create(f, reviewValues)
+        (doc, _) = created
+        _ <- as(f.tenant)(_.requestDeviation(doc.id, Parties, "Stored before ADR 0071", author))
+        _ <- ZIO.serviceWithZIO[Env](
+          _.owner.transactSystem(
+            Db.sql(
+              sql"""update dms.document_version set deviation_report = '{"format":1,"deviations":[]}'::jsonb
+                    where document_id = ${doc.id.value}""".update.run()
+            )
+          )
+        )
+        before    <- as(f.tenant)(_.get(doc.id)).map(_.versions.head)
+        submitted <- as(f.tenant)(_.submit(doc.id, author))
+      yield assertTrue(!before.requiresExtraReview, submitted.requiresExtraReview)
+    },
+    test("a change based on an older working state is refused and changes nothing") {
+      for
+        f       <- fixture
+        created <- create(f, reviewValues)
+        (doc, draft) = created
+        _       <- as(f.tenant)(_.requestDeviation(doc.id, Parties, "Affiliates", author))
+        current <- as(f.tenant)(
+          _.updateDraft(
+            doc.id,
+            DraftChange(None, reviewValues, Some(deviating), Some(draft.workingState)),
+            author
+          )
+        )
+        stale <- as(f.tenant)(
+          _.updateDraft(
+            doc.id,
+            DraftChange(None, reviewValues, Some(content), Some(draft.workingState)),
+            author
+          )
+        ).either
+        stored <- as(f.tenant)(_.get(doc.id)).map(_.versions.head)
+      yield assertTrue(
+        current.workingState == draft.workingState + 1,
+        stale.left.exists {
+          case DocumentError.Conflict(message) => message.contains("saved in the meantime")
+          case _                               => false
+        },
+        stored.workingState == current.workingState,
+        stored.content == deviating
+      )
     },
     test("a new version carries over the active deviation requests of the valid version") {
       for

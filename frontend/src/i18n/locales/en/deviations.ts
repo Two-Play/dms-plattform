@@ -2,7 +2,7 @@
 export const deviations = {
   title: 'Locked sections and deviations',
   draftHint:
-    'Locked sections hold vetted standard text. If one has to differ, request a deviation with a reason; the additional review step then checks the change. The text itself cannot be changed on this page yet.',
+    'Locked sections hold vetted standard text. If one has to differ, request a deviation with a reason: the document then gets the additional review step, and you can change the text of that section here. Sections without a request stay read-only.',
   versionHint:
     'Changes to the standard text of locked sections with their location and reason, as stored with this version.',
   loading: 'Loading the deviation report…',
@@ -13,6 +13,11 @@ export const deviations = {
   locked: 'Locked',
   standardText: 'Standard text',
   requested: 'Deviation requested',
+  textChanged: 'Text changed',
+  requestWithoutChange:
+    'The text still matches the standard text. The request alone gives the document the additional review step; withdraw it if no change is needed.',
+  requestWithoutChangeVersion:
+    'The text of this version matches the standard text; the additional review step comes from the request.',
   changedWithoutRequest: 'Changed without a request',
   requestedBy: 'Requested by {name} on {date}',
   carriedOver: 'Carried over from the previous version.',
@@ -68,7 +73,7 @@ export const deviations = {
     actionFor: 'Request deviation for {section}',
     title: 'Request a deviation for {section}',
     description:
-      'The request and its reason are shown to reviewers and recorded in the audit trail. If the section deviates from the standard text, the document gets the additional review step.',
+      'The request and its reason are shown to reviewers and recorded in the audit trail. The document gets the additional review step as soon as the request is recorded, and you can then change the text of this section.',
     reason: 'Reason',
     reasonHint: 'Why does the standard text have to change here?',
     reasonMissing: 'Please give a reason.',
@@ -95,10 +100,46 @@ export const deviations = {
     conflict: 'The request was not withdrawn: {message} The list has been updated.',
     failed: 'The request was not withdrawn: {message}',
   },
+  edit: {
+    action: 'Edit text',
+    actionFor: 'Edit text of {section}',
+    title: 'Edit the text of {section}',
+    hint: 'Saved changes are listed in the deviation report and checked in the additional review step. Title and position of the section stay as they are.',
+    blocks: 'Text of {section}',
+    loading: 'Loading the editor…',
+    save: 'Save text',
+    saving: 'Saving…',
+    saved: 'Text of {section} saved',
+    close: 'Close',
+    discard: 'Discard changes',
+    unsaved: 'Unsaved changes',
+    restore: 'Restore standard text',
+    restored:
+      'The standard text is back in the editor. Save it to end the deviation of this section.',
+    restoreUnavailable:
+      'The standard text could not be loaded, so it cannot be restored right now: {message}',
+    conflict:
+      'The text was not saved: {message} The page has been updated; your text is still here.',
+    forbidden: 'You may not change this draft. Your text is still here.',
+    invalid: 'The text was not saved: {message} Your text is still here.',
+    failed: 'The text was not saved: {message} Your text is still here.',
+    changedElsewhere: {
+      message:
+        'Someone else changed this section while you were editing it. Keep your text and save it over theirs, or load the saved text.',
+      keep: 'Keep my text',
+      load: 'Load saved text',
+    },
+    requestGone:
+      'This section no longer has an active request, so the text cannot be saved. Request the deviation again; your text is still here.',
+    noLongerDraft:
+      'This version is no longer a draft, so the text cannot be saved. Your text is still here to copy.',
+    submitBlocked:
+      'The text of {section} has unsaved changes. Save or discard them before submitting.',
+  },
   blocked: {
     message:
       'The draft was saved but cannot be submitted: these sections break the rules of the template.',
-    hint: 'Request a deviation for a changed locked section, or restore its standard text.',
+    hint: 'Request a deviation for a changed locked section, or restore its standard text: with an active request you can do that under "Edit text".',
     violation: {
       locked_section_changed: 'Its standard text was changed without a deviation request.',
       locked_section_removed: 'A locked section must not be removed.',

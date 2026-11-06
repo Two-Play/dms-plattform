@@ -724,7 +724,7 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         audit == List("workflow.four-eyes-disabled" -> Some("Two-person team"))
       )
     },
-    test("the extra review step of the class runs only for versions with deviations from locked text") {
+    test("the extra review step of the class runs only for versions with deviation requests") {
       val withLegal =
         """{"definition":{"steps":[
           |  {"key":"review","name":"Review","kind":"Review","lanes":[{"key":"department","role":"Reviewer"}]},
@@ -736,7 +736,15 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         defined <- call(admin, "POST", "/api/v1/admin/workflows/contract", Some(withLegal))
         plain   <- draftDocument("Stark")
         special <- draftDocument("Wayne")
+        wanted  <- draftDocument("Kent")
         path = s"/api/v1/documents/${special.id}"
+        // The request alone adds the step (business concept US-01.1, ADR 0071).
+        _ <- call(
+          author,
+          "POST",
+          s"/api/v1/documents/${wanted.id}/deviation-requests",
+          Some("""{"sectionId":"parties","reason":"Maybe a group company"}""")
+        )
         _ <- call(
           author,
           "POST",
@@ -747,23 +755,30 @@ object WorkflowApiSpec extends ZIOSpecDefault:
           author,
           "PUT",
           s"$path/draft",
-          Some(s"""{"values":{${values("Wayne")}},"content":${deviating.toJson}}""")
+          // What the editor of a locked section sends (ADR 0071).
+          Some(s"""{"content":${deviating.toJson},"expectedWorkingState":${special.current.workingState}}""")
         ).map(as[DocumentVersionView])
-        _           <- submit(plain.id) *> submit(special.id)
+        _           <- submit(plain.id) *> submit(special.id) *> submit(wanted.id)
         plainCase   <- cases(plain.id).map(_.head)
         specialCase <- cases(special.id).map(_.head)
+        wantedCase  <- cases(wanted.id).map(_.head)
         plainNext   <- vote(reviewer1, openTask(plainCase, "department"), "Approve").map(as[WorkflowCaseView])
         specialNext <- vote(reviewer1, openTask(specialCase, "department"), "Approve").map(
           as[WorkflowCaseView]
         )
-        report <- call(reviewer2, "GET", s"$path/versions/${changed.id}/deviations")
+        wantedNext <- vote(reviewer1, openTask(wantedCase, "department"), "Approve").map(as[WorkflowCaseView])
+        report     <- call(reviewer2, "GET", s"$path/versions/${changed.id}/deviations")
       yield assertTrue(
         defined._1 == Status.Created,
         changed.requiresExtraReview,
         plainNext.currentStep.contains("approval"),
         specialNext.currentStep.contains("legal"),
+        wantedNext.currentStep.contains("legal"),
         openTask(specialNext, "legal").candidates == List(reviewer1.value, reviewer2.value),
-        report._1 == Status.Ok
+        report._1 == Status.Ok,
+        report._2
+          .fromJson[DeviationsView]
+          .exists(v => v.requiresExtraReview && v.deviations.forall(_.authorized))
       )
     },
     test("step-up with access tokens without auth_time: the ID token's auth_time counts (DMS-86)") {

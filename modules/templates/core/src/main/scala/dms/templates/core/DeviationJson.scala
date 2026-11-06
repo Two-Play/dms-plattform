@@ -11,7 +11,8 @@ import zio.json.ast.Json
   *
   * Sum types carry their case name in a `type` field like the content, e.g.
   * `{"type":"TextReplaced","from":"30 days","to":"60 days"}` or `{"type":"Cell","row":1,"column":0}`. Stored
-  * reports are wrapped with their format version, `{"format":1,"deviations":[...]}`; inserted and deleted
+  * reports are wrapped with their format version, `{"format":1,"deviations":[...]}`, plus `"requested":[...]`
+  * when requests are active (ADR 0071; older reports have none and read as empty); inserted and deleted
   * blocks use the content format of [[ContentJson]].
   */
 object DeviationJson:
@@ -34,18 +35,20 @@ object DeviationJson:
 
   /** The stored form, with its format version. */
   def encodeStored(report: DeviationReport): String =
+    def ast[A: JsonEncoder](value: A) = value.toJsonAST.fold(e => throw IllegalStateException(e), identity)
+    val requested = Option.when(report.requested.nonEmpty)("requested" -> ast(report.requested)).toList
     Json
-      .Obj(
-        "format"     -> Json.Num(FormatVersion),
-        "deviations" -> report.deviations.toJsonAST.fold(e => throw IllegalStateException(e), identity)
-      )
+      .Obj((List("format" -> Json.Num(FormatVersion), "deviations" -> ast(report.deviations)) ++ requested)*)
       .toJson
 
   def decodeStored(json: String): Either[String, DeviationReport] =
     json.fromJson[Json.Obj].flatMap { obj =>
       obj.get("format").flatMap(_.as[Int].toOption) match
         case Some(FormatVersion) =>
-          obj.get("deviations").getOrElse(Json.Arr()).as[List[Deviation]].map(DeviationReport(_))
+          for
+            deviations <- obj.get("deviations").getOrElse(Json.Arr()).as[List[Deviation]]
+            requested  <- obj.get("requested").getOrElse(Json.Arr()).as[List[DeviationRequest]]
+          yield DeviationReport(deviations, requested)
         case Some(other) => Left(s"unknown deviation report format $other")
         case None        => Left("the deviation report has no format version")
     }

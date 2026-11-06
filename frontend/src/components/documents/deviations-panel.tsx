@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Lock } from 'lucide-react'
-import { useId, useState, type SyntheticEvent } from 'react'
+import { useCallback, useId, useState, type ReactNode, type SyntheticEvent } from 'react'
 import { useApiClient } from '@/api/context'
 import {
   applyDeviations,
@@ -33,6 +33,7 @@ import { t } from '@/i18n'
 import { formatDateTime } from '@/i18n/format'
 import { toast } from '@/lib/toast'
 import { changeText, locationText, lockedSectionId } from './deviation-labels'
+import type { SectionTextEditorProps } from './section-text-editor'
 
 /** A locked section of the version, or the section a request names, with what the panel shows for it. */
 interface LockedSection {
@@ -68,6 +69,27 @@ function failure(error: Error, action: 'request' | 'withdraw'): string {
 
 function focusSection(sectionId: string) {
   document.getElementById(lockedSectionId(sectionId))?.focus()
+}
+
+function editButtonId(sectionId: string): string {
+  return `${lockedSectionId(sectionId)}-edit`
+}
+
+/**
+ * The editor of a section. It brings ProseMirror along, so it is loaded when it is opened (the page of
+ * readers does not need it); a chunk that fails to load is a failed load like any other.
+ */
+function LazySectionTextEditor(props: SectionTextEditorProps) {
+  const chunk = useQuery({
+    queryKey: ['chunks', 'section-text-editor'],
+    queryFn: () => import('./section-text-editor'),
+    staleTime: Infinity,
+    structuralSharing: false,
+    retry: false,
+  })
+  if (chunk.isPending) return <LoadingState label={t('deviations.edit.loading')} rows={3} />
+  if (chunk.isError) return <ErrorState error={chunk.error} onRetry={() => void chunk.refetch()} />
+  return <chunk.data.SectionTextEditor {...props} />
 }
 
 interface FormProps {
@@ -265,7 +287,13 @@ function SectionState({ section }: { section: LockedSection }) {
   if (section.unauthorized) {
     return <Badge variant="destructive">{t('deviations.changedWithoutRequest')}</Badge>
   }
-  if (section.request) return <Badge variant="secondary">{t('deviations.requested')}</Badge>
+  if (section.request) {
+    return (
+      <Badge variant="secondary">
+        {section.changed ? t('deviations.textChanged') : t('deviations.requested')}
+      </Badge>
+    )
+  }
   return <Badge variant="outline">{t('deviations.standardText')}</Badge>
 }
 
@@ -273,10 +301,20 @@ function SectionRow({
   section,
   editable,
   onAct,
+  onEdit,
+  editing,
+  otherEditing,
+  editor,
 }: {
   section: LockedSection
   editable: boolean
   onAct: () => void
+  onEdit: () => void
+  /** The editor of this section is open. */
+  editing: boolean
+  /** The editor of another section is open: one at a time. */
+  otherEditing: boolean
+  editor: ReactNode
 }) {
   const { request } = section
   return (
@@ -291,20 +329,33 @@ function SectionRow({
         <span className="sr-only">{t('deviations.locked')}:</span>
         <span className="font-medium">{section.title}</span>
         <SectionState section={section} />
-        {editable && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="ml-auto"
-            aria-label={
-              request
-                ? t('deviations.withdraw.actionFor', { section: section.title })
-                : t('deviations.request.actionFor', { section: section.title })
-            }
-            onClick={onAct}
-          >
-            {request ? t('deviations.withdraw.action') : t('deviations.request.action')}
-          </Button>
+        {editable && !(editing && request) && (
+          <div className="ml-auto flex flex-wrap gap-2">
+            {request && (
+              <Button
+                id={editButtonId(section.id)}
+                size="sm"
+                variant="outline"
+                disabled={otherEditing}
+                aria-label={t('deviations.edit.actionFor', { section: section.title })}
+                onClick={onEdit}
+              >
+                {t('deviations.edit.action')}
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              aria-label={
+                request
+                  ? t('deviations.withdraw.actionFor', { section: section.title })
+                  : t('deviations.request.actionFor', { section: section.title })
+              }
+              onClick={onAct}
+            >
+              {request ? t('deviations.withdraw.action') : t('deviations.request.action')}
+            </Button>
+          </div>
         )}
       </div>
       {request && (
@@ -320,8 +371,16 @@ function SectionRow({
             />
             {request.basedOn && <> {t('deviations.carriedOver')}</>}
           </p>
+          {!section.changed && (
+            <p className="text-xs text-muted-foreground">
+              {editable
+                ? t('deviations.requestWithoutChange')
+                : t('deviations.requestWithoutChangeVersion')}
+            </p>
+          )}
         </>
       )}
+      {editor}
     </li>
   )
 }
@@ -467,23 +526,50 @@ function Report({
 
 /**
  * Locked sections, deviation requests and the deviation report of a version (US-01.1, DMS-84, ADR 0022).
- * On a draft, `editable` adds requesting and withdrawing. Whoever sees a draft may change it (`ReadDocument`
- * and `EditDraft` on a draft ask for the same roles); the backend checks again. From submission on the
- * requests are frozen, and readers of the version see them with the report as it was submitted.
+ * On a draft, `editable` adds requesting and withdrawing, and sections with an active request can have their
+ * text edited (DMS-154, ADR 0071). Whoever sees a draft may change it (`ReadDocument` and `EditDraft` on a
+ * draft ask for the same roles); the backend checks again. From submission on the requests are frozen, and
+ * readers of the version see them with the report as it was submitted.
  */
 export function DeviationsPanel({
   documentId,
   version,
   editable,
+  onUnsavedChange,
 }: {
   documentId: string
   version: DocumentVersionView
   editable: boolean
+  /** Called with the title of the section whose text has unsaved changes, or without one. */
+  onUnsavedChange?: (section: string | undefined) => void
 }) {
   const client = useApiClient()
   const report = useQuery(deviationsQuery(client, documentId, version.id))
   // The section as it was when the dialog opened: a refresh behind the dialog must not swap its form.
   const [acting, setActing] = useState<LockedSection | undefined>(undefined)
+  // The section whose editor is open, also while its request or the draft are gone: the text must not vanish.
+  const [editing, setEditing] = useState<{ id: string; title: string } | undefined>(undefined)
+
+  const closeEditor = useCallback(() => {
+    setEditing((open) => {
+      if (open) {
+        // The button comes back with the next render.
+        requestAnimationFrame(() => {
+          const button = document.getElementById(editButtonId(open.id))
+          if (button) button.focus()
+          else focusSection(open.id)
+        })
+      }
+      return undefined
+    })
+  }, [])
+  const editingTitle = editing?.title
+  const onDirtyChange = useCallback(
+    (dirty: boolean) => {
+      onUnsavedChange?.(dirty ? editingTitle : undefined)
+    },
+    [onUnsavedChange, editingTitle],
+  )
 
   const contentSections = version.content.sections ?? []
   const titleOf = (sectionId: string) =>
@@ -508,7 +594,9 @@ export function DeviationsPanel({
     }
   })
   // On a draft every locked section is a place to act; later only those with a request say anything.
-  const listed = editable ? sections : sections.filter((s) => s.request || s.unauthorized)
+  const listed = editable
+    ? sections
+    : sections.filter((s) => s.request || s.unauthorized || s.id === editing?.id)
 
   return (
     <Card data-testid="deviations-panel">
@@ -542,6 +630,30 @@ export function DeviationsPanel({
                       onAct={() => {
                         setActing(section)
                       }}
+                      onEdit={() => {
+                        setEditing({ id: section.id, title: section.title })
+                      }}
+                      editing={editing?.id === section.id}
+                      otherEditing={editing !== undefined && editing.id !== section.id}
+                      editor={
+                        editing?.id === section.id && (
+                          <LazySectionTextEditor
+                            documentId={documentId}
+                            version={version}
+                            sectionId={section.id}
+                            title={section.title}
+                            blocked={
+                              !editable
+                                ? 'noLongerDraft'
+                                : section.request
+                                  ? undefined
+                                  : 'requestGone'
+                            }
+                            onClose={closeEditor}
+                            onDirtyChange={onDirtyChange}
+                          />
+                        )
+                      }
                     />
                   ))}
                 </ul>

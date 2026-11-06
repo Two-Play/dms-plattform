@@ -162,9 +162,10 @@ final case class DocumentVersion(
 ):
   def label: String = Versioning.label(number, status, workingState)
 
-  /** True if the content deviates, with deviation requests, from the standard text of locked template
-    * sections: the workflow then adds the additional review step of the document class (business concept 6).
-    * See [[DeviationReport.requiresExtraReview]]. A submitted version never has unauthorized deviations.
+  /** True if a locked template section has an active deviation request, whether its text changed yet or not:
+    * the workflow then adds the additional review step of the document class (business concept US-01.1, ADR
+    * 0071). See [[DeviationReport.requiresExtraReview]]. A submitted version never has unauthorized
+    * deviations.
     */
   def requiresExtraReview: Boolean = DeviationReport.requiresExtraReview(deviations)
 

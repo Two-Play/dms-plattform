@@ -4,7 +4,7 @@ import type * as en from '@/i18n/locales/en/deviations'
 export const deviations: Translation<typeof en.deviations> = {
   title: 'Gesperrte Abschnitte und Abweichungen',
   draftHint:
-    'Gesperrte Abschnitte enthalten geprüften Standardtext. Muss einer davon abweichen, beantragen Sie die Abweichung mit Begründung; der zusätzliche Prüfschritt prüft dann die Änderung. Der Text selbst lässt sich auf dieser Seite noch nicht ändern.',
+    'Gesperrte Abschnitte enthalten geprüften Standardtext. Muss einer davon abweichen, beantragen Sie die Abweichung mit Begründung: Das Dokument erhält dann den zusätzlichen Prüfschritt, und Sie können den Text dieses Abschnitts hier ändern. Abschnitte ohne Antrag bleiben schreibgeschützt.',
   versionHint:
     'Änderungen am Standardtext gesperrter Abschnitte mit Ort und Begründung, wie sie mit dieser Version gespeichert sind.',
   loading: 'Abweichungsbericht wird geladen …',
@@ -15,6 +15,11 @@ export const deviations: Translation<typeof en.deviations> = {
   locked: 'Gesperrt',
   standardText: 'Standardtext',
   requested: 'Abweichung beantragt',
+  textChanged: 'Text geändert',
+  requestWithoutChange:
+    'Der Text entspricht noch dem Standardtext. Schon der Antrag gibt dem Dokument den zusätzlichen Prüfschritt; ziehen Sie ihn zurück, wenn keine Änderung nötig ist.',
+  requestWithoutChangeVersion:
+    'Der Text dieser Version entspricht dem Standardtext; der zusätzliche Prüfschritt kommt vom Antrag.',
   changedWithoutRequest: 'Ohne Antrag geändert',
   requestedBy: 'Beantragt von {name} am {date}',
   carriedOver: 'Aus der Vorversion übernommen.',
@@ -70,7 +75,7 @@ export const deviations: Translation<typeof en.deviations> = {
     actionFor: 'Abweichung für {section} beantragen',
     title: 'Abweichung für {section} beantragen',
     description:
-      'Der Antrag und seine Begründung werden Prüfenden angezeigt und im Prüfpfad festgehalten. Weicht der Abschnitt vom Standardtext ab, erhält das Dokument den zusätzlichen Prüfschritt.',
+      'Der Antrag und seine Begründung werden den Prüfenden angezeigt und im Audit-Trail festgehalten. Das Dokument erhält den zusätzlichen Prüfschritt, sobald der Antrag erfasst ist, und Sie können dann den Text dieses Abschnitts ändern.',
     reason: 'Begründung',
     reasonHint: 'Warum muss der Standardtext hier abweichen?',
     reasonMissing: 'Bitte geben Sie eine Begründung an.',
@@ -97,10 +102,46 @@ export const deviations: Translation<typeof en.deviations> = {
     conflict: 'Der Antrag wurde nicht zurückgezogen: {message} Die Liste wurde aktualisiert.',
     failed: 'Der Antrag wurde nicht zurückgezogen: {message}',
   },
+  edit: {
+    action: 'Text bearbeiten',
+    actionFor: 'Text von {section} bearbeiten',
+    title: 'Text von {section} bearbeiten',
+    hint: 'Gespeicherte Änderungen erscheinen im Abweichungsbericht und werden im zusätzlichen Prüfschritt geprüft. Titel und Position des Abschnitts bleiben unverändert.',
+    blocks: 'Text von {section}',
+    loading: 'Editor wird geladen …',
+    save: 'Text speichern',
+    saving: 'Wird gespeichert …',
+    saved: 'Text von {section} gespeichert',
+    close: 'Schließen',
+    discard: 'Änderungen verwerfen',
+    unsaved: 'Ungespeicherte Änderungen',
+    restore: 'Standardtext wiederherstellen',
+    restored:
+      'Der Standardtext steht wieder im Editor. Speichern Sie ihn, um die Abweichung dieses Abschnitts zu beenden.',
+    restoreUnavailable:
+      'Der Standardtext konnte nicht geladen werden und lässt sich deshalb gerade nicht wiederherstellen: {message}',
+    conflict:
+      'Der Text wurde nicht gespeichert: {message} Die Seite wurde aktualisiert; Ihr Text ist noch da.',
+    forbidden: 'Sie dürfen diesen Entwurf nicht ändern. Ihr Text ist noch da.',
+    invalid: 'Der Text wurde nicht gespeichert: {message} Ihr Text ist noch da.',
+    failed: 'Der Text wurde nicht gespeichert: {message} Ihr Text ist noch da.',
+    changedElsewhere: {
+      message:
+        'Jemand anderes hat diesen Abschnitt geändert, während Sie ihn bearbeitet haben. Behalten Sie Ihren Text und speichern ihn über den anderen, oder laden Sie den gespeicherten Text.',
+      keep: 'Meinen Text behalten',
+      load: 'Gespeicherten Text laden',
+    },
+    requestGone:
+      'Dieser Abschnitt hat keinen aktiven Antrag mehr, der Text lässt sich daher nicht speichern. Beantragen Sie die Abweichung erneut; Ihr Text ist noch da.',
+    noLongerDraft:
+      'Diese Version ist kein Entwurf mehr, der Text lässt sich daher nicht speichern. Ihr Text steht zum Kopieren noch hier.',
+    submitBlocked:
+      'Der Text von {section} hat ungespeicherte Änderungen. Speichern oder verwerfen Sie sie vor dem Einreichen.',
+  },
   blocked: {
     message:
       'Der Entwurf wurde gespeichert, kann aber nicht eingereicht werden: Diese Abschnitte verstoßen gegen die Regeln der Vorlage.',
-    hint: 'Beantragen Sie für einen geänderten gesperrten Abschnitt eine Abweichung, oder stellen Sie seinen Standardtext wieder her.',
+    hint: 'Beantragen Sie für einen geänderten gesperrten Abschnitt eine Abweichung, oder stellen Sie seinen Standardtext wieder her: Mit einem aktiven Antrag geht das unter „Text bearbeiten“.',
     violation: {
       locked_section_changed: 'Sein Standardtext wurde ohne Abweichungsantrag geändert.',
       locked_section_removed: 'Ein gesperrter Abschnitt darf nicht entfernt werden.',

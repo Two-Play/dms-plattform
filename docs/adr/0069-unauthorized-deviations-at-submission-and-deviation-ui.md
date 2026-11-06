@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed (2026-11-05, implemented in DMS-84) |
+| Status | Proposed (2026-11-05, implemented in DMS-84); point 8 and the first follow-up are superseded by [0071](0071-editing-locked-text-and-extra-review-on-request.md) |
 | Date | 2026-11-05 |
 | Decided by | Philippe |
 
@@ -65,7 +65,7 @@ Where permission for the actions comes from:
 
 ## Follow-ups
 
-- Must be decided: how authors change the text of a locked section with an active request in the UI (reuse of the visual content editor of ADR 0051). Until then the deviation flow cannot be finished in the UI.
+- Decided in ADR 0071: how authors change the text of a locked section with an active request in the UI (reuse of the visual content editor of ADR 0051).
 - Could be done: show the report in the vote dialog as well, and mark requested sections in the rendered content of a version in review.
 
 ## Reversibility

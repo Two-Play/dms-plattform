@@ -548,6 +548,42 @@ object DocumentApiSpec extends ZIOSpecDefault:
         frozenView.exists(v => v.status == "InReview" && v.requiresExtraReview && v.requests.size == 2)
       )
     },
+    test("a save of the content alone keeps the values and is refused on an older working state") {
+      val deviating = content.copy(sections =
+        content.sections.map(s =>
+          if s.locked then
+            s.copy(blocks =
+              List(Block.Paragraph(List(Inline.Text("Between "), Inline.Placeholder("contractPartner"))))
+            )
+          else s
+        )
+      )
+      def body(expected: Int) = s"""{"content":${deviating.toJson},"expectedWorkingState":$expected}"""
+      for
+        doc <- createDocument(reviewValues)
+        path = s"/api/v1/documents/${doc.id}"
+        _ <- call(
+          author,
+          "POST",
+          s"$path/deviation-requests",
+          Some("""{"sectionId":"parties","reason":"Group company"}""")
+        )
+        before <- call(author, "GET", path)
+        open    = before._2.fromJson[DocumentView].toOption.map(_.current)
+        working = open.map(_.workingState).getOrElse(0)
+        stale <- call(author, "PUT", s"$path/draft", Some(body(working - 1)))
+        saved <- call(author, "PUT", s"$path/draft", Some(body(working)))
+        version = saved._2.fromJson[DocumentVersionView].toOption
+        again <- call(author, "PUT", s"$path/draft", Some(body(working)))
+      yield assertTrue(
+        stale._1 == Status.Conflict,
+        saved._1 == Status.Ok,
+        version.exists(_.workingState == working + 1),
+        version.exists(_.content == deviating),
+        version.map(_.values) == open.map(_.values),
+        again._1 == Status.Conflict
+      )
+    },
     test("the document list follows the latest changes, also beyond its first windows") {
       def first(limit: Int) =
         call(author, "GET", s"/api/v1/documents?limit=$limit").map(
