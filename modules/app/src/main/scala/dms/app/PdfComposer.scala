@@ -1,6 +1,7 @@
 package dms.app
 
 import org.apache.pdfbox.Loader
+import org.apache.pdfbox.cos.COSName
 import org.apache.pdfbox.io.RandomAccessReadBuffer
 import org.apache.pdfbox.multipdf.PDFMergerUtility
 import org.apache.pdfbox.pdmodel.font.{PDType1Font, Standard14Fonts}
@@ -21,11 +22,21 @@ object PdfComposer:
   private val FontSize = 7f
 
   /** Writes `lines` at the top of every page, right-aligned, the first line in red if `emphasize`. Text that
-    * the standard font cannot encode is replaced by `?`.
+    * the standard font cannot encode is replaced by `?`. With `plain` the result no longer identifies itself
+    * as PDF/A (ADR 0073): the XMP packet, which carries the identification, and the output intents go.
     */
-  def stamp(pdf: Array[Byte], lines: List[String], emphasize: Boolean): Either[String, Array[Byte]] =
+  def stamp(
+      pdf: Array[Byte],
+      lines: List[String],
+      emphasize: Boolean,
+      plain: Boolean = false
+  ): Either[String, Array[Byte]] =
     attempt {
       Using.resource(Loader.loadPDF(pdf)) { document =>
+        if plain then
+          val catalog = document.getDocumentCatalog.getCOSObject
+          catalog.removeItem(COSName.METADATA)
+          catalog.removeItem(COSName.OUTPUT_INTENTS)
         val font = PDType1Font(Standard14Fonts.FontName.HELVETICA)
         document.getPages.asScala.foreach { page =>
           val box = page.getCropBox

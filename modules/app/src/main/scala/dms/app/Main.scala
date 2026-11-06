@@ -261,6 +261,8 @@ object Main extends ZIOAppDefault:
           EvidenceReportApi.auditEvidence(cfg.audit),
           EvidenceReportStore.layer,
           ZLayer.succeed(cfg.library),
+          ZLayer.succeed(cfg.onDemandPdf),
+          OnDemandPdfLimits.layer,
           LibrarySnapshots.layer,
           ZLayer.succeed(cfg.notifications.settings),
           ZLayer.succeed(cfg.notifications.smtp),

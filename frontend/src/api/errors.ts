@@ -7,18 +7,29 @@ export type FieldIssue = components['schemas']['IssueView']
 export const UNAVAILABLE_MESSAGE =
   'The partner master is not reachable right now. You can save the draft without the partner and pick it later.'
 
-/** A failed API call with the backend's error code, message and field issues, if it sent them. */
+/**
+ * A failed API call with the backend's error code, message and field issues, if it sent them, and the
+ * seconds to wait from `Retry-After`, if the backend asked the caller to come back later.
+ */
 export class ApiRequestError extends Error {
   readonly status: number
   readonly code: string | undefined
   readonly issues: FieldIssue[]
+  readonly retryAfterSeconds: number | undefined
 
-  constructor(status: number, message: string, code?: string, issues: FieldIssue[] = []) {
+  constructor(
+    status: number,
+    message: string,
+    code?: string,
+    issues: FieldIssue[] = [],
+    retryAfterSeconds?: number,
+  ) {
     super(message)
     this.name = 'ApiRequestError'
     this.status = status
     this.code = code
     this.issues = issues
+    this.retryAfterSeconds = retryAfterSeconds
   }
 
   /** The partner master is down or answered with something unusable (503/502). */
@@ -48,6 +59,12 @@ function errorBody(body: unknown): ApiErrorBody | undefined {
   return { code, message, issues: Array.isArray(issues) ? issues.filter(isIssue) : undefined }
 }
 
+/** `Retry-After` in seconds; the backend never sends the date form. */
+function retryAfter(response: Response): number | undefined {
+  const value = response.headers.get('Retry-After')
+  return value !== null && /^\d+$/.test(value) ? Number(value) : undefined
+}
+
 /** The error of a failed call, with the backend's code, message and issues if it sent an `ApiError`. */
 export function requestError(response: Response, raw: unknown, fallback: string): ApiRequestError {
   const body = errorBody(raw)
@@ -58,5 +75,11 @@ export function requestError(response: Response, raw: unknown, fallback: string)
       body?.code ?? 'partner_directory_unavailable',
     )
   }
-  return new ApiRequestError(response.status, body?.message ?? fallback, body?.code, body?.issues)
+  return new ApiRequestError(
+    response.status,
+    body?.message ?? fallback,
+    body?.code,
+    body?.issues,
+    retryAfter(response),
+  )
 }

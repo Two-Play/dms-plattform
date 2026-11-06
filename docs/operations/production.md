@@ -42,6 +42,8 @@ Set `DMS_PROFILE=production`. The application then refuses to start with the set
 - [ ] The web application is served with its own Content Security Policy; the API's headers only cover the API.
 - [ ] `/docs` and `/docs/*` (Swagger UI) are not reachable from outside, unless wanted. `/health` and `/ready` need no sign-in and say nothing beyond the names of the dependencies.
 - [ ] The rendering and conversion workers are only reachable from the application; their images are pinned by digest (`DMS_RENDERING_IMAGE`, `DMS_CONVERSION_IMAGE`, ADR 0055).
+- [ ] The rendering worker is rolled out before or with an application that prints plain draft PDFs (ADR 0073): an older worker refuses them and draft PDFs fail with 422.
+- [ ] The limits of on-demand PDFs fit the deployment (`DMS_ON_DEMAND_PDF_*`, ADR 0073): the in-flight limits hold per application instance, so the worker can get as many times the value as there are instances. The rates hold over all instances.
 - [ ] The load balancer checks `GET /ready`; `DMS_HTTP_DRAIN_SECONDS` is at least its interval. The orchestrator's stop timeout is longer than `drainSeconds` + `shutdownGraceSeconds` + 10 s.
 
 ### Logs and monitoring

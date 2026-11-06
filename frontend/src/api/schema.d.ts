@@ -1539,7 +1539,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description A PDF of an open version (draft, in review, in approval), printed on demand from its saved state and marked "Draft – not valid" in the header and as watermark on every page. Not archived and not stored; the download is audited. 409 for approved versions (download their rendition). Requires ReadDocument on the version. */
+    /** @description A PDF of an open version (draft, in review, in approval), printed on demand from its saved state and marked "Draft – not valid" in the header and as watermark on every page. A plain PDF without PDF/A identification, not archived and not stored; the download is audited. 409 for approved versions (download their rendition). 429 with Retry-After (pdf_limit_reached) when the caller, the tenant or the rendering capacity is at its limit. Requires ReadDocument on the version. */
     get: operations['getApiV1DocumentsIdVersionsVersionidDraft.pdf']
     put?: never
     post?: never
@@ -1556,7 +1556,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** @description A copy of an approved version printed on demand, e.g. with the change history appended; header and footer as in the archive rendition plus the note that the archived rendition is authoritative. The archived PDF/A is not altered. Not stored; the download is audited. 409 for versions that were never approved. Requires ReadDocument on the version. */
+    /** @description A copy of an approved version printed on demand, e.g. with the change history appended; header and footer as in the archive rendition plus the note that the archived rendition is authoritative. The archived PDF/A is not altered. Not stored; the download is audited. 409 for versions that were never approved. 429 with Retry-After (pdf_limit_reached) when the caller, the tenant or the rendering capacity is at its limit. Requires ReadDocument on the version. */
     get: operations['getApiV1DocumentsIdVersionsVersionidCopy.pdf']
     put?: never
     post?: never
@@ -10116,6 +10116,8 @@ export interface operations {
       }
       default: {
         headers: {
+          /** @description Seconds to wait, with status 429 */
+          'Retry-After'?: string
           [name: string]: unknown
         }
         content: {
@@ -10165,6 +10167,8 @@ export interface operations {
       }
       default: {
         headers: {
+          /** @description Seconds to wait, with status 429 */
+          'Retry-After'?: string
           [name: string]: unknown
         }
         content: {

@@ -192,6 +192,7 @@ export const docs = {
     copyHint:
       'A copy generated now with the change history; the archived PDF/A stays unchanged and authoritative.',
     failed: 'The PDF could not be downloaded: {message}',
+    limited: 'Too many PDFs are being generated right now. Please try again in {seconds} s.',
     downloadWord: 'Download as Word',
     downloadingWord: 'Preparing the Word document…',
     wordHint:

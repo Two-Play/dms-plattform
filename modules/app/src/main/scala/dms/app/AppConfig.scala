@@ -378,7 +378,8 @@ final case class AppConfig(
     attachments: AttachmentsConfig,
     retention: RetentionConfig,
     notifications: NotificationsConfig,
-    library: LibraryConfig
+    library: LibraryConfig,
+    onDemandPdf: OnDemandPdfConfig
 )
 
 object AppConfig:

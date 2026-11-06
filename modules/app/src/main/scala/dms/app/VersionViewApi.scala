@@ -7,7 +7,7 @@ import dms.documents.core.{DocumentDetails, DocumentError}
 import dms.documents.{DocumentKind, DocumentVersion, Versioning}
 import dms.identity.{Principal, TenantOrganizations, UserDirectory}
 import dms.kernel.{DocumentId, UserId}
-import dms.rendering.ArchiveStandard
+import dms.rendering.{ArchiveStandard, PdfVariant}
 import dms.rendering.core.{PdfJob, PdfRenderer, RenderingError, RenditionFacts}
 import dms.templates.core.{HtmlOptions, HtmlRenderer, ProfileSource, TemplateService}
 import dms.templates.{Language, ResolvedContent}
@@ -56,8 +56,9 @@ final case class VersionHtmlView(
   *     before it took effect, which says so as a draft says it is one (ADR 0072).
   *   - `GET …/versions/{versionId}/draft.pdf?changelog=`: a PDF of an open version (draft, in review, in
   *     approval) printed by the rendering worker on demand, marked "Draft – not valid" in the header and as
-  *     watermark on every page. Not validated, not stored, not archived; every download is audited
-  *     (`document.draft-pdf-downloaded`, with the SHA-256 of the bytes handed out).
+  *     watermark on every page. A plain PDF without PDF/A identification (DMS-118, ADR 0073). Not validated,
+  *     not stored, not archived; every download is audited (`document.draft-pdf-downloaded`, with the SHA-256
+  *     of the bytes handed out).
   *   - `GET …/versions/{versionId}/copy.pdf?changelog=`: a copy of an approved version with the header and
   *     footer of its archive rendition and the note that the archived rendition is authoritative. Meant for
   *     the change history appendix: the archived PDF/A is never altered. Audited as
@@ -70,11 +71,12 @@ final case class VersionHtmlView(
   * change summary, status dates and approver; `attachments=true` the list of attachments (name, size,
   * SHA-256, DMS-115). For file documents (DMS-115) the PDFs are the converted original (draft) or the
   * archived rendition (copy), marked on every page, with the appendices printed by the rendering worker and
-  * appended. Everything requires `ReadDocument` on the version.
+  * appended. Everything requires `ReadDocument` on the version. Both PDFs are subject to the limits of
+  * [[OnDemandPdfLimiter]]: a refused request is answered with 429 and `Retry-After`.
   */
 object VersionViewApi:
   type Env = DocumentApi.Env & TemplateService & ProfileSource & PdfRenderer & AuditTrail &
-    TenantOrganizations & UserDirectory & FileVersions
+    TenantOrganizations & UserDirectory & FileVersions & OnDemandPdfLimiter
 
   /** Audit action of a downloaded draft PDF. */
   val DraftPdfAction: String = "document.draft-pdf-downloaded"
@@ -138,7 +140,7 @@ object VersionViewApi:
       )
 
   private def pdfEndpoint(file: String) =
-    SecuredApi.base.get
+    SecuredApi.retryable.get
       .in(version / file)
       .in(changelog)
       .in(attachmentList)
@@ -152,9 +154,10 @@ object VersionViewApi:
     pdfEndpoint("draft.pdf")
       .description(
         "A PDF of an open version (draft, in review, in approval), printed on demand from its saved state and " +
-          "marked \"Draft – not valid\" in the header and as watermark on every page. Not archived and not " +
-          "stored; the download is audited. 409 for approved versions (download their rendition). " +
-          "Requires ReadDocument on the version."
+          "marked \"Draft – not valid\" in the header and as watermark on every page. A plain PDF without PDF/A " +
+          "identification, not archived and not stored; the download is audited. 409 for approved versions " +
+          "(download their rendition). 429 with Retry-After (pdf_limit_reached) when the caller, the tenant or " +
+          "the rendering capacity is at its limit. Requires ReadDocument on the version."
       )
       .serverLogic(p =>
         (id, versionId, changelog, attachments) =>
@@ -167,7 +170,8 @@ object VersionViewApi:
         "A copy of an approved version printed on demand, e.g. with the change history appended; header and " +
           "footer as in the archive rendition plus the note that the archived rendition is authoritative. The " +
           "archived PDF/A is not altered. Not stored; the download is audited. 409 for versions that were never " +
-          "approved. Requires ReadDocument on the version."
+          "approved. 429 with Retry-After (pdf_limit_reached) when the caller, the tenant or the rendering " +
+          "capacity is at its limit. Requires ReadDocument on the version."
       )
       .serverLogic(p =>
         (id, versionId, changelog, attachments) =>
@@ -306,7 +310,7 @@ object VersionViewApi:
       withChangelog: Boolean,
       withAttachments: Boolean,
       draft: Boolean
-  ): ZIO[Env, (StatusCode, ApiError), (String, Array[Byte])] =
+  ): ZIO[Env, SecuredApi.RetryableError, (String, Array[Byte])] =
     for
       found <- printable(p, id, versionId, withChangelog) { (_, v) =>
         if draft then
@@ -327,7 +331,32 @@ object VersionViewApi:
               ZIO.fail(DocumentError.Conflict(s"version ${v.label} was never approved; print it as draft"))
             )
             .unit
-      }
+      }.mapError(SecuredApi.withoutRetry)
+      // Whoever may not read the version or asks for the wrong PDF gets that answer and spends nothing.
+      bytes <- ZIO.scoped[Env](
+        ZIO.serviceWithZIO[OnDemandPdfLimiter](_.admit(p.tenantId, p.userId)).mapError(refused) *>
+          printPdf(p, found, withChangelog, withAttachments, draft).mapError(SecuredApi.withoutRetry)
+      )
+      suffix = if draft then "draft" else "copy"
+    yield (s"""attachment; filename="$id-${found.version.label}-$suffix.pdf"""", bytes)
+
+  private def refused(error: OnDemandPdfRefused | DbError): SecuredApi.RetryableError = error match
+    case OnDemandPdfRefused(limit, seconds) =>
+      (
+        StatusCode.TooManyRequests,
+        Some(seconds.toString),
+        ApiError("pdf_limit_reached", s"${limit.describe} Try again in $seconds seconds.")
+      )
+    case e: DbError => SecuredApi.withoutRetry(DocumentApi.toResponse(e))
+
+  private def printPdf(
+      p: Principal,
+      found: Printable,
+      withChangelog: Boolean,
+      withAttachments: Boolean,
+      draft: Boolean
+  ): ZIO[Env, (StatusCode, ApiError), Array[Byte]] =
+    for
       rendering <- if found.file then ZIO.none else render(p, found.details, found.version).asSome
       language = rendering.fold(DocumentRenditions.language(found.version))(_.language)
       extras <- printed(p, found, language, withAttachments)
@@ -339,7 +368,7 @@ object VersionViewApi:
               .fromEither(VersionPrintLayout.compose(r.page, facts, history, attachments))
               .mapError(m => toResponse(RenderingError.Invalid(m)))
             rendered <- ZIO
-              .serviceWithZIO[PdfRenderer](_.render(job(page, found, facts)))
+              .serviceWithZIO[PdfRenderer](_.render(job(page, found, facts, draft)))
               .mapError(toResponse)
           yield rendered.bytes.toArray
         case None => filePdf(p, found, facts, language, history, attachments, draft)
@@ -351,13 +380,13 @@ object VersionViewApi:
         withAttachments,
         bytes
       )
-      suffix = if draft then "draft" else "copy"
-    yield (s"""attachment; filename="$id-${found.version.label}-$suffix.pdf"""", bytes)
+    yield bytes
 
-  private def job(page: String, found: Printable, facts: PrintFacts): PdfJob =
+  /** Drafts are plain PDFs (ADR 0073); copies keep the variant of ADR 0039. */
+  private def job(page: String, found: Printable, facts: PrintFacts, draft: Boolean): PdfJob =
     PdfJob(
       page,
-      ArchiveStandard.default,
+      if draft then PdfVariant.Plain else PdfVariant.Archive(ArchiveStandard.default),
       identifier(found, facts.generatedAt),
       Map("documentId" -> found.details.document.id.value.toString)
     )
@@ -386,7 +415,7 @@ object VersionViewApi:
         archived = !draft
       )
       stamped <- ZIO
-        .fromEither(PdfComposer.stamp(base.toArray, lines, emphasize = facts.notValid))
+        .fromEither(PdfComposer.stamp(base.toArray, lines, emphasize = facts.notValid, plain = draft))
         .mapError(failed)
       result <-
         if history.isEmpty && attachments.isEmpty then ZIO.succeed(stamped)
@@ -404,7 +433,7 @@ object VersionViewApi:
               .fromEither(VersionPrintLayout.compose(empty, facts, history, attachments, startsPage = true))
               .mapError(failed)
             appendix <- ZIO
-              .serviceWithZIO[PdfRenderer](_.render(job(page, found, facts)))
+              .serviceWithZIO[PdfRenderer](_.render(job(page, found, facts, draft)))
               .mapError(toResponse)
             merged <- ZIO.fromEither(PdfComposer.append(stamped, appendix.bytes.toArray)).mapError(failed)
           yield merged
