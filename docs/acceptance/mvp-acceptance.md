@@ -215,4 +215,8 @@ Run on 2026-11-04 on this branch.
 
 After the four blockers, on all of them together: 1,079 backend and 405 frontend tests passed. On the running local stack: withdrawing a version in the browser as an approver (status, reason, 409 on a second try, absent from library and search, mail to the owner), purpose and reason in the body (403 without them, 405 for the old GET), and a stopped rendering service with the job set to dead by hand (mail to owner and records manager, retry through the API, version approved), and an overdue review task added by hand with a 30-second deadline check (one mail to the owner, one notice, no repeat). Escalation of a review task ran in tests only.
 
-Not run for this report: other browser walkthroughs, backup and restore, the production profile in a real environment.
+Browser run of 2026-11-06 on the local stack at V60. Passed: lowering confidentiality from request to publication (author, approver, extra step, level changes with the published version; a version of 1.0 at Internal, 2.0 at Public), legal hold (create, required fields, add from a search, badge on the document, lift with confirmation), the template test mode with its generated cases, the person picker by keyboard in the deputy form, `/failures` with no failed items, and at 375 px the start, document, task, library, search, deputy, notification, legal hold, retention, template, compliance and admin pages. The findings are fixed in DMS-167 and DMS-174.
+
+Not run in the browser: a deputy acting on a task, a real failed item on `/failures`, publication on a future valid-from date, a refused lowering. No screen reader pass (DMS-157).
+
+Not run for this report: backup and restore, the production profile in a real environment.

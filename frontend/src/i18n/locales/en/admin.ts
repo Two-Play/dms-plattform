@@ -66,6 +66,9 @@ export const deputies = {
   title: 'Deputies',
   description:
     'While a deputyship is active, the deputy can complete your open review and approval tasks on your behalf. You keep your tasks as well.',
+  notOwnDeputy: 'Yourself',
+  needsSameRole:
+    'This person does not hold all the covered roles. Choose someone with the same roles or limit the roles.',
   setDeputy: 'Set a deputy',
   setDeputyText: 'For a limited period, e.g. a vacation.',
   loading: 'Loading your deputyships',

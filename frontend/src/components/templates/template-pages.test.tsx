@@ -424,7 +424,7 @@ describe('Template page', () => {
     expect(screen.getByText('false and true')).toBeInTheDocument()
     expect(screen.getByTestId('test-case-preview')).toHaveTextContent('Fixed term rendered')
     const list = screen.getByRole('list', { name: 'Test cases' })
-    await user.click(within(list).getByRole('button', { name: /empty optional fields/ }))
+    await user.click(within(list).getByRole('button', { name: /Empty optional fields/ }))
     expect(screen.getByTestId('test-case-preview')).toHaveTextContent('Empty case rendered')
     expect(screen.getByText('Missing required values: termType')).toBeInTheDocument()
   })

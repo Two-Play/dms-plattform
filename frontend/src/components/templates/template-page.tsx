@@ -16,6 +16,7 @@ import {
   changeTemplateStatus,
   createVersion,
   requestOf,
+  templateClassesQuery,
   templateVersionsQuery,
   type TemplateStatus,
   type TemplateVersion,
@@ -52,6 +53,9 @@ import { newWordTemplateVersion, wordTemplateQuery, type WordTemplate } from '@/
 import { WordTemplatePanel } from './word-template-panel'
 
 function History({ version }: { version: TemplateVersion }) {
+  const client = useApiClient()
+  const classes = useQuery(templateClassesQuery(client))
+  const classLabel = classes.data?.find((c) => c.id === version.documentClassId)?.label
   const edited = (version.editedBy ?? []).filter((u) => u !== version.createdBy)
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
@@ -87,9 +91,9 @@ function History({ version }: { version: TemplateVersion }) {
         </>
       )}
       <dt className="text-muted-foreground">{t('templates.page.documentClass')}</dt>
-      <dd className="font-mono text-xs">
+      <dd>
         {t('templates.page.classVersion', {
-          id: version.documentClassId,
+          id: classLabel ?? version.documentClassId,
           version: version.documentClassVersion,
         })}
       </dd>

@@ -78,7 +78,7 @@ export function AdminPage({ tab }: { tab?: string }) {
     <div className="space-y-6">
       <PageHeader title={t('admin.title')} description={t('admin.description')} />
       <Tabs defaultValue={tab ?? 'groups'}>
-        <TabsList>
+        <TabsList className="h-auto max-w-full flex-wrap justify-start">
           <TabsTrigger value="groups">{t('admin.tabGroups')}</TabsTrigger>
           <TabsTrigger value="number-ranges">{t('admin.tabNumberRanges')}</TabsTrigger>
           <TabsTrigger value="acknowledgements">{t('ackSettings.tab')}</TabsTrigger>

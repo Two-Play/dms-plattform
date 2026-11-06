@@ -3,6 +3,7 @@ import { cn } from 'cn'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { XIcon } from 'lucide-react'
 import { t } from '@/i18n'
+import { pageHeading, useReturnFocus } from '@/lib/return-focus'
 
 function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
@@ -40,8 +41,12 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & { showCloseButton?: boolean }) {
+  // Radix returns focus only to a `DialogTrigger`; most dialogs here are opened from their own state.
+  const focusReturn = useReturnFocus(pageHeading)
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -52,6 +57,14 @@ function DialogContent({
           className,
         )}
         {...props}
+        onOpenAutoFocus={(event) => {
+          focusReturn.remember()
+          onOpenAutoFocus?.(event)
+        }}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event)
+          if (!event.defaultPrevented) focusReturn.restore(event)
+        }}
       >
         {children}
         {showCloseButton && (

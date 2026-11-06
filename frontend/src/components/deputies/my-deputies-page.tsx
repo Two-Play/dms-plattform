@@ -32,7 +32,7 @@ export function MyDeputiesPage() {
           <CardDescription>{t('deputies.setDeputyText')}</CardDescription>
         </CardHeader>
         <CardContent>
-          <DeputyshipForm />
+          <DeputyshipForm selfId={userId} />
         </CardContent>
       </Card>
       {(list.isPending || me.isPending) && <LoadingState label={t('deputies.loading')} />}
