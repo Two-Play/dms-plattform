@@ -2,9 +2,9 @@ package dms.app
 
 import dms.archive.*
 import dms.archive.core.{LegalHoldService, LegalHoldStore}
-import dms.authz.{AccessDenied, Action, Authorizer, Resource, Subject}
+import dms.authz.{AccessDenied, Action, Authorizer, Policy, Resource, Subject}
 import dms.db.{Db, DbError}
-import dms.documents.DocumentStatus
+import dms.documents.{DocumentStatus, Versioning}
 import dms.documents.core.{DocumentDetails, DocumentError, DocumentService}
 import dms.identity.{Authenticator, Principal}
 import dms.kernel.DocumentId
@@ -79,8 +79,8 @@ final case class HoldCandidateView(
     /** Title of the hit; the search only finds documents the caller may read. */
     title: String,
     documentNumber: Option[String],
-    /** False if the caller may not manage legal holds of the document (scope, confidentiality): a request
-      * with this search is refused (403) until the search excludes it.
+    /** False if the caller is not cleared for every version that stands for the document. The hold can be set
+      * all the same (ADR 0082), but only someone cleared can take the document out of it again.
       */
     manageable: Boolean,
     /** True if an active legal hold covers the document already. */
@@ -107,13 +107,18 @@ final case class ReleaseLegalHold(
 
 final case class HeldDocumentView(
     documentId: UUID,
-    /** Absent if the caller may not manage the document (e.g. confidential, outside their groups). */
+    /** The title the caller may know: the document's if they are cleared for every version, else the title of
+      * a version they are cleared for (ADR 0082). Absent if there is none: nothing of the document is shown.
+      */
     title: Option[String],
     /** Document (named) or Search (a hit of a confirmed search). */
     addedVia: String,
     reason: String,
     addedBy: String,
     addedAt: Instant,
+    /** Whether the caller may take the document out of a hold: this needs clearance, setting a hold does not.
+      */
+    removable: Boolean,
     /** Set if the document was removed from the hold (DMS-106); it then no longer counts as covered by it. */
     removedAt: Option[Instant] = None,
     removedBy: Option[String] = None,
@@ -151,9 +156,13 @@ final case class LegalHoldRefView(id: UUID, name: String, matterReference: Optio
   *
   * Records managers (`ManageRetention`, permission matrix row "Retention / legal hold") set a hold for a
   * matter, put documents under it (named, or the hits of a search they confirm by its hit count) and release
-  * it; setting, adding and releasing require a reason and are audited. Hold-level operations need a records
-  * manager assignment covering the whole tenant; every document put under a hold additionally needs
-  * `ManageRetention` on the document (scope, confidentiality).
+  * it; setting, adding and releasing require a reason and are audited. Every operation needs a records
+  * manager assignment covering the whole tenant.
+  *
+  * A legal hold is always possible (DMS-156, ADR 0082): it reveals nothing and protects at once, so putting a
+  * document under a hold needs no clearance for any of its versions. What the caller is shown still follows
+  * the clearance: a title only of a version they are cleared for. Taking a single document out of a hold ends
+  * its protection, so that needs `ManageRetention` on every governing version (ADR 0072).
   */
 object LegalHoldApi:
   type Env = Authenticator & Db & Authorizer & DocumentService & LegalHoldService & SearchIndex
@@ -177,7 +186,8 @@ object LegalHoldApi:
           "(`documentIds`) and/or taken from a search (`searchFilter`: the parameters of the search plus " +
           s"`expectedCount`, the hit count the caller confirmed; 409 result_changed if the search finds a different " +
           s"number now, 422 too_many_documents above $MaxDocuments hits). Documents can also be added later. " +
-          "Requires the records manager role for the whole tenant and for every document."
+          "Requires the records manager role for the whole tenant; no clearance for the documents is needed, " +
+          "and the response names them by id only."
       )
       .tag("Legal holds")
       .serverLogic(p =>
@@ -187,10 +197,10 @@ object LegalHoldApi:
             reason   <- required(req.reason, "reason")
             subject  <- checkedSubject(p)
             searched <- ZIO.foreach(req.searchFilter)(resolve(subject, _))
-            result   <- inTransaction(p) { (authz, documents, service) =>
+            result   <- inTransaction(p) { (_, documents, service) =>
               for
-                named   <- manageable(authz, subject, documents, ids(req.documentIds))
-                hits    <- manageable(authz, subject, documents, searched.getOrElse(Nil))
+                named   <- existing(documents, ids(req.documentIds))
+                hits    <- existing(documents, searched.getOrElse(Nil))
                 created <- service.create(
                   NewLegalHold(name, req.matterReference, reason),
                   named,
@@ -235,8 +245,9 @@ object LegalHoldApi:
       .in(holds / holdId)
       .out(jsonBody[LegalHoldView])
       .description(
-        "A legal hold with its documents: who added them how and why. Titles are shown for documents the caller " +
-          "may manage. Requires the records manager role."
+        "A legal hold with its documents: who added them how and why. A title is shown only if the caller is " +
+          "cleared for the version it comes from, and `removable` says whether they may take the document out. " +
+          "Requires the records manager role."
       )
       .tag("Legal holds")
       .serverLogic(p =>
@@ -247,7 +258,7 @@ object LegalHoldApi:
               for
                 hold   <- service.get(LegalHoldId(id))
                 listed <- service.documents(hold.id)
-                titled <- ZIO.foreach(listed)(d => title(subject, documents, d.documentId).map(d -> _))
+                titled <- ZIO.foreach(listed)(d => shown(subject, documents, d.documentId).map(d -> _))
               yield view(hold, Some(titled))
             }
           yield result
@@ -261,7 +272,7 @@ object LegalHoldApi:
       .description(
         "Puts further documents under an active hold, named or from a confirmed search (as on creation); a reason " +
           "is required (422). Documents the hold covers already are skipped; `addedDocumentIds` lists the new " +
-          "ones. 409 released if the hold was released."
+          "ones. 409 released if the hold was released. No clearance for the documents is needed."
       )
       .tag("Legal holds")
       .serverLogic(p =>
@@ -270,10 +281,10 @@ object LegalHoldApi:
             reason   <- required(req.reason, "reason")
             subject  <- checkedSubject(p)
             searched <- ZIO.foreach(req.searchFilter)(resolve(subject, _))
-            result   <- inTransaction(p) { (authz, documents, service) =>
+            result   <- inTransaction(p) { (_, documents, service) =>
               for
-                named <- manageable(authz, subject, documents, ids(req.documentIds))
-                hits  <- manageable(authz, subject, documents, searched.getOrElse(Nil))
+                named <- existing(documents, ids(req.documentIds))
+                hits  <- existing(documents, searched.getOrElse(Nil))
                 _     <- ZIO.when(named.isEmpty && hits.isEmpty)(
                   ZIO.fail(LegalHoldError.Invalid(List("documentIds or searchFilter is required")))
                 )
@@ -292,9 +303,10 @@ object LegalHoldApi:
       .out(jsonBody[HoldSearchPreviewView])
       .description(
         "The documents a search would put under a hold (DMS-106): the search runs as the caller, as when the " +
-          "hold is set; `expectedCount` is ignored. Returns the hit count, the distinct documents (whether the " +
-          "caller may manage each and whether a hold covers it already) and a `fingerprint` to confirm exactly " +
-          s"these documents with `expectedFingerprint`. 422 too_many_documents above $MaxDocuments hits. " +
+          "hold is set; `expectedCount` is ignored. Returns the hit count, the distinct documents (the title of " +
+          "the hit, a version the caller may read; whether they could take the document out of a hold again; " +
+          "whether a hold covers it already) and a `fingerprint` to confirm exactly these documents with " +
+          s"`expectedFingerprint`. 422 too_many_documents above $MaxDocuments hits. " +
           "Requires the records manager role for the whole tenant."
       )
       .tag("Legal holds")
@@ -334,7 +346,8 @@ object LegalHoldApi:
         "Takes a single document out of an active hold (DMS-106), e.g. one added by mistake; a reason is required " +
           "(422). The entry stays in the hold's history with the removal; the document is no longer under legal " +
           "hold unless another active hold covers it. 404 if the hold does not cover the document, 409 released " +
-          "if the hold was released. Requires the records manager role for the whole tenant and for the document."
+          "if the hold was released. Requires the records manager role for the whole tenant and clearance for " +
+          "every version that stands for the document."
       )
       .tag("Legal holds")
       .serverLogic(p =>
@@ -344,7 +357,7 @@ object LegalHoldApi:
             subject <- checkedSubject(p)
             result  <- inTransaction(p) { (authz, documents, service) =>
               for
-                _       <- manageable(authz, subject, documents, List(DocumentId(documentId)))
+                _       <- checkManageable(authz, subject, documents, DocumentId(documentId))
                 changed <- service.removeDocument(LegalHoldId(id), DocumentId(documentId), reason, p.userId)
               yield view(changed, None)
             }
@@ -489,39 +502,60 @@ object LegalHoldApi:
   private def ids(documentIds: Option[List[UUID]]): List[DocumentId] =
     documentIds.getOrElse(Nil).map(DocumentId(_))
 
-  /** The documents if the caller may manage every one of them (404 for an unknown, 403 for another). */
-  private def manageable(
-      authz: Authorizer,
-      subject: Subject,
-      documents: DocumentService,
-      ids: List[DocumentId]
-  ): IO[Failure, List[DocumentId]] =
+  /** The documents to put under a hold, if they all exist (404 otherwise). The caller's role is checked, and
+    * a hold needs nothing more (ADR 0082).
+    */
+  private def existing(documents: DocumentService, ids: List[DocumentId]): IO[Failure, List[DocumentId]] =
     val distinct = ids.distinct
     if distinct.size > MaxDocuments then
       ZIO.fail(
         LegalHoldError.Invalid(List(s"at most $MaxDocuments documents can be put under a hold at once"))
       )
-    else
-      ZIO.foreach(distinct)(id =>
-        for
-          details <- documents.get(id)
-          _       <- ZIO.foreachDiscard(DocumentApi.governing(subject.tenantId, details))(
-            authz.check(subject, Action.ManageRetention, _)
-          )
-        yield id
-      )
+    else ZIO.foreach(distinct)(id => documents.get(id).as(id))
 
-  private def title(
+  /** That the caller may take the document out of a hold (404 for an unknown, 403 for another document). */
+  private def checkManageable(
+      authz: Authorizer,
       subject: Subject,
       documents: DocumentService,
       id: DocumentId
-  ): IO[DocumentError, Option[String]] =
+  ): IO[Failure, Unit] =
+    documents
+      .get(id)
+      .flatMap(details =>
+        ZIO.foreachDiscard(DocumentApi.governing(subject.tenantId, details))(
+          authz.check(subject, Action.ManageRetention, _)
+        )
+      )
+
+  /** What the caller is shown of a held document: a title and whether they may take it out of a hold. */
+  private def shown(
+      subject: Subject,
+      documents: DocumentService,
+      id: DocumentId
+  ): IO[DocumentError, (Option[String], Boolean)] =
     for
       details <- documents.get(id)
+      title   <- titleFor(subject, details)
       allowed <- permits(subject, details)
-    yield Option.when(allowed)(details.document.title)
+    yield (title, allowed)
 
-  /** Whether the caller may manage legal holds of the document (without failing). */
+  /** The document's title for someone cleared for all of it. For anyone else, the title a version they are
+    * cleared for states itself: the document's title may come from another version, also from a draft saved
+    * before ADR 0074. Without such a version, none.
+    */
+  private def titleFor(subject: Subject, details: DocumentDetails): UIO[Option[String]] =
+    Clock.instant.map { now =>
+      val cleared = details.versions.filter(v =>
+        Policy
+          .decide(subject, Action.ManageRetention, DocumentApi.resource(subject.tenantId, details, v), now)
+          .isPermitted
+      )
+      if cleared.size == details.versions.size then Some(details.document.title)
+      else Versioning.naming(cleared).flatMap(DocumentRenditions.ownTitle)
+    }
+
+  /** Whether the caller may take the document out of a hold (without failing). */
   private def manages(
       subject: Subject,
       documents: DocumentService,
@@ -533,10 +567,13 @@ object LegalHoldApi:
     Clock.instant.map(now =>
       DocumentApi
         .governing(subject.tenantId, details)
-        .forall(dms.authz.Policy.decide(subject, Action.ManageRetention, _, now).isPermitted)
+        .forall(Policy.decide(subject, Action.ManageRetention, _, now).isPermitted)
     )
 
-  private def view(hold: LegalHold, documents: Option[List[(HeldDocument, Option[String])]]): LegalHoldView =
+  private def view(
+      hold: LegalHold,
+      documents: Option[List[(HeldDocument, (Option[String], Boolean))]]
+  ): LegalHoldView =
     LegalHoldView(
       hold.id.value,
       hold.name,
@@ -550,7 +587,7 @@ object LegalHoldApi:
       hold.release.map(_.reason),
       hold.documentCount,
       documents.map(
-        _.map((d, title) =>
+        _.map { case (d, (title, removable)) =>
           HeldDocumentView(
             d.documentId.value,
             title,
@@ -558,11 +595,12 @@ object LegalHoldApi:
             d.reason,
             d.addedBy.value,
             d.addedAt,
+            removable,
             d.removal.map(_.at),
             d.removal.map(_.by.value),
             d.removal.map(_.reason)
           )
-        )
+        }
       )
     )
 

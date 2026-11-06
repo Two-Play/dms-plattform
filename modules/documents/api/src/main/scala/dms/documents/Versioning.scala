@@ -87,6 +87,18 @@ object Versioning:
         .orElse(versions.lastOption)
         .toList
 
+  /** Of `versions`, the one that names the document to someone who may not know all of it (DMS-156, ADR
+    * 0082): the latest valid one, else the latest that was in force, else the latest. A discarded draft and a
+    * destroyed version name nothing.
+    */
+  def naming(versions: List[DocumentVersion]): Option[DocumentVersion] =
+    val candidates = versions.filterNot(v => v.status == Discarded || v.status == Destroyed)
+    candidates
+      .filter(v => isValid(v.status))
+      .maxByOption(_.number)
+      .orElse(candidates.filter(_.publishedAt.isDefined).maxByOption(_.number))
+      .orElse(candidates.lastOption)
+
   /** The number of the first version of a document. */
   val first: VersionNo = VersionNo.Initial
 

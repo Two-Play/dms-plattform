@@ -228,10 +228,9 @@ export function documentIdsIn(text: string): string[] {
   return [...new Set((text.match(UUID) ?? []).map((id) => id.toLowerCase()))]
 }
 
-/** Whether the preview can be confirmed: it has documents, all of which the caller may manage. */
+/** Whether the preview can be confirmed: it has documents. A legal hold is always possible (ADR 0082). */
 export function confirmable(preview: HoldSearchPreview | undefined): boolean {
-  const documents = preview?.documents ?? []
-  return documents.length > 0 && documents.every((d) => d.manageable)
+  return (preview?.documents ?? []).length > 0
 }
 
 /** The search result changed since it was reviewed (409 result_changed). */

@@ -187,7 +187,14 @@ object VersioningSpec extends ZIOSpecDefault:
         Versioning.governing(List(archived, ended, neverValid)) == List(ended),
         Versioning.governing(List(archived, destroyed, neverValid)) == List(archived),
         Versioning.governing(List(firstStop, firstStopped)) == List(firstStopped),
-        Versioning.governing(Nil).isEmpty
+        Versioning.governing(Nil).isEmpty,
+        // What names a document to someone who may not know all of it: in force first, then whatever is left.
+        Versioning.naming(List(superseded, valid, otherScope, draft)).contains(otherScope),
+        Versioning.naming(List(superseded, neverValid, draft)).contains(superseded),
+        Versioning.naming(List(archived, ended)).contains(ended),
+        Versioning.naming(List(neverValid, draft)).contains(draft),
+        Versioning.naming(List(discarded, destroyed)).isEmpty,
+        Versioning.naming(Nil).isEmpty
       )
     },
     test("labels can be parsed back") {

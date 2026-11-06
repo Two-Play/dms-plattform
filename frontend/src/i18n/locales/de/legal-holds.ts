@@ -106,9 +106,9 @@ export const legalHolds: Translation<typeof en.legalHolds> = {
     }),
     previewCaption: 'Dokumente der Suche',
     held: 'Unter Legal Hold',
-    notManageable: 'Außerhalb Ihres Bereichs',
+    notManageable: 'Herausnehmen nur mit Freigabe',
     notManageableText:
-      'Für einige dieser Dokumente dürfen Sie keine Legal Holds verwalten. Grenzen Sie die Suche ein, um sie auszuschließen.',
+      'Für einige dieser Dokumente sind Sie nicht für jede Version freigegeben. Sie können sie unter Legal Hold stellen, aber einzeln wieder herausnehmen kann sie nur, wer freigegeben ist.',
     none: 'Die Suche findet keine Dokumente.',
     changed: 'Ändern Sie die Suche und prüfen Sie sie erneut.',
     resultChanged:
