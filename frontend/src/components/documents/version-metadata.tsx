@@ -47,6 +47,23 @@ function valueOf(version: DocumentVersionView, key: string): MetadataValue | und
   return version.values[key]?.value
 }
 
+function levelName(code: string): string {
+  return tOptional(`docs.meta.levels.${code}`) ?? code
+}
+
+/**
+ * The level a version states. Where access stands elsewhere (ADR 0083) the value alone would say too much: an
+ * approved lowering is a proposal until publication, and without publication it never took effect.
+ */
+function levelText(code: string, version: DocumentVersionView): string {
+  const access = version.accessFloor
+  if (access === undefined) return levelName(code)
+  const names = { level: levelName(code), access: levelName(access) }
+  return version.status === 'InApproval' || version.status === 'Approved'
+    ? t('docs.meta.levelProposed', names)
+    : t('docs.meta.levelNeverInForce', names)
+}
+
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="contents">
@@ -139,7 +156,7 @@ export function VersionMetadata({
             {validUntil ? displayValue(validUntil) : <NotSet />}
           </Row>
           <Row label={t('docs.meta.confidentiality')}>
-            {levelCode ? (tOptional(`docs.meta.levels.${levelCode}`) ?? levelCode) : <NotSet />}
+            {levelCode ? levelText(levelCode, version) : <NotSet />}
           </Row>
           <RetentionRow documentId={document.id} version={version} />
           <Row label={t('docs.meta.approval')}>

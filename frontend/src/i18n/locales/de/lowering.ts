@@ -4,8 +4,12 @@ import type * as en from '@/i18n/locales/en/lowering'
 export const lowering: Translation<typeof en.lowering> = {
   title: 'Vertraulichkeit herabstufen',
   hint: 'Diese Version steht auf {level}. Tiefer geht es nur mit der Freigabe einer zweiten Person.',
+  levelOnly: 'Diese Version steht auf {level}.',
   accessHint:
     'Diese Version nennt {level}. Bis zur Veröffentlichung bleibt der Zugriff auf {access}: Nur wer dafür berechtigt ist, sieht sie.',
+  accessHintEnded:
+    'Diese Version nennt {level}, wurde aber nie veröffentlicht. Diese Stufe wurde also nie wirksam: Der Zugriff bleibt auf {access}.',
+  requests: 'Anträge zur Herabstufung',
   offer:
     'Unter {level} braucht diese Version eine zusätzliche Freigabe: Es entscheidet jemand, der für die aktuelle Stufe berechtigt ist und die Version nicht geändert hat. Bis dahin bleibt der Entwurf auf seiner Stufe, und bereits gültige Versionen bleiben unberührt.',
   loading: 'Anträge zur Herabstufung werden geladen …',
@@ -21,6 +25,7 @@ export const lowering: Translation<typeof en.lowering> = {
     'Die Freigabe senkt die Stufe nur für diese Version und erst ab ihrer Veröffentlichung. Eine Ablehnung gibt die Version auf der alten Stufe an die Autorin oder den Autor zurück.',
   status: {
     Requested: 'Offen',
+    Undecided: 'Nicht entschieden',
     Approved: 'Freigegeben',
     Refused: 'Abgelehnt',
     Withdrawn: 'Zurückgezogen',
@@ -31,9 +36,15 @@ export const lowering: Translation<typeof en.lowering> = {
     inWorkflow: 'Wird im zusätzlichen Freigabeschritt des Workflows entschieden.',
     approved:
       'Freigegeben: {level} gilt mit der Veröffentlichung dieser Version. Bis dahin bleibt der Zugriff auf {access}.',
+    neverInForce:
+      'Freigegeben, aber nie wirksam: Die Version wurde nicht veröffentlicht, {level} galt also nie, und der Zugriff bleibt auf {access}.',
     inForce: 'Wirksam: Diese Version steht seit ihrer Veröffentlichung auf {level}.',
+    tookEffect:
+      '{level} wurde mit der Veröffentlichung dieser Version wirksam, die nicht mehr gültig ist.',
     refused:
       'Abgelehnt: Die Version bleibt auf {level}. Sie können mit neuer Begründung erneut beantragen.',
+    refusedClosed: 'Abgelehnt: Dieser Antrag hat nichts geändert.',
+    undecided: 'Nicht entschieden: Die Version kam nicht weiter und bleibt auf {level}.',
     withdrawn: 'Der Antrag wurde zurückgezogen.',
   },
   request: {

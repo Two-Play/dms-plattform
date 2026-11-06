@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useId, useState, type SyntheticEvent } from 'react'
+import { useId, useRef, useState, type RefObject, type SyntheticEvent } from 'react'
 import {
   applyLowerings,
   levelsBelow,
@@ -27,6 +27,16 @@ import { formatDateTime } from '@/i18n/format'
 import { toast } from '@/lib/toast'
 
 const ON_ITS_WAY = new Set(['Draft', 'InReview', 'InApproval', 'Approved'])
+
+/** Statuses in which a version is in force. */
+const VALID = new Set(['Published', 'ReviewDue'])
+
+/** Moves focus once the render that removed the focused control is through. */
+function focusAfterRender(target: RefObject<HTMLElement | null>) {
+  requestAnimationFrame(() => {
+    target.current?.focus()
+  })
+}
 
 function levelName(level: string): string {
   return tOptional(`docs.meta.levels.${level}`) ?? level
@@ -56,11 +66,13 @@ function failure(error: Error, action: 'request' | 'withdraw'): string {
 function RequestForm({
   documentId,
   basisLevel,
-  onDone,
+  onSent,
+  onCancel,
 }: {
   documentId: string
   basisLevel: string
-  onDone: () => void
+  onSent: () => void
+  onCancel: () => void
 }) {
   const client = useApiClient()
   const queryClient = useQueryClient()
@@ -78,7 +90,7 @@ function RequestForm({
     onSuccess: async (result) => {
       await applyLowerings(queryClient, documentId, result)
       toast(t('lowering.request.done'))
-      onDone()
+      onSent()
     },
   })
 
@@ -138,7 +150,7 @@ function RequestForm({
         <Button type="submit" size="sm" disabled={ask.isPending}>
           {ask.isPending ? t('lowering.request.sending') : t('lowering.request.send')}
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={onDone}>
+        <Button type="button" size="sm" variant="outline" onClick={onCancel}>
           {t('common.cancel')}
         </Button>
       </div>
@@ -172,24 +184,58 @@ function Closed({ request }: { request: Lowering }) {
   )
 }
 
+/** A request nobody decided, on a version that went no further: nobody will decide it any more. */
+function undecided(request: Lowering, lowerings: Lowerings): boolean {
+  return request.status === 'Requested' && !ON_ITS_WAY.has(lowerings.status)
+}
+
+/** What a request means now: that depends on where its version went since. */
 function statusText(request: Lowering, lowerings: Lowerings): string {
   switch (request.status) {
     case 'Requested':
+      if (undecided(request, lowerings)) {
+        return t('lowering.state.undecided', { level: levelName(lowerings.accessLevel) })
+      }
       return lowerings.status === 'Draft'
         ? t('lowering.state.draft')
         : t('lowering.state.inWorkflow')
     case 'Approved':
-      return lowerings.accessLevel === lowerings.level
-        ? t('lowering.state.inForce', { level: levelName(request.to) })
-        : t('lowering.state.approved', {
-            level: levelName(request.to),
-            access: levelName(lowerings.accessLevel),
-          })
+      if (lowerings.accessLevel === lowerings.level) {
+        const level = levelName(request.to)
+        return VALID.has(lowerings.status)
+          ? t('lowering.state.inForce', { level })
+          : t('lowering.state.tookEffect', { level })
+      }
+      return t(
+        ON_ITS_WAY.has(lowerings.status)
+          ? 'lowering.state.approved'
+          : 'lowering.state.neverInForce',
+        { level: levelName(request.to), access: levelName(lowerings.accessLevel) },
+      )
     case 'Refused':
-      return t('lowering.state.refused', { level: levelName(request.from) })
+      return lowerings.canRequest
+        ? t('lowering.state.refused', { level: levelName(lowerings.level) })
+        : t('lowering.state.refusedClosed')
     default:
       return t('lowering.state.withdrawn')
   }
+}
+
+/** The line under the title: where the version stands, and what going lower takes if that is possible. */
+function description(lowerings: Lowerings): string {
+  const level = levelName(lowerings.level)
+  if (lowerings.accessLevel !== lowerings.level) {
+    return t(
+      ON_ITS_WAY.has(lowerings.status) ? 'lowering.accessHint' : 'lowering.accessHintEnded',
+      {
+        level,
+        access: levelName(lowerings.accessLevel),
+      },
+    )
+  }
+  return lowerings.status === 'Draft' && levelsBelow(lowerings.level).length > 0
+    ? t('lowering.hint', { level })
+    : t('lowering.levelOnly', { level })
 }
 
 function RequestItem({ request, lowerings }: { request: Lowering; lowerings: Lowerings }) {
@@ -200,7 +246,9 @@ function RequestItem({ request, lowerings }: { request: Lowering; lowerings: Low
           {t('lowering.fromTo', { from: levelName(request.from), to: levelName(request.to) })}
         </span>
         <Badge variant="secondary">
-          {tOptional(`lowering.status.${request.status}`) ?? request.status}
+          {undecided(request, lowerings)
+            ? t('lowering.status.Undecided')
+            : (tOptional(`lowering.status.${request.status}`) ?? request.status)}
         </Badge>
       </div>
       <p>{statusText(request, lowerings)}</p>
@@ -238,12 +286,16 @@ export function ConfidentialityLoweringPanel({
   const queryClient = useQueryClient()
   const lowerings = useQuery(loweringQuery(client, documentId, version.id))
   const [asking, setAsking] = useState(false)
+  // Sending and withdrawing remove the control that had focus; the outcome is what to read next.
+  const statusBlock = useRef<HTMLDivElement>(null)
+  const askButton = useRef<HTMLButtonElement>(null)
 
   const withdraw = useMutation({
     mutationFn: () => withdrawLowering(client, documentId),
     onSuccess: async (result) => {
       await applyLowerings(queryClient, documentId, result)
       toast(t('lowering.withdraw.done'))
+      focusAfterRender(statusBlock)
     },
   })
 
@@ -276,22 +328,24 @@ export function ConfidentialityLoweringPanel({
         <CardTitle>
           <h2>{t('lowering.title')}</h2>
         </CardTitle>
-        <CardDescription>
-          {data.accessLevel === data.level
-            ? t('lowering.hint', { level: levelName(data.level) })
-            : t('lowering.accessHint', {
-                level: levelName(data.level),
-                access: levelName(data.accessLevel),
-              })}
-        </CardDescription>
+        <CardDescription>{description(data)}</CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
         {requests.length > 0 && (
-          <ul className="grid gap-2">
-            {requests.toReversed().map((request) => (
-              <RequestItem key={request.id} request={request} lowerings={data} />
-            ))}
-          </ul>
+          <div
+            ref={statusBlock}
+            tabIndex={-1}
+            role="group"
+            aria-label={t('lowering.requests')}
+            className="rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            data-testid="lowering-status"
+          >
+            <ul className="grid gap-2">
+              {requests.toReversed().map((request) => (
+                <RequestItem key={request.id} request={request} lowerings={data} />
+              ))}
+            </ul>
+          </div>
         )}
         {editable && open && (
           <div className="grid gap-2">
@@ -317,8 +371,13 @@ export function ConfidentialityLoweringPanel({
             <RequestForm
               documentId={documentId}
               basisLevel={data.basisLevel}
-              onDone={() => {
+              onSent={() => {
                 setAsking(false)
+                focusAfterRender(statusBlock)
+              }}
+              onCancel={() => {
+                setAsking(false)
+                focusAfterRender(askButton)
               }}
             />
           ) : (
@@ -327,6 +386,7 @@ export function ConfidentialityLoweringPanel({
                 {t('lowering.offer', { level: levelName(data.basisLevel) })}
               </p>
               <Button
+                ref={askButton}
                 size="sm"
                 variant="outline"
                 className="justify-self-start"

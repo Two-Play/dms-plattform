@@ -363,7 +363,7 @@ object WorkflowApi:
                   )
               )
               result <- ctx.workflow.vote(id, decision, req.reason, p.userId, p.authenticatedAt)
-            yield caseView(result)
+            yield caseView(ctx.forCaller(details, result))
           }.mapError(SecuredApi.explainReauthentication(p))
       )
 
@@ -387,7 +387,11 @@ object WorkflowApi:
     SecuredApi.base.get
       .in("api" / "v1" / "documents" / path[UUID]("id").description("Document id") / "workflow")
       .out(jsonBody[List[WorkflowCaseView]])
-      .description("The review and approval cases of the versions of a document the caller may read")
+      .description(
+        "The review and approval cases of the versions of a document the caller may read. The reason of a vote " +
+          "in the additional approval step for a lower confidentiality stays with those cleared for the level " +
+          "the request was made at, also after the lower level took effect (ADR 0083)."
+      )
       .tag("Workflow")
       .serverLogic(p =>
         id =>
@@ -396,7 +400,9 @@ object WorkflowApi:
               details  <- ctx.documents.get(DocumentId(id))
               cases    <- ctx.workflow.cases(DocumentId(id))
               readable <- ctx.readableVersions(details, cases)
-            yield cases.filter(c => readable.contains(c.workflowCase.versionId)).map(caseView)
+            yield cases
+              .filter(c => readable.contains(c.workflowCase.versionId))
+              .map(c => caseView(ctx.forCaller(details, c)))
           }
       )
 
@@ -554,6 +560,20 @@ object WorkflowApi:
       details.versions
         .find(_.id == task.versionId)
         .exists(v => Policy.clearedFor(subject, DocumentApi.resource(subject.tenantId, details, v)))
+
+    /** The case as the caller may see it. The reason of a vote in the additional approval step is the reason
+      * of the decision on the lowering, so it stays at the old level like the request (ADR 0083, decision
+      * 14).
+      */
+    def forCaller(details: DocumentDetails, c: CaseDetails): CaseDetails =
+      val cleared = details.versions
+        .find(_.id == c.workflowCase.versionId)
+        .exists(v => Policy.clearedFor(subject, DocumentApi.loweringResource(subject.tenantId, details, v)))
+      if cleared then c
+      else
+        c.copy(votes =
+          c.votes.map(v => if v.step == WorkflowDefinition.LoweringStep then v.copy(reason = None) else v)
+        )
 
     def configure(p: Principal): IO[AccessDenied, Unit] =
       check(Action.Configure, Resource(p.tenantId, configurationArea = Some(ConfigurationArea.Workflows)))

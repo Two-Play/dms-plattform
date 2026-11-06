@@ -64,7 +64,8 @@ final class WorkflowDocuments(service: DocumentService) extends DocumentGateway:
       actor: UserId,
       actingFor: Option[UserId]
   ): IO[WorkflowError, ReviewSubject] =
-    (if approved then service.approveLowering(versionId, reason, actor, actingFor)
+    (if approved then
+       service.approveLowering(versionId, reason, actor, actingFor, WorkflowDocuments.contentSha256)
      else service.refuseLowering(versionId, reason, actor, actingFor))
       .mapError(WorkflowDocuments.toWorkflowError) *> subject(documentId, versionId)
 

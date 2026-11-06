@@ -878,7 +878,7 @@ final class DocumentService(
       // Drafts saved before DMS-158 may be less confidential than the version they started from.
       versions <- sql(DocumentStore.versions(id, templates))
       _        <- checkLevel(document, current, current.values, versions)
-      _        <- followLevel(current)
+      _        <- followLevel(current, actor)
       // Drafts saved before DMS-133 (or before their class got a rule) get the class's retention rule now.
       refreshed <- refreshRetention(document, current, actor)
       _         <- ZIO.when(document.kind == DocumentKind.File)(
@@ -1853,14 +1853,16 @@ final class DocumentService(
   /** Approves the open request in the additional approval step, called by the workflow in the transaction of
     * the vote: the version states the new level from now on, so that the rendition and the metadata snapshot
     * do, while access keeps the old level until it is published ([[DocumentVersion.accessFloor]]). The
-    * checksum of the version changes with it; the workflow follows. The only change of field values outside a
-    * draft, and the guard of V60 allows nothing else.
+    * checksum of the version changes with it; the workflow follows, and the audit entry names both, as votes
+    * before this one carry the old checksum. `contentSha256` is how the workflow computes it. The only change
+    * of field values outside a draft, and the guard of V60 allows nothing else.
     */
   def approveLowering(
       versionId: UUID,
       reason: Option[String],
       actor: UserId,
-      actingFor: Option[UserId]
+      actingFor: Option[UserId],
+      contentSha256: DocumentVersion => String
   ): IO[DocumentError, DocumentVersion] =
     for
       (document, current, request) <- decidedLowering(versionId)
@@ -1874,7 +1876,11 @@ final class DocumentService(
         actor,
         "document.confidentiality-lowering-approved",
         updated,
-        loweringDetails(closed),
+        loweringDetails(
+          closed,
+          "contentSha256Before" -> Json.Str(contentSha256(current)),
+          "contentSha256After"  -> Json.Str(contentSha256(updated))
+        ),
         Some(closed.reason),
         actingFor
       )
@@ -1970,12 +1976,19 @@ final class DocumentService(
     * the old level on record is the one the version really had. A request the level has overtaken blocks
     * submission until it is withdrawn.
     */
-  private def followLevel(current: DocumentVersion): IO[DocumentError, Unit] =
+  private def followLevel(current: DocumentVersion, actor: UserId): IO[DocumentError, Unit] =
     val level = CoreFields.confidentialityLevel(current.metadata)
     ZIO.foreachDiscard(current.requestedLowering.filter(_.from != level)) { request =>
       val problems = ConfidentialityLowering.problems(request.to, level, Some(level))
       ZIO.unless(problems.isEmpty)(ZIO.fail(DocumentError.Invalid(problems))) *>
-        sql(DocumentStore.followLevel(request.id, level))
+        sql(DocumentStore.followLevel(request.id, level)) *>
+        record(
+          actor,
+          "document.confidentiality-lowering-followed",
+          current,
+          loweringDetails(request.copy(from = level), "previousFrom" -> Json.Str(request.from)),
+          Some(request.reason)
+        )
     }
 
   private def levelEntry(v: DocumentVersion, level: String): (String, FieldEntry) =
@@ -1984,9 +1997,9 @@ final class DocumentService(
       v.values.get(CoreFields.Confidentiality).fold(ValueOrigin.Manual)(_.origin)
     )
 
-  private def loweringDetails(l: ConfidentialityLowering): Json.Obj =
+  private def loweringDetails(l: ConfidentialityLowering, more: (String, Json)*): Json.Obj =
     def user(u: Option[UserId]) = u.fold[Json](Json.Null)(o => Json.Str(o.value))
-    Json.Obj(
+    val fields                  = List[(String, Json)](
       "requestId"      -> Json.Str(l.id.toString),
       "from"           -> Json.Str(l.from),
       "to"             -> Json.Str(l.to),
@@ -1996,6 +2009,7 @@ final class DocumentService(
       "actingFor"      -> user(l.actingFor),
       "decisionReason" -> l.decisionReason.fold[Json](Json.Null)(Json.Str(_))
     )
+    Json.Obj((fields ++ more)*)
 
   /** Tells the people involved. No level and no reason: notices carry no content (business concept 8). */
   private def publishLowering(

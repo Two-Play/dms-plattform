@@ -157,6 +157,9 @@ object DocumentServiceSpec extends ZIOSpecDefault:
   private val author   = UserId("author-1")
   private val approver = UserId("approver-1")
 
+  /** Stands in for the checksum of the workflow: the level is all that changes with an approved lowering. */
+  private val levelOf: DocumentVersion => String = v => CoreFields.confidentialityLevel(v.metadata)
+
   private val content = TemplateContent(
     List(
       Section(
@@ -1339,9 +1342,9 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         f     <- fixture
         doc   <- published(f)
         draft <- as(f.tenant)(_.newVersion(doc, ChangeKind.Major, Some("Figures"), author))
-        none  <- as(f.tenant)(_.approveLowering(draft.id, None, approver, None)).either
+        none  <- as(f.tenant)(_.approveLowering(draft.id, None, approver, None, levelOf)).either
         _     <- as(f.tenant)(_.requestLowering(doc, "Public", "Why", author))
-        early <- as(f.tenant)(_.approveLowering(draft.id, None, approver, None)).either
+        early <- as(f.tenant)(_.approveLowering(draft.id, None, approver, None, levelOf)).either
       yield assertTrue(
         none.left.exists(_.isInstanceOf[DocumentError.Conflict]),
         early.isLeft
@@ -1356,7 +1359,9 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         _      <- as(f.tenant)(_.submit(doc, author))
         _      <- as(f.tenant)(_.changeStatus(draft.id, ReviewPassed, UserId("reviewer-1")))
         before <- as(f.tenant)(_.get(doc)).map(_.versions.find(_.id == draft.id).get)
-        after  <- as(f.tenant)(_.approveLowering(draft.id, Some("Fine"), approver, Some(UserId("principal"))))
+        after  <- as(f.tenant)(
+          _.approveLowering(draft.id, Some("Fine"), approver, Some(UserId("principal")), levelOf)
+        )
         stored <- as(f.tenant)(_.get(doc)).map(_.versions.find(_.id == draft.id).get)
         _      <- as(f.tenant)(
           _.attachRendition(draft.id, Rendition("renditions/2.pdf", Some("v1"), "b" * 64), author)
@@ -1378,7 +1383,9 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         CoreFields.confidentialityLevel(valid.accessMetadata) == "Public",
         audit.exists(e =>
           e.action == "document.confidentiality-lowering-approved" && e.actor.id == approver.value &&
-            e.actor.onBehalfOf.contains("principal") && e.details.value.contains("Fine")
+            e.actor.onBehalfOf.contains("principal") && e.details.value.contains("Fine") &&
+            e.details.value.contains("\"contentSha256Before\":\"Internal\"") &&
+            e.details.value.contains("\"contentSha256After\":\"Public\"")
         ),
         audit.exists(e => e.action == "document.confidentiality-lowered" && e.reason.contains("Why")),
         events.contains("document.confidentiality-lowering-decided"),

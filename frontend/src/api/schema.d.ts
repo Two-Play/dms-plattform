@@ -4021,6 +4021,7 @@ export interface components {
       file?: components['schemas']['VersionFileView']
       withdrawal?: components['schemas']['WithdrawalView']
       editors?: string[]
+      accessFloor?: string
     }
     /** DocumentView */
     DocumentView: {

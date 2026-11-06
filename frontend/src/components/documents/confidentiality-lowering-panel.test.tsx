@@ -13,6 +13,7 @@ import {
   LoweringDecisionNote,
 } from './confidentiality-lowering-panel'
 import { ProposedValuesNote } from './proposed-values-note'
+import { VersionMetadata } from './version-metadata'
 
 const documentId = '7c1e2f0a-0000-4000-8000-0000000000d9'
 
@@ -330,6 +331,154 @@ describe('Lowering panel on a submitted version', () => {
       expect(get).toHaveBeenCalled()
     })
     expect(screen.queryByTestId('confidentiality-lowering')).not.toBeInTheDocument()
+  })
+})
+
+describe('What a request means once its version moved on', () => {
+  const panel = async (extra: Partial<Lowerings>, status = extra.status ?? 'Published') => {
+    renderPanel(() => ok(state({ status, basisLevel: undefined, canRequest: false, ...extra })), {
+      editable: false,
+      status,
+    })
+    return screen.findByTestId('confidentiality-lowering')
+  }
+  const approved = request({ status: 'Approved', decidedBy: 'approver-1' })
+
+  it('does not promise a publication to an approved request on a withdrawn version', async () => {
+    const card = await panel({
+      status: 'Withdrawn',
+      level: 'Internal',
+      accessLevel: 'Confidential',
+      requests: [approved],
+    })
+    expect(card).toHaveTextContent('Approved, but never in force')
+    expect(card).toHaveTextContent('it was never published')
+    expect(card).not.toHaveTextContent('Until it is published')
+    expect(card).not.toHaveTextContent('applies with the publication')
+  })
+
+  it('says a request left open on a withdrawn version will not be decided', async () => {
+    const card = await panel({ status: 'Withdrawn', requests: [request()] })
+    expect(card).toHaveTextContent(
+      'Not decided: the version went no further and stays at Confidential.',
+    )
+    expect(within(card).getByText('Not decided')).toBeInTheDocument()
+    expect(card).not.toHaveTextContent('Decided in the additional approval step')
+  })
+
+  it('does not offer asking again on a later published version', async () => {
+    const card = await panel({
+      requests: [request({ status: 'Refused', decidedBy: 'approver-1' })],
+    })
+    expect(card).toHaveTextContent('Refused: this request changed nothing.')
+    expect(card).not.toHaveTextContent('You can ask again')
+  })
+
+  it('does not call a lowering in force on a version that is no longer valid', async () => {
+    const card = await panel({
+      status: 'Superseded',
+      level: 'Internal',
+      accessLevel: 'Internal',
+      requests: [approved],
+    })
+    expect(card).toHaveTextContent('Internal took effect with the publication of this version')
+    expect(card).not.toHaveTextContent('In force')
+  })
+
+  it('speaks of going lower only on a draft with a level below it', async () => {
+    const lowest = await panel({
+      level: 'Public',
+      accessLevel: 'Public',
+      requests: [approved],
+    })
+    expect(lowest).toHaveTextContent('This version stands at Public.')
+    expect(lowest).not.toHaveTextContent('Going lower')
+  })
+
+  it('does not speak of going lower on a published version above the lowest level', async () => {
+    const card = await panel({
+      level: 'Internal',
+      accessLevel: 'Internal',
+      requests: [approved],
+    })
+    expect(card).not.toHaveTextContent('Going lower')
+  })
+})
+
+describe('Focus after an action', () => {
+  it('moves to the status block when the request is sent', async () => {
+    let current = state()
+    const { user } = renderPanel(() => ok(current), {
+      post: () => {
+        current = state({ canRequest: false, requests: [request()] })
+        return ok(current, 201)
+      },
+    })
+    await user.click(await screen.findByRole('button', { name: 'Ask for a lower level' }))
+    await user.type(screen.getByLabelText('Reason (required)'), 'The project is public now')
+    await user.click(screen.getByRole('button', { name: 'Send request' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('lowering-status')).toHaveFocus()
+    })
+  })
+
+  it('moves to the status block when the request is withdrawn', async () => {
+    let current = state({ canRequest: false, requests: [request()] })
+    const { user } = renderPanel(() => ok(current), {
+      post: () => {
+        current = state({
+          requests: [request({ status: 'Withdrawn', decidedBy: 'author-1' })],
+        })
+        return ok(current)
+      },
+    })
+    await user.click(await screen.findByRole('button', { name: 'Withdraw request' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('lowering-status')).toHaveFocus()
+    })
+  })
+
+  it('returns to the button when asking is cancelled', async () => {
+    const { user } = renderPanel(() => ok(state()))
+    await user.click(await screen.findByRole('button', { name: 'Ask for a lower level' }))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Ask for a lower level' })).toHaveFocus()
+    })
+  })
+})
+
+describe('The level in the metadata', () => {
+  const stating = (status: string, accessFloor?: string): DocumentVersionView => ({
+    ...version(status),
+    accessFloor,
+    values: {
+      confidentiality: { value: { type: 'Selection', code: 'Internal' }, origin: 'Manual' },
+    },
+  })
+  const show = (shown: DocumentVersionView) => {
+    const { wrap } = setup(() => ok(state()))
+    const document = { id: documentId, current: shown } as unknown as DocumentView
+    render(wrap(<VersionMetadata document={document} version={shown} />))
+    return screen.getByTestId('version-metadata')
+  }
+
+  it('qualifies an approved level until the publication', () => {
+    expect(show(stating('Approved', 'Confidential'))).toHaveTextContent(
+      'Internal from its publication on; until then access stays at Confidential',
+    )
+  })
+
+  it('says a level that was never published never took effect', () => {
+    expect(show(stating('Withdrawn', 'Confidential'))).toHaveTextContent(
+      'Internal never took effect; access stays at Confidential',
+    )
+  })
+
+  it('shows the plain level where access is at the level stated', () => {
+    const card = show(stating('Published'))
+    expect(card).toHaveTextContent('Internal')
+    expect(card).not.toHaveTextContent('access stays')
   })
 })
 
