@@ -8,6 +8,8 @@ import dms.documents.core.{DocumentDetails, DocumentError, DocumentService}
 import dms.documents.{DocumentRecord, DocumentVersion, Versioning}
 import dms.identity.{Authenticator, Principal}
 import dms.kernel.DocumentId
+import dms.workflow.core.{ApprovalWorkflow, WorkflowError}
+import dms.workflow.{CaseDetails, CaseStatus}
 import sttp.model.StatusCode
 import sttp.tapir.Schema
 import sttp.tapir.json.zio.jsonBody
@@ -36,7 +38,7 @@ final case class RecordDifferenceView(
     versionOwner: Option[String],
     /** The title the version names; absent if it is the document's. */
     versionTitle: Option[String],
-    /** The version in the workflow a correction waits for, if any. */
+    /** The version in the workflow a correction waits for, if any, also a draft it returned. */
     inWorkflow: Option[String]
 ) derives JsonCodec,
       Schema
@@ -56,8 +58,10 @@ final case class DraftBelowBasisView(
     versionLabel: String,
     /** Draft, InReview or InApproval. */
     versionStatus: String,
+    /** The title of the basis: what the open version proposes is not for those who may not read it. */
     title: String,
     classPath: List[String],
+    /** The unit of the basis, for the same reason. */
     unit: Option[String],
     author: String,
     owner: Option[String],
@@ -104,7 +108,7 @@ final case class RecordCorrectedView(documentId: UUID, owner: Option[String], ti
   * Both reports name people, so reading them is audited, as for the four-eyes report (ADR 0078).
   */
 object RecordsApi:
-  type Env = Authenticator & Db & Authorizer & DocumentService & AuditTrail
+  type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow & AuditTrail
 
   /** The audit actions recorded whenever a report was read. */
   val DifferencesViewed = "records.document-differences-viewed"
@@ -145,7 +149,8 @@ object RecordsApi:
       .description(
         "Gives the document the owner, the title or both that its last version in force names (ADR 0084), with " +
           "a reason, recorded in the audit trail as `document.record-corrected` with before and after. No other " +
-          "value can be set. Tells both owners. 403 as for the report. 409 while a version is in the workflow, or " +
+          "value can be set. Tells both owners, except the caller. 403 as for the report. 409 while a version is in " +
+          "the workflow, also a draft it returned, or " +
           "if `versionId` is no longer the last one in force or the chosen value no longer differs. 422 without " +
           "reason or value."
       )
@@ -154,12 +159,22 @@ object RecordsApi:
         (id, req) =>
           run(p) { subject =>
             for
-              service <- ZIO.service[DocumentService]
-              authz   <- ZIO.service[Authorizer]
-              details <- service.get(DocumentId(id))
+              service  <- ZIO.service[DocumentService]
+              authz    <- ZIO.service[Authorizer]
+              workflow <- ZIO.service[ApprovalWorkflow]
+              _        <- service.lockRecord(DocumentId(id))
+              details  <- service.get(DocumentId(id))
               shown = details.versions.filter(_.id == req.versionId)
               _ <- ZIO.foreachDiscard(reach(p, details, shown))(
                 authz.check(subject, Action.CorrectDocumentRecord, _)
+              )
+              cases <- ZIO.foreach(details.open.toList)(v => workflow.caseOfVersion(v.id)).map(_.flatten)
+              _     <- ZIO.foreachDiscard(returned(details, cases))(v =>
+                ZIO.fail(
+                  DocumentError.Conflict(
+                    s"version ${v.label} was returned and goes on from its votes; correct the document after it is through"
+                  )
+                )
               )
               corrected <- service.correctRecord(
                 DocumentId(id),
@@ -175,7 +190,7 @@ object RecordsApi:
 
   def endpoints: List[ZServerEndpoint[Env, Any]] = List(differences, drafts, correct)
 
-  private type Failure = DocumentError | AccessDenied | DbError
+  private type Failure = DocumentError | AccessDenied | DbError | WorkflowError
 
   private def run[A](p: Principal)(f: Subject => ZIO[Env, Failure, A]): ZIO[Env, (StatusCode, ApiError), A] =
     (for
@@ -186,7 +201,17 @@ object RecordsApi:
       case e: AccessDenied  => DocumentApi.toResponse(e)
       case e: DbError       => DocumentApi.toResponse(e)
       case e: DocumentError => DocumentApi.toResponse(e)
+      case e: WorkflowError => WorkflowApi.toResponse(e)
     }
+
+  /** The open draft, if its workflow returned it: the next submission goes on from the votes that stand, the
+    * owner's among them, so a correction would leave a confirmation by someone who no longer owns the
+    * document (ADR 0084, decision 10).
+    */
+  private def returned(details: DocumentDetails, cases: List[CaseDetails]): Option[DocumentVersion] =
+    details.open.filter(v =>
+      cases.exists(c => c.workflowCase.versionId == v.id && c.workflowCase.status == CaseStatus.Returned)
+    )
 
   /** The resources a row of `details` is decided on: what speaks for the document, and what the row shows. */
   private def reach(p: Principal, details: DocumentDetails, shown: List[DocumentVersion]): List[Resource] =
@@ -223,6 +248,9 @@ object RecordsApi:
       rows <- ZIO.serviceWithZIO[DocumentService](_.recordDifferences)
       seen <- visible(subject, rows, (d, f) => reach(p, d, List(f.version)))
       (permitted, notCleared) = seen
+      cases <- ZIO.serviceWithZIO[ApprovalWorkflow](
+        _.casesOf(permitted.collect { case (d, _) if d.open.isDefined => d.document.id })
+      )
     yield RecordDifferencesView(
       permitted
         .map { (details, f) =>
@@ -237,7 +265,10 @@ object RecordsApi:
             details.document.title,
             f.owner.map(_.value),
             f.title,
-            DocumentRecord.inWorkflow(details.versions).map(_.label)
+            DocumentRecord
+              .inWorkflow(details.versions)
+              .orElse(returned(details, cases.getOrElse(details.document.id, Nil)))
+              .map(_.label)
           )
         }
         .sortBy(v => (v.documentTitle, v.documentId)),
@@ -258,9 +289,10 @@ object RecordsApi:
             v.id,
             v.label,
             v.status.toString,
-            v.namedTitle.getOrElse(details.document.title),
+            // What the draft proposes stays with those who may read it: records managers may not.
+            f.basis.namedTitle.getOrElse(details.document.title),
             details.profile.classPath.map(_.value),
-            CoreFields.organizationalUnit(v.metadata),
+            CoreFields.organizationalUnit(f.basis.metadata),
             v.createdBy.value,
             details.document.ownerId.map(_.value),
             CoreFields.confidentialityLevel(v.accessMetadata),

@@ -19,7 +19,7 @@ export const retention = {
     differences: {
       title: 'Owner and title differ from the version',
       description:
-        'Documents whose owner or title are not what the version last in force names. They come from drafts that used to change these values when saved. They stay as they are until you correct them case by case; leave a rightful takeover as it is.',
+        'Documents whose owner or title are not what the version last in force names. Mostly they come from drafts that used to change these values when saved. They can also be rightful: if a version later withdrawn or destroyed set the values, the document is right to differ from the version shown here. They stay as they are until you correct them case by case; check the history first, and leave a rightful takeover as it is.',
       loading: 'Loading differences',
       none: 'No differences.',
       noneText: 'Owner and title of all documents match the version last in force.',
@@ -43,14 +43,15 @@ export const retention = {
       owner: 'Owner',
       title_: 'Title',
       nothing: 'Choose at least one value.',
-      ownerHint: 'Both owners are told. The rights on the document change at once.',
+      ownerHint:
+        'The former and the new owner are told, unless that is you. The rights on the document change at once.',
       submit: 'Correct',
       done: 'Document corrected.',
     },
     drafts: {
       title: 'Open versions below their basis',
       description:
-        'Open versions whose confidentiality is lower than that of the version they started from. Their content is more open than that version allows. They cannot be submitted: the author or owner raises the level, asks for the lower level or discards the draft.',
+        'Open versions whose confidentiality is lower than that of the version they started from. Their content is more open than that version allows. Title and unit are those of the basis. A draft cannot be submitted: its author or owner raises the level, asks for the lower level or discards it. A version in review or approval can no longer be changed and is not checked again: it can be published like this unless someone returns it.',
       loading: 'Loading open versions',
       none: 'No open version stands below its basis.',
       noneText: 'The confidentiality of all open versions reaches at least that of their basis.',
@@ -62,7 +63,9 @@ export const retention = {
       colPeople: 'Author and owner',
       colChanged: 'Last changed',
       noOwner: 'no owner',
+      frozen: 'Cannot be changed; can be published like this unless someone returns it',
     },
+    incomplete: 'This list is not complete.',
     notCleared: plural({
       one: '{count} more document in your area is not listed here because you are not cleared for it. Someone cleared has to check it.',
       other:

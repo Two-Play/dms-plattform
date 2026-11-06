@@ -7,7 +7,8 @@ import type { components } from './schema'
  * What records management keeps straight about documents (DMS-162, ADR 0084): owner and title that
  * differ from the version last in force, and open versions below their basis. The backend records
  * every reading in the audit trail, and leaves out what the caller is not cleared for, which it
- * counts in `notCleared`.
+ * counts in `notCleared`. So they do not refetch by themselves: coming back to the window is no
+ * reading.
  */
 
 export type RecordDifference = components['schemas']['RecordDifferenceView']
@@ -18,6 +19,8 @@ export type DraftsBelowBasis = components['schemas']['DraftsBelowBasisView']
 export function recordDifferencesQuery(client: ApiClient) {
   return queryOptions({
     queryKey: ['records', 'document-differences'],
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     queryFn: async (): Promise<RecordDifferences> => {
       const { data, error, response } = await client.GET('/api/v1/records/document-differences')
       if (!response.ok || !data) {
@@ -35,6 +38,8 @@ export function recordDifferencesQuery(client: ApiClient) {
 export function draftsBelowBasisQuery(client: ApiClient) {
   return queryOptions({
     queryKey: ['records', 'drafts-below-basis'],
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     queryFn: async (): Promise<DraftsBelowBasis> => {
       const { data, error, response } = await client.GET('/api/v1/records/drafts-below-basis')
       if (!response.ok || !data) {

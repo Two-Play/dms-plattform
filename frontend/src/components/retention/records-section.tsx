@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, EyeOff } from 'lucide-react'
 import { useId, useState, type SyntheticEvent } from 'react'
 import { useApiClient } from '@/api/context'
+import { ApiRequestError } from '@/api/errors'
 import {
   correctRecord,
   draftsBelowBasisQuery,
@@ -39,9 +40,36 @@ function level(code: string): string {
 
 /** Says that the list is not all there is: the rest needs someone cleared. */
 function NotCleared({ count }: { count: number }) {
-  if (count === 0) return null
+  return <>{t('retention.records.notCleared', { count })}</>
+}
+
+/** The note under a list. Nothing listed does not mean nothing is there if documents were left out. */
+function ListEnd({
+  rows,
+  notCleared,
+  none,
+  noneText,
+}: {
+  rows: number
+  notCleared: number
+  none: string
+  noneText: string
+}) {
+  if (rows === 0 && notCleared > 0) {
+    return (
+      <EmptyState
+        icon={EyeOff}
+        title={t('retention.records.incomplete')}
+        description={<NotCleared count={notCleared} />}
+      />
+    )
+  }
+  if (rows === 0) return <EmptyState icon={CheckCircle2} title={none} description={noneText} />
+  if (notCleared === 0) return null
   return (
-    <p className="text-sm text-muted-foreground">{t('retention.records.notCleared', { count })}</p>
+    <p className="text-sm text-muted-foreground">
+      <NotCleared count={notCleared} />
+    </p>
   )
 }
 
@@ -70,6 +98,12 @@ function CorrectDialog({
       toast(t('retention.records.correct.done'))
       await invalidateAfterCorrection(queryClient)
       close()
+    },
+    // The difference went away or something entered the workflow: the row is out of date.
+    onError: async (error) => {
+      if (error instanceof ApiRequestError && error.status === 409) {
+        await queryClient.invalidateQueries({ queryKey: ['records'] })
+      }
     },
   })
 
@@ -248,13 +282,7 @@ function DifferencesCard() {
           <ErrorState error={report.error} onRetry={() => void report.refetch()} />
         ) : (
           <>
-            {rows.length === 0 ? (
-              <EmptyState
-                icon={CheckCircle2}
-                title={t('retention.records.differences.none')}
-                description={t('retention.records.differences.noneText')}
-              />
-            ) : (
+            {rows.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <caption className="sr-only">
@@ -290,7 +318,12 @@ function DifferencesCard() {
                 </table>
               </div>
             )}
-            <NotCleared count={report.data.notCleared} />
+            <ListEnd
+              rows={rows.length}
+              notCleared={report.data.notCleared}
+              none={t('retention.records.differences.none')}
+              noneText={t('retention.records.differences.noneText')}
+            />
           </>
         )}
         <CorrectDialog
@@ -319,6 +352,11 @@ function DraftRow({ draft: d }: { draft: DraftBelowBasis }) {
       <td className={td}>
         <span className="font-mono text-xs">{d.versionLabel}</span>
         <span className="block text-xs text-muted-foreground">{statusLabel(d.versionStatus)}</span>
+        {d.versionStatus !== 'Draft' && (
+          <span className="block text-xs text-destructive">
+            {t('retention.records.drafts.frozen')}
+          </span>
+        )}
       </td>
       <td className={td}>{level(d.level)}</td>
       <td className={td}>
@@ -356,13 +394,7 @@ function DraftsCard() {
           <ErrorState error={report.error} onRetry={() => void report.refetch()} />
         ) : (
           <>
-            {rows.length === 0 ? (
-              <EmptyState
-                icon={CheckCircle2}
-                title={t('retention.records.drafts.none')}
-                description={t('retention.records.drafts.noneText')}
-              />
-            ) : (
+            {rows.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <caption className="sr-only">{t('retention.records.drafts.caption')}</caption>
@@ -396,7 +428,12 @@ function DraftsCard() {
                 </table>
               </div>
             )}
-            <NotCleared count={report.data.notCleared} />
+            <ListEnd
+              rows={rows.length}
+              notCleared={report.data.notCleared}
+              none={t('retention.records.drafts.none')}
+              noneText={t('retention.records.drafts.noneText')}
+            />
           </>
         )}
       </CardContent>

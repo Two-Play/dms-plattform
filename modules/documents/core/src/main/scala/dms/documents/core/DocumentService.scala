@@ -885,6 +885,8 @@ final class DocumentService(
     * title or both, as a decision per case with a reason. There is no free choice of value. The version and
     * the difference are those the caller saw, or the correction is refused. It waits for a version in the
     * workflow, which read the owner when it started and takes its own values to the document at publication.
+    * A draft returned by its workflow is such a version too, but only the workflow knows it: the caller asks
+    * after [[lockRecord]] (ADR 0084, decision 10).
     */
   def correctRecord(
       id: DocumentId,
@@ -903,9 +905,7 @@ final class DocumentService(
       _ <- ZIO.unless(owner || title)(
         ZIO.fail(DocumentError.Invalid(List("choose the owner, the title or both")))
       )
-      // Publication and submission take these locks, so neither passes between the check and the change.
-      document <- sql(DocumentStore.lockDocument(id)).someOrFail(documentNotFound(id))
-      _        <- sql(DocumentStore.lockOpenVersion(id, templates))
+      document <- lockRecord(id)
       versions <- sql(DocumentStore.versions(id, templates))
       _        <- ZIO.foreachDiscard(DocumentRecord.inWorkflow(versions))(v =>
         ZIO.fail(
@@ -959,6 +959,13 @@ final class DocumentService(
           .mapError(DocumentError.Database(_))
       )
     yield document.copy(ownerId = newOwner, title = newTitle)
+
+  /** Locks the document and its open version until the transaction ends. Publication, submission and the
+    * return of a version take these locks, so none of them passes between a check and the correction.
+    */
+  def lockRecord(id: DocumentId): IO[DocumentError, Document] =
+    sql(DocumentStore.lockDocument(id)).someOrFail(documentNotFound(id)) <*
+      sql(DocumentStore.lockOpenVersion(id, templates))
 
   /** Submits the open draft for review. Blocked while fields required in review or later are missing: the
     * values freeze here, so this is the last moment the author can add them (ADR 0062).

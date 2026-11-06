@@ -134,6 +134,11 @@ object DocumentRecordSpec extends ZIOSpecDefault:
         val valid = version(1, DocumentStatus.Published, named(ben, " Taken over "), Some(1))
         assertTrue(DocumentRecord.difference(document, List(valid)).isEmpty)
       },
+      test("what a withdrawn version set is reported against the version that stayed valid") {
+        val stays = version(1, DocumentStatus.Published, named(anna, "Taken over"), Some(9))
+        val ended = version(2, DocumentStatus.Withdrawn, named(ben, "Taken over"), Some(1))
+        assertTrue(DocumentRecord.difference(document, List(stays, ended)).exists(_.owner.contains(anna)))
+      },
       test("a document without a version in force has none") {
         assertTrue(
           DocumentRecord.difference(document, List(version(1, DocumentStatus.Draft, named()))).isEmpty
@@ -217,6 +222,12 @@ object DocumentRecordSpec extends ZIOSpecDefault:
             .reachedUnit(moved, Map("organizationalUnit" -> MetadataValue.Text("Sales")), List(valid, moved))
             .isEmpty
         )
+      },
+      test("a blank unit is no unit") {
+        val valid = version(1, DocumentStatus.Published, unit("Finance"), Some(1))
+        val draft = version(2, DocumentStatus.Draft, unit("Finance"))
+        val after = Map("organizationalUnit" -> MetadataValue.Text("  "))
+        assertTrue(Versioning.reachedUnit(draft, after, List(valid, draft)).isEmpty)
       },
       test("not a first version, and not a version without a unit") {
         val first = version(1, DocumentStatus.Draft, unit("Finance"))

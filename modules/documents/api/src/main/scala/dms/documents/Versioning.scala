@@ -99,10 +99,14 @@ object Versioning:
       .orElse(candidates.filter(_.publishedAt.isDefined).maxByOption(_.number))
       .orElse(candidates.lastOption)
 
-  /** The version that last gave the document its owner and title (ADR 0074, decision 5): of the valid
-    * versions the one published last, as several can be valid with different scopes; without a valid one the
-    * one published last among those that were in force. `None` if no version ever took effect: then a first
-    * draft sets owner and title. A destroyed version has no values left.
+  /** The version the document is compared with in the report of ADR 0084: of the valid versions the one
+    * published last, as several can be valid with different scopes; without a valid one the one published
+    * last among those that were in force. `None` if no version ever took effect: then a first draft sets
+    * owner and title. A destroyed version has no values left.
+    *
+    * Usually this is the version that gave the document its owner and title (ADR 0074, decision 5), but not
+    * always: if that version was withdrawn while another stayed valid, or was destroyed, the document keeps
+    * what it set, rightly, and differs from this one.
     */
   def lastInForce(versions: List[DocumentVersion]): Option[DocumentVersion] =
     def latest(vs: List[DocumentVersion]) = vs.maxByOption(_.publishedAt.fold(0L)(_.toEpochMilli))

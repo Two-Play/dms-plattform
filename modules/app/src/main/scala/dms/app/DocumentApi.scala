@@ -651,13 +651,7 @@ object DocumentApi:
                 DraftChange(req.title, keepExternal(open) ++ entered, req.content, req.expectedWorkingState),
                 p.userId
               )
-              // The check above saw the draft where it stood. Where it goes decides who reads what it copied.
-              _ <- ZIO.foreachDiscard(Versioning.reachedUnit(open, updated.metadata, details.versions))(
-                unit =>
-                  ctx
-                    .allowed(Action.EditDraft, resource(p, details, updated))
-                    .flatMap(allowed => ZIO.unless(allowed)(ZIO.fail(unitOutOfReach(details, unit))))
-              )
+              _ <- checkUnitReach(ctx.subject, details, open, updated)
             yield versionViewIn(details, ctx.service.settings)(updated)
           }
       )
@@ -1247,14 +1241,35 @@ object DocumentApi:
       .fromOption(details.open)
       .orElseFail(DocumentError.Conflict(s"document ${details.document.id.value} has no open version"))
 
-  private def unitOutOfReach(details: DocumentDetails, unit: String): DocumentError =
+  /** For every way of saving a draft, after the save, whose transaction a failure undoes: the check before it
+    * saw the draft where it stood, and where it goes decides who reads what it copied (ADR 0084, decision
+    * 15).
+    */
+  private[app] def checkUnitReach(
+      subject: Subject,
+      details: DocumentDetails,
+      open: DocumentVersion,
+      updated: DocumentVersion
+  ): IO[DocumentError, Unit] =
     val field = DocumentResource.OrganizationalUnitField
-    DocumentError.InvalidValues(
-      List(
-        FieldIssue(
-          field,
-          details.profile.field(field).fold(field)(_.definition.label),
-          IssueKind.UnitOutOfReach(unit)
+    ZIO.foreachDiscard(Versioning.reachedUnit(open, updated.metadata, details.versions))(unit =>
+      Clock.instant.flatMap(now =>
+        ZIO.unless(
+          Policy
+            .decide(subject, Action.EditDraft, resource(subject.tenantId, details, updated), now)
+            .isPermitted
+        )(
+          ZIO.fail(
+            DocumentError.InvalidValues(
+              List(
+                FieldIssue(
+                  field,
+                  details.profile.field(field).fold(field)(_.definition.label),
+                  IssueKind.UnitOutOfReach(unit)
+                )
+              )
+            )
+          )
         )
       )
     )

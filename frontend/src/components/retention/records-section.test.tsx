@@ -5,11 +5,13 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
 import { ApiClientProvider } from '@/api/context'
-import type {
-  DraftBelowBasis,
-  DraftsBelowBasis,
-  RecordDifference,
-  RecordDifferences,
+import {
+  draftsBelowBasisQuery,
+  recordDifferencesQuery,
+  type DraftBelowBasis,
+  type DraftsBelowBasis,
+  type RecordDifference,
+  type RecordDifferences,
 } from '@/api/records'
 import { setLocale } from '@/i18n'
 import { RecordsSection } from './records-section'
@@ -118,6 +120,19 @@ describe('Document data for records management (DMS-162)', () => {
     expect(await screen.findByText(/2 weitere Dokumente/)).toBeInTheDocument()
   })
 
+  it('does not call a list without rows complete if documents were left out', async () => {
+    renderWith({ differences: [], notCleared: 1 }, { drafts: [], notCleared: 2 })
+    await waitFor(() => {
+      expect(screen.getAllByText('Diese Liste ist nicht vollständig.')).toHaveLength(2)
+    })
+    expect(screen.getByText(/1 weiteres Dokument/)).toBeInTheDocument()
+    expect(screen.getByText(/2 weitere Dokumente/)).toBeInTheDocument()
+    expect(screen.queryByText('Keine Abweichungen.')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Keine offene Version steht unter ihrer Ausgangsversion.'),
+    ).not.toBeInTheDocument()
+  })
+
   it('shows the failure of a report with a way to retry', async () => {
     const { get, user } = renderWith(new Error('down'))
     const retry = await screen.findByRole('button', { name: /erneut/i })
@@ -187,6 +202,35 @@ describe('Document data for records management (DMS-162)', () => {
 
     expect(await box.findByRole('alert')).toBeInTheDocument()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('reads the report again after a refusal, whose row is out of date', async () => {
+    const { get, user } = renderWith({ differences: [difference], notCleared: 0 }, undefined, () =>
+      refused(409, 'the document no longer differs from this version'),
+    )
+    await user.click(await screen.findByRole('button', { name: 'Hijacked berichtigen' }))
+    const box = within(await screen.findByRole('dialog'))
+    await user.type(box.getByLabelText('Begründung *'), 'Reason')
+    get.mockClear()
+    await user.click(box.getByRole('button', { name: 'Berichtigen' }))
+
+    await waitFor(() => {
+      expect(get).toHaveBeenCalledWith('/api/v1/records/document-differences')
+    })
+  })
+
+  it('does not read the audited reports again when the window gets the focus', () => {
+    const client = {} as ApiClient
+    expect(recordDifferencesQuery(client).refetchOnWindowFocus).toBe(false)
+    expect(draftsBelowBasisQuery(client).refetchOnWindowFocus).toBe(false)
+  })
+
+  it('tells that a version in review cannot be changed any more', async () => {
+    renderWith(
+      { differences: [], notCleared: 0 },
+      { drafts: [{ ...draft, versionStatus: 'InReview' }], notCleared: 0 },
+    )
+    expect(await screen.findByText(/Nicht änderbar/)).toBeInTheDocument()
   })
 
   it('lists open versions below their basis with both levels and the people to ask', async () => {

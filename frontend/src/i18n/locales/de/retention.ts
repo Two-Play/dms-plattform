@@ -20,7 +20,7 @@ export const retention: Translation<typeof en.retention> = {
     differences: {
       title: 'Eigentümer und Titel weichen von der Version ab',
       description:
-        'Dokumente, deren Eigentümer oder Titel nicht dem entsprechen, was die zuletzt gültige Version nennt. Das stammt von Entwürfen, die diese Werte früher beim Speichern geändert haben. Es bleibt so, bis Sie im Einzelfall berichtigen; eine berechtigte Übernahme lassen Sie einfach stehen.',
+        'Dokumente, deren Eigentümer oder Titel nicht dem entsprechen, was die zuletzt gültige Version nennt. Meist stammt das von Entwürfen, die diese Werte früher beim Speichern geändert haben. Es kann aber auch berechtigt sein: Hat eine später zurückgezogene oder vernichtete Version die Werte gesetzt, nennt das Dokument zu Recht etwas anderes als die hier gezeigte Version. Es bleibt so, bis Sie im Einzelfall berichtigen; prüfen Sie vorher die Historie, und lassen Sie eine berechtigte Übernahme stehen.',
       loading: 'Abweichungen werden geladen',
       none: 'Keine Abweichungen.',
       noneText: 'Eigentümer und Titel aller Dokumente entsprechen der zuletzt gültigen Version.',
@@ -44,14 +44,15 @@ export const retention: Translation<typeof en.retention> = {
       owner: 'Eigentümer',
       title_: 'Titel',
       nothing: 'Wählen Sie mindestens einen Wert.',
-      ownerHint: 'Beide Eigentümer werden benachrichtigt. Die Rechte am Dokument wechseln sofort.',
+      ownerHint:
+        'Bisheriger und neuer Eigentümer werden benachrichtigt, außer Sie sind es selbst. Die Rechte am Dokument wechseln sofort.',
       submit: 'Berichtigen',
       done: 'Dokument berichtigt.',
     },
     drafts: {
       title: 'Offene Versionen unter ihrer Ausgangsversion',
       description:
-        'Offene Versionen, deren Vertraulichkeit niedriger ist als die der Version, von der sie ausgehen. Ihr Inhalt ist weiter geöffnet, als die Ausgangsversion erlaubt. Sie lassen sich nicht einreichen: Autor/in oder Eigentümer heben die Stufe an, beantragen die niedrigere Stufe oder verwerfen den Entwurf.',
+        'Offene Versionen, deren Vertraulichkeit niedriger ist als die der Version, von der sie ausgehen. Ihr Inhalt ist weiter geöffnet, als die Ausgangsversion erlaubt. Titel und Einheit stammen aus der Ausgangsversion. Einen Entwurf können Autor/in oder Eigentümer nicht einreichen: Sie heben die Stufe an, beantragen die niedrigere Stufe oder verwerfen ihn. Eine Version in Prüfung oder Freigabe ist nicht mehr änderbar und wird nicht erneut geprüft: Sie kann so veröffentlicht werden, wenn niemand sie zurückgibt.',
       loading: 'Offene Versionen werden geladen',
       none: 'Keine offene Version steht unter ihrer Ausgangsversion.',
       noneText:
@@ -64,7 +65,9 @@ export const retention: Translation<typeof en.retention> = {
       colPeople: 'Autor/in und Eigentümer',
       colChanged: 'Zuletzt geändert',
       noOwner: 'kein Eigentümer',
+      frozen: 'Nicht änderbar; kann so veröffentlicht werden, wenn sie niemand zurückgibt',
     },
+    incomplete: 'Diese Liste ist nicht vollständig.',
     notCleared: plural({
       one: '{count} weiteres Dokument in Ihrem Bereich ist hier nicht aufgeführt, weil Sie dafür nicht freigegeben sind. Das muss jemand mit Freigabe prüfen.',
       other:

@@ -900,6 +900,41 @@ object NewVersionAccessApiSpec extends ZIOSpecDefault:
           after == (Some(accomplice.value), "Hijacked")
         )
       },
+      test("a correction waits for a draft its workflow returned, whose votes stand") {
+        for
+          doc    <- published()
+          _      <- takeOver(doc.id)
+          row    <- difference(records, doc.id).map(_.get)
+          _      <- startVersion(member, doc.id)
+          _      <- call(member, "POST", s"/api/v1/documents/${doc.id}/submit")
+          review <- call(member, "GET", s"/api/v1/documents/${doc.id}/workflow")
+            .map(as[List[WorkflowCaseView]](_).last.tasks.find(_.status == "Open").get)
+          back <- call(
+            reviewer,
+            "POST",
+            s"/api/v1/workflow/tasks/${review.id}/votes",
+            Some(CastVote("RequestChanges", Some("Figures are missing")).toJson)
+          )
+          shown <- difference(records, doc.id)
+          held  <- correct(records, doc.id, row.versionId)
+          after <- stored(doc.id)
+        yield assertTrue(
+          back.status == Status.Ok,
+          shown.exists(_.inWorkflow.isDefined),
+          held.status == Status.Conflict,
+          after == (Some(accomplice.value), "Hijacked")
+        )
+      },
+      test("a draft that never went into the workflow holds nothing back") {
+        for
+          doc       <- published()
+          _         <- takeOver(doc.id)
+          row       <- difference(records, doc.id).map(_.get)
+          _         <- startVersion(member, doc.id)
+          shown     <- difference(records, doc.id)
+          corrected <- correct(records, doc.id, row.versionId)
+        yield assertTrue(shown.exists(_.inWorkflow.isEmpty), corrected.status == Status.Ok)
+      },
       test("a correction is refused on a version that is not the last in force") {
         for
           doc     <- published()
@@ -930,6 +965,19 @@ object NewVersionAccessApiSpec extends ZIOSpecDefault:
           !other.drafts.exists(_.documentId == doc.id),
           refused.status == Status.Forbidden,
           audited.isDefined
+        )
+      },
+      test("the list shows what the basis says, nothing of what the draft proposes") {
+        for
+          doc  <- published()
+          _    <- startVersion(member, doc.id)
+          _    <- save(owner, doc.id, values(unit = "Sales"), "Project Moth")
+          _    <- lowerOpenVersion(doc.id)
+          read <- belowBasis(records)
+          row = as[DraftsBelowBasisView](read).drafts.find(_.documentId == doc.id)
+        yield assertTrue(
+          row.exists(d => d.title == "Board minutes" && d.unit.contains("Finance")),
+          !read.text.contains("Project Moth")
         )
       },
       test("a draft at the level of its basis is not listed") {

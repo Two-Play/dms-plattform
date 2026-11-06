@@ -12,9 +12,11 @@ DMS-162 collects the follow-ups of ADR 0074 and 0083 that were left open: the re
 
 **Past takeovers.** Until ADR 0074, saving a draft wrote owner and title to `dms.document`. A draft that was discarded or withdrawn left them there. ADR 0074 refused a migration: which owner is right cannot always be told, a draft was the only way to change an owner, also for honest changes, and a migration cannot write an audit entry. The reading of the code found:
 
-- `dms.document` is written in three places: a first version's draft, publication (`applyToDocument`), and now the correction. A mismatch between the document and the version that last took effect can have only this one cause. Values a version does not have keep what the document has, so these say nothing.
+- `dms.document` is written in three places: a first version's draft, publication (`applyToDocument`), and now the correction. Values a version does not have keep what the document has, so these say nothing.
+- A takeover by a draft is the usual cause of a mismatch, not the only one. The version compared with is not always the one that set the values: if that version was withdrawn while another stayed valid, or was destroyed, the document keeps an honest value that differs. The records do not tell the two apart.
 - A document can have several valid versions, one per scope. The version published last set the values, not the one with the highest number.
 - A running workflow took the owner when it started: candidates of an owner lane are stored on the task, and `ReviewSubject` is read again only for the next round. A version in approval will set its own values at publication.
+- A returned case is not over. The version is a draft again, but `ApprovalWorkflow.resubmit` and `Rules.resume` go on at the returning step, the earlier votes stand, and `contentSha256` does not cover `document.owner_id`. So the confirmation of an owner who is corrected away would stand.
 - Review tasks of the periodic review name no person: they read `document.owner_id`, so a corrected owner gets them at once. The search index carries the owner in its access attributes and finds the document through `updated_at`.
 - Records managers do not read drafts: `ReadDocument` on a `Draft` asks for the author or owner role. This ADR does not change that.
 
@@ -41,23 +43,23 @@ Given: the first version copied nothing and stays free (ADR 0074, decision 4). `
 
 ### Owner and title
 
-5. **The version that counts is the last in force.** `Versioning.lastInForce`: of the valid versions the one published last, without one the one published last among those that were in force, never a destroyed one. A document with no version that took effect has no difference: its draft sets owner and title by right.
+5. **The document is compared with the last version in force.** `Versioning.lastInForce`: of the valid versions the one published last, without one the one published last among those that were in force, never a destroyed one. A document with no version that took effect has no difference: its draft sets owner and title by right. This is usually, not always, the version that set the values (see the context), and the report says so: a row is a question, not a finding of fault.
 6. **A difference is a named value that is not the document's** (`DocumentRecord.difference`), compared as publication writes it, trimmed. `GET /api/v1/records/document-differences`.
 7. **Nothing changes by itself.** Past takeovers stay until someone decides, per document and per value, as ADR 0074 asked: an honest change of owner stays in the report and is not undone. See the negative consequences.
 8. **A correction takes the version's value, no other.** `POST /api/v1/documents/{id}/record-correction` with `{versionId, owner, title, reason}`. The caller chooses the owner, the title or both, and cannot enter a value, because the only value anyone approved is the version's. The reason is required, at most 4000 characters.
 9. **It is recorded and told.** Audit entry `document.record-corrected` with the reason and owner and title before and after. If the owner changes, the outbox event `document.owner-corrected` tells the owner it had and the owner it has now, without the reason, and not the person who corrected it if they are one of the two.
-10. **It waits for the workflow.** 409 while a version is in review, in approval or approved: the case read the owner when it started, and an approved version brings its own values. An open draft does not hold it back, as a new round reads the owner again. The report says which version it waits for. It is also 409 if the version is no longer the last in force, or the chosen value no longer differs, so a stale page decides nothing. The document and the open version are locked first.
+10. **It waits for the workflow.** 409 while a version is in review, in approval or approved: the case read the owner when it started, and an approved version brings its own values. The same holds for a draft whose case is `Returned`: its next submission goes on from the votes that stand. Only a draft that has no running case does not hold it back. The report says which version it waits for. It is also 409 if the version is no longer the last in force, or the chosen value no longer differs, so a stale page decides nothing. The document and the open version are locked first, and the state of the case is read after that.
 
 ### Open versions below their basis
 
-11. **A list, no action.** `GET /api/v1/records/drafts-below-basis`: open versions whose level is below their basis (`DocumentRecord.belowBasis`), with author, owner, both levels and when the version last changed. Records managers cannot read drafts and should not correct what they cannot read. The people named can raise the level, ask for a lowering (ADR 0083), or discard the draft.
+11. **A list, no action.** `GET /api/v1/records/drafts-below-basis`: open versions whose level is below their basis (`DocumentRecord.belowBasis`), with author, owner, both levels and when the version last changed. Title and unit are those of the basis: what the open version proposes stays with those who may read it (ADR 0074, ADR 0082), and records managers may not read drafts. They should not correct what they cannot read either. For a draft, the people named can raise the level, ask for a lowering (ADR 0083), or discard it. A version in review or approval cannot be changed, and the level is checked only at submission, so it can reach publication below its basis unless someone returns it; the list says so on the row.
 12. **Levels count by `accessMetadata`**, on both sides, so an approved lowering is not reported as long as access stays at the old level, and a basis that was lowered but never published counts at its old level.
 13. **Both reports sit on the retention page**, in a tab "Dokumentdaten", which is where records managers work. The page asks for a records manager for the whole tenant (ADR 0047), so a scoped records manager has the reports through the API only.
 
 ### Moving a later draft
 
 14. **Only the document's owner moves a later version to another unit.** A draft saved with a unit that neither it nor its basis has gets 422 `invalid_values` with the issue `unit_moved`, unless the caller is the owner on `dms.document`, like adding a group (ADR 0074, decision 3). The owner answers for who reaches the document, and that does not end at the unit. It holds on every level: below `Confidential` the move opens more, and above it members of the groups who hold a role only in the new unit get in.
-15. **Only to a unit where they can edit it.** After the change `EditDraft` is decided again on the draft as it would stand. If it fails, 422 with the issue `unit_out_of_reach`, and nothing is saved. Nobody hands copied content to a unit they cannot follow it into. A draft is not moved past its owner's scope; the way out is a role in the target unit, for as long as the move takes.
+15. **Only to a unit where they can edit it.** After the change `EditDraft` is decided again on the draft as it would stand, on every way of saving a draft (`DocumentApi.checkUnitReach`, also when a partner reference fills the unit). If it fails, 422 with the issue `unit_out_of_reach`, and nothing is saved. Nobody hands copied content to a unit they cannot follow it into. A draft is not moved past its owner's scope; the way out is a role in the target unit, for as long as the move takes.
 16. **What is decided stays, and the way back is free.** After the owner moved the draft, its author saves it with that unit, as with a group the owner added. Going back to the unit of the basis, and leaving the field empty, widens nothing and needs no one. Submission does not repeat the check, as for groups: the owner may have moved it and someone else submits.
 17. **A first version stays free**, and the move takes effect when saved: the new unit's authors are meant to work on it, and its reviewers and approvers are found in that unit. The change is in the audit entry `document.draft-changed` with before and after, as for every field.
 
@@ -112,7 +114,9 @@ Moving a later draft:
 
 ### Negative / Cost
 
-- **An honest change of owner stays in the report** until a later version names that owner, as long as the difference stands. Records managers see the same rows again.
+- **An honest change of owner stays in the report** until a later version names that owner, as long as the difference stands. Records managers see the same rows again. This includes values set by a version that was withdrawn or destroyed since. The report warns of it, but a correction there would undo something right, so the records manager has to check the history.
+- A correction can wait long: a returned draft holds it back until the draft is through or discarded.
+- A version in review or approval below its basis can be published as it is. The report only shows it.
 - **The owner decides alone on a move**, and the new unit's authors read the draft from that moment. This is less than ADR 0083 asks for a level. It rests on the owner answering for the document, and on the concept not asking for more.
 - **An owner scoped to one unit cannot hand a document on by themselves.** Someone has to give them a role in the target unit for the move, or a person with a wider role has to be the owner first. A document without an owner cannot move at all, as it cannot get a group, until a version names one.
 - An author with rights in both units has to ask the owner, also for an honest correction of a wrong unit in a later draft.
@@ -135,6 +139,7 @@ Moving a later draft:
 - Could: show the reports to scoped records managers in the UI.
 - Could: a list of open versions that left the unit of their basis, for drafts moved before this change.
 - Could: tell the owner when a draft is below its basis.
+- Should: decide whether a version below its basis may be approved at all; today `checkLevel` runs only at submission.
 
 ## Reversibility
 

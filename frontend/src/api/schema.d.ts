@@ -2658,7 +2658,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Gives the document the owner, the title or both that its last version in force names (ADR 0084), with a reason, recorded in the audit trail as `document.record-corrected` with before and after. No other value can be set. Tells both owners. 403 as for the report. 409 while a version is in the workflow, or if `versionId` is no longer the last one in force or the chosen value no longer differs. 422 without reason or value. */
+    /** @description Gives the document the owner, the title or both that its last version in force names (ADR 0084), with a reason, recorded in the audit trail as `document.record-corrected` with before and after. No other value can be set. Tells both owners, except the caller. 403 as for the report. 409 while a version is in the workflow, also a draft it returned, or if `versionId` is no longer the last one in force or the chosen value no longer differs. 422 without reason or value. */
     post: operations['postApiV1DocumentsIdRecord-correction']
     delete?: never
     options?: never

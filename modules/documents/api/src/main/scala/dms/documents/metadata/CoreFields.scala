@@ -77,9 +77,9 @@ object CoreFields:
   def allowedGroups(values: Map[String, MetadataValue]): Set[String] =
     values.get(AllowedGroups).toList.flatMap(texts).map(_.trim).filter(_.nonEmpty).toSet
 
-  /** The organizational unit named in `values`. */
+  /** The organizational unit named in `values`; a blank value names none. */
   def organizationalUnit(values: Map[String, MetadataValue]): Option[String] =
-    values.get("organizationalUnit").toList.flatMap(texts).headOption
+    values.get("organizationalUnit").toList.flatMap(texts).headOption.filter(_.trim.nonEmpty)
 
   private def texts(value: MetadataValue): List[String] = value match
     case MetadataValue.Text(t)      => List(t)
