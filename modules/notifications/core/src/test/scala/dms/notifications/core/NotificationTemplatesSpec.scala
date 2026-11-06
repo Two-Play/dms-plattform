@@ -286,7 +286,7 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
         en.body.contains("those who approved the version can withdraw it on the document page"),
         canWithdraw.body.contains("you can withdraw the version on the document page"),
         listed.body.contains("die Version auf der Dokumentseite zurückziehen"),
-        !de.body.contains("zurückziehen"),
+        de.body.contains("Inhaber der Eigentümerrolle oder die Freigebenden die Version zurückziehen"),
         noRetry.body.contains("records management can retry it"),
         noRetry.body.contains("the technical message is shown with the retry"),
         !noRetry.body.contains("You can retry"),
@@ -299,6 +299,26 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
         blind.subject == "Archiv-PDF fehlgeschlagen: Dokument",
         blind.body.contains("von einem Dokument"),
         !blind.body.contains("Reiserichtlinie")
+      )
+    },
+    test("a dead rendition names the withdrawal; after a refusal of the four-eyes rule only that (DMS-163)") {
+      val version = UUID.fromString("00000000-0000-0000-0000-000000000009")
+      val ref     = doc.copy(versionId = Some(version))
+      def render(language: Language, params: (String, String)*) =
+        NotificationTemplates
+          .render("failure.rendition", language, params.toMap, Some(ref), ctx(Some(facts)))
+          .body
+      val owner   = "audience"    -> NotificationTemplates.Audience.Owner
+      val records = "audience"    -> NotificationTemplates.Audience.Records
+      val can     = "canWithdraw" -> "true"
+      val four    = "reason"      -> "segregation_of_duties"
+      assertTrue(
+        render(Language.De, owner, can).contains("können Sie die Version auf der Dokumentseite zurückziehen"),
+        render(Language.En, records).contains("holders of the owner role"),
+        render(Language.De, owner, can, four).contains("Ein erneuter Versuch hilft nicht. Sie können"),
+        !render(Language.De, owner, can, four).contains("erneut versuchen"),
+        render(Language.En, records, four).contains("A retry cannot help. Holders of the owner role"),
+        render(Language.En, records, four).contains("four-eyes rule")
       )
     },
     test("every failure code has a reason, and an unknown code still reads as one (DMS-146)") {

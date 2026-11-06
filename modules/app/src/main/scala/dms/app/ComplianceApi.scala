@@ -208,6 +208,7 @@ object ComplianceApi:
   private val AcknowledgementRates = "acknowledgements"
   private val WithoutOwner         = "documents-without-owner"
   private val Deviations           = "deviations"
+  private val FourEyesFindings     = "four-eyes-findings"
 
   private val base = "api" / "v1" / "compliance"
 
@@ -361,7 +362,7 @@ object ComplianceApi:
     SecuredApi.base.post
       .in(
         base / "exports" / path[String]("list").description(
-          s"$OverdueReviews, $AcknowledgementRates, $WithoutOwner or $Deviations"
+          s"$OverdueReviews, $AcknowledgementRates, $WithoutOwner, $Deviations or $FourEyesFindings"
         )
       )
       .in(unitQuery)
@@ -374,7 +375,8 @@ object ComplianceApi:
       .description(
         "A list of the cockpit as CSV for spreadsheets: UTF-8 with byte order mark, semicolon-separated, with the " +
           "same rights, scope and filters as the list on the screen; text that a spreadsheet would run as a formula " +
-          "starts with an apostrophe. Every export is recorded in the audit trail, which is why this is a POST."
+          "starts with an apostrophe. Every export is recorded in the audit trail, which is why this is a POST. " +
+          s"$FourEyesFindings has no filters, like its list."
       )
       .tag("Compliance")
       .serverLogic(p => (list, unit, owner, document, lang) => exportOf(p, list, unit, owner, document, lang))
@@ -636,6 +638,15 @@ object ComplianceApi:
           found <- rows(Needs(deviations = true))((_, _, all) => deviationViews(all, unit, owner))
           names <- named(found.map(_.owner))
         yield ComplianceCsv.deviations(lang, found, names)
+      case FourEyesFindings =>
+        for
+          found <- inTransaction(p)(subject =>
+            FourEyesReportApi
+              .visibleFindings(p, subject)
+              .tap(all => recordExport(p, list, None, None, None, all.size))
+          )
+          names <- named(found.flatMap(f => List(f.owner, Some(f.decidedBy), f.actingFor, Some(f.editor))))
+        yield ComplianceCsv.fourEyesFindings(lang, found, names)
       case other =>
         ZIO.fail((StatusCode.NotFound, ApiError("not_found", s"the cockpit has no list '$other'")))
     table.map(csv => (attachment(s"compliance-$list"), bytes(csv)))
@@ -969,6 +980,75 @@ private[app] object ComplianceCsv:
           text(r.unit),
           r.publishedAt.fold("")(_.toString)
         )
+      )
+    )
+
+  /** The retroactive check of the four-eyes rule (ADR 0078), one finding per row, as on the screen. */
+  def fourEyesFindings(
+      lang: Option[String],
+      rows: List[FourEyesFindingView],
+      names: String => Option[String]
+  ): String =
+    Csv.table(
+      pick(lang)(
+        "Dokument-ID",
+        "Titel",
+        "Klasse",
+        "Version",
+        "Status",
+        "Einheit",
+        "Eigentümer (Benutzer-ID)",
+        "Eigentümer (Name)",
+        "Art",
+        "Entschieden von (Benutzer-ID)",
+        "Entschieden von (Name)",
+        "In Vertretung für (Benutzer-ID)",
+        "In Vertretung für (Name)",
+        "Geändert von (Benutzer-ID)",
+        "Geändert von (Name)",
+        "Schritt",
+        "Runde",
+        "Entschieden am",
+        "Zuerst geändert am",
+        "Prüfung läuft noch"
+      )(
+        "Document id",
+        "Title",
+        "Class",
+        "Version",
+        "Status",
+        "Unit",
+        "Owner (user id)",
+        "Owner (name)",
+        "Kind",
+        "Decided by (user id)",
+        "Decided by (name)",
+        "On behalf of (user id)",
+        "On behalf of (name)",
+        "Changed by (user id)",
+        "Changed by (name)",
+        "Step",
+        "Round",
+        "Decided at",
+        "First changed at",
+        "Review still running"
+      ),
+      rows.map(r =>
+        List(
+          r.documentId.toString,
+          Csv.text(r.title),
+          path(r.classPath),
+          Csv.text(r.versionLabel),
+          r.versionStatus,
+          text(r.unit)
+        ) ++ owner(r.owner, names) ++ List(r.kind) ++ owner(Some(r.decidedBy), names) ++
+          owner(r.actingFor, names) ++ owner(Some(r.editor), names) ++ List(
+            text(r.step),
+            r.round.fold("")(_.toString),
+            r.decidedAt.toString,
+            r.firstChangedAt.toString,
+            r.caseOpen.toString
+          )
       )
     )
 

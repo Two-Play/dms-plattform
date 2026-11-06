@@ -11,7 +11,7 @@ import dms.identity.{Authenticator, Principal}
 import dms.kernel.{DocumentId, TemplateId, UserId}
 import dms.templates.{DeviationChange, Inline, PathStep, SectionId, TemplateContent}
 import dms.workflow.{CaseDetails, StepKind}
-import dms.workflow.core.{ApprovalWorkflow, WorkflowError}
+import dms.workflow.core.{ApprovalWorkflow, Rules, WorkflowError}
 import dms.templates.core.ContentJson.given
 import dms.templates.core.DeviationJson.given
 import sttp.model.StatusCode
@@ -211,8 +211,12 @@ final case class DocumentVersionView(
     /** For a file document (DMS-115): the uploaded original of this version, empty before the first upload.
       */
     file: Option[VersionFileView] = None,
-    /** Set if the version was approved but withdrawn before it became valid: it was never in force. */
-    withdrawal: Option[WithdrawalView] = None
+    /** Set if the version was withdrawn before it became valid, after its approval or because its rendition
+      * failed for good in approval: it was never in force.
+      */
+    withdrawal: Option[WithdrawalView] = None,
+    /** Everyone who started or changed this version, sorted: none of them approves it (ADR 0075). */
+    editors: List[String] = Nil
 ) derives JsonCodec,
       Schema
 
@@ -309,11 +313,17 @@ final case class DocumentView(
       * document's owner or a tenant administrator.
       */
     canDiscardDraft: Boolean = false,
-    /** The approved version the caller may withdraw now (`POST
-      * /api/v1/documents/{id}/versions/{versionId}/withdraw`, DMS-143): it waits for its valid-from date, or
-      * its publication failed for good (DMS-145), and the caller holds the owner role or approved it.
+    /** The version the caller may withdraw now (`POST /api/v1/documents/{id}/versions/{versionId}/withdraw`,
+      * DMS-143): it waits for its valid-from date, or its publication failed for good (DMS-145), or it is in
+      * approval and its rendition failed for good (DMS-163), and the caller holds the owner role or approved
+      * it.
       */
     withdrawable: Option[WithdrawableVersionView] = None,
+    /** True if the caller may change the open draft but voted on it, or holds an open task on it, in a step
+      * that excludes authors: their first change costs them that vote and any vote on this version (DMS-163,
+      * ADR 0078).
+      */
+    changeCostsVote: Boolean = false,
     /** The highest version number ever approved: new versions count on from it, also if that version was
       * withdrawn before it took effect, whose number is not given again.
       */
@@ -333,6 +343,10 @@ final case class WithdrawableVersionView(
     /** Whether every attempt to publish it failed: it can then be withdrawn after its valid-from date, too.
       */
     publicationFailed: Boolean,
+    /** Whether every attempt to produce its archive PDF failed: it is then still in approval, and withdrawing
+      * is the way out (DMS-163, ADR 0078).
+      */
+    renditionFailed: Boolean = false,
     /** The approver the caller would act for: their right rests on a vote cast as deputy (DMS-145, ADR 0070).
       */
     actingFor: Option[String] = None
@@ -525,6 +539,7 @@ object DocumentApi:
                 case Some(open) => ctx.allowed(Action.DiscardDraft, resource(p, details, open))
                 case None       => ZIO.succeed(false)
               withdrawable <- withdrawableVersion(ctx, details)
+              costsVote    <- changeCostsVote(ctx, details)
             yield documentView(
               details.document,
               details.profile,
@@ -537,6 +552,7 @@ object DocumentApi:
               startVersionBlocked = start.flatten,
               canDiscardDraft = discard,
               withdrawable = withdrawable,
+              changeCostsVote = costsVote,
               latestReleasedVersion =
                 details.versions.filter(_.releasedAt.isDefined).map(_.number).maxOption.map(_.show)
             )
@@ -772,15 +788,17 @@ object DocumentApi:
       .out(jsonBody[DocumentVersionView])
       .description(
         "Stops an approved version before its valid-from date (DMS-143), or later if its publication failed " +
-          "for good (Failed, DMS-145): it goes to Withdrawn, is never published, the valid version stays valid " +
-          "and the document can get a new version. Requires Withdraw: the owner role or having approved " +
+          "for good (Failed, DMS-145), or a version in approval whose archive rendition failed for good (Failed, " +
+          "DMS-163; its workflow case ends as Withdrawn): it goes to Withdrawn, is never published, the valid " +
+          "version stays valid and the document can get a new version. Requires Withdraw: the owner role or having approved " +
           "this version. The reason is required (422), at most 4000 characters, and recorded in the audit " +
           "trail. A deputy who approved the version may withdraw it while the deputyship stands, recorded on " +
           "behalf of the approver. Author, approvers and owner are notified, readers are not. 409 with the code " +
           "`version_published` " +
           "if the publication got there first, `version_due` from its valid-from date on unless the publication " +
           "failed for good (also if a retry got there first), `version_withdrawn` " +
-          "if it was withdrawn already, `version_not_approved` if it was never approved."
+          "if it was withdrawn already, `version_not_approved` if it is not approved and its rendition did not " +
+          "fail for good."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -803,6 +821,7 @@ object DocumentApi:
                   .as(None)
               )(ZIO.succeed(_))
               withdrawn <- ctx.service.withdrawApproved(versionId, req.reason, approvers, p.userId, actingFor)
+              _         <- ctx.workflow.closeWithdrawn(versionId, p.userId, actingFor)
             yield versionViewIn(
               details.copy(versions = details.versions.map(v => if v.id == versionId then withdrawn else v)),
               ctx.service.settings
@@ -914,7 +933,7 @@ object DocumentApi:
       val service: DocumentService,
       val workflow: ApprovalWorkflow,
       authz: Authorizer,
-      subject: Subject
+      val subject: Subject
   ):
     def check(action: Action, resource: Resource): IO[AccessDenied, Unit] =
       authz.check(subject, action, resource).unit
@@ -1142,22 +1161,30 @@ object DocumentApi:
       withdrawnBeforeValid = false
     )
 
-  /** The approved version the caller may withdraw now, if any. Mirrors the checks of `withdrawVersion`, which
-    * decides again.
+  /** The version the caller may withdraw now, if any: an approved one, or one in approval whose rendition
+    * failed for good (DMS-163, ADR 0078). Mirrors the checks of `withdrawVersion`, which decides again.
     */
   private def withdrawableVersion(
       ctx: Context,
       details: DocumentDetails
   ): IO[WorkflowError, Option[WithdrawableVersionView]] =
-    details.versions.find(_.status == DocumentStatus.Approved) match
+    details.versions.find(v =>
+      v.status == DocumentStatus.Approved || v.status == DocumentStatus.InApproval
+    ) match
       case None    => ZIO.none
       case Some(v) =>
+        val inApproval = v.status == DocumentStatus.InApproval
         for
-          cases  <- ctx.workflow.cases(details.document.id)
-          now    <- Clock.instant
-          right  <- ctx.withdrawalRight(details, v, cases)
-          failed <- ctx.service.publicationFailed(v.id).mapError(WorkflowDocuments.toWorkflowError)
-        yield Option.when(right.isDefined && (failed || !Publication.isDue(v.validFrom, details.zone, now)))(
+          cases      <- ctx.workflow.cases(details.document.id)
+          now        <- Clock.instant
+          right      <- ctx.withdrawalRight(details, v, cases)
+          failed     <- ctx.service.publicationFailed(v.id).mapError(WorkflowDocuments.toWorkflowError)
+          unrendered <- ZIO
+            .when(inApproval)(ctx.service.renditionFailed(v.id))
+            .mapBoth(WorkflowDocuments.toWorkflowError, _.contains(true))
+          possible =
+            if inApproval then unrendered else failed || !Publication.isDue(v.validFrom, details.zone, now)
+        yield Option.when(right.isDefined && possible)(
           WithdrawableVersionView(
             v.id,
             v.label,
@@ -1167,9 +1194,22 @@ object DocumentApi:
               .lastOption
               .map(_.label),
             failed,
+            unrendered,
             right.flatten.map(_.value)
           )
         )
+
+  /** Whether the caller's first change of the open draft would cost them their vote (ADR 0078). */
+  private def changeCostsVote(ctx: Context, details: DocumentDetails): IO[WorkflowError, Boolean] =
+    details.open.filter(_.status == DocumentStatus.Draft) match
+      case None        => ZIO.succeed(false)
+      case Some(draft) =>
+        for
+          edit  <- ctx.allowed(Action.EditDraft, resource(ctx.subject.tenantId, details, draft))
+          cases <- if edit then ctx.workflow.cases(details.document.id) else ZIO.succeed(Nil)
+        yield cases
+          .filter(_.workflowCase.versionId == draft.id)
+          .exists(Rules.changeCostsVote(_, ctx.subject.userId, draft.authors))
 
   /** A document whose versions were all discarded (DMS-129) or destroyed (DMS-82) is not found. */
   private[app] def discardedDocument(id: UUID, details: DocumentDetails): DocumentError =
@@ -1346,7 +1386,9 @@ object DocumentApi:
       requiresAcknowledgement = v.requiresAcknowledgement,
       publishedAt = v.publishedAt,
       file = v.file.map(fileView(v.documentId.value, _)),
-      withdrawal = v.withdrawal.map(w => WithdrawalView(w.at, w.by.value, w.reason, w.actingFor.map(_.value)))
+      withdrawal =
+        v.withdrawal.map(w => WithdrawalView(w.at, w.by.value, w.reason, w.actingFor.map(_.value))),
+      editors = v.authors.map(_.value).toList.sorted
     )
 
   private[app] def fileView(documentId: UUID, f: VersionFile): VersionFileView =

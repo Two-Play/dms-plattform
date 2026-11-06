@@ -268,7 +268,8 @@ final class PlatformNotificationEvents(
                 users("recipients"),
                 document,
                 params("version", "validFrom", "withdrawnBy", "actingFor", "reason") ++
-                  payload.get("publicationFailed").map(_ => "publicationFailed" -> "true")
+                  payload.get("publicationFailed").map(_ => "publicationFailed" -> "true") ++
+                  payload.get("renditionFailed").map(_ => "renditionFailed" -> "true")
               )
             )
           )
@@ -411,9 +412,9 @@ final class PlatformNotificationEvents(
                 asDeputy <- ZIO
                   .foreach(workflow)(Delegation.approvedAsDeputy(roles, _, subject, d, cases))
                   .mapBoth(_.describe, _.getOrElse(Set.empty[UUID]))
-                // Withdrawing is the way out if a retry cannot help; only a publication has it (ADR 0061).
+                // Withdrawing is the way out if a retry cannot help (ADR 0061, 0078).
                 canWithdraw <- ZIO
-                  .foreach(workflow.filterNot(_ => rendition))(
+                  .foreach(workflow)(
                     Delegation.withdrawalRight(roles, _, subject, d, v, cases).map(_.isDefined)
                   )
                   .mapBoth(_.describe, _.getOrElse(may(subject, Action.Withdraw)))

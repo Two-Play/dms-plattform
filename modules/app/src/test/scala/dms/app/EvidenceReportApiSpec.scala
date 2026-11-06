@@ -640,6 +640,11 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
           s"/api/v1/documents/${doc.id}/versions/${doc.current.id}/withdraw",
           Some(WithdrawVersion("Falscher Vertragspartner").toJson)
         )
+        // Someone besides the author changed it: the report names them (ADR 0078).
+        _ <- ownerQuery(
+          sql"""insert into dms.document_version_editor (tenant_id, version_id, user_id)
+                values (${tenantId.value}, ${doc.current.id}, ${reader.value})""".update.run()
+        )
         created <- createReport(auditor, doc.id)
         view = as[EvidenceReportView](created)
         json <- payloadOf(auditor, view)
@@ -663,8 +668,12 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         texts.exists(_.contains(s"by ${deputy.value} on behalf of ${approver.value}")),
         texts.exists(_.contains("Withdrawn, never valid")),
         texts.exists(_.contains("Falscher Vertragspartner")),
+        parsed.versions.head.editors.exists(_.contains(reader.value)),
+        parsed.versions.head.editors.exists(_.contains(author.value)),
+        texts.exists(_.contains("Changed by")),
         // The format stays: reports of other versions do not change.
-        !plain.text.contains("\"withdrawal\"")
+        !plain.text.contains("\"withdrawal\""),
+        !plain.text.contains("\"editors\"")
       )
     },
     test(

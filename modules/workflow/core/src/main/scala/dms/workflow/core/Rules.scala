@@ -68,6 +68,21 @@ object Rules:
         definition.step(v.step).forall(s => excludesAuthors(fourEyes, s.kind))
     )
 
+  /** Whether changing the draft of case `c` costs `user` something the four-eyes rule takes away (DMS-163,
+    * ADR 0078): they do not count as an author yet, and they voted in a step that excludes authors, or hold
+    * an open task of such a step, as candidate or deputy. The first change makes them an editor for good.
+    */
+  def changeCostsVote(c: CaseDetails, user: UserId, authors: Set[UserId]): Boolean =
+    val excluded = c.tasks.filter(t => excludesAuthors(c.workflowCase.fourEyes, t.kind))
+    val ids      = excluded.map(_.id).toSet
+    !authors.contains(user) && (
+      c.votes.exists(v => ids(v.taskId) && (v.voter == user || v.actingFor.contains(user))) ||
+        excluded.exists(t =>
+          (t.status == TaskStatus.Open || t.status == TaskStatus.Waiting) &&
+            (t.candidates.contains(user) || t.deputies.exists(_.deputy == user))
+        )
+    )
+
   /** Step-up for approval votes: the sign-in must not be older than `window`. A token without `auth_time`
     * fails closed.
     */

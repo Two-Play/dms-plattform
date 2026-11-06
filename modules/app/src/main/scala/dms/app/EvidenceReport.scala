@@ -206,8 +206,12 @@ final case class EvidenceVersion(
     original: Option[EvidenceAttachment] = None,
     /** Present only for destroyed versions (DMS-82); their content, files and rendition no longer exist. */
     destruction: Option[EvidenceDestruction] = None,
-    /** Present only for versions approved but withdrawn before they took effect (ADR 0070). */
-    withdrawal: Option[EvidenceWithdrawal] = None
+    /** Present only for versions withdrawn before they took effect (ADR 0070, 0078). */
+    withdrawal: Option[EvidenceWithdrawal] = None,
+    /** Everyone who changed the version, sorted (ADR 0075, 0078). Present only if someone besides `createdBy`
+      * did, so reports of versions with one author keep their layout.
+      */
+    editors: Option[List[String]] = None
 ) derives JsonCodec
 
 final case class EvidenceLegalHold(
@@ -484,7 +488,7 @@ object EvidenceReport:
         ) ++
         v.acknowledgements.toList.flatMap(_.entries.map(_.userId)) ++ v.reviews.flatMap(_.decidedBy) ++
         v.destruction.toList.flatMap(d => List(d.proposedBy, d.approvedBy)) ++
-        v.withdrawal.toList.flatMap(w => w.by :: w.actingFor.toList)
+        v.withdrawal.toList.flatMap(w => w.by :: w.actingFor.toList) ++ v.editors.toList.flatten
     }
     val holds = r.legalHolds.flatMap(h => h.createdBy :: h.releasedBy.toList ++ h.documentRemovedBy.toList)
     val audit = r.auditTrail.flatMap(e => e.actorId :: e.onBehalfOf.toList)
@@ -616,7 +620,8 @@ object EvidenceReport:
         )
       },
       withdrawal =
-        v.withdrawal.map(w => EvidenceWithdrawal(w.at, w.by.value, w.actingFor.map(_.value), w.reason))
+        v.withdrawal.map(w => EvidenceWithdrawal(w.at, w.by.value, w.actingFor.map(_.value), w.reason)),
+      editors = Option.when((v.editors - v.createdBy).nonEmpty)(v.authors.map(_.value).toList.sorted)
     )
 
   private def destroyed(v: DocumentVersion): Boolean = v.status == dms.documents.DocumentStatus.Destroyed

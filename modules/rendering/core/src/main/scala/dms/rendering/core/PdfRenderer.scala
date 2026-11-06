@@ -31,10 +31,15 @@ enum RenderingError:
   /** A stored rendition does not match its checksum. */
   case Integrity(message: String)
 
+  /** The rendition exists, but the four-eyes rule refuses the approval it would complete (DMS-163, ADR 0078):
+    * the last approver created or changed the version. A retry cannot help.
+    */
+  case Refused(message: String)
+
   case Database(error: DbError)
 
   /** A stable code of the kind of failure, for clients that explain it (DMS-93): `unavailable`, `rejected`,
-    * `not_archivable`, `invalid`, `too_complex`, `integrity` or `database`.
+    * `not_archivable`, `invalid`, `too_complex`, `integrity`, `segregation_of_duties` or `database`.
     */
   def code: String = this match
     case Unavailable(_)   => "unavailable"
@@ -43,6 +48,7 @@ enum RenderingError:
     case Invalid(_)       => "invalid"
     case TooComplex(_)    => "too_complex"
     case Integrity(_)     => "integrity"
+    case Refused(_)       => RenderingError.SegregationOfDuties
     case Database(_)      => "database"
 
   def describe: String = this match
@@ -54,7 +60,12 @@ enum RenderingError:
     case Invalid(m)    => m
     case TooComplex(m) => m
     case Integrity(m)  => m
+    case Refused(m)    => m
     case Database(e)   => s"database error: $e"
+
+object RenderingError:
+  /** The code of [[Refused]]: the one failure a retry can never cure. */
+  val SegregationOfDuties: String = "segregation_of_duties"
 
 /** A page to print.
   *

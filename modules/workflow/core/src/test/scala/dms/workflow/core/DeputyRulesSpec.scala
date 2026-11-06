@@ -330,5 +330,40 @@ object DeputyRulesSpec extends ZIOSpecDefault:
           deputies(deputyship(roles = List("Author"), cls = Some("policy")), "Author").isEmpty
         )
       }
+    ),
+    suite("what a change of the draft costs (DMS-163, ADR 0078)")(
+      test("whoever voted in a step excluding authors, or holds its open task, loses that") {
+        val done = task("approval")
+        val open = task("next").copy(status = TaskStatus.Open)
+        val c    = caseOf(version, List(done, open), List(vote("approval", actingFor = None, voter = dora)))
+        assertTrue(
+          Rules.changeCostsVote(c, dora, Set(clara)),
+          Rules.changeCostsVote(c, anna, Set(clara)),
+          !Rules.changeCostsVote(c, ben, Set(clara))
+        )
+      },
+      test("a deputy who voted or holds the task loses it, and so does the principal of a vote") {
+        val standing = task("next").copy(status = TaskStatus.Open, deputies = List(TaskDeputy(ben, anna)))
+        val voted    = caseOf(version, List(task("approval")), List(vote("approval")))
+        assertTrue(
+          Rules.changeCostsVote(caseOf(version, List(standing), Nil), ben, Set(clara)),
+          Rules.changeCostsVote(voted, ben, Set(clara)),
+          Rules.changeCostsVote(voted, anna, Set(clara))
+        )
+      },
+      test("nothing is left to lose for someone who changed the version already") {
+        val c = caseOf(version, List(task("approval")), List(vote("approval", None, dora)))
+        assertTrue(!Rules.changeCostsVote(c, dora, Set(clara, dora)))
+      },
+      test("with the rule off a review vote survives a change, an approval vote does not") {
+        val fourEyesOff = (c: CaseDetails) => c.copy(workflowCase = c.workflowCase.copy(fourEyes = false))
+        val review      = caseOf(version, List(task("r", StepKind.Review)), List(vote("r", None, dora)))
+        val approval    = caseOf(version, List(task("a")), List(vote("a", None, dora)))
+        assertTrue(
+          Rules.changeCostsVote(review, dora, Set(clara)),
+          !Rules.changeCostsVote(fourEyesOff(review), dora, Set(clara)),
+          Rules.changeCostsVote(fourEyesOff(approval), dora, Set(clara))
+        )
+      }
     )
   )

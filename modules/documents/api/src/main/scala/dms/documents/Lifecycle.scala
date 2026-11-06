@@ -35,7 +35,9 @@ object Lifecycle:
     (InReview, ReviewPassed)   -> InApproval,
     (InApproval, Reject)       -> Draft,
     (InApproval, Approve)      -> Approved,
-    (Approved, Publish)        -> Published,
+    // Its rendition failed for good, so approval cannot finish (DMS-163, ADR 0078): it never took effect.
+    (InApproval, Withdraw) -> Withdrawn,
+    (Approved, Publish)    -> Published,
     // Stopped before its valid-from date (DMS-143, ADR 0059): it never took effect.
     (Approved, Withdraw)          -> Withdrawn,
     (Published, ReviewDueReached) -> ReviewDue,

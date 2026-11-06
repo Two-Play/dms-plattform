@@ -119,6 +119,7 @@ function documentWith(current: DocumentVersionView): DocumentView {
     canAssignNumber: false,
     canStartVersion: false,
     canDiscardDraft: false,
+    changeCostsVote: false,
     kind: 'Structured',
     title: 'IT security policy',
     ownerId: 'owner-1',

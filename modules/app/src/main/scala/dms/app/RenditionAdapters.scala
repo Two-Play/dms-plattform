@@ -85,7 +85,10 @@ final class DocumentRenditions(
         .mapError(e => RenderingError.Invalid(e.describe))
       _ <- workflow
         .completeApproval(request.caseId, request.approver, request.authenticatedAt)
-        .mapError(e => RenderingError.Invalid(e.describe))
+        .mapError {
+          case WorkflowError.FourEyes(m) => RenderingError.Refused(m)
+          case e                         => RenderingError.Invalid(e.describe)
+        }
     yield ()
 
   private def page(

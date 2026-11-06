@@ -77,10 +77,10 @@ How tasks of editors are cleared:
 
 ## Follow-ups
 
-- Report past violations. Business concept 2.4 asks that rule changes are checked retroactively and reported. Until there is a report, this query lists them: `select v.document_id, v.id, v.released_by from dms.document_version v join dms.document_version_editor e on e.version_id = v.id and e.user_id = v.released_by where v.released_by is not null;`.
-- A way out for a `Rendering` case whose approver is refused (see Negative / Cost).
-- Decide whether the four-eyes setting should allow an author to approve at all: business concept 2.4 calls the rule configurable, V9 and `Policy` have never let an author approve.
-- Warn before the first change that it takes away the right to vote on this version, and show the editors in the version history and the evidence report.
+- Done in DMS-163 (ADR 0078): the report of past violations, with the review votes of editors. Business concept 2.4 asks that rule changes are checked retroactively and reported. Until there is a report, this query lists them: `select v.document_id, v.id, v.released_by from dms.document_version v join dms.document_version_editor e on e.version_id = v.id and e.user_id = v.released_by where v.released_by is not null;`.
+- Done in DMS-163 (ADR 0078): a way out for a `Rendering` case whose approver is refused (see Negative / Cost).
+- Open, recorded in ADR 0078, decision 12: decide whether the four-eyes setting should allow an author to approve at all: business concept 2.4 calls the rule configurable, V9 and `Policy` have never let an author approve.
+- Done in DMS-163 (ADR 0078): warn before the first change that it takes away the right to vote on this version, and show the editors in the version history and the evidence report.
 - `Policy` grants `EditDraft` to assigned reviewers in review, but `updateDraft` refuses every status except `Draft`. If reviewers ever get to suggest changes, those changes have to be recorded here and the rule applies to them.
 
 ## Reversibility

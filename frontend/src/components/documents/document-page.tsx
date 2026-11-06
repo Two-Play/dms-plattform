@@ -189,6 +189,15 @@ export function DocumentPage({
       {document.data && shown && (
         <>
           <AccessNote document={document.data} />
+          {!showingOther && document.data.changeCostsVote && (
+            <p
+              role="status"
+              data-testid="change-costs-vote"
+              className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
+            >
+              {t('docs.view.changeCostsVote')}
+            </p>
+          )}
           {showingOther && (
             <p className="rounded-md border bg-muted/50 p-3 text-sm" role="status">
               {t('docs.view.olderVersion', { label: shown.version })}{' '}
@@ -277,6 +286,7 @@ export function DocumentPage({
             documentId={document.data.id}
             title={document.data.title}
             versions={{ [document.data.current.id]: document.data.current.version }}
+            withdrawableVersion={document.data.withdrawable?.versionId}
           />
           <VersionHistory documentId={document.data.id} shownId={shown.id} />
         </>

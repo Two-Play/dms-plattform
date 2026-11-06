@@ -32,7 +32,7 @@ enum CaseStatus:
 
   /** All steps approved; the archive rendition of the version is being produced (DMS-44). The version stays
     * in approval until the rendition is attached, then the case becomes `Approved`. If rendering fails for
-    * good, the case stays here.
+    * good, the case stays here until a retry succeeds or the version is withdrawn.
     */
   case Rendering
 
@@ -42,6 +42,11 @@ enum CaseStatus:
   /** The version was discarded as a draft (DMS-129, ADR 0050), e.g. after a return; it is never resubmitted.
     */
   case Discarded
+
+  /** The rendition failed for good and the version was withdrawn in approval (DMS-163, ADR 0078): it was
+    * never approved, and the votes of the case stay as a record.
+    */
+  case Withdrawn
 
 /** The review and approval of one document version. Every submission starts a round; all rounds of a case run
   * on the same workflow definition (business concept 6.1: a running case stays on its workflow version).

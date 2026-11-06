@@ -765,15 +765,18 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
           .map(m => (m.group(1), m.group(2)))
           .filter((a, b) => names(a) && names(b))
           .toSet
-      // V41 replaces the guard of V33 and allows exactly the lifecycle's transitions. V33 (DMS-82 adds the removal
+      // V55 replaces the guard of V41 and allows exactly the lifecycle's transitions; V41 lacked the withdrawal of a
+      // version in approval (DMS-163). V41 replaced the guard of V33. V33 (DMS-82 adds the removal
       // of content on destruction) and V31 lacked the withdrawal of an approved version (DMS-143); V31 replaced the
       // guard of V18 (which replaced V10's and V9's); V18 also lacked the discarding of a draft (DMS-129), the
       // earlier ones also the withdrawal of a valid version (DMS-55).
-      val withdrawApproved = Set(("Approved", "Withdrawn"))
+      val inApproval       = Set(("InApproval", "Withdrawn"))
+      val withdrawApproved = Set(("Approved", "Withdrawn")) ++ inApproval
       val discard          = Set(("Draft", "Discarded"))
       val withdrawValid    = Set(("Published", "Withdrawn"), ("ReviewDue", "Withdrawn"))
       assertTrue(
-        pairs("V41__withdraw_approved_versions.sql") == lifecycle,
+        pairs("V55__withdraw_versions_with_a_failed_rendition.sql") == lifecycle,
+        pairs("V41__withdraw_approved_versions.sql") == lifecycle -- inApproval,
         pairs("V33__destruction_and_cleanup.sql") == lifecycle -- withdrawApproved,
         pairs("V31__discard_drafts.sql") == lifecycle -- withdrawApproved,
         pairs("V18__periodic_review.sql") == lifecycle -- withdrawApproved -- discard,

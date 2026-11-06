@@ -83,6 +83,7 @@ function documentWith(
     canAssignNumber: false,
     canStartVersion: false,
     canDiscardDraft: false,
+    changeCostsVote: false,
     kind: 'Structured',
     current,
     ...extra,
@@ -95,6 +96,7 @@ const withdrawable = {
   validFrom: '2027-01-01',
   validVersion: '1.0',
   publicationFailed: false,
+  renditionFailed: false,
 }
 
 type Reply = Promise<{ data: unknown; error: unknown; response: Response }>
@@ -169,6 +171,73 @@ function renderAt(path: string) {
 }
 
 const page = `/documents/${documentId}`
+
+describe('Withdraw a version whose rendition failed for good (DMS-163)', () => {
+  const stuck = version('v2', '2.0', 'InApproval')
+
+  it('explains that the approval cannot finish, and sends the reason', async () => {
+    state.document = documentWith(stuck, {
+      withdrawable: { ...withdrawable, renditionFailed: true },
+    })
+    state.versions = [valid, stuck]
+    const { post, user } = renderAt(page)
+
+    await user.click(await screen.findByRole('button', { name: 'Withdraw version 2.0' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent(
+      'The archive PDF of version 2.0 could not be produced, so its approval cannot finish.',
+    )
+    await user.type(within(dialog).getByLabelText('Reason'), 'The approver changed the text')
+    await user.click(within(dialog).getByRole('button', { name: 'Withdraw version' }))
+
+    await waitFor(() => {
+      expect(post).toHaveBeenCalledWith('/api/v1/documents/{id}/versions/{versionId}/withdraw', {
+        params: { path: { id: documentId, versionId: 'v2' } },
+        body: { reason: 'The approver changed the text' },
+      })
+    })
+  })
+})
+
+describe('What a change of the draft costs (DMS-163)', () => {
+  it('warns a voter before the first change, and only them', async () => {
+    const draft = version('v2', '2.0-draft.1', 'Draft')
+    state.document = documentWith(draft, { changeCostsVote: true })
+    state.versions = [valid, draft]
+    renderAt(page)
+
+    expect(await screen.findByTestId('change-costs-vote')).toHaveTextContent(
+      'your vote no longer counts',
+    )
+  })
+
+  it('stays silent for everyone else', async () => {
+    const draft = version('v2', '2.0-draft.1', 'Draft')
+    state.document = documentWith(draft)
+    state.versions = [valid, draft]
+    renderAt(page)
+
+    expect(await screen.findByRole('heading', { name: 'Travel policy' })).toBeInTheDocument()
+    expect(screen.queryByTestId('change-costs-vote')).not.toBeInTheDocument()
+  })
+})
+
+describe('Editors in the version history (DMS-163)', () => {
+  it('names who changed a version besides the person who started it', async () => {
+    const changed = version('v2', '2.0', 'Approved', {
+      validFrom: '2027-01-01',
+      editors: ['author-1', 'colleague-1'],
+    })
+    state.document = documentWith(changed)
+    state.versions = [valid, changed]
+    renderAt(page)
+
+    const history = await screen.findByRole('list', { name: 'Versions' })
+    expect(await within(history).findByText(/Changed by/)).toHaveTextContent('colleague-1')
+    expect(within(history).getAllByText(/Changed by/)).toHaveLength(1)
+  })
+})
 
 describe('Withdraw an approved version on the document page (DMS-143)', () => {
   it('is hidden unless the backend names a version the caller may withdraw', async () => {

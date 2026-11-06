@@ -459,6 +459,32 @@ final class ApprovalWorkflow(
         yield cancelled
     }
 
+  /** Ends the case of a version withdrawn while it waited for a rendition that failed for good (DMS-163, ADR
+    * 0078): nothing can finish it any more, so it moves from `Rendering` to `Withdrawn` and keeps its votes.
+    * Recorded as `workflow.withdrawn`. Does nothing for a case in any other status: an approved version
+    * withdrawn before its date keeps its `Approved` case (ADR 0059).
+    */
+  def closeWithdrawn(versionId: UUID, actor: UserId, actingFor: Option[UserId]): IO[WorkflowError, Unit] =
+    sql(WorkflowStore.lockCaseOfVersion(versionId)).flatMap {
+      case Some(row) if row.status == CaseStatus.Rendering.toString =>
+        for
+          _ <- sql(WorkflowStore.updateCase(row.copy(status = CaseStatus.Withdrawn.toString)))
+          _ <- record(
+            actor,
+            "workflow.withdrawn",
+            AuditObject("document", Some(row.documentId), None),
+            Json.Obj(
+              "caseId"         -> Json.Str(row.id.toString),
+              "versionId"      -> Json.Str(row.versionId.toString),
+              "previousStatus" -> Json.Str(row.status)
+            ),
+            None,
+            onBehalfOf = actingFor
+          )
+        yield ()
+      case _ => ZIO.unit
+    }
+
   /** The approvals of the given versions by version id (approver, deputy's principal, time), e.g. for the
     * validity history (DMS-53). Versions approved without a workflow case are missing.
     */
@@ -1150,6 +1176,10 @@ final class ApprovalWorkflow(
       subject <- documents.subject(DocumentId(row.documentId), row.versionId)
       _       <- ZIO.unless(subject.contentSha256 == row.contentSha256)(
         ZIO.fail(WorkflowError.Conflict("the content changed during the review"))
+      )
+      // A vote cast before the person counted as an editor (ADR 0075): no retry can change this (ADR 0078).
+      _ <- ZIO.when(subject.authors.contains(approver) || actingFor.exists(subject.authors.contains))(
+        ZIO.fail(WorkflowError.FourEyes("the last approver created or changed this version"))
       )
       approved <- documents.advance(
         DocumentId(row.documentId),

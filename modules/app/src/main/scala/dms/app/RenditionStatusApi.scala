@@ -8,7 +8,7 @@ import dms.documents.DocumentStatus
 import dms.documents.core.DocumentError
 import dms.kernel.DocumentId
 import dms.rendering.RenditionRequest
-import dms.rendering.core.RenditionJobs
+import dms.rendering.core.{RenderingError, RenditionJobs}
 import sttp.model.StatusCode
 import sttp.tapir.Schema
 import sttp.tapir.json.zio.*
@@ -21,9 +21,9 @@ import java.time.{Instant, OffsetDateTime}
 import java.util.UUID
 
 /** Why the last attempt failed. `code` (`unavailable`, `rejected`, `not_archivable`, `invalid`,
-  * `too_complex`, `integrity`, `database`, `timeout`, `internal`; of a publication `conflict`, `legal_hold`,
-  * `invalid`, `not_found`, `database`, `timeout`, `internal`) says what kind of failure it was, so the client
-  * can explain it; `message` is the technical detail.
+  * `too_complex`, `integrity`, `segregation_of_duties`, `database`, `timeout`, `internal`; of a publication
+  * `conflict`, `legal_hold`, `invalid`, `not_found`, `database`, `timeout`, `internal`) says what kind of
+  * failure it was, so the client can explain it; `message` is the technical detail.
   */
 final case class RenditionErrorView(code: Option[String], message: String) derives JsonCodec, Schema
 
@@ -109,7 +109,15 @@ object RenditionStatusApi:
               job   <- jobOf(versionId)
               prov  <- provenanceOf(versionId)
               retry <- ctx.allowed(Action.RetryRendition, DocumentApi.resource(p.tenantId, details, version))
-            yield statusView(id, versionId, version.label, version.rendition.isDefined, job, prov, retry)
+            yield statusView(
+              id,
+              versionId,
+              version.label,
+              version.rendition.isDefined,
+              job,
+              prov,
+              retry && job.forall(retryCanHelp)
+            )
           }
       )
 
@@ -120,7 +128,8 @@ object RenditionStatusApi:
       .description(
         "Requeues the rendering job of a version in approval whose rendition failed (Failed: starts over with " +
           "all attempts) or waits for its next attempt (Retrying: runs now). 409 rendition_not_failed in any " +
-          "other state. Requires RetryRendition: the person named owner (without owner: the author) with any " +
+          "other state, and if the four-eyes rule refused the approval (code segregation_of_duties): a retry " +
+          "cannot help then, the version can only be withdrawn. Requires RetryRendition: the person named owner (without owner: the author) with any " +
           "role covering the document, records managers and tenant administrators. Audited."
       )
       .tag("Documents")
@@ -137,17 +146,26 @@ object RenditionStatusApi:
                   resource = DocumentApi.resource(p.tenantId, details, version)
                   _ <- ctx
                     .check(Action.RetryRendition, resource.copy(status = Some(DocumentStatus.InApproval)))
+                  // After the lock, as the withdrawal reads it: exactly one of the two wins (ADR 0078).
+                  locked <- ctx.service.lockForJobRetry(versionId)
                   before <- jobOf(versionId)
                   state = before.map(stateOf)
                   outcome <-
-                    if version.status != DocumentStatus.InApproval || version.rendition.isDefined ||
+                    if locked.status != DocumentStatus.InApproval || locked.rendition.isDefined ||
                       !state.exists(s => s == Failed || s == Retrying)
                     then
                       ZIO.succeed(
                         Left(
                           s"the rendition of version ${version.label} is ${state.getOrElse(NoRendition)} and " +
-                            s"the version is ${version.status}: only a failed rendition of a version in approval " +
+                            s"the version is ${locked.status}: only a failed rendition of a version in approval " +
                             "can be retried"
+                        )
+                      )
+                    else if !before.forall(retryCanHelp) then
+                      ZIO.succeed(
+                        Left(
+                          s"the four-eyes rule refused the approval of version ${version.label}: a retry " +
+                            "cannot help, the version can only be withdrawn"
                         )
                       )
                     else
@@ -241,7 +259,7 @@ object RenditionStatusApi:
                             nextAttempt(job.row),
                             job.row.finishedAt,
                             job.row.lastError.map(errorView),
-                            retry
+                            retry && retryCanHelp(job.row)
                           )
                         )
                       }
@@ -342,6 +360,12 @@ object RenditionStatusApi:
     */
   private[app] def covers(ctx: DocumentApi.Context, retry: Action, resource: Resource): UIO[Boolean] =
     ctx.allowed(retry, resource.copy(confidentiality = Confidentiality.Internal))
+
+  /** Whether another attempt can change anything: a refusal of the four-eyes rule stays, the editors of a
+    * version are recorded for good (ADR 0075, 0078).
+    */
+  private[app] def retryCanHelp(job: JobRow): Boolean =
+    !job.lastError.flatMap(RenditionJobs.parseJobError(_)._1).contains(RenderingError.SegregationOfDuties)
 
   private[app] def stateOf(job: JobRow): String = job.status match
     case "dead"                       => Failed

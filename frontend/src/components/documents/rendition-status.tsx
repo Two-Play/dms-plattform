@@ -50,14 +50,18 @@ export function RetryRenditionButton({
 /**
  * The state of the archive rendition of a version waiting for it (workflow case `Rendering`,
  * DMS-93): produced, retried automatically, or failed with its cause and, for the document's
- * owner, records managers and tenant administrators, a retry button.
+ * owner, records managers and tenant administrators, a retry button. A rendition that failed for
+ * good also names the way out: withdrawing the version (DMS-163, ADR 0078), which `canWithdraw`
+ * callers find in the page's actions.
  */
 export function RenditionStatusNotice({
   documentId,
   versionId,
+  canWithdraw = false,
 }: {
   documentId: string
   versionId: string
+  canWithdraw?: boolean
 }) {
   const client = useApiClient()
   const status = useQuery(renditionStatusQuery(client, documentId, versionId))
@@ -101,6 +105,9 @@ export function RenditionStatusNotice({
               <summary className="cursor-pointer">{t('renditions.technicalDetail')}</summary>
               <p className="mt-1 break-words font-mono">{s.lastError.message}</p>
             </details>
+          )}
+          {s.state === 'Failed' && (
+            <p>{canWithdraw ? t('renditions.withdrawHint') : t('renditions.withdrawHintOthers')}</p>
           )}
           {s.canRetry && (
             <RetryRenditionButton

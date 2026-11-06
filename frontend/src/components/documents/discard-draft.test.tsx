@@ -85,6 +85,7 @@ function documentWith(
     canAssignNumber: false,
     canStartVersion: false,
     canDiscardDraft: true,
+    changeCostsVote: false,
     kind: 'Structured',
     current,
     ...extra,

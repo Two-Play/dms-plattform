@@ -356,6 +356,14 @@ object RenditionApiSpec extends ZIOSpecDefault:
 
   private def failures(user: UserId) = call(user, "GET", "/api/v1/renditions/failures")
 
+  private def withdrawal(user: UserId, doc: UUID, version: UUID) =
+    call(
+      user,
+      "POST",
+      s"/api/v1/documents/$doc/versions/$version/withdraw",
+      Some("""{"reason":"Nobody else can finish this"}""")
+    )
+
   /** The retention job of the archive module (DMS-93) for a version, as the job runner would run it. */
   private def retain(doc: UUID, version: UUID) =
     for
@@ -825,6 +833,119 @@ object RenditionApiSpec extends ZIOSpecDefault:
           byOwner.exists(_._4.contains(s"/documents/${doc.id}?version=$version")),
           second.size == 4
         )
+    },
+    test("a last approver who changed the version cannot finish: told, no retry, withdrawn (DMS-163)") {
+      withRoles(author -> RoleAssignment(Role.Owner)) {
+        for
+          pair <- approvedByVotes("Soylent")
+          (doc, waiting) = pair
+          version        = waiting.versionId
+          mails <- Ref.make(List.empty[Mail])
+          // A case in `Rendering` at deployment: V53 finds that the last approver changed the version.
+          _ <- ownerQuery(
+            sql"""insert into dms.document_version_editor (tenant_id, version_id, user_id)
+                  values (${tenantId.value}, $version, ${approver.value})""".update.run()
+          )
+          tooEarly <- withdrawal(author, doc.id, version)
+          _        <- makeDue(version, maxAttempts = 1)
+          _        <- jobs().flatMap(runJobs)
+          dead     <- renditionJob(version)
+          failed   <- status(author, doc.id, version).map(as[RenditionStatusView])
+          listed   <- failures(records).map(as[List[RenditionFailureView]])
+          retried  <- retry(records, doc.id, version)
+          stuck    <- document(doc.id)
+          _        <- notifications(mails).flatMap(deliverDead(doc.id, _))
+          told     <- notices(doc.id)
+          // Neither a reader nor records management withdraws: they are told who can.
+          refused   <- withdrawal(records, doc.id, version)
+          withdrawn <- withdrawal(author, doc.id, version)
+          closed    <- cases(doc.id).map(_.head)
+          after     <- document(doc.id)
+          relisted  <- failures(records).map(as[List[RenditionFailureView]])
+          again     <- retry(records, doc.id, version)
+          next      <- call(
+            author,
+            "POST",
+            s"/api/v1/documents/${doc.id}/versions",
+            Some("""{"changeKind":"Major","reason":"A new approver takes it"}""")
+          )
+          actions <- ownerQuery(
+            sql"""select action from dms.audit_event where object_id = ${doc.id}
+                  and action in ('document.withdrawn-before-valid', 'workflow.withdrawn') order by seq"""
+              .query[String]
+              .run()
+              .toList
+          )
+          _ <- notifications(mails).flatMap(deliver(doc.id, "document.approved-version-withdrawn", _))
+          afterWithdrawal <- notices(doc.id)
+        yield
+          val byRecords = told.find(_._1 == records.value)
+          val byOwner   = told.find(_._1 == author.value)
+          assertTrue(
+            tooEarly.status == Status.Conflict,
+            tooEarly.text.contains("version_not_approved"),
+            dead.exists((s, _, error) =>
+              s == "dead" && error.exists(_.startsWith("[segregation_of_duties]"))
+            ),
+            failed.state == "Failed",
+            failed.lastError.exists(_.code.contains("segregation_of_duties")),
+            !failed.canRetry,
+            listed.exists(f => f.versionId == version && !f.canRetry),
+            retried.status == Status.Conflict,
+            retried.text.contains("rendition_not_failed"),
+            stuck.current.status == "InApproval",
+            stuck.withdrawable.exists(w => w.versionId == version && w.renditionFailed),
+            told.map(_._1).toSet == Set(author.value, records.value),
+            byRecords.exists(_._3.contains("Vier-Augen-Prinzip")),
+            byRecords.exists(_._3.contains("Ein erneuter Versuch hilft nicht")),
+            byRecords.exists(_._3.contains("Inhaber der Eigentümerrolle")),
+            byOwner.exists(_._3.contains("Sie können die Version auf der Dokumentseite zurückziehen")),
+            refused.status == Status.Forbidden,
+            withdrawn.status == Status.Ok,
+            closed.status == "Withdrawn",
+            closed.approval.isEmpty,
+            closed.votes.nonEmpty,
+            after.current.status == "Withdrawn",
+            after.current.withdrawal.exists(_.reason == "Nobody else can finish this"),
+            after.withdrawable.isEmpty,
+            !relisted.exists(_.versionId == version),
+            again.status == Status.Conflict,
+            next.status == Status.Created,
+            actions == List("document.withdrawn-before-valid", "workflow.withdrawn"),
+            afterWithdrawal.exists((user, _, body, _) =>
+              user == approver.value && body.contains("weil ihr Archiv-PDF nicht erzeugt werden konnte")
+            )
+          )
+      }
+    },
+    test("any dead rendition can be withdrawn; a retry that gets there first closes that way (DMS-163)") {
+      withRoles(author -> RoleAssignment(Role.Owner)) {
+        for
+          pair <- approvedByVotes("Tyrell")
+          (doc, waiting) = pair
+          version        = waiting.versionId
+          _          <- makeDue(version, maxAttempts = 1)
+          _          <- jobs(renderer = Some(unavailable)).flatMap(runJobs)
+          failed     <- status(author, doc.id, version).map(as[RenditionStatusView])
+          stuck      <- document(doc.id)
+          retried    <- retry(records, doc.id, version)
+          afterRetry <- document(doc.id)
+          lost       <- withdrawal(author, doc.id, version)
+          _          <- makeDue(version, maxAttempts = 1)
+          _          <- jobs(renderer = Some(unavailable)).flatMap(runJobs)
+          withdrawn  <- withdrawal(author, doc.id, version)
+          lateRetry  <- retry(records, doc.id, version)
+        yield assertTrue(
+          failed.canRetry,
+          stuck.withdrawable.exists(_.renditionFailed),
+          retried.status == Status.Ok,
+          afterRetry.withdrawable.isEmpty,
+          lost.status == Status.Conflict,
+          lost.text.contains("version_not_approved"),
+          withdrawn.status == Status.Ok,
+          lateRetry.status == Status.Conflict
+        )
+      }
     },
     test("a worker that crashed on the last attempt is noticed, and older failures are announced by V40") {
       for
