@@ -624,6 +624,30 @@ private[core] object DocumentStore:
       .run()
       .toMap
 
+  /** The next `limit` versions after `after`, by id, that are valid and require acknowledgement. */
+  def awaitingAcknowledgement(after: UUID, limit: Int)(using DbTx): List[UUID] =
+    sql"""select id from dms.document_version
+          where requires_acknowledgement and status in ('Published', 'ReviewDue') and id > $after
+          order by id
+          limit $limit""".query[UUID].run().toList
+
+  /** One row of [[currentlyValid]], by primary key, if the version is valid and requires acknowledgement.
+    * Unlike [[currentlyValid]] it stays cheap once per version: the first publication comes from the
+    * document's own versions, not from a grouping of all versions.
+    */
+  def awaitingAcknowledgement(id: UUID)(using DbTx): List[CurrentRow] =
+    sql"""select d.id, d.class_id, d.class_version, d.title, d.owner_id, d.author_id, d.template_id,
+                 d.template_version, d.created_at, v.id, v.major, v.minor, v.status, v.field_values, v.created_by,
+                 v.released_by, v.valid_from, v.published_at, v.review_due_on, v.requires_acknowledgement,
+                 v.scope, d.document_number,
+                 (select min(o.published_at) from dms.document_version o where o.document_id = d.id)
+          from dms.document_version v
+          join dms.document d on d.id = v.document_id
+          where v.id = $id and v.requires_acknowledgement and v.status in ('Published', 'ReviewDue')"""
+      .query[CurrentRow]
+      .run()
+      .toList
+
   def attachRendition(id: UUID, r: Rendition)(using DbTx): Boolean =
     sql"""update dms.document_version
           set rendition_key = ${r.objectKey}, rendition_version = ${r.objectVersion},

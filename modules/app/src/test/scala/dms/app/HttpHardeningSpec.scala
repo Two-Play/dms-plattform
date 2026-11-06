@@ -1,6 +1,7 @@
 package dms.app
 
 import dms.db.DbError
+import dms.db.queue.QueueDepth
 import sttp.model.StatusCode
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import zio.*
@@ -12,6 +13,13 @@ import zio.test.*
 object HttpHardeningSpec extends ZIOSpecDefault:
 
   private def header(response: Response, name: String) = response.headers.get(name)
+
+  private object Locale:
+    def withDefault[A](locale: java.util.Locale)(work: => A): A =
+      val before = java.util.Locale.getDefault
+      java.util.Locale.setDefault(locale)
+      try work
+      finally java.util.Locale.setDefault(before)
 
   private val routes = Routes(
     Method.GET / "plain"   -> handler(Response.text("ok")),
@@ -106,13 +114,40 @@ object HttpHardeningSpec extends ZIOSpecDefault:
         slow.status == "unavailable"
       )
     } @@ TestAspect.withLiveClock,
-    test("bulk deliveries have a worker of their own, everything else stays in the regular one") {
-      val (regular, bulk) = Background.jobLanes(
-        Map("notifications.deliver" -> 1, "webhook.deliver" -> 2, "document.render-rendition" -> 3)
+    test(
+      "deliveries, renditions and reminder checks have workers of their own, the rest shares the regular one"
+    ) {
+      val lanes = Background.jobLanes(
+        Map(
+          "notifications.deliver"                    -> 1,
+          "webhook.deliver"                          -> 2,
+          "document.render-rendition"                -> 3,
+          "document.publish"                         -> 4,
+          "documents.acknowledgement-reminder-check" -> 5
+        )
       )
       assertTrue(
-        bulk.keySet == Set("notifications.deliver", "webhook.deliver"),
-        regular.keySet == Set("document.render-rendition")
+        lanes.bulk.keySet == Set("notifications.deliver", "webhook.deliver"),
+        lanes.renditions.keySet == Set("document.render-rendition"),
+        lanes.reminders.keySet == Set("documents.acknowledgement-reminder-check"),
+        lanes.regular.keySet == Set("document.publish")
+      )
+    },
+    test("the metrics are in the text format, with a point whatever the language of the instance") {
+      val text = Locale.withDefault(java.util.Locale.GERMANY)(
+        MetricsApi.render(
+          List(QueueDepth("due", 3, 12.5), QueueDepth("delayed", 1, 0), QueueDepth("running", 2, 7))
+        )
+      )
+      assertTrue(
+        text.linesIterator.toList.filterNot(_.startsWith("#")) == List(
+          """dms_rendering_queue_depth{state="due"} 3""",
+          """dms_rendering_queue_depth{state="delayed"} 1""",
+          """dms_rendering_queue_depth{state="running"} 2""",
+          "dms_rendering_queue_oldest_seconds 12.500"
+        ),
+        text.linesIterator.count(_.startsWith("# TYPE")) == 2,
+        text.endsWith("\n")
       )
     },
     test("a draining instance is taken out although everything answers") {

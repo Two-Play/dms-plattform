@@ -705,6 +705,16 @@ final class DocumentService(
   def validVersion(id: UUID): IO[DocumentError, List[CurrentVersion]] =
     sql(DocumentStore.currentlyValid(Some(id))).flatMap(currentVersions)
 
+  /** Ids of the next `limit` versions after `after` (by id, from the start without it) that are valid and
+    * require acknowledgement: a page of the reminder check (DMS-137), whatever the size of the tenant.
+    */
+  def awaitingAcknowledgement(after: Option[UUID], limit: Int): IO[DocumentError, List[UUID]] =
+    sql(DocumentStore.awaitingAcknowledgement(after.getOrElse(UUID(0L, 0L)), limit))
+
+  /** The version, if it is valid and requires acknowledgement (any more). */
+  def awaitingAcknowledgement(id: UUID): IO[DocumentError, Option[CurrentVersion]] =
+    sql(DocumentStore.awaitingAcknowledgement(id)).flatMap(currentVersions).map(_.headOption)
+
   private def currentVersions(rows: List[DocumentStore.CurrentRow]): IO[DocumentError, List[CurrentVersion]] =
     for
       paths <- ZIO.foreach(rows.map(r => (r.classId, r.classVersion)).distinct)((id, version) =>

@@ -155,6 +155,16 @@ object PdfRenditionSpec extends ZIOSpecDefault:
         garbage.failures.nonEmpty
       )
     },
+    test("veraPDF gives the same results at the same time: rendition jobs can run in parallel (DMS-137)") {
+      for
+        pdf     <- ZIO.serviceWithZIO[PdfRenderer](_.render(job(page)))
+        results <- ZIO.foreachPar((1 to 12).toList)(i =>
+          VeraPdfValidator
+            .validate(if i % 3 == 0 then plainPdf else pdf.bytes, ArchiveStandard.PdfA2b)
+            .map(i -> _.compliant)
+        )
+      yield assertTrue(results.forall((i, compliant) => compliant == (i % 3 != 0)))
+    },
     test("the plain variant prints the same page without anything that says PDF/A (DMS-118)") {
       for
         archive <- ZIO.serviceWithZIO[PdfRenderer](_.render(job(page)))

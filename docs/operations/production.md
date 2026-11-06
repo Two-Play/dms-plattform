@@ -40,7 +40,7 @@ Set `DMS_PROFILE=production`. The application then refuses to start with the set
 - [ ] A reverse proxy terminates TLS, sends `Strict-Transport-Security` and limits request rates per client. The application adds the other security headers itself.
 - [ ] The reverse proxy's access log holds method, path and status, but no request bodies and no query strings of `/api` requests: the stated purpose and reason for viewing named people travel in a request body (ADR 0060), and filters in query strings may name organizational units.
 - [ ] The web application is served with its own Content Security Policy; the API's headers only cover the API.
-- [ ] `/docs` and `/docs/*` (Swagger UI) are not reachable from outside, unless wanted. `/health` and `/ready` need no sign-in and say nothing beyond the names of the dependencies.
+- [ ] `/docs` and `/docs/*` (Swagger UI) are not reachable from outside, unless wanted. `/health` and `/ready` need no sign-in and say nothing beyond the names of the dependencies. `/metrics` needs no sign-in either and gives totals only, but they show how busy the installation is, and every call reads the database: let only the monitoring reach it (ADR 0079).
 - [ ] The rendering and conversion workers are only reachable from the application; their images are pinned by digest (`DMS_RENDERING_IMAGE`, `DMS_CONVERSION_IMAGE`, ADR 0055).
 - [ ] The rendering worker is rolled out before or with an application that prints plain draft PDFs (ADR 0073): an older worker refuses them and draft PDFs fail with 422.
 - [ ] The limits of on-demand PDFs fit the deployment (`DMS_ON_DEMAND_PDF_*`, ADR 0073): the in-flight limits hold per application instance, so the worker can get as many times the value as there are instances. The rates hold over all instances.
@@ -52,7 +52,7 @@ Set `DMS_PROFILE=production`. The application then refuses to start with the set
 - [ ] Heap: reading an Office file can take about 1 GiB; one runs at a time per 2 GiB of JVM heap, at most four (ADR 0076). Give the application at least 2 GiB beyond the library cache.
 
 - [ ] `DMS_LOG_APPENDER=JSON` writes one JSON object per line.
-- [ ] Alerts on: `/ready` not 200, `level=ERROR`, 503 answers (the database is overloaded), dead jobs (`select kind, count(*) from dms.job where status = 'dead' group by 1`), the age of the oldest unpublished outbox event.
+- [ ] Alerts on: `/ready` not 200, `level=ERROR`, 503 answers (the database is overloaded), dead jobs (`select kind, count(*) from dms.job where status = 'dead' group by 1`), the age of the oldest unpublished outbox event, and `dms_rendering_queue_oldest_seconds` of `GET /metrics`: above 60 for several minutes means renditions come in faster than they are printed (see Capacity).
 - [ ] Log retention follows the data protection concept. Logs contain ids, not names, titles or field values; database error details are switched off at the driver.
 
 ## Service user of the user directory
@@ -108,6 +108,7 @@ The answer must have a `result` with one user and a `details.totalResult`. Right
 |---|---|---|
 | `GET /health` | The process is alive | 200 always; restart the instance if it does not answer |
 | `GET /ready` | The instance should get traffic | 200 `ready`, 200 `degraded` (search, rendering, conversion or the virus scanner are down: reading and approving go on, their work queues up or fails closed), 503 `unavailable` (database or object store down), 503 `draining` |
+| `GET /metrics` | Business figures for monitoring (business concept chapter 13) | Text format of Prometheus: `dms_rendering_queue_depth{state="due\|delayed\|running"}` (rendition jobs of all tenants) and `dms_rendering_queue_oldest_seconds` (how long the oldest due job has been waiting). All instances answer with the same numbers, as the queue is shared: scrape one, or take the maximum. 503 without the database |
 
 On SIGTERM the instance answers `draining`, waits `drainSeconds`, stops accepting requests and gives those in progress `shutdownGraceSeconds`. Background jobs are interrupted; their leases expire and another instance takes them over, so jobs must stay idempotent (ADR 0010).
 
@@ -153,3 +154,7 @@ Do not use `flyway repair` here: it also realigns the checksums of applied migra
 ## Capacity
 
 See [scripts/loadtest/README.md](../../scripts/loadtest/README.md) for the measured load. In short: the library holds about 2 KB per valid version in memory (`DMS_LIBRARY_CACHE_MAX_VERSIONS`, default 200,000, so about 400 MB at most; plan the JVM heap with it). Rendering and conversion run outside the application and are the slowest parts: scale them independently.
+
+**Renditions.** A worker prints one page at a time, and a rendition job waits for its answer, so the number of rendition jobs at a time decides the throughput (ADR 0079). Run as many worker replicas as you want in parallel and set `DMS_RENDERING_PARALLEL_JOBS` so that instances times jobs does not exceed the replicas; on-demand PDFs (`DMS_ON_DEMAND_PDF_*`) take their turn on the same workers. More jobs than replicas gain nothing: they wait in the worker, for each other and for a render whose caller has given up (DMS-161), and run into `DMS_RENDERING_TIMEOUT_SECONDS`. A job also validates with veraPDF in the application, which costs CPU and heap there. Add a replica when `dms_rendering_queue_oldest_seconds` stays above zero.
+
+**Acknowledgement reminders.** The hourly check of a tenant runs as a chain of jobs of `DMS_DOCUMENTS_ACKNOWLEDGEMENT_REMINDER_PAGE_SIZE` versions (default 200), with one short transaction per version, in a lane of their own (ADR 0079). The lane handles about 30 versions a second per instance; if the checks of all tenants take longer than the hour, add instances or raise `DMS_DOCUMENTS_ACKNOWLEDGEMENT_REMINDER_CHECK_SECONDS`. Runs that overlap do no harm.

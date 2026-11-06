@@ -93,13 +93,13 @@ The baseline did not fail slowly, it collapsed: ten statements held all ten conn
 | Document list sorted all documents of the tenant | 140 ms and growing with the tenant | Windows over the `updated_at` indexes |
 | Library decoded and authorized 19,000 versions per request | 1.8 s of SQL per request under load | Copy per tenant, checked against a stamp; 95 ms p95 |
 | One FIFO queue for everything | 73,000 deliveries before 223 renditions: nothing was published within 2 minutes | Own worker for bulk jobs; 8.6 s p95 |
-| Reminder check per publication read all acknowledgements | About 1 million rows per publication | Checks the published version only |
+| Reminder check per publication read all acknowledgements | About 1 million rows per publication | Checks the published version only; since DMS-137 the hourly check too goes version by version (see below) |
 | Finding the open acknowledgements visited all valid versions | 30 ms per request | Partial index; 21 ms p50 including the loads |
 
 **Limits seen:**
 
 - Deliveries run at about 100 per second on one worker. One publication to 1,100 readers takes about 11 s to deliver, one to 100,000 readers about 17 minutes, which the 48 hours of 14.2 allow. In these runs a backlog remains, because the first reminder check also asks readers for the bulk-loaded versions (no request records exist for them).
-- Renditions run one at a time per instance. Without a limit on publications (0.7 per second, thousands of times the peak of 14.2) the time from approval to publication grows to 46 s at p95, while reading stays unaffected.
+- Renditions ran one at a time per instance in these runs. Without a limit on publications (0.7 per second, thousands of times the peak of 14.2) the time from approval to publication grows to 46 s at p95, while reading stays unaffected. Since DMS-137 they have a lane of their own, and `DMS_RENDERING_PARALLEL_JOBS` with worker replicas runs several at a time (see below). These runs have not been repeated since.
 - The approver's inbox loaded one document per task: 450 ms p50 with 240 open tasks in the run above. It has read in batches since DMS-138 (ADR 0066); the load test has not been repeated since.
 - A new library copy takes about 0.6 s at 19,000 versions, and more at full volume.
 
@@ -107,4 +107,49 @@ The baseline did not fail slowly, it collapsed: ten statements held all ten conn
 
 - One backend instance, no reverse proxy, no TLS, no virus scanner, no email (notifications stay in the application).
 - Short runs of a few minutes, so slow leaks and table growth do not show.
-- Full volume is 100 times larger. What grows with the tenant is the library copy, the reminder check and everything listed under follow-ups in ADR 0056. A test at full volume needs a production-like environment.
+- Full volume is 100 times larger. What grows with the tenant is the library copy and everything listed under follow-ups in ADR 0056. A test at full volume needs a production-like environment.
+
+## Renditions and the reminder check at full volume (DMS-137)
+
+Measured on 2026-11-06 on the machine above, with other agents' builds and test suites running: load average 7 to 17 on 16 cores. Treat the lows as what a free core does and the p95 as what a busy machine does; a p95 for production needs a repeat on free hardware. Details and decisions: [ADR 0079](../../docs/adr/0079-background-jobs-at-full-volume-and-rendering-queue-metric.md).
+
+**Time of a render** with `render_bench.py`, a worker built from `workers/rendering` with the memory limit of compose (512 MB). 30 renders each, one after the other, in seconds. Target of the business concept (chapter 13): up to 50 pages, p95 at most 10 s.
+
+| Document | Pages | Min | p50 | p95 | Max |
+|---|---:|---:|---:|---:|---:|
+| Contract (clauses, tables, annexes) | 12 | 2.00 | 2.43 | 3.29 | 3.53 |
+| | 34 | 3.22 | 4.06 | 6.08 | 6.10 |
+| | 56 | 5.86 | 7.37 | 13.13 | 13.71 |
+| | 56, second series | 5.06 | 6.17 | 11.42 | 12.53 |
+| Policy (mostly text) | 13 | 0.85 | 1.13 | 1.43 | 1.45 |
+| | 26 | 1.76 | 2.54 | 3.38 | 3.67 |
+| | 51 | 3.47 | 4.31 | 6.46 | 6.88 |
+| One table across all pages | 12 | 1.38 | 1.62 | 2.06 | 2.11 |
+| | 25 | 2.81 | 3.27 | 4.73 | 5.48 |
+| | 50 | 7.05 | 9.43 | 13.75 | 13.89 |
+
+veraPDF adds about 1 s for 56 pages (p50 0.9 to 1.1, p95 1.2 to 1.5). A render is pure CPU on one core: the container used 230 s of CPU for about 33 renders. So one worker prints 56 pages in about 5 s on a free core and 11 to 13 s at p95 on a busy machine. Peak memory was 369 MiB at 56 pages. A contract of 210 pages took 24 s, within the 60 s of `DMS_RENDERING_TIMEOUT_SECONDS`; one of about 500 pages ran for more than ten minutes at the memory limit, and then the kernel killed the worker.
+
+The target holds for one document at a time on a free core: 5 to 7 s plus validation, and 7.04 s at p95 in the last row of the next table, measured while the load was lower. It holds with little room for one table across 50 pages (at least 7 s plus validation), and it was missed on this machine whenever the machine was busy. It does not hold when two long documents meet at one worker.
+
+**Several at a time**, the 56-page contract, 4 parallel requests unless noted:
+
+| Set-up | Min | p50 | p95 | Renditions per minute |
+|---|---:|---:|---:|---:|
+| One worker, one request at a time | 5.06 | 6.17 | 11.42 | 8.6 |
+| One worker, 2 requests | 6.28 | 12.00 | 12.95 | 10.2 |
+| One worker, 4 requests | 5.20 | 21.98 | 24.59 | 10.8 |
+| Four replicas, 4 requests | 5.48 | 6.52 | 7.04 | 36.8 |
+
+**Reminder check**, measured once with a temporary test against PostgreSQL 17 in a container (default settings), through the real job runner. Volume: a tenant of the size 14.2 gives on average, 2,000 valid versions that ask for acknowledgement, 2,000 readers each, 3.96 million acknowledgements, 4 million request records, 1 % open.
+
+| What | Time | Longest transaction |
+|---|---:|---:|
+| Before: the reads of the former check alone, in one transaction | 9.0 s | 9.0 s, then the writes |
+| First run, 11 jobs, 40,000 reminders due | 90.6 s | 0.40 s |
+| Next hour, 11 jobs, nothing due | 57.8 s | 0.05 s |
+| One version, 100,000 more readers: everyone asked | 4.3 s | 3.7 s |
+| The same version: everyone reminded | 4.7 s | 4.3 s |
+| The same version: nothing due | 2.2 s | 1.9 s |
+
+That is about 30 ms per version under this load. The longest transaction is the largest sample of `pg_stat_activity` every 20 ms.

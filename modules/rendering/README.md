@@ -17,7 +17,7 @@ Layout: `api` holds public types and interfaces, `core` the implementation. Othe
   - `RenditionLayout`: running header and footer (document ID, version, valid-from, approval note, page x of y), metadata,
     file identifier; pure. A deputy's approval note names the approver they stood in for ("on behalf of" / "i. V. für",
     `RenditionRequest.onBehalfOf`, DMS-49).
-  - `PdfRenderer` / `WeasyPrintRenderer`: HTTP client of the worker. `PdfValidator` / `VeraPdfValidator`: veraPDF in-process.
+  - `PdfRenderer` / `WeasyPrintRenderer`: HTTP client of the worker; `parallelJobs` says how many rendition jobs run at a time per instance, in a lane of their own (`Background`, ADR 0079). `PdfValidator` / `VeraPdfValidator`: veraPDF in-process.
   - `RenditionArchive`: object storage (`renditions/<tenant>/<document>/<version>.pdf`) with checksum check on read.
   - `RenditionSource`: port implemented by the application (`dms.app.DocumentRenditions`) for the page of a version (or,
     for a file document, its original with a `prepare` step that fills the Word fields, DMS-115) and the completion

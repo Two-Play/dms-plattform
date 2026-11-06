@@ -18,6 +18,14 @@ final case class ClaimedJob(
     maxAttempts: Int
 )
 
+/** How many jobs of a kind are in `state`, across all tenants: `due` (waiting for a worker), `delayed`
+  * (waiting for a retry or a later time) or `running`.
+  *
+  * @param oldestSeconds
+  *   how long the oldest of them has been due; 0 without jobs
+  */
+final case class QueueDepth(state: String, jobs: Long, oldestSeconds: Double)
+
 /** Durable job queue in PostgreSQL (ADR 0010). Jobs are claimed with a lease (`FOR UPDATE SKIP LOCKED` inside
   * `dms.job_claim`), so several workers on several instances never get the same job at the same time.
   * Delivery is at-least-once: a job whose worker crashed is claimed again after its lease, so handlers must
@@ -109,6 +117,17 @@ object JobQueue:
           .head
       )
     )
+
+  /** The depth of the queue of `kind` across all tenants, one entry per state (DMS-137). */
+  def depth(db: Db, kind: String): IO[DbError, List[QueueDepth]] =
+    db.transactSystem(
+      Db.sql(
+        sql"select state, jobs, oldest_seconds from dms.job_queue_depth($kind)"
+          .query[(String, Long, Double)]
+          .run()
+          .toList
+      )
+    ).map(_.map(QueueDepth(_, _, _)))
 
   /** Ids of all tenants, for system jobs that fan out per tenant. */
   def tenantIds(db: Db): IO[DbError, List[TenantId]] =
