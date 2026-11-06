@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed (2026-11-06, implemented in DMS-159) |
+| Status | Accepted (2026-11-06; proposed 2026-11-06, implemented in DMS-159) |
 | Date | 2026-11-06 |
 | Decided by | Philippe |
 
@@ -86,3 +86,7 @@ How tasks of editors are cleared:
 ## Reversibility
 
 Medium. The checks are plain code and two triggers, and can be removed in one change without touching data: back to comparing `created_by`. The table can stay unused or be dropped. Counting less than every change is a change in a few call sites, but it only takes effect for changes made from then on, because the list does not say what kind of change a person made. Keeping the list running from now on keeps both ways open, which is why it records people and not decisions.
+
+## Addendum 2026-11-06
+
+The user confirmed on 2026-11-06 that every change to a draft counts and costs the person's vote, also a corrected typo or saved metadata.

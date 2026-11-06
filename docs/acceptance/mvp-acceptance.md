@@ -62,7 +62,7 @@ PR numbers refer to GitHub pull requests; early items without a number were comm
 | US-02.1 | DMS-33 | Status-dependent mandatory fields | done | #17, `RequirednessSpec` | |
 | S-01.a | DMS-34 | Templates with placeholders and CEL | done | #18, ADR 0020 | |
 | S-01.b | DMS-35 | Template lifecycle, four eyes | done | #18, `TemplateApiSpec` | |
-| US-01.1 | DMS-36, DMS-154 | Locked and editable sections | done | #20, #25, #26, #98, ADR 0022, 0069, 0071, `DocumentApiSpec`, `WorkflowApiSpec`, `deviations-panel.test.tsx`, `section-text-editor.test.tsx` | Not yet checked in a real browser: DMS-157 |
+| US-01.1 | DMS-36, DMS-154 | Locked and editable sections | **partly** | #20, #25, #26, #98, ADR 0022, 0069, 0071, `DocumentApiSpec`, `WorkflowApiSpec`, `deviations-panel.test.tsx`, `section-text-editor.test.tsx` | Not yet checked in a real browser: DMS-157 |
 | US-01.2 | DMS-50 | Impact analysis | done | #39, `TemplateImpactApiSpec` | |
 | S-03.a | DMS-37 | Document from template | done | #23, `DocumentApiSpec` | |
 | S-05.a | DMS-38 | Frozen version packages | done | #23, ADR 0021, `DocumentVersionSchemaSpec` | |
@@ -99,7 +99,7 @@ PR numbers refer to GitHub pull requests; early items without a number were comm
 
 ## Open follow-ups
 
-The 14 follow-ups still open in Jira, each checked criterion by criterion against the code. Later work covered parts of them, but no issue is finished.
+The follow-ups still open in Jira, each checked criterion by criterion against the code. Later work covered parts of them, but no issue is finished.
 
 | Issue | Covered by later work | Still open | For stage 1 |
 |---|---|---|---|

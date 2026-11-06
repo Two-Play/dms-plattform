@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed (2026-11-06, implemented in DMS-155) |
+| Status | Accepted (2026-11-06; proposed 2026-11-06, implemented in DMS-155) |
 | Date | 2026-11-06 |
 | Decided by | Philippe |
 
@@ -137,3 +137,7 @@ No migration; V49 stays free. No new dependency.
 ## Reversibility
 
 **high**: No data changes. `Versioning.governing`, the checks in the three APIs, the file names and the markings are code. `VersionHtmlView.neverValidMarking` is an added optional field. Going back to the latest version is one line per API, and would open what is closed here again.
+
+## Addendum 2026-11-06
+
+Decision on legal holds changed on 2026-11-06: a legal hold is always possible. Records managers may set it without seeing a stricter draft, because a hold reveals no content and protects at once. This replaces "an open draft keeps its say" for holds; implementation in DMS-156.

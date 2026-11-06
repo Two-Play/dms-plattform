@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed (2026-11-06, implemented in DMS-169) |
+| Status | Accepted (2026-11-06; proposed 2026-11-06, implemented in DMS-169) |
 | Date | 2026-11-06 |
 | Decided by | Philippe |
 
@@ -139,3 +139,7 @@ Flyway V57. No new dependency.
 ## Reversibility
 
 **high**: Notices are additive: emptying `dms.audit.violationReminderDays` ends the reminders, and removing one call in `verifyFully` ends the notices; the table can stay as a record. The endpoints, the figure and the category are additive. A person's mail setting for a removed category is ignored. Notices that went out cannot be recalled.
+
+## Addendum 2026-11-06
+
+The data protection question named here goes to the data protection officer (decided 2026-11-06).

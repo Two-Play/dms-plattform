@@ -214,3 +214,4 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | – | DMS-170 | Task | Backlog (MVP) | – | DMS-163: way out sooner, return keeping the text, acting on four-eyes findings |
 | – | DMS-171 | Bug | Backlog (MVP) | – | DMS-137: very long documents kill the worker, repeat measurements, tenant-wide reads in the cockpit |
 | – | DMS-172 | Task | Backlog (MVP) | – | DMS-169: notice of a stopped verification, more checkpoints, reassigning orphaned documents |
+| – | DMS-173 | Task | Backlog (MVP) | – | DMS-171: conversion worker, reports over the limit, renders without a caller, Kubernetes, documents with images |
