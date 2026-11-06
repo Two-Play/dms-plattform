@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed (2026-11-06, implemented in DMS-158) |
+| Status | Accepted (2026-11-06; proposed 2026-11-06, implemented in DMS-158) |
 | Date | 2026-11-06 |
 | Decided by | Philippe |
 
@@ -121,3 +121,7 @@ Given: a document has one owner and one title, and the versions have their own v
 ## Reversibility
 
 **high**: No schema or stored data changes. The checks are in `DocumentApi`, `ReviewApi` and `DocumentService`; two issue codes are added. Going back means writing to `dms.document` in `updateDraft` again, which reopens the defect. Owners applied at publication stay, and rightly so.
+
+## Addendum 2026-11-06
+
+The user decided on 2026-11-06 to build the additional approval of business concept 3.2 for lowering confidentiality. Until it exists the refusal of decision 2 stands; implementation in DMS-162.

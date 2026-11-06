@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed (2026-11-06, implemented in DMS-108) |
+| Status | Accepted (2026-11-06; proposed 2026-11-06, implemented in DMS-108) |
 | Date | 2026-11-06 |
 | Decided by | Philippe |
 
@@ -142,3 +142,7 @@ The name list of the owner on the document page stays as ADR 0048 decided it: it
 ## Reversibility
 
 **medium**: The prefix is an optimization: a constant of 0 days makes every report verify the whole chain again, and the run table can stay as the record of the regular check. Format 2 stays readable with its field; a format 3 can drop it. Removed payloads cannot be restored, which is their purpose. Notices and exports are additive endpoints and one table.
+
+## Addendum 2026-11-06
+
+Removal of a report on a person's request and the retention of reports of living documents go to the data protection officer (decided 2026-11-06). Nothing is built until there is a requirement.

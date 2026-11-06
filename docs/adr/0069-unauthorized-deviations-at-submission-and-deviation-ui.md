@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed (2026-11-05, implemented in DMS-84); point 8 and the first follow-up are superseded by [0071](0071-editing-locked-text-and-extra-review-on-request.md) |
+| Status | Accepted (2026-11-06; proposed 2026-11-05, implemented in DMS-84); point 8 and the first follow-up are superseded by [0071](0071-editing-locked-text-and-extra-review-on-request.md) |
 | Date | 2026-11-05 |
 | Decided by | Philippe |
 

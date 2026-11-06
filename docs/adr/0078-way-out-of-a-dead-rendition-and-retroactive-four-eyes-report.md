@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed (2026-11-06, implemented in DMS-163) |
+| Status | Accepted (2026-11-06; proposed 2026-11-06, implemented in DMS-163) |
 | Date | 2026-11-06 |
 | Decided by | Philippe |
 
@@ -116,3 +116,7 @@ Flyway V55. New dependency between modules: `documents-core` on `rendering-api`,
 ## Reversibility
 
 **medium**: The report, the warning, the texts and the failure code are code and can go without touching data. The transition can be closed again by restoring the guard of V41 in a new migration and removing the condition in `withdrawApproved`. Versions already withdrawn stay withdrawn, and cases in status `Withdrawn` stay, so the value has to remain in the check. The optional field stays in reports already issued.
+
+## Addendum 2026-11-06
+
+Decision 12 answered on 2026-11-06: "four eyes off" concerns review steps only. An author never approves their own version, so V9, V14, V53 and `Policy` stay as they are.

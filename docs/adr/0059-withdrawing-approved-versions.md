@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed (2026-11-04, implemented in DMS-143) |
+| Status | Accepted (2026-11-06; proposed 2026-11-04, implemented in DMS-143) |
 | Date | 2026-11-04 |
 | Decided by | Philippe |
 

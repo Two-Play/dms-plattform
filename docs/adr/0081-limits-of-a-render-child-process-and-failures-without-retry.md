@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed |
+| Status | Accepted (2026-11-06) |
 | Date | 2026-11-06 |
 | Decided by | Philippe |
 

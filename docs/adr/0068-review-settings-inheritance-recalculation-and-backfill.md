@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed |
+| Status | Accepted (2026-11-06) |
 | Date | 2026-11-05 |
 | Decided by | Philippe |
 
@@ -147,3 +147,7 @@ Given:
 ## Reversibility
 
 **medium**: The recalculation is one job kind and a pure rule; dropping it leaves dates as they are, and the recalculation table can be dropped. Changing the limits needs no migration. Inheritance is stored in class versions from now on, so going back means reading `review_inherited` as false, which takes the interval away from inheriting classes for later publications. Dates once moved or backfilled stay; the audit trail says what they were.
+
+## Addendum 2026-11-06
+
+The user confirmed on 2026-11-06 that a date chosen at recertification may move earlier when a class's interval gets shorter: the stricter class cycle wins.
