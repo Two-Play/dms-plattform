@@ -791,7 +791,7 @@ export interface paths {
     /** @description The versions of a document the caller may read, oldest first */
     get: operations['getApiV1DocumentsIdVersions']
     put?: never
-    /** @description Starts the next version from the valid version as a draft: Major for a change of content (full workflow of the class), Minor for an editorial correction (on submission the owner confirms it in a shortened workflow, and an automatic comparison warns in `editorialCheck` if more text changed than the configured threshold). Both need a change summary in `reason` (422 if empty, DMS-126). 409 while a version is open or an approved version waits for its valid-from date. */
+    /** @description Starts the next version from the valid version as a draft: Major for a change of content (full workflow of the class), Minor for an editorial correction (on submission the owner confirms it in a shortened workflow, and an automatic comparison warns in `editorialCheck` if more text changed than the configured threshold). Both need a change summary in `reason` (422 if empty, DMS-126). 403 unless the caller may edit drafts and is cleared for the valid version: its author, the document's owner or in one of its access groups, if it is confidential. 409 while a version is open or an approved version waits for its valid-from date. */
     post: operations['postApiV1DocumentsIdVersions']
     delete?: never
     options?: never
@@ -807,7 +807,7 @@ export interface paths {
       cookie?: never
     }
     get?: never
-    /** @description Changes the draft and saves it as the next working state. Locked sections and computed fields of the template cannot be changed (422); versions in review or later cannot be changed (409). Values taken over from a business system (origin System, e.g. the partner master) keep their origin; a different value for them is rejected (422 `not_editable`). */
+    /** @description Changes the draft and saves it as the next working state. Locked sections without an active deviation request and computed fields of the template cannot be changed (422); versions in review or later cannot be changed (409), nor can a draft that has moved past `expectedWorkingState` (409). Values taken over from a business system (origin System, e.g. the partner master) keep their origin; a different value for them is rejected (422 `not_editable`). A first version sets owner and title of the document; a later version keeps them in its values until it is published. A later version cannot be less confidential than the version it started from (422 `confidentiality_lowered`, also if the field is left out), and only the document's owner can add access groups (422 `access_groups_widened`). */
     put: operations['putApiV1DocumentsIdDraft']
     post?: never
     delete?: never
@@ -825,7 +825,7 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** @description Submits the draft for review and starts the workflow of the document class (or the next round after a return). Blocked while fields required in review are missing (422 `incomplete` with issues) and while the content breaks the edit rules of the template (422 `unauthorized_deviations`: one issue per violation, `field` is the section id, `label` its title, `code` the kind of violation). */
+    /** @description Submits the draft for review and starts the workflow of the document class (or the next round after a return). Blocked while fields required in review are missing (422 `incomplete` with issues), while the content breaks the edit rules of the template (422 `unauthorized_deviations`: one issue per violation, `field` is the section id, `label` its title, `code` the kind of violation) and while a later version is less confidential than the version it started from (422 `confidentiality_lowered`). */
     post: operations['postApiV1DocumentsIdSubmit']
     delete?: never
     options?: never

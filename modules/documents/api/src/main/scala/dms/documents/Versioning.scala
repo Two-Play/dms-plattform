@@ -50,13 +50,30 @@ object Versioning:
           .maxByOption(_.number)
       )
 
+  /** Whether `v` is the first version of its document: every other version was discarded. Only a first
+    * version sets owner and title of the document while it is open (DMS-158, ADR 0074). A version started
+    * after a first version was withdrawn is a later version.
+    */
+  def isFirst(v: DocumentVersion, versions: List[DocumentVersion]): Boolean =
+    versions.forall(o => o.id == v.id || o.status == Discarded)
+
+  /** What an open version took its content from, to compare its protection with (DMS-158, ADR 0074): the
+    * [[startingPoint]] among the other versions, or if that ended meanwhile the latest other version that was
+    * released. `None` for a first version.
+    */
+  def basis(v: DocumentVersion, versions: List[DocumentVersion]): Option[DocumentVersion] =
+    val others = versions.filterNot(_.id == v.id)
+    startingPoint(others).orElse(
+      others.filter(o => o.releasedAt.isDefined && o.status != Destroyed).maxByOption(_.number)
+    )
+
   /** The versions that speak for the document as a whole when a right on the document is decided (DMS-155,
     * ADR 0072). A version that ended without taking effect has no say: it stays the latest one for good, and
     * its metadata may be the reason it was stopped (ADR 0059).
     *
     * All valid versions, and whatever is still on its way into force: its metadata will stand for the
-    * document, and the document's title may come from it. If a document has none of these, the latest version
-    * that was in force; without one, the latest version.
+    * document, and the document's title comes from it once it takes effect. If a document has none of these,
+    * the latest version that was in force; without one, the latest version.
     *
     * Callers ask for the right on every one of them, so a version cannot widen what another one restricts.
     */

@@ -56,7 +56,7 @@ Business concept 5.1, 5.2. `api`, package `dms.documents` (pure):
 
 Tables (migration V9):
 
-- `dms.document`: identity, pinned class and template version (foreign keys incl. tenant), title and owner (the only updatable columns). Insert only from a `Released` template version (trigger).
+- `dms.document`: identity, pinned class and template version (foreign keys incl. tenant), title and owner (the only updatable columns). Title and owner are those in force: the draft of a first version sets them, a later version only when it is published (ADR 0074). Insert only from a `Released` template version (trigger).
 - `dms.document_version`: one row per version package (content and values as `jsonb`). Guard trigger `document_version_guard`: versions start as drafts; only drafts change content, values, working state, scope and pinned versions; working states never decrease; status changes only along `Lifecycle` (a test compares both); metadata snapshot and approver are recorded once, on InApproval → Approved; the rendition is frozen from approval on; no deletes. Check constraints: approved versions have snapshot, approver and rendition checksum; the approver is not the author; minor versions have a reason. Partial unique indexes: one open version per document (`document_version_one_open`), one valid version per document and scope (`document_version_one_valid`), a version number once per document (withdrawn drafts give it back).
 - `dms.document_working_state`: one snapshot per saved working state, insert-only.
 - RLS with `dms.current_tenant()` on all three; `dms_app` may select and insert, and update only the columns listed in the migration.
@@ -83,11 +83,11 @@ HTTP (module `app`, `DocumentApi`):
 | GET | `/api/v1/documents?limit=` | Most recently changed documents (default 50, at most 200 looked at) with the version the caller sees (open if readable, else latest readable), `mine` for the caller's own; documents without a readable version are left out | `ReadDocument` per version |
 | GET | `/api/v1/documents/{id}` | Document with its open (or latest readable) version | `ReadDocument` on a version |
 | GET | `/api/v1/documents/{id}/versions` | Versions the caller may read | `ReadDocument` per version |
-| PUT | `/api/v1/documents/{id}/draft` | Change values, title and content of the draft; each is optional and stays as it is without a value. With `expectedWorkingState`, a draft that has moved on answers 409 (ADR 0071) | `EditDraft` |
+| PUT | `/api/v1/documents/{id}/draft` | Change values, title and content of the draft; each is optional and stays as it is without a value. With `expectedWorkingState`, a draft that has moved on answers 409 (ADR 0071); 422 `confidentiality_lowered`, `access_groups_widened` for a later version (ADR 0074) | `EditDraft` |
 | POST | `/api/v1/documents/{id}/versions/{versionId}/preview` | Live preview of a draft from its saved content with the values entered so far; 409 for other versions (ADR 0071) | `ReadDocument` on that version |
 | GET | `/api/v1/documents/{id}/versions/{versionId}/standard-text` | The locked sections of the template of the version, with their text (ADR 0071) | `ReadDocument` on that version |
 | POST | `/api/v1/documents/{id}/submit` | Submit for review | `EditDraft` |
-| POST | `/api/v1/documents/{id}/versions` | Start the next version (`{"changeKind":"Major"\|"Minor","reason":"..."}`) from the valid version as a draft; the reason is the change summary, required for Minor | `EditDraft` as author of the new draft |
+| POST | `/api/v1/documents/{id}/versions` | Start the next version (`{"changeKind":"Major"\|"Minor","reason":"..."}`) from the valid version as a draft; the reason is the change summary, required for Minor | `EditDraft` on the valid version as a draft, with its own author, owner and groups: the caller needs clearance for it (ADR 0074) |
 | PUT | `/api/v1/documents/{id}/draft/change-summary` | Change the change summary of the draft until submission (DMS-103; 409 afterwards, 422 empty for Minor); audited as `document.change-reason-changed` | `EditDraft` |
 | GET | `/api/v1/documents/{id}/versions/{versionId}/rendition` | Archive rendition (PDF/A-2b) of an approved version with `ETag`/`Repr-Digest` = SHA-256; 404 without rendition (DMS-44, module `rendering`) | `ReadDocument` on that version |
 
@@ -158,7 +158,7 @@ HTTP (module `app`, `DocumentApi`):
 
 | Method | Path | Purpose | Authorization |
 |---|---|---|---|
-| POST | `/api/v1/documents/{id}/versions` | Start the next version `{"changeKind":"Major"\|"Minor","reason","requiresAcknowledgement"}`; 201 | `EditDraft` on a draft of the caller |
+| POST | `/api/v1/documents/{id}/versions` | Start the next version `{"changeKind":"Major"\|"Minor","reason","requiresAcknowledgement"}`; 201 | `EditDraft` on the valid version as a draft (ADR 0074) |
 
 Version views additionally carry `validFrom`, `publicationDue` (approved versions), `successor` (`{versionId, version, status, validFrom, publicationDue}`), `requiresAcknowledgement` and `editorialCheck` (`{basedOn, changedRatio, threshold, exceedsThreshold}`, minor versions).
 
@@ -285,6 +285,13 @@ HTTP (module `app`):
 `DocumentView` carries `documentNumber` and `canAssignNumber`, `DocumentSummaryView`, `CurrentVersionView` and search hits (`SearchHitView`, DMS-116) carry `documentNumber`. Search: an exact number matches through `metadata.keyword.documentNumber` (no mapping change).
 
 Backfill (DMS-116, ADR 0040 addendum): `NumberRangeService.backfillScope(classId)` returns the range and the documents without number of the class and of its subclasses with the same effective range, oldest first (`created_at`, then id). `DocumentService.numberExisting(id, actor)` numbers one document in the caller's transaction like `DocumentNumbering.next` on creation, with the counter of the period of the document's creation year (`{YYYY}` shows that year); the open draft gets the number as a new working state, approved versions keep their frozen values. It skips (`BackfillSkip`) documents that have a number (idempotent), whose class has no range, with a version in review or approval, or without the organizational unit a `{OU}` pattern needs. Audit `document.number-assigned` with `backfill: true`, `manual: false` and the range key per document, and `number-range.backfilled` with the counts per run (`recordBackfill`). The app runs one transaction per document and enqueues `search.index-document` for each numbered document in the same transaction.
+
+## Later versions: protection, owner and title (DMS-158, ADR 0074)
+
+- Starting a version needs clearance for the version it starts from (`DocumentApi.versionStart`, also for `ReviewApi.revise` and `canStartVersion`); becoming the author of the draft does not count.
+- A later version compares with its basis (`Versioning.basis`). The confidentiality level never goes down, for nobody, and a missing value counts as `Internal`: 422 `invalid_values` with the issue code `confidentiality_lowered` on saving and on submission. On a restricted basis only the document's owner adds access groups (`access_groups_widened`, on saving). A first version (`Versioning.isFirst`) is free.
+- `owner` and `title` of a later version stay in its values. `Approved → Published` writes them to `dms.document` and records `document.owner-and-title-applied` if something changed. Discarded and withdrawn versions leave the document as it is, so nothing is restored.
+- The owner of an open later version, for its workflow, rights, tasks, notifications and search, is the owner in force (`document.ownerId`). What a version prints comes from the version: `DocumentVersion.namedOwner`, `DocumentRenditions.title`.
 
 ## Discarding drafts (DMS-129, ADR 0050)
 

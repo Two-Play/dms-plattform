@@ -87,6 +87,49 @@ object VersioningSpec extends ZIOSpecDefault:
         Versioning.startingPoint(Nil).isEmpty
       )
     },
+    test("a draft is compared with what it started from; only without another version it is the first") {
+      val template                                                              = TemplateId.random()
+      def version(major: Int, status: DocumentStatus, released: Boolean = true) =
+        DocumentVersion(
+          UUID.randomUUID(),
+          DocumentId.random(),
+          VersionNo(major, 0),
+          1,
+          status,
+          Major,
+          None,
+          "",
+          1,
+          template,
+          1,
+          TemplateContent(Nil),
+          Map.empty,
+          None,
+          None,
+          UserId("author"),
+          Instant.EPOCH,
+          Instant.EPOCH,
+          Option.when(released)(UserId("approver")),
+          Option.when(released)(Instant.EPOCH)
+        )
+      val draft      = version(3, Draft, released = false)
+      val discarded  = version(2, Discarded, released = false)
+      val valid      = version(1, Published)
+      val outOfForce = version(1, Withdrawn)
+      val destroyed  = version(2, Destroyed)
+      assertTrue(
+        Versioning.isFirst(draft, List(draft)),
+        Versioning.isFirst(draft, List(discarded, draft)),
+        !Versioning.isFirst(draft, List(valid, draft)),
+        !Versioning.isFirst(draft, List(outOfForce, draft)),
+        Versioning.basis(draft, List(draft)).isEmpty,
+        Versioning.basis(draft, List(discarded, draft)).isEmpty,
+        Versioning.basis(draft, List(valid, discarded, draft)).contains(valid),
+        // The version it started from went out of force while the draft was open.
+        Versioning.basis(draft, List(outOfForce, draft)).contains(outOfForce),
+        Versioning.basis(draft, List(outOfForce, destroyed, draft)).contains(outOfForce)
+      )
+    },
     test("what is valid or on its way decides for the document, not what ended without taking effect") {
       val template = TemplateId.random()
       def version(

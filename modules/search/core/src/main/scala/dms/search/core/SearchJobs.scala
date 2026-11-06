@@ -19,8 +19,8 @@ import scala.util.Try
   *   - Synchronization: every instance calls [[tick]] every `syncInterval`; it enqueues one job `search.sync`
   *     per tenant and interval (idempotency key: tenant and interval number), which reindexes every document
   *     changed since the previous run. It also catches changes without an outbox event (e.g. a new owner set
-  *     with a draft) and events a failed job lost, so the index follows the database within about one
-  *     interval.
+  *     with the draft of a first version) and events a failed job lost, so the index follows the database
+  *     within about one interval.
   *
   * Both jobs are idempotent; at-least-once delivery is safe.
   */

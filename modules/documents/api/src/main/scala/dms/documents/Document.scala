@@ -172,6 +172,12 @@ final case class DocumentVersion(
   /** The field values without their origin. */
   def metadata: Map[String, MetadataValue] = values.map((k, e) => k -> e.value)
 
+  /** The owner this version names. The document has it only from the moment the version takes effect, except
+    * for a first version (ADR 0074); rights follow the document.
+    */
+  def namedOwner: Option[UserId] =
+    metadata.get("owner").collect { case MetadataValue.PersonRef(user) => UserId(user) }
+
   /** The clause versions the content references, in document order without duplicates. */
   def clauses: List[(String, Int)] =
     TemplateContent.blocks(content).collect { case Block.ClauseRef(key, version) => (key, version) }.distinct

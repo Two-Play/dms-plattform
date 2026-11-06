@@ -769,6 +769,10 @@ final class DocumentService(
   /** Saves a changed draft as its next working state. Locked sections can only keep the template's text
     * unless a deviation request for the section is recorded (edit rules of the template); the computed fields
     * are those of the template. The deviation report is recomputed and stored with the draft.
+    *
+    * Only a first version sets owner and title of the document here; a later version keeps them in its values
+    * until it takes effect (ADR 0074). A later version cannot be less protected than the version it started
+    * from, see [[checkProtection]].
     */
   def updateDraft(id: DocumentId, change: DraftChange, actor: UserId): IO[DocumentError, DocumentVersion] =
     for
@@ -812,6 +816,8 @@ final class DocumentService(
         document.number,
         retention
       )
+      versions <- sql(DocumentStore.versions(id, templates))
+      _        <- checkProtection(profile, document, current, values, versions, actor)
       next = current.copy(
         workingState = current.workingState + 1,
         content = content,
@@ -823,7 +829,8 @@ final class DocumentService(
       _ <- sql(DocumentStore.updateDraft(next, templates)).filterOrFail(identity)(changedConcurrently(next))
       _ <- sql {
         DocumentStore.insertWorkingState(next, actor, templates)
-        DocumentStore.updateDocument(id, title.trim, ownerOf(values))
+        if Versioning.isFirst(current, versions) then
+          DocumentStore.updateDocument(id, title.trim, ownerOf(values))
       }
       _ <- record(
         actor,
@@ -845,6 +852,9 @@ final class DocumentService(
       current  <- sql(DocumentStore.lockOpenVersion(id, templates)).someOrFail(noOpenVersion(id))
       // Drafts started before DMS-126 may lack the summary; they cannot be submitted without one.
       _ <- checkChangeReason(current.changeKind, current.number, current.changeReason)
+      // Drafts saved before DMS-158 may be less confidential than the version they started from.
+      versions <- sql(DocumentStore.versions(id, templates))
+      _        <- checkLevel(document, current, current.values, versions)
       // Drafts saved before DMS-133 (or before their class got a rule) get the class's retention rule now.
       refreshed <- refreshRetention(document, current, actor)
       _         <- ZIO.when(document.kind == DocumentKind.File)(
@@ -861,6 +871,63 @@ final class DocumentService(
       }
       _ <- ZIO.when(updated.changeKind == ChangeKind.Minor)(recordEditorialCheck(updated, actor))
     yield updated
+
+  /** A later version cannot be less protected than the version it started from: it holds that version's
+    * content from the first moment (DMS-158, ADR 0074). The level never goes down (business concept 3.2: it
+    * can only be raised without an additional approval, which does not exist yet); access groups are added by
+    * the document's owner only. A missing level counts as `Internal`, as for access.
+    */
+  private def checkProtection(
+      profile: MetadataProfile,
+      document: Document,
+      current: DocumentVersion,
+      values: Map[String, FieldEntry],
+      versions: List[DocumentVersion],
+      actor: UserId
+  ): IO[DocumentError, Unit] =
+    // What the owner added to the draft stays when someone else saves it.
+    val added = Versioning
+      .basis(current, versions)
+      .filter(b => CoreFields.isRestricted(b.metadata) && !document.ownerId.contains(actor))
+      .toList
+      .flatMap(b =>
+        (CoreFields.allowedGroups(metadataOf(values)) -- CoreFields.allowedGroups(b.metadata) --
+          CoreFields.allowedGroups(current.metadata)).toList
+      )
+      .sorted
+    val label = profile.field(CoreFields.AllowedGroups).fold(CoreFields.AllowedGroups)(_.definition.label)
+    checkLevel(document, current, values, versions) *>
+      ZIO
+        .unless(added.isEmpty)(
+          ZIO.fail(
+            DocumentError.InvalidValues(
+              List(FieldIssue(CoreFields.AllowedGroups, label, IssueKind.AccessGroupsWidened(added)))
+            )
+          )
+        )
+        .unit
+
+  private def checkLevel(
+      document: Document,
+      current: DocumentVersion,
+      values: Map[String, FieldEntry],
+      versions: List[DocumentVersion]
+  ): IO[DocumentError, Unit] =
+    ZIO.foreachDiscard(
+      Versioning
+        .basis(current, versions)
+        .filter(b => CoreFields.lowersConfidentiality(b.metadata, metadataOf(values)))
+    )(b =>
+      profile(document.classId, current.classVersion).flatMap { profile =>
+        val label =
+          profile.field(CoreFields.Confidentiality).fold(CoreFields.Confidentiality)(_.definition.label)
+        ZIO.fail(
+          DocumentError.InvalidValues(
+            List(FieldIssue(CoreFields.Confidentiality, label, IssueKind.ConfidentialityLowered(b.label)))
+          )
+        )
+      }
+    )
 
   /** The retention rule of a version (DMS-133): the rule records management set for the document; otherwise
     * the rule of the class (own or inherited, origin platform); without one a value entered by hand before
@@ -1903,6 +1970,9 @@ final class DocumentService(
       _ <- ZIO.when(current.status == DocumentStatus.Approved && target == DocumentStatus.Published)(
         ReviewService.reopenFor(audit, current.id)
       )
+      _ <- ZIO.when(current.status == DocumentStatus.Approved && target == DocumentStatus.Published)(
+        applyToDocument(document, current, actor)
+      )
       // Who must acknowledge is fixed by the class's settings at publication (DMS-100, ADR 0048).
       _ <- ZIO.when(
         current.status == DocumentStatus.Approved && target == DocumentStatus.Published &&
@@ -1950,6 +2020,34 @@ final class DocumentService(
         Some(current.status)
       )
     yield updated
+
+  /** A version takes effect: the document gets the owner and title it names (ADR 0074). A value the version
+    * does not have keeps what the document has. Recorded in the audit trail if something changes.
+    */
+  private def applyToDocument(
+      document: Document,
+      v: DocumentVersion,
+      actor: UserId
+  ): IO[DocumentError, Unit] =
+    val owner                   = v.namedOwner.orElse(document.ownerId)
+    val title                   = titleOf(v).map(_.trim).filter(_.nonEmpty).getOrElse(document.title)
+    def user(u: Option[UserId]) = u.fold[Json](Json.Null)(o => Json.Str(o.value))
+    ZIO
+      .unless(owner == document.ownerId && title == document.title)(
+        sql(DocumentStore.updateDocument(document.id, title, owner)) *>
+          record(
+            actor,
+            "document.owner-and-title-applied",
+            v,
+            Json.Obj(
+              "ownerBefore" -> user(document.ownerId),
+              "owner"       -> user(owner),
+              "titleBefore" -> Json.Str(document.title),
+              "title"       -> Json.Str(title)
+            )
+          )
+      )
+      .unit
 
   /** The review date of a version that becomes valid now: from its valid-from date (or today in the tenant's
     * time zone), the class's interval and the `nextReview` value it was approved with (see [[Review.dueOn]]).

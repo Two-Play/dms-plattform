@@ -561,6 +561,43 @@ object ReviewApiSpec extends ZIOSpecDefault:
         found.map(v => (v.version, v.status)) == List(("1.0", "Published"), ("2.0-draft.1", "Draft"))
       )
     },
+    test("a draft naming another owner moves neither the review task nor the right to decide it") {
+      for
+        doc     <- validDocument()
+        _       <- runReviewCheck
+        task    <- taskOf(doc)
+        started <- call(
+          author,
+          "POST",
+          s"/api/v1/documents/${doc.id}/versions",
+          Some("""{"changeKind":"Major","reason":"New regulation"}""")
+        )
+        saved <- call(
+          author,
+          "PUT",
+          s"/api/v1/documents/${doc.id}/draft",
+          Some(
+            s"""{"title":"Code of conduct","values":${values(
+                owner2,
+                today.plusDays(10),
+                today.plusDays(30)
+              )}}"""
+          )
+        )
+        byNamed <- decide(owner2, task, "revise", """{"reason":"Mine now"}""")
+        ofNamed <- tasks(owner2)
+        ofOwner <- tasks(owner)
+        // The owner in force decides, which links the open version and leaves no open task for later tests.
+        byOwner <- decide(owner, task, "revise", """{"reason":"New regulation"}""")
+      yield assertTrue(
+        started._1 == Status.Created,
+        saved._1 == Status.Ok,
+        byNamed._1 == Status.Forbidden,
+        !ofNamed.exists(_.id == task.id),
+        ofOwner.exists(_.id == task.id),
+        byOwner._1 == Status.Ok
+      )
+    },
     test("withdrawing puts the version out of force; a reason is required") {
       for
         doc       <- validDocument()

@@ -169,6 +169,18 @@ object ValidationSpec extends ZIOSpecDefault:
           groupIssues("Confidential", List("Board Members"), DocumentStatus.Draft) ==
             List(IssueKind.PatternMismatch(CoreFields.GroupKeyPattern)),
           CoreFields.isRestricted(Map("confidentiality" -> V.Selection("StrictlyConfidential"))),
+          CoreFields.lowersConfidentiality(
+            Map("confidentiality" -> V.Selection("Confidential")),
+            Map("confidentiality" -> V.Selection("Internal"))
+          ),
+          // A missing value counts as `Internal`, as for access.
+          CoreFields.lowersConfidentiality(Map("confidentiality" -> V.Selection("Confidential")), Map.empty),
+          CoreFields.lowersConfidentiality(Map.empty, Map("confidentiality" -> V.Selection("Public"))),
+          !CoreFields.lowersConfidentiality(Map.empty, Map("confidentiality" -> V.Selection("Internal"))),
+          !CoreFields.lowersConfidentiality(
+            Map("confidentiality" -> V.Selection("Confidential")),
+            Map("confidentiality" -> V.Selection("StrictlyConfidential"))
+          ),
           !CoreFields.isRestricted(Map("confidentiality" -> V.Selection("Public")))
         )
       }

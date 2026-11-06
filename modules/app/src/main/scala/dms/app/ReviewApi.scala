@@ -177,13 +177,7 @@ object ReviewApi:
                 )
               found <- ownersVersion(p, ctx, reviews, id)
               (details, version) = found
-              // The caller becomes the author of a draft of this document, as for a new version.
-              _ <- ctx.check(
-                Action.EditDraft,
-                DocumentApi
-                  .resource(p.tenantId, details, version)
-                  .copy(status = Some(DocumentStatus.Draft), authorId = Some(p.userId))
-              )
+              _       <- ctx.check(Action.EditDraft, DocumentApi.versionStart(p.tenantId, details, version))
               decided <- reviews.revise(id, kind, req.reason, p.userId)
               result  <- viewAfter(ctx, classes, decided._1)
             yield result
