@@ -195,6 +195,7 @@ export const docs: Translation<typeof en.docs> = {
     copyHint:
       'Eine jetzt erzeugte Kopie mit Änderungshistorie; die archivierte PDF/A-Fassung bleibt unverändert und maßgeblich.',
     failed: 'Das PDF konnte nicht heruntergeladen werden: {message}',
+    limited: 'Gerade werden zu viele PDFs erzeugt. Bitte versuchen Sie es in {seconds} s erneut.',
     downloadWord: 'Als Word herunterladen',
     downloadingWord: 'Word-Dokument wird erzeugt …',
     wordHint:

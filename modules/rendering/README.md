@@ -5,7 +5,7 @@ Archive renditions of approved versions (DMS-44, ADR 0008, ADR 0025): HTML → P
 
 Layout: `api` holds public types and interfaces, `core` the implementation. Other modules may only depend on `api`.
 
-- `api`: `ArchiveStandard`, `RenditionRequest` (job payload, job kind `document.render-rendition`), `RenditionEvents`
+- `api`: `ArchiveStandard`, `PdfVariant` (PDF/A or plain, what the worker prints; plain is for drafts printed on demand, ADR 0073), `RenditionRequest` (job payload, job kind `document.render-rendition`), `RenditionEvents`
   (outbox events `document.rendition-failed` per failed attempt and `document.rendition-dead`, written by the database
   when the job is dead, which is what people are notified of: DMS-142, ADR 0058).
 - `core`:

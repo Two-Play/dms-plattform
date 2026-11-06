@@ -19,6 +19,16 @@ object ArchiveStandard:
   /** PDF/A-2b (ISO 19005-2, level B): visual reproducibility, embedded fonts, no external dependencies. */
   val default: ArchiveStandard = PdfA2b
 
+/** What the rendering worker prints a page as. */
+enum PdfVariant(val worker: String):
+  /** PDF/A: everything that is archived or validated. */
+  case Archive(standard: ArchiveStandard) extends PdfVariant(standard.variant)
+
+  /** An ordinary PDF without PDF/A identification, for drafts printed on demand (DMS-118, ADR 0073). It
+    * cannot be validated against an archive standard and is never stored.
+    */
+  case Plain extends PdfVariant("plain")
+
 /** Request to render the archive rendition of a version whose last workflow step was approved (DMS-44). It is
   * the payload of a job of kind [[RenditionRequest.JobKind]]; the job attaches the rendition and completes
   * the approval of `caseId` as `approver`.

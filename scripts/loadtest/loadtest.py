@@ -102,6 +102,11 @@ def backend_env() -> dict[str, str]:
         "DMS_SEARCH_URL": "http://localhost:19201",
         "DMS_WORKER_NAME": "loadtest",
         "DMS_DOCUMENTS_PUBLICATION_CHECK_SECONDS": "5",
+        # The load test measures the worker, so the limits that protect it in production are off (ADR 0073).
+        "DMS_ON_DEMAND_PDF_PER_USER_PER_MINUTE": "0",
+        "DMS_ON_DEMAND_PDF_PER_TENANT_PER_MINUTE": "0",
+        "DMS_ON_DEMAND_PDF_IN_FLIGHT_PER_TENANT": "0",
+        "DMS_ON_DEMAND_PDF_IN_FLIGHT_PER_INSTANCE": "0",
         "ZITADEL_ISSUER": ISSUER,
         "DMS_ZITADEL_PROJECT_ID": PROJECT,
         "DMS_ZITADEL_CLIENT_ID": CLIENT,

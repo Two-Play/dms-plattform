@@ -1,7 +1,7 @@
 package dms.rendering.core
 
 import dms.db.DbError
-import dms.rendering.ArchiveStandard
+import dms.rendering.PdfVariant
 import zio.*
 import zio.json.*
 
@@ -51,16 +51,18 @@ enum RenderingError:
     case Integrity(m) => m
     case Database(e)  => s"database error: $e"
 
-/** A page to print as PDF/A.
+/** A page to print.
   *
   * @param html
   *   the complete page: content, stylesheet, page rules and metadata; no external references
+  * @param variant
+  *   PDF/A for everything archived, plain for drafts printed on demand
   * @param identifier
   *   the PDF file identifier (32 hex characters), stable per version
   * @param xmp
-  *   custom XMP properties (`documentId`, `version`, `validFrom`)
+  *   custom XMP properties (`documentId`, `version`, `validFrom`); a plain PDF has no XMP packet
   */
-final case class PdfJob(html: String, standard: ArchiveStandard, identifier: String, xmp: Map[String, String])
+final case class PdfJob(html: String, variant: PdfVariant, identifier: String, xmp: Map[String, String])
 
 /** Which worker produced a file, for reproducibility (DMS-93, ADR 0055).
   *
@@ -91,7 +93,7 @@ final case class RenderedPdf(
     worker: WorkerIdentity = WorkerIdentity.unknown
 )
 
-/** Prints HTML as PDF/A (ADR 0008, 0025). */
+/** Prints HTML as PDF (ADR 0008, 0025, 0073). */
 trait PdfRenderer:
   def render(job: PdfJob): IO[RenderingError, RenderedPdf]
 
@@ -107,7 +109,7 @@ final class WeasyPrintRenderer(client: HttpClient, config: RendererConfig) exten
   private val endpoint = URI.create(config.url.stripSuffix("/") + "/render")
 
   def render(job: PdfJob): IO[RenderingError, RenderedPdf] =
-    val body    = Request(job.html, job.standard.variant, job.identifier, job.xmp).toJson
+    val body    = Request(job.html, job.variant.worker, job.identifier, job.xmp).toJson
     val request = HttpRequest
       .newBuilder(endpoint)
       .timeout(JDuration.ofSeconds(config.timeoutSeconds.toLong))

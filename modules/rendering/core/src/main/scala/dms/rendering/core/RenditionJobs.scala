@@ -6,7 +6,7 @@ import dms.db.queue.{ClaimedJob, JobQueue, Outbox}
 import dms.db.{Db, DbError, Jsonb}
 import dms.documents.Rendition
 import dms.kernel.{DocumentId, TenantId, UserId}
-import dms.rendering.{ArchiveStandard, RenditionEvents, RenditionRequest}
+import dms.rendering.{ArchiveStandard, PdfVariant, RenditionEvents, RenditionRequest}
 import zio.*
 import zio.json.*
 import zio.json.ast.Json
@@ -144,7 +144,7 @@ final class RenditionJobs(
           pdf <- renderer.render(
             PdfJob(
               html,
-              standard,
+              PdfVariant.Archive(standard),
               RenditionLayout.identifier(tenant, page.facts),
               RenditionLayout.xmp(page.facts)
             )

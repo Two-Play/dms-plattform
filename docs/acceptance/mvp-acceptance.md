@@ -113,7 +113,7 @@ The 14 follow-ups still open in Jira, each checked criterion by criterion agains
 | DMS-102 Search | Notifications as outbox subscriber (#79); Word text (#63); basic auth, https and replicas are configurable, the profile now requires them | Clause text, PDF and OCR text, a later subscriber misses earlier events, owner change and version time | Defer, except PDF text if policies are uploaded as PDFs |
 | DMS-104 Review | Notification and escalation (DMS-141, ADR 0057); inheritance, recalculation, backfill (#99, ADR 0068) | Rollout notice, settings in the UI, notice of moved dates: DMS-153 | Announce the rollout before going live |
 | DMS-108 Report and cockpit | Owner UI for the name list (#71), display names in the UI, purpose in the request body (DMS-144) | Chain cache, report list and retention, cockpit export and actions, names in the PDF | Defer |
-| DMS-118 On-demand PDFs | | Limits and a plain variant | Defer: `draft.pdf` stayed fast in the load test |
+| DMS-118 On-demand PDFs | Limits per user and tenant, plain draft PDFs (ADR 0073) | Limits on Word exports and previews, plain copies | Defer the rest: `draft.pdf` stayed fast in the load test |
 | DMS-124 Office fields | | Everything | Defer |
 | DMS-125 People picker | Service user described in ADR 0037 and `docs/operations/production.md` | Fuzzy search, paging, hiding chosen people | Defer |
 | DMS-132 Retention | Rules from the class (#82) | Jurisdiction and contract-end trigger, simulation, withdrawn drafts, personal data in the audit trail, orphans at scale | Defer; decide the audit data question with data protection |

@@ -2,6 +2,7 @@ import { useMutation } from '@tanstack/react-query'
 import { FileDown, FileText } from 'lucide-react'
 import { useId, useState } from 'react'
 import { useApiClient } from '@/api/context'
+import { ApiRequestError } from '@/api/errors'
 import type { DocumentVersionView } from '@/api/partners'
 import { downloadVersionDocx, downloadVersionPdf, pdfKind } from '@/api/version-view'
 import { Button } from '@/components/ui/button'
@@ -13,7 +14,16 @@ import { t } from '@/i18n'
  * history" – a copy of the approved version with the change history; the archived file stays unchanged.
  * Hidden for versions without a PDF (e.g. a withdrawn draft). With `wordExport` (structured documents,
  * DMS-121) also "Download as Word": the same page converted into a Word document, with the same options.
+ * PDFs generated on demand are limited (DMS-118): a refused download says when to try again.
  */
+function failure(error: Error): string {
+  return error instanceof ApiRequestError &&
+    error.status === 429 &&
+    error.retryAfterSeconds !== undefined
+    ? t('docs.pdf.limited', { seconds: error.retryAfterSeconds })
+    : t('docs.pdf.failed', { message: error.message })
+}
+
 export function PdfDownload({
   documentId,
   version,
@@ -108,7 +118,7 @@ export function PdfDownload({
       </p>
       {download.error && (
         <p role="alert" className="text-destructive">
-          {t('docs.pdf.failed', { message: download.error.message })}
+          {failure(download.error)}
         </p>
       )}
       {word.error && (

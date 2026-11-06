@@ -23,6 +23,7 @@ import dms.templates.*
 import dms.templates.core.ContentJson.given
 import dms.templates.core.{ProfileSource, TemplateDraft, TemplateService}
 import dms.workflow.core.{ApprovalWorkflow, FlowableEngine, WorkflowConfig}
+import org.apache.pdfbox.Loader
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import sttp.tapir.ztapir.RichZServerEndpoint
@@ -198,7 +199,8 @@ object VersionViewApiSpec extends ZIOSpecDefault:
       DocumentRenditions.layer,
       ZLayer(RenditionArchive.inMemory),
       ZLayer.succeed(DocumentConverter.unavailable),
-      FileVersions.layer
+      FileVersions.layer,
+      ZLayer.succeed(OnDemandPdfLimiter.unlimited)
     )
 
   private def token(user: UserId): String =
@@ -341,6 +343,29 @@ object VersionViewApiSpec extends ZIOSpecDefault:
   private def pdf(user: UserId, doc: UUID, version: UUID, file: String, changelog: Boolean) =
     call(user, "GET", s"/api/v1/documents/$doc/versions/$version/$file?changelog=$changelog")
 
+  /** What the file says about itself: the XMP packet, if any, and the number of output intents. */
+  private def identification(response: Response): (Option[String], Int) =
+    val document = Loader.loadPDF(response.body.toArray)
+    try
+      val catalog = document.getDocumentCatalog
+      (
+        Option(catalog.getMetadata).map(m =>
+          String(m.exportXMPMetadata().readAllBytes(), StandardCharsets.UTF_8)
+        ),
+        catalog.getOutputIntents.size
+      )
+    finally document.close()
+
+  /** Runs `effect` with the real limits, on the test's database. */
+  private def limitedTo[R, E, A](config: OnDemandPdfConfig)(effect: ZIO[R & OnDemandPdfLimiter, E, A]) =
+    for
+      s        <- setup.await
+      inFlight <- Ref.make(Map.empty[TenantId, Int])
+      result   <- effect.provideSomeEnvironment[R](
+        _.add[OnDemandPdfLimiter](OnDemandPdfLimits(s.app, config, inFlight))
+      )
+    yield result
+
   private def texts(response: Response): List[String] =
     RenderingWorker.pageTexts(response.body).map(RenderingWorker.normalized)
 
@@ -447,6 +472,56 @@ object VersionViewApiSpec extends ZIOSpecDefault:
         standard.status == Status.Ok,
         as[StandardTextView](standard).sections == content.sections.filter(_.locked),
         late.status == Status.Conflict
+      )
+    },
+    test("draft PDFs are plain PDFs, copies stay as they were (DMS-118)") {
+      for
+        found <- publishedWithDraft("Soylent", "Hooli")
+        (doc, first, second) = found
+        draft <- pdf(author, doc.id, second.id, "draft.pdf", changelog = true)
+        copy  <- pdf(reader, doc.id, first.id, "copy.pdf", changelog = true)
+        (draftXmp, draftIntents) = identification(draft)
+        (copyXmp, copyIntents)   = identification(copy)
+      yield assertTrue(
+        draft.status == Status.Ok,
+        draftXmp.isEmpty,
+        draftIntents == 0,
+        copy.status == Status.Ok,
+        copyXmp.exists(_.contains("pdfaid")),
+        copyIntents == 1
+      )
+    },
+    test("over its limit a request gets 429 with Retry-After; only printed PDFs count (DMS-118)") {
+      for
+        found <- publishedWithDraft("Massive Dynamic", "Wonka")
+        (doc, first, second) = found
+        before <- audited(doc.id, VersionViewApi.DraftPdfAction)
+        calls  <- limitedTo(OnDemandPdfConfig(1, 0, 0, 0, 5))(
+          for
+            wrongPdf <- pdf(author, doc.id, first.id, "draft.pdf", changelog = false)
+            noRight  <- pdf(reader, doc.id, second.id, "draft.pdf", changelog = false)
+            printed  <- pdf(author, doc.id, second.id, "draft.pdf", changelog = false)
+            refused  <- pdf(author, doc.id, second.id, "draft.pdf", changelog = false)
+            copy     <- pdf(author, doc.id, first.id, "copy.pdf", changelog = true)
+            other    <- pdf(reader, doc.id, first.id, "copy.pdf", changelog = true)
+            page     <- call(author, "GET", s"/api/v1/documents/${doc.id}/versions/${second.id}/html")
+          yield (wrongPdf, noRight, printed, refused, copy, other, page)
+        )
+        (wrongPdf, noRight, printed, refused, copy, other, page) = calls
+        after <- audited(doc.id, VersionViewApi.DraftPdfAction)
+        seconds = refused.header("Retry-After").flatMap(_.toIntOption)
+      yield assertTrue(
+        wrongPdf.status == Status.Conflict,
+        noRight.status == Status.Forbidden,
+        printed.status == Status.Ok,
+        refused.status == Status.TooManyRequests,
+        seconds.exists(s => s >= 1 && s <= 60),
+        refused.text.contains("pdf_limit_reached"),
+        copy.status == Status.TooManyRequests,
+        copy.header("Retry-After").isDefined,
+        other.status == Status.Ok,
+        page.status == Status.Ok,
+        after.size == before.size + 1
       )
     },
     test("an open version prints as marked draft PDF with the change history; the download is audited") {

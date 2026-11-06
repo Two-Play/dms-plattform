@@ -1,4 +1,4 @@
-"""DMS rendering worker (DMS-44, ADR 0008 addendum, ADR 0025): HTML -> PDF/A with WeasyPrint over HTTP.
+"""DMS rendering worker (DMS-44, ADR 0008 addendum, ADR 0025): HTML -> PDF with WeasyPrint over HTTP.
 
 A stateless print service. The application builds the complete HTML page (content, stylesheet, running
 header/footer, document metadata as <meta> tags), calls POST /render and gets the PDF bytes back. Everything
@@ -8,6 +8,9 @@ Determinism (spike DMS-23): nothing that ends up in the PDF comes from the clock
 Creation and modification dates come from the page's dcterms.created / dcterms.modified meta tags, the file
 identifier from the request. The service never fetches anything over the network: any reference to an
 external resource fails the render.
+
+Variants: PDF/A for everything archived, "plain" for drafts printed on demand (DMS-118, ADR 0073): an ordinary PDF
+with no PDF/A identification, no output intent and no XMP packet, so that it cannot pass for an archive copy.
 
 Endpoints:
   GET  /health   200 {"status": "ok", "renderer": "..."}
@@ -67,7 +70,8 @@ def build_fingerprint() -> str:
 WORKER_IMAGE = os.environ.get("DMS_WORKER_IMAGE", "").strip() or "unknown"
 WORKER_BUILD = "unknown"  # computed in main()
 
-VARIANTS = {"pdf/a-2b", "pdf/a-3b"}
+PLAIN = "plain"
+VARIANTS = {"pdf/a-2b", "pdf/a-3b", PLAIN}
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 IDENTIFIER = re.compile(r"^[0-9a-f]{32}$")
 
@@ -183,15 +187,17 @@ RENDER_LOCK = threading.Lock()
 
 
 def render(request: dict) -> tuple[bytes, int]:
-    xmp = xmp_packet({**request["xmp"], "renderer": request["xmp"].get("renderer") or RENDERER})
+    plain = request["variant"] == PLAIN
+    xmp = None if plain else xmp_packet({**request["xmp"], "renderer": request["xmp"].get("renderer") or RENDERER})
     with RENDER_LOCK:
         try:
             document = weasyprint.HTML(string=request["html"], url_fetcher=NoFetching()).render()
         except FatalURLFetchingError as e:
             raise Unrenderable(str(e.__cause__ or e)) from e
-        merge_xmp(document.metadata, xmp)
+        if xmp is not None:
+            merge_xmp(document.metadata, xmp)
         identifier = request["identifier"].encode() if request["identifier"] else None
-        pdf = document.write_pdf(pdf_variant=request["variant"], pdf_identifier=identifier)
+        pdf = document.write_pdf(pdf_variant=None if plain else request["variant"], pdf_identifier=identifier)
     return pdf, len(document.pages)
 
 

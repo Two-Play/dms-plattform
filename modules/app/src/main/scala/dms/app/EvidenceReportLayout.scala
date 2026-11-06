@@ -1,6 +1,6 @@
 package dms.app
 
-import dms.rendering.ArchiveStandard
+import dms.rendering.{ArchiveStandard, PdfVariant}
 import dms.rendering.core.{PdfJob, RenditionLayout}
 import dms.templates.core.HtmlRenderer.escape
 
@@ -26,7 +26,7 @@ object EvidenceReportLayout:
   def job(report: EvidenceReportPayload, sha256: String): PdfJob =
     PdfJob(
       html(report, sha256),
-      ArchiveStandard.default,
+      PdfVariant.Archive(ArchiveStandard.default),
       sha256.take(32),
       Map("documentId" -> report.document.id.toString)
     )

@@ -239,7 +239,7 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
   private type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow & TemplateService &
     ProfileSource & PdfRenderer & AuditTrail & TenantOrganizations & UserDirectory & FileVersions &
     WordTemplateService & AttachmentService & AttachmentUploads & RenditionSource & RenditionArchive &
-    ObjectStore & DocumentClassService
+    ObjectStore & DocumentClassService & OnDemandPdfLimiter
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -268,6 +268,7 @@ object FileDocumentApiSpec extends ZIOSpecDefault:
       RenditionWiring.archive,
       ZLayer.succeed(converter),
       ZLayer.succeed(renderer),
+      ZLayer.succeed(OnDemandPdfLimiter.unlimited),
       FileVersions.layer,
       WordTemplateService.layer,
       scanner,

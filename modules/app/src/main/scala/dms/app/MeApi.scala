@@ -3,7 +3,7 @@ package dms.app
 import dms.authz.{Groups, RoleAssignments}
 import dms.db.Db
 import dms.identity.{AuthError, Authenticator, IdTokenCheck, Principal}
-import sttp.model.StatusCode
+import sttp.model.{HeaderNames, StatusCode}
 import sttp.tapir.Schema
 import sttp.tapir.json.zio.jsonBody
 import sttp.tapir.ztapir.*
@@ -63,6 +63,27 @@ object SecuredApi:
       .zServerSecurityLogic(token =>
         ZIO.serviceWithZIO[Authenticator](_.authenticate(token)).mapError(toResponse)
       )
+
+  /** The error of an endpoint that may ask the caller to come back later: status, `Retry-After` in seconds,
+    * body.
+    */
+  type RetryableError = (StatusCode, Option[String], ApiError)
+
+  /** Like [[base]], for endpoints whose errors may carry a `Retry-After` header (429, DMS-118). */
+  val retryable: ZPartialServerEndpoint[Authenticator, String, Principal, Unit, RetryableError, Unit, Any] =
+    endpoint
+      .securityIn(auth.bearer[String]())
+      .errorOut(
+        statusCode
+          .and(header[Option[String]](HeaderNames.RetryAfter).description("Seconds to wait, with status 429"))
+          .and(jsonBody[ApiError])
+      )
+      .zServerSecurityLogic(token =>
+        ZIO.serviceWithZIO[Authenticator](_.authenticate(token)).mapError(e => withoutRetry(toResponse(e)))
+      )
+
+  /** An error of [[base]] as error of [[retryable]]. */
+  def withoutRetry(error: (StatusCode, ApiError)): RetryableError = (error._1, None, error._2)
 
   /** Like [[base]], additionally reading the ID token from [[IdTokenHeader]]: ZITADEL access tokens carry no
     * `auth_time`, so the sign-in time for step-up comes from the ID token (ADR 0024 addendum DMS-86).

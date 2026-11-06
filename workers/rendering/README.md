@@ -1,6 +1,6 @@
 # Rendering worker
 
-HTML → PDF/A with WeasyPrint behind a small HTTP API (DMS-44, [ADR 0008](../../docs/adr/0008-rendering-weasyprint.md), [ADR 0025](../../docs/adr/0025-archive-renditions.md)).
+HTML → PDF with WeasyPrint behind a small HTTP API, PDF/A for everything archived (DMS-44, [ADR 0008](../../docs/adr/0008-rendering-weasyprint.md), [ADR 0025](../../docs/adr/0025-archive-renditions.md)).
 The worker is stateless: no database, no object storage, no credentials, no outbound requests. The application's rendering job
 (`dms.rendering.core.RenditionJobs`) builds the complete page, calls the worker, validates the PDF with veraPDF, stores it and
 completes the approval.
@@ -22,7 +22,7 @@ this directory with Testcontainers (no compose needed).
 | Field | Meaning |
 |---|---|
 | `html` | The complete page: content, stylesheet, `@page` rules with header/footer, `<title>` and `<meta>` tags (`dcterms.created`/`modified` set the PDF dates). Must not reference external resources. |
-| `pdfVariant` | `pdf/a-2b` (default) or `pdf/a-3b` |
+| `pdfVariant` | `pdf/a-2b` (default), `pdf/a-3b` or `plain`: an ordinary PDF for drafts printed on demand, with no PDF/A identification, no output intent and no XMP packet (`xmp` is ignored) ([ADR 0073](../../docs/adr/0073-limits-and-plain-variant-of-on-demand-pdfs.md)) |
 | `identifier` | PDF file identifier, 32 lowercase hex characters (stable per version, for reproducible bytes) |
 | `xmp` | Custom XMP properties `documentId`, `version`, `validFrom` (strings), declared in a PDF/A extension schema |
 
@@ -30,7 +30,9 @@ Responses: `200 application/pdf` with headers `X-Renderer` (WeasyPrint, pydyf an
 (the image reference from `DMS_WORKER_IMAGE`, `unknown` if unset) and `X-Worker-Build` (build fingerprint, see below); `400` malformed
 request; `422` the page cannot be rendered (e.g. an external reference); `500` unexpected failure. `GET /health` answers `200`.
 
-One render runs at a time per container (WeasyPrint is not documented as thread-safe); scale with replicas.
+One render runs at a time per container (WeasyPrint is not documented as thread-safe); scale with replicas. Further requests wait
+in the worker, and a render whose caller gave up still runs to its end; the application keeps on-demand PDFs from piling up here
+(`dms.onDemandPdf`, ADR 0073).
 
 ## Image identity (DMS-93, ADR 0055)
 

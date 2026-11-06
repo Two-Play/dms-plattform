@@ -1,7 +1,7 @@
 package dms.rendering.core
 
 import dms.kernel.TenantId
-import dms.rendering.ArchiveStandard
+import dms.rendering.{ArchiveStandard, PdfVariant}
 import org.apache.pdfbox.Loader
 import org.apache.pdfbox.pdmodel.{PDDocument, PDPage}
 import zio.*
@@ -59,7 +59,7 @@ object PdfRenditionSpec extends ZIOSpecDefault:
   private def job(html: String) =
     PdfJob(
       RenditionLayout.compose(html, facts).toOption.get,
-      ArchiveStandard.PdfA2b,
+      PdfVariant.Archive(ArchiveStandard.PdfA2b),
       RenditionLayout.identifier(tenant, facts),
       RenditionLayout.xmp(facts)
     )
@@ -153,6 +153,28 @@ object PdfRenditionSpec extends ZIOSpecDefault:
         plain.failures.nonEmpty,
         !garbage.compliant,
         garbage.failures.nonEmpty
+      )
+    },
+    test("the plain variant prints the same page without anything that says PDF/A (DMS-118)") {
+      for
+        archive <- ZIO.serviceWithZIO[PdfRenderer](_.render(job(page)))
+        plain   <- ZIO.serviceWithZIO[PdfRenderer](_.render(job(page).copy(variant = PdfVariant.Plain)))
+        again   <- ZIO.serviceWithZIO[PdfRenderer](_.render(job(page).copy(variant = PdfVariant.Plain)))
+        report  <- VeraPdfValidator.validate(plain.bytes, ArchiveStandard.PdfA2b)
+        texts               = RenderingWorker.pageTexts(plain.bytes).map(RenderingWorker.normalized)
+        (metadata, intents) =
+          val document = Loader.loadPDF(plain.bytes.toArray)
+          try (Option(document.getDocumentCatalog.getMetadata), document.getDocumentCatalog.getOutputIntents)
+          finally document.close()
+      yield assertTrue(
+        metadata.isEmpty,
+        intents.isEmpty,
+        !report.compliant,
+        !String(plain.bytes.toArray, StandardCharsets.ISO_8859_1).contains("pdfaid"),
+        plain.pages == archive.pages,
+        texts == RenderingWorker.pageTexts(archive.bytes).map(RenderingWorker.normalized),
+        sha256(plain.bytes) == sha256(again.bytes),
+        plain.worker.build.isDefined
       )
     }
   ).provideShared(RenderingWorker.renderer) @@ TestAspect.sequential @@ TestAspect.withLiveClock

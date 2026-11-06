@@ -202,3 +202,5 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | – | DMS-158 | Bug | Backlog (MVP) | – | Security review: confidential content through a new version, drafts changing the live document |
 | – | DMS-159 | Bug | Backlog (MVP) | – | Security review: four eyes bypassed by editing another author's draft |
 | – | DMS-160 | Bug | Backlog (MVP) | – | Security review: SSRF in the conversion worker, memory exhaustion through Office files, ReDoS |
+| – | DMS-161 | Task | Backlog (MVP) | – | DMS-118: time limit in the worker, further endpoints, measure the defaults |
+| – | DMS-162 | Task | Backlog (MVP) | – | DMS-158: lowering confidentiality with extra approval, past owner changes, unit change in a draft |
