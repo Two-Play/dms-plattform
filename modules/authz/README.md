@@ -4,6 +4,8 @@ Authorization (ADR 0018, business concept 2.3): `Policy.decide` is a pure, deny-
 
 `PolicySpec` contains one test per cell of the permission matrix.
 
+Documents: `Approve` is denied to the author and to everyone in `Resource.contributors`, whoever changed the version (`DocumentVersion.editors`, ADR 0075).
+
 Templates (business concept 4.1): `EditTemplates` covers creating and changing templates; `ReleaseTemplate` additionally requires that the template designer neither created (`Resource.authorId`) nor changed (`Resource.contributors`) the version (four-eyes principle); `ReadTemplateCatalog` lets every business role see released templates.
 
 Documents (business concept 5.1, DMS-37): `ReadDocument` reads a version in any status along the visibility column of the status model: drafts for authors and owners, review and approval additionally for assigned reviewers and approvers, approved versions also for their approver, published versions like `ReadPublished`, superseded versions for every business role, withdrawn and archived versions for owners, records managers and auditors. `CreateFromTemplate` and `EditDraft` (also used for submitting a draft) are checked on a `Resource` built from the document: class path of its profile, organizational unit, confidentiality, status, author of the version and owner.

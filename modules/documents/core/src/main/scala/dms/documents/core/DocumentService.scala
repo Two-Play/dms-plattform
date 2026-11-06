@@ -93,7 +93,7 @@ enum DocumentError:
       s"$event is not possible in status $from"
     case Lifecycle(LifecycleError.LegalHoldActive)                => "a legal hold is active"
     case Lifecycle(LifecycleError.SegregationOfDutiesViolated(_)) =>
-      "segregation of duties: the author of a version cannot approve it"
+      "segregation of duties: whoever created or changed a version cannot approve it"
     case Conflict(m)             => m
     case WithdrawalRefused(_, m) => m
     case Database(e)             => s"database error: $e"
@@ -387,7 +387,8 @@ final class DocumentService(
         now,
         now,
         None,
-        None
+        None,
+        editors = Set(actor)
       )
       _ <- sql {
         DocumentStore.insertDocument(document)
@@ -518,7 +519,8 @@ final class DocumentService(
       next  = current.copy(
         workingState = current.workingState + 1,
         values = current.values + (CoreFields.DocumentNumber -> entry),
-        rendition = None
+        rendition = None,
+        editors = current.editors + actor
       )
       _ <- sql(DocumentStore.updateDraft(next, templates))
         .filterOrFail(identity)(changedConcurrently(next))
@@ -617,6 +619,10 @@ final class DocumentService(
     yield documents.map(d =>
       DocumentDetails(d, versions.getOrElse(d.id, Nil), profiles((d.classId, d.classVersion)), zone)
     )
+
+  /** The people who changed the given versions, by version id (ADR 0075), without reading the versions. */
+  def editors(versions: List[UUID]): IO[DocumentError, Map[UUID, Set[UserId]]] =
+    sql(DocumentStore.editorsOf(versions))
 
   /** The time zone of the tenant; validity switches at 00:00 there (DMS-45). */
   def tenantZone: IO[DocumentError, ZoneId] = sql(DocumentStore.tenantZone)
@@ -824,7 +830,8 @@ final class DocumentService(
         values = values,
         scope = Versioning.scopeKey(metadataOf(values)),
         rendition = None,
-        deviations = DeviationReport.compare(template.content, content, requests)
+        deviations = DeviationReport.compare(template.content, content, requests),
+        editors = current.editors + actor
       )
       _ <- sql(DocumentStore.updateDraft(next, templates)).filterOrFail(identity)(changedConcurrently(next))
       _ <- sql {
@@ -961,7 +968,12 @@ final class DocumentService(
       if retention == before || !Versioning.isEditable(current.status) then ZIO.succeed(current)
       else
         val values = (current.values - ClassRetention.Field) ++ retention.map(ClassRetention.Field -> _)
-        val next   = current.copy(workingState = current.workingState + 1, values = values, rendition = None)
+        val next   = current.copy(
+          workingState = current.workingState + 1,
+          values = values,
+          rendition = None,
+          editors = current.editors + actor
+        )
         for
           _ <- sql(DocumentStore.updateDraft(next, templates))
             .filterOrFail(identity)(changedConcurrently(next))
@@ -1296,7 +1308,8 @@ final class DocumentService(
           kind == ChangeKind.Major || settings.minorVersionsRequireAcknowledgement
         ),
         attachments = attachments,
-        file = file
+        file = file,
+        editors = Set(actor)
       )
       _ <- sql {
         DocumentStore.insertVersion(version, templates)
@@ -1325,8 +1338,8 @@ final class DocumentService(
   /** Changes the change summary of the open draft (DMS-103): what changed and why, shown in the version
     * history and above version comparisons. It can be changed until the draft is submitted (409 afterwards);
     * a version with a predecessor keeps a non-empty summary (422, DMS-126). Not a working state: content and
-    * values are unchanged. Recorded in the audit trail with the summary before and after; an unchanged
-    * summary records nothing.
+    * values are unchanged; the actor still counts as an editor (ADR 0075). Recorded in the audit trail with
+    * the summary before and after; an unchanged summary records nothing.
     */
   def updateChangeReason(
       id: DocumentId,
@@ -1350,7 +1363,12 @@ final class DocumentService(
             now <- Clock.instant
             _   <- sql(DocumentStore.updateChangeReason(current.id, changeReason))
               .filterOrFail(identity)(changedConcurrently(current))
-            next = current.copy(changeReason = changeReason, updatedAt = now)
+            _ <- sql(DocumentStore.recordEditor(current.id, actor))
+            next = current.copy(
+              changeReason = changeReason,
+              updatedAt = now,
+              editors = current.editors + actor
+            )
             _ <- record(
               actor,
               "document.change-reason-changed",
@@ -1672,6 +1690,7 @@ final class DocumentService(
         case other                                                 => other
       }
       updated <- storeDeviations(current, template, existing :+ request)
+      _       <- sql(DocumentStore.recordEditor(current.id, actor))
       _       <- record(
         actor,
         "document.deviation-requested",
@@ -1710,6 +1729,7 @@ final class DocumentService(
         template,
         existing.map(r => if r.id == requestId then withdrawn else r)
       )
+      _ <- sql(DocumentStore.recordEditor(current.id, actor))
       _ <- record(
         actor,
         "document.deviation-withdrawn",
@@ -1912,7 +1932,7 @@ final class DocumentService(
         .fromEither(event match
           case LifecycleEvent.Approve =>
             Lifecycle
-              .approve(current.status, current.createdBy, actor)
+              .approve(current.status, current.authors, actor)
               .left
               .map(TransitionBlocked.NotAllowed(_))
               .flatMap { target =>

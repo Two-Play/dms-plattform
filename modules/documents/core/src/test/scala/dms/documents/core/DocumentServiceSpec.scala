@@ -801,6 +801,51 @@ object DocumentServiceSpec extends ZIOSpecDefault:
         events == List("document.created", "document.submitted")
       )
     },
+    test(
+      "every change of a draft makes its actor an editor, in the list that outlives the states (DMS-159)"
+    ) {
+      val saver     = UserId("saver")
+      val requester = UserId("requester")
+      val withdrawn = UserId("withdrawer")
+      val summary   = UserId("summarizer")
+      for
+        f       <- fixture
+        created <- create(f, reviewValues)
+        (doc, v) = created
+        _         <- as(f.tenant)(_.updateDraft(doc.id, DraftChange(None, reviewValues, None), saver))
+        requested <- as(f.tenant)(_.requestDeviation(doc.id, Parties, "Customer wish", requester))
+        _         <- as(f.tenant)(_.withdrawDeviation(doc.id, requested._1.id, withdrawn))
+        _         <- as(f.tenant)(_.updateChangeReason(doc.id, Some("Why it changed"), summary))
+        // Nothing changes here: nobody becomes an editor.
+        _       <- as(f.tenant)(_.updateChangeReason(doc.id, Some("Why it changed"), approver))
+        stored  <- as(f.tenant)(_.get(doc.id)).map(_.versions.head)
+        batched <- as(f.tenant)(_.editors(List(v.id)))
+      yield assertTrue(
+        stored.editors == Set(author, saver, requester, withdrawn, summary),
+        stored.authors == stored.editors,
+        batched == Map(v.id -> stored.editors)
+      )
+    },
+    test("whoever changed a version cannot approve it, like its author (DMS-159)") {
+      val editor = UserId("editor")
+      for
+        f       <- fixture
+        created <- create(f, reviewValues)
+        (doc, v) = created
+        _ <- as(f.tenant)(_.updateDraft(doc.id, DraftChange(None, reviewValues, None), editor))
+        _ <- as(f.tenant)(_.submit(doc.id, author))
+        _ <- as(f.tenant)(_.changeStatus(v.id, ReviewPassed, UserId("reviewer-1")))
+        _ <- as(f.tenant)(_.attachRendition(v.id, Rendition("renditions/1.pdf", None, "b" * 64), author))
+        byEditor <- as(f.tenant)(_.changeStatus(v.id, Approve, editor)).either
+        approved <- as(f.tenant)(_.changeStatus(v.id, Approve, approver))
+      yield assertTrue(
+        byEditor.left.exists {
+          case DocumentError.Lifecycle(LifecycleError.SegregationOfDutiesViolated(u)) => u == editor
+          case _                                                                      => false
+        },
+        approved.label == "1.0"
+      )
+    },
     test("approval freezes the version with a metadata snapshot; the author cannot approve") {
       for
         f       <- fixture

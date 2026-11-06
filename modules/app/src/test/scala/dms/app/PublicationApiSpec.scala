@@ -485,6 +485,30 @@ object PublicationApiSpec extends ZIOSpecDefault:
         )
       )
     },
+    test("an owner who changed an editorial version does not confirm it; an approver does (DMS-159)") {
+      for
+        doc <- validDocument(owner)
+        _   <- newVersion(doc.id, """{"changeKind":"Minor","reason":"Typo in rule 5"}""")
+        _   <- call(
+          owner,
+          "PUT",
+          s"/api/v1/documents/${doc.id}/draft",
+          Some(
+            s"""{"values":${values(owner, past)},"content":${content(words.updated(4, "rule5x")).toJson}}"""
+          )
+        ).map(as[DocumentVersionView])
+        _       <- call(author, "POST", s"/api/v1/documents/${doc.id}/submit")
+        started <- cases(doc.id).map(_.last)
+        task = started.tasks.head
+        byOwner   <- vote(owner, task)
+        rendering <- vote(approver, task).map(as[WorkflowCaseView])
+      yield assertTrue(
+        task.step == "editorial-confirmation",
+        task.candidates == List(approver.value),
+        byOwner._1 == Status.Forbidden,
+        rendering.status == "Rendering"
+      )
+    },
     test("authors start a new version and edit its change summary until submission (DMS-103)") {
       for
         doc      <- validDocument(owner)

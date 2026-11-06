@@ -70,6 +70,8 @@ export const tasks = {
       'Approving needs a recent sign-in. If yours is too old, you are asked to sign in again and can then repeat the vote.',
     stepUpNeeded:
       'Your vote was not recorded: approving needs a fresh sign-in. Sign in again; afterwards you can repeat this vote.',
+    fourEyes:
+      'You created or changed this version. Four-eyes principle: someone else has to review and approve it.',
     signInAgain: 'Sign in again',
     casting: 'Casting vote…',
     cast: 'Cast vote',

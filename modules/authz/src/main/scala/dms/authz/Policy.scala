@@ -128,7 +128,8 @@ object Policy:
 
       case Approve =>
         requireStatus(InApproval)(
-          if isAuthor then Decision.Deny("segregation of duties: the author cannot approve their own version")
+          if isAuthor || resource.contributors.contains(subject.userId) then
+            Decision.Deny("segregation of duties: whoever created or changed a version cannot approve it")
           else
             grantIf(
               has(Approver) || (has(Owner) && resource.ownerMayApprove),

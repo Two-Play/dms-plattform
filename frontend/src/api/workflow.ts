@@ -1,7 +1,7 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query'
 import { t } from '@/i18n'
 import type { ApiClient } from './client'
-import { requestError } from './errors'
+import { ApiRequestError, requestError } from './errors'
 import type { components } from './schema'
 
 export type CastVote = components['schemas']['CastVote']
@@ -69,6 +69,14 @@ export async function resetDeadlineSettings(client: ApiClient): Promise<Deadline
 export type VoteDecision = 'Approve' | 'ApproveWithConditions' | 'RequestChanges' | 'Reject'
 
 /** A reason is required for every decision except a plain approval. */
+/**
+ * Whether a vote was refused because the caller created or changed the version (403
+ * `segregation_of_duties`, DMS-159): whoever changed a version counts as its author.
+ */
+export function isFourEyesRefusal(error: unknown): boolean {
+  return error instanceof ApiRequestError && error.code === 'segregation_of_duties'
+}
+
 export function needsReason(decision: VoteDecision): boolean {
   return decision !== 'Approve'
 }

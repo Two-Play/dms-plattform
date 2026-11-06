@@ -14,7 +14,7 @@ object LifecycleSpec extends ZIOSpecDefault:
       val result = for
         s1 <- Lifecycle.transition(Draft, Submit)
         s2 <- Lifecycle.transition(s1, ReviewPassed)
-        s3 <- Lifecycle.approve(s2, author, approver)
+        s3 <- Lifecycle.approve(s2, Set(author), approver)
         s4 <- Lifecycle.transition(s3, Publish)
       yield s4
       assertTrue(result == Right(Published))
@@ -26,7 +26,10 @@ object LifecycleSpec extends ZIOSpecDefault:
     },
     test("an author cannot approve their own version") {
       assertTrue(
-        Lifecycle.approve(InApproval, author, author) == Left(
+        Lifecycle.approve(InApproval, Set(author, approver), approver) == Left(
+          LifecycleError.SegregationOfDutiesViolated(approver)
+        ),
+        Lifecycle.approve(InApproval, Set(author), author) == Left(
           LifecycleError.SegregationOfDutiesViolated(author)
         )
       )

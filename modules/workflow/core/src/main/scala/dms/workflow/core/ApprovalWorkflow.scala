@@ -155,14 +155,14 @@ final class ApprovalWorkflow(
       found     <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
       row       <- sql(WorkflowStore.lockCase(found.caseId)).someOrFail(taskNotFound(taskId))
       task      <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
-      actingFor <- participation(row, task, actor)
+      subject   <- documents.subject(DocumentId(row.documentId), row.versionId)
+      actingFor <- participation(row, task, subject, actor)
       now       <- Clock.instant
       kind = StepKind.valueOf(task.stepKind)
       _ <- ZIO.fromEither(
         Rules.checkVote(kind, decision, reason, authenticatedAt, now, config.reauthenticationWindow)
       )
-      subject <- documents.subject(DocumentId(row.documentId), row.versionId)
-      _       <- ZIO.unless(subject.contentSha256 == row.contentSha256)(
+      _ <- ZIO.unless(subject.contentSha256 == row.contentSha256)(
         ZIO.fail(
           WorkflowError.Conflict(
             "the content changed since this round started; vote again after resubmission"
@@ -215,6 +215,22 @@ final class ApprovalWorkflow(
       details <- details(row.id)
     yield details
 
+  /** Refuses `actor` on an open task under the four-eyes rule (ADR 0075). The vote itself checks the same;
+    * the API asks first, so that the policy's general refusal does not hide the reason.
+    */
+  def refuseOwnVersion(taskId: String, actor: UserId): IO[WorkflowError, Unit] =
+    for
+      task    <- sql(WorkflowStore.task(taskId)).someOrFail(taskNotFound(taskId))
+      row     <- caseRow(task.caseId)
+      subject <- documents.subject(DocumentId(row.documentId), row.versionId)
+      _       <- ZIO.when(task.status == TaskStatus.Open.toString)(fourEyes(row, task, subject, actor))
+    yield ()
+
+  private def fourEyes(row: CaseRow, task: TaskRow, subject: ReviewSubject, actor: UserId) =
+    ZIO.when(
+      Rules.excludesAuthors(row.fourEyes, StepKind.valueOf(task.stepKind)) && subject.authors.contains(actor)
+    )(ZIO.fail(WorkflowError.FourEyes(Rules.OwnVersion)))
+
   /** Re-resolves the participants of an open or waiting task, e.g. after a tenant administrator assigned the
     * missing role.
     */
@@ -261,6 +277,36 @@ final class ApprovalWorkflow(
       }
     yield changed.flatten
 
+  /** Takes people who changed a version off its open tasks (ADR 0075), as a check over the open tasks of the
+    * tenant: a version only changes as a draft, when it has no open task, so this finds tasks assigned before
+    * the change was recorded, e.g. those of running cases when V53 filled the list. Such a task is resolved
+    * again like [[resolveParticipants]], by the platform: the next eligible person takes it, and without one
+    * it waits and the tenant administrators are told. Returns the changed tasks.
+    */
+  def excludeEditors: IO[WorkflowError, List[String]] =
+    for
+      open    <- sql(WorkflowStore.unfinishedTasks).map(_.filter(_.status == TaskStatus.Open.toString))
+      rows    <- sql(WorkflowStore.casesById(open.map(_.caseId).distinct))
+      editors <- documents.editors(rows.map(_.versionId))
+      affected = rows.filter(row =>
+        open.exists(t =>
+          t.caseId == row.id && Rules.excludesAuthors(row.fourEyes, StepKind.valueOf(t.stepKind)) &&
+            t.candidateList.exists(editors.getOrElse(row.versionId, Set.empty).contains)
+        )
+      )
+      changed <- ZIO.foreach(affected) { found =>
+        for
+          row     <- sql(WorkflowStore.lockCase(found.id)).someOrFail(caseNotFound(found.id))
+          subject <- documents.subject(DocumentId(row.documentId), row.versionId)
+          // re-read under the case lock: a concurrent vote may have completed a task meanwhile
+          tasks <- sql(WorkflowStore.tasksOfCase(row.id)).map(_.filter(_.status == TaskStatus.Open.toString))
+          resolved <- ZIO.foreach(tasks)(t =>
+            resolve(row, subject, t, DeadlineActor, onlyIfChanged = true, technical = true)
+          )
+        yield resolved.flatten
+      }
+    yield changed.flatten
+
   /** Resolves the participants of a task again; with `onlyIfChanged` nothing is written or recorded when they
     * stay the same. Returns the task id if it was updated.
     */
@@ -269,11 +315,13 @@ final class ApprovalWorkflow(
       subject: ReviewSubject,
       task: TaskRow,
       actor: UserId,
-      onlyIfChanged: Boolean
+      onlyIfChanged: Boolean,
+      technical: Boolean = false
   ): IO[WorkflowError, Option[String]] =
     for
       holders <- holdersOf(task.role, subject)
-      eligible  = Rules.eligible(holders, subject.author, row.fourEyes)
+      excluded  = Rules.excludesAuthors(row.fourEyes, StepKind.valueOf(task.stepKind))
+      eligible  = Rules.eligible(holders, subject.authors, excluded)
       status    = if eligible.isEmpty then TaskStatus.Waiting else TaskStatus.Open
       unchanged = eligible == task.candidateList && status.toString == task.status
       updated <-
@@ -289,7 +337,8 @@ final class ApprovalWorkflow(
                 "taskId"     -> Json.Str(task.id),
                 "candidates" -> Json.Arr(eligible.map(u => Json.Str(u.value))*)
               ),
-              None
+              None,
+              technical
             )
             added = eligible.filterNot(task.candidateList.contains)
             _ <-
@@ -621,7 +670,7 @@ final class ApprovalWorkflow(
         held        <- ZIO.when(cleared.contains(deputy))(directory.heldRoles(deputy)).map(_.getOrElse(Nil))
         roles = Map(deputy -> held.filter(_.isActiveAt(now)).map(_.role).toSet)
       yield approvals.filter(
-        Rules.standsIn(_, deputy, subject.author, subject.classPath, deputyships, roles, now)
+        Rules.standsIn(_, deputy, subject.authors, subject.classPath, deputyships, roles, now)
       )
 
   private def ownerDeputies(subject: ReviewSubject): IO[WorkflowError, List[TaskDeputy]] =
@@ -707,15 +756,27 @@ final class ApprovalWorkflow(
 
   private def resubmit(row: CaseRow, subject: ReviewSubject, actor: UserId): IO[WorkflowError, UUID] =
     val definition = WorkflowStore.parse(row.definition)
-    val resume     = Rules.resume(definition, row.returnedStep, row.contentSha256, subject.contentSha256)
     for
-      invalidated <-
+      votes <- sql(WorkflowStore.votesOfCase(row.id))
+      resume = Rules.resume(
+        definition,
+        row.returnedStep,
+        row.contentSha256,
+        subject.contentSha256,
+        Rules.voterEdited(votes, subject.authors, row.fourEyes, definition)
+      )
+      changed <-
         if resume.contentChanged then
           sql(
             WorkflowStore.invalidateVotes(row.id, subject.contentSha256, "the content changed after the vote")
           )
         else ZIO.succeed(0)
-      next = row.copy(
+      edited <-
+        if resume.voterEdited then
+          sql(WorkflowStore.invalidateAllVotes(row.id, "someone who voted changed the version afterwards"))
+        else ZIO.succeed(0)
+      invalidated = changed + edited
+      next        = row.copy(
         round = row.round + 1,
         status = CaseStatus.Running.toString,
         returnedStep = None,
@@ -727,13 +788,14 @@ final class ApprovalWorkflow(
       _ <- sql(WorkflowStore.updateCase(started))
       _ <- record(
         actor,
-        if resume.contentChanged then "workflow.reset" else "workflow.resubmitted",
+        if resume.reset then "workflow.reset" else "workflow.resubmitted",
         target(subject),
         Json.Obj(
           "caseId"           -> Json.Str(row.id.toString),
           "round"            -> Json.Num(started.round),
           "resumeAt"         -> Json.Str(resume.step),
           "contentChanged"   -> Json.Bool(resume.contentChanged),
+          "voterEdited"      -> Json.Bool(resume.voterEdited),
           "invalidatedVotes" -> Json.Num(invalidated),
           "contentSha256"    -> Json.Str(subject.contentSha256)
         ),
@@ -753,12 +815,12 @@ final class ApprovalWorkflow(
     else (stored.fold(WorkflowDefinition.default)(_.definition), Bpmn.processKey(stored.map(_.classKey)))
 
   /** People who may take a lane: the document owner for [[WorkflowDefinition.DocumentOwner]] lanes (their
-    * deputies if the owner is the author or missing, see [[Rules.ownerConfirmation]]), otherwise the holders
-    * of the lane's role.
+    * deputies if the owner started or changed the version or is missing, see [[Rules.ownerConfirmation]]),
+    * otherwise the holders of the lane's role.
     */
   private def holdersOf(role: String, subject: ReviewSubject): IO[WorkflowError, List[UserId]] =
     if role == WorkflowDefinition.DocumentOwner then
-      Rules.ownerConfirmation(subject.owner, subject.author) match
+      Rules.ownerConfirmation(subject.owner, subject.authors) match
         case Nil    => directory.holders(WorkflowDefinition.OwnerDeputyRole, subject)
         case owners => ZIO.succeed(owners)
     else directory.holders(role, subject)
@@ -851,7 +913,7 @@ final class ApprovalWorkflow(
         .orElseFail(WorkflowError.Engine(s"unknown task $key"))
       holders  <- holdersOf(lane.role, subject)
       deadline <- deadlineOf(step, definition)
-      eligible = Rules.eligible(holders, subject.author, row.fourEyes)
+      eligible = Rules.eligible(holders, subject.authors, Rules.excludesAuthors(row.fourEyes, step.kind))
       task     = TaskRow(
         taskId,
         row.id,
@@ -929,15 +991,19 @@ final class ApprovalWorkflow(
     for
       admins <- directory.tenantAdmins
       payload = Json.Obj(
-        "caseId"         -> Json.Str(row.id.toString),
-        "taskId"         -> Json.Str(task.id),
-        "documentId"     -> Json.Str(subject.documentId.value.toString),
-        "versionId"      -> Json.Str(subject.versionId.toString),
-        "version"        -> Json.Str(subject.versionLabel),
-        "step"           -> Json.Str(task.stepKey),
-        "lane"           -> Json.Str(task.laneKey),
-        "role"           -> Json.Str(task.role),
-        "authorExcluded" -> Json.Bool(row.fourEyes && holders.contains(subject.author)),
+        "caseId"     -> Json.Str(row.id.toString),
+        "taskId"     -> Json.Str(task.id),
+        "documentId" -> Json.Str(subject.documentId.value.toString),
+        "versionId"  -> Json.Str(subject.versionId.toString),
+        "version"    -> Json.Str(subject.versionLabel),
+        "step"       -> Json.Str(task.stepKey),
+        "lane"       -> Json.Str(task.laneKey),
+        "role"       -> Json.Str(task.role),
+        // Also true if only someone who changed the version was left out (ADR 0075).
+        "authorExcluded" -> Json.Bool(
+          Rules.excludesAuthors(row.fourEyes, StepKind.valueOf(task.stepKind)) &&
+            holders.exists(subject.authors.contains)
+        ),
         // Role holders outside the access groups of a confidential version do not count (DMS-101).
         "confidential" -> Json.Bool(subject.accessGroups.isDefined),
         "recipients"   -> Json.Arr(admins.map(a => Json.Str(a.value))*)
@@ -1125,19 +1191,23 @@ final class ApprovalWorkflow(
   /** Whether `actor` may vote on the task: as a candidate (`None`) or as the deputy of a candidate (the
     * candidate they act for, DMS-49).
     */
-  private def participation(row: CaseRow, task: TaskRow, actor: UserId): IO[WorkflowError, Option[UserId]] =
+  private def participation(
+      row: CaseRow,
+      task: TaskRow,
+      subject: ReviewSubject,
+      actor: UserId
+  ): IO[WorkflowError, Option[UserId]] =
     if task.status != "Open" then ZIO.fail(WorkflowError.Conflict(s"task ${task.id} is ${task.status}"))
-    else if row.fourEyes && UserId(row.authorId) == actor then
-      ZIO.fail(
-        WorkflowError.Forbidden("four-eyes rule: the author cannot review or approve their own version")
-      )
-    else if task.candidateList.contains(actor) then ZIO.none
     else
-      views(row, List(task)).flatMap(
-        _.flatMap(_.deputies).find(_.deputy == actor) match
-          case Some(d) => ZIO.some(d.principal)
-          case None    => ZIO.fail(WorkflowError.Forbidden("you are not a participant of this task"))
-      )
+      fourEyes(row, task, subject, actor) *> {
+        if task.candidateList.contains(actor) then ZIO.none
+        else
+          views(row, List(task)).flatMap(
+            _.flatMap(_.deputies).find(_.deputy == actor) match
+              case Some(d) => ZIO.some(d.principal)
+              case None    => ZIO.fail(WorkflowError.Forbidden("you are not a participant of this task"))
+          )
+      }
 
   /** Views of tasks of one case, open tasks with the deputies who may complete them now (DMS-49): deputies of
     * candidates with an active deputyship for the lane's role and the document's class who still hold the
@@ -1197,7 +1267,7 @@ final class ApprovalWorkflow(
           t.id -> Rules.taskDeputies(
             t.role,
             t.candidateList,
-            subject.author,
+            subject.authors,
             subject.classPath,
             deputyships,
             active.filter((d, _) => mayStandIn.contains(d)),

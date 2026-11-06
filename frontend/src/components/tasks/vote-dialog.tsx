@@ -8,6 +8,7 @@ import {
   decisionsFor,
   invalidateAfterVote,
   isApprovalStep,
+  isFourEyesRefusal,
   needsReason,
   type VoteDecision,
   type WorkflowTask,
@@ -147,7 +148,7 @@ function VoteForm({ task, initial, onVoted, onCancel }: VoteFormProps) {
       ) : (
         vote.isError && (
           <p role="alert" className="text-sm text-destructive">
-            {vote.error.message}
+            {isFourEyesRefusal(vote.error) ? t('tasks.voteDialog.fourEyes') : vote.error.message}
           </p>
         )
       )}

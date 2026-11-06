@@ -224,6 +224,14 @@ object PolicySpec extends ZIOSpecDefault:
       val own = base(Approve).copy(authorId = Some(user))
       assertTrue(!permitted(Seq(Approver), Approve, own))
     },
+    test("whoever changed a version cannot approve it either, as approver or as owner (DMS-159)") {
+      val changed = base(Approve).copy(authorId = Some(UserId("someone")), contributors = Set(user))
+      assertTrue(
+        !permitted(Seq(Approver), Approve, changed),
+        !permitted(Seq(Owner), Approve, changed.copy(ownerMayApprove = true)),
+        permitted(Seq(Approver), Approve, changed.copy(contributors = Set(UserId("someone-else"))))
+      )
+    },
     test("status restricts actions") {
       assertTrue(
         !permitted(Seq(Author), EditDraft, document(Published)),

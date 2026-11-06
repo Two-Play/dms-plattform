@@ -60,11 +60,13 @@ object Lifecycle:
   def destroy(from: DocumentStatus, legalHold: Boolean): Either[LifecycleError, DocumentStatus] =
     if legalHold then Left(LifecycleError.LegalHoldActive) else transition(from, Destroy)
 
-  /** Approval with segregation of duties: author and approver must differ (business concept 2.4). */
+  /** Approval with segregation of duties: the approver is none of the version's authors, who are all who
+    * started or changed it (business concept 2.4, ADR 0075).
+    */
   def approve(
       from: DocumentStatus,
-      author: UserId,
+      authors: Set[UserId],
       approver: UserId
   ): Either[LifecycleError, DocumentStatus] =
-    if author == approver then Left(LifecycleError.SegregationOfDutiesViolated(approver))
+    if authors.contains(approver) then Left(LifecycleError.SegregationOfDutiesViolated(approver))
     else transition(from, Approve)

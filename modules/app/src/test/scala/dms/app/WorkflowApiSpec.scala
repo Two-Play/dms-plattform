@@ -66,6 +66,8 @@ object WorkflowApiSpec extends ZIOSpecDefault:
   private val standIn   = UserId("deputy-3")
   private val bystander = UserId("deputy-4")
   private val voter     = UserId("deputy-5")
+  // Author, reviewer and approver in one organizational unit only, so other tests do not meet them (DMS-159).
+  private val colleague = UserId("colleague-1")
 
   private val signingKey: RSAKey = RSAKeyGenerator(2048).keyID("key-1").generate()
 
@@ -134,6 +136,10 @@ object WorkflowApiSpec extends ZIOSpecDefault:
               RoleAssignments.Postgres.grant(u, RoleAssignment(Role.Reviewer), admin)
             )
             _ <- RoleAssignments.Postgres.grant(approver, RoleAssignment(Role.Approver), admin)
+            _ <- ZIO.foreachDiscard(List(Role.Author, Role.Reviewer, Role.Approver))(r =>
+              RoleAssignments.Postgres
+                .grant(colleague, RoleAssignment(r, organizationalUnit = Some(EditorsUnit)), admin)
+            )
             // Scoped to another class: not a participant for contracts.
             _ <- RoleAssignments.Postgres
               .grant(reader, RoleAssignment(Role.Approver, documentClass = Some("policy")), admin)
@@ -293,6 +299,36 @@ object WorkflowApiSpec extends ZIOSpecDefault:
        |"language":{"type":"Text","value":"de"},
        |"retentionRule":{"type":"Text","value":"contract-10y"},
        |"containsPersonalData":{"type":"YesNo","value":false}""".stripMargin
+
+  private val EditorsUnit = "Editors"
+
+  /** The fields of a document in the organizational unit where [[colleague]] holds their roles. */
+  private def inEditorsUnit(partner: String) =
+    values(partner).replace("\"Legal\"", s"\"$EditorsUnit\"")
+
+  /** `user` saves the draft with another partner. */
+  private def rewrite(user: UserId, doc: UUID, partner: String) =
+    call(
+      user,
+      "PUT",
+      s"/api/v1/documents/$doc/draft",
+      Some(s"""{"values":{${inEditorsUnit(partner)}}}""")
+    )
+
+  /** The latest workflow of the class with the four-eyes rule on: earlier tests leave it off. */
+  private def fourEyesOn =
+    call(admin, "POST", "/api/v1/admin/workflows/contract", Some(contractWorkflow))
+      .map(r => assertTrue(r._1 == Status.Created))
+
+  /** Every open review task is approved by a candidate other than [[colleague]], whatever lanes the class has
+    * by now.
+    */
+  private def passReview(c: WorkflowCaseView): ZIO[Env, Nothing, WorkflowCaseView] =
+    c.tasks.find(t => t.kind == "Review" && t.status == "Open") match
+      case None    => ZIO.succeed(c)
+      case Some(t) =>
+        val voter = UserId(t.candidates.filterNot(_ == colleague.value).head)
+        vote(voter, t, "Approve").map(as[WorkflowCaseView]).flatMap(passReview)
 
   private val contractWorkflow =
     """{"definition":{"steps":[
@@ -1534,6 +1570,109 @@ object WorkflowApiSpec extends ZIOSpecDefault:
         ownRole._1 == Status.Ok,
         as[DocumentVersionView](ownRole).withdrawal.exists(_.actingFor.contains(approver.value)),
         ownAudit.exists(_._2.contains(approver.value))
+      )
+    },
+    test("someone who rewrote a colleague's draft neither reviews nor approves it (DMS-159)") {
+      for
+        _ <- fourEyesOn
+        // Without the edit they take part: they hold the roles in this unit.
+        before  <- draftDocument("Untouched", Some(inEditorsUnit("Untouched")))
+        _       <- submit(before.id)
+        running <- cases(before.id).map(_.head)
+        doc     <- draftDocument("Rewritten", Some(inEditorsUnit("Rewritten")))
+        edited  <- rewrite(colleague, doc.id, "Rewritten by a colleague")
+        _       <- submit(doc.id)
+        started <- cases(doc.id).map(_.head)
+        review = started.tasks.filter(_.status == "Open")
+        refused  <- vote(colleague, review.head, "Approve")
+        reviewed <- cases(doc.id).map(_.head).flatMap(passReview)
+        approval = reviewed.tasks.find(t => t.kind == "Approval" && t.status == "Open").get
+        selfApproved <- vote(colleague, approval, "Approve", signedInSecondsAgo = 10)
+      yield assertTrue(
+        running.tasks.filter(_.status == "Open").forall(_.candidates.contains(colleague.value)),
+        edited._1 == Status.Ok,
+        review.nonEmpty,
+        review.forall(!_.candidates.contains(colleague.value)),
+        refused._1 == Status.Forbidden,
+        error(refused._2).exists(_.code == "segregation_of_duties"),
+        !approval.candidates.contains(colleague.value),
+        selfApproved._1 == Status.Forbidden,
+        error(selfApproved._2).exists(_.code == "segregation_of_duties")
+      )
+    },
+    test(
+      "a voter who changes the version after a return loses the vote, even if the checksum stays (DMS-159)"
+    ) {
+      for
+        _       <- fourEyesOn
+        doc     <- draftDocument("Same terms", Some(inEditorsUnit("Same terms")))
+        _       <- submit(doc.id)
+        started <- cases(doc.id).map(_.head)
+        own = started.tasks.find(t => t.kind == "Review" && t.status == "Open").get
+        voted    <- vote(colleague, own, "Approve").map(as[WorkflowCaseView])
+        reviewed <- passReview(voted)
+        approval = reviewed.tasks.find(t => t.kind == "Approval" && t.status == "Open").get
+        _ <- vote(approver, approval, "Reject", Some("Wrong term"), 10)
+        // The same values again: a saved draft change, but nothing the checksum covers.
+        saved <- rewrite(colleague, doc.id, "Same terms")
+        again <- submit(doc.id) *> cases(doc.id).map(_.head)
+        open = again.tasks.filter(t => t.round == 2 && t.status == "Open")
+        audit <- auditActions("workflow.reset")
+      yield assertTrue(
+        saved._1 == Status.Ok,
+        again.contentSha256 == started.contentSha256,
+        again.round == 2,
+        again.currentStep == started.currentStep,
+        again.votes.nonEmpty,
+        again.votes.forall(_.invalidatedAt.isDefined),
+        open.nonEmpty,
+        open.forall(t => t.kind == "Review" && !t.candidates.contains(colleague.value)),
+        audit.nonEmpty
+      )
+    },
+    test("a task of someone who changed the version moves on, and waits without anyone left (DMS-159)") {
+      for
+        _        <- fourEyesOn
+        doc      <- draftDocument("Late editor", Some(inEditorsUnit("Late editor")))
+        _        <- submit(doc.id)
+        reviewed <- cases(doc.id).map(_.head).flatMap(passReview)
+        assigned = reviewed.tasks.find(t => t.kind == "Approval" && t.status == "Open").get
+        s        <- setup.await
+        workflow <- ZIO.service[ApprovalWorkflow]
+        jobs   = DeadlineJobs(s.app, workflow, DeadlineScheduleConfig())
+        others = assigned.candidates.filterNot(_ == colleague.value)
+        editor = (user: UserId) =>
+          s.app.transact(tenantId)(
+            Db.sql(
+              sql"""insert into dms.document_version_editor (tenant_id, version_id, user_id)
+                    values (dms.current_tenant(), ${assigned.versionId}, ${user.value})""".update.run()
+            )
+          )
+        // As after V53: the list names them, the task was assigned before.
+        _       <- editor(colleague)
+        refused <- vote(colleague, assigned, "Approve", signedInSecondsAgo = 10)
+        _       <- jobs.check(tenantId)
+        moved   <- cases(doc.id).map(_.head.tasks.find(_.id == assigned.id).get)
+        again   <- jobs.check(tenantId) *> auditActions("workflow.participants-resolved").map(_.size)
+        _       <- jobs.check(tenantId)
+        same    <- auditActions("workflow.participants-resolved").map(_.size)
+        _       <- ZIO.foreachDiscard(others)(u => editor(UserId(u)))
+        _       <- jobs.check(tenantId)
+        waiting <- cases(doc.id).map(_.head.tasks.find(_.id == assigned.id).get)
+        missing <- outbox("workflow.participant-missing")
+        by      <- lastAudit("workflow.participants-resolved")
+      yield assertTrue(
+        assigned.candidates.contains(colleague.value),
+        refused._1 == Status.Forbidden,
+        error(refused._2).exists(_.code == "segregation_of_duties"),
+        moved.status == "Open",
+        others.nonEmpty,
+        moved.candidates == others,
+        same == again,
+        waiting.status == "Waiting",
+        waiting.candidates.isEmpty,
+        missing.exists(p => p.contains(assigned.id)),
+        by.map(_._1).contains(ApprovalWorkflow.DeadlineActor.value)
       )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

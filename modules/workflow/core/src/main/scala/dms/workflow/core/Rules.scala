@@ -10,32 +10,63 @@ import java.util.UUID
 /** Pure rules of the approval workflow (business concept 2.4, 6.1; DMS-40 to DMS-42). */
 object Rules:
 
-  /** Participants of a lane: the holders of its role, without the author while the four-eyes rule is on (the
-    * next holders take the task). Empty means nobody is eligible and the task waits.
-    */
-  def eligible(holders: List[UserId], author: UserId, fourEyes: Boolean): List[UserId] =
-    holders.distinct.filterNot(u => fourEyes && u == author).sortBy(_.value)
+  /** The refusal of the four-eyes rule. */
+  val OwnVersion = "four-eyes rule: whoever created or changed a version cannot review or approve it"
 
-  /** Who confirms an editorial version (DMS-46): its owner, unless the owner is the author or there is none;
-    * then nobody, and the holders of [[WorkflowDefinition.OwnerDeputyRole]] take the task. The author never
-    * confirms their own version, whatever the four-eyes setting (the approval is segregated in any case).
+  /** Whether a step leaves out the version's authors (whoever started or changed it, ADR 0075): review steps
+    * while the four-eyes rule is on, approval steps always. Policy, lifecycle and database refuse the
+    * approval of an author whatever the setting, so a task for them could never be completed.
     */
-  def ownerConfirmation(owner: Option[UserId], author: UserId): List[UserId] =
-    owner.filterNot(_ == author).toList
+  def excludesAuthors(fourEyes: Boolean, kind: StepKind): Boolean = fourEyes || kind == StepKind.Approval
 
-  /** Where a resubmitted version continues and whether earlier votes became invalid: after a content change
-    * at the reset step of the definition (DMS-41), otherwise at the step that returned it.
+  /** Participants of a lane: the holders of its role, without the version's authors where the step excludes
+    * them, see [[excludesAuthors]] (the next holders take the task). Empty means nobody is eligible and the
+    * task waits.
+    */
+  def eligible(holders: List[UserId], authors: Set[UserId], excludeAuthors: Boolean): List[UserId] =
+    holders.distinct.filterNot(u => excludeAuthors && authors.contains(u)).sortBy(_.value)
+
+  /** Who confirms an editorial version (DMS-46): its owner, unless the owner started or changed it or there
+    * is none; then nobody, and the holders of [[WorkflowDefinition.OwnerDeputyRole]] take the task. An author
+    * never confirms their own version, whatever the four-eyes setting (the approval is segregated in any
+    * case).
+    */
+  def ownerConfirmation(owner: Option[UserId], authors: Set[UserId]): List[UserId] =
+    owner.filterNot(authors.contains).toList
+
+  /** Where a resubmitted version continues and whether earlier votes became invalid: after a content change,
+    * or if someone with a standing vote has changed the version since (ADR 0075), at the reset step of the
+    * definition (DMS-41), otherwise at the step that returned it.
     */
   def resume(
       definition: WorkflowDefinition,
       returnedStep: Option[String],
       votedChecksum: String,
-      currentChecksum: String
+      currentChecksum: String,
+      voterEdited: Boolean = false
   ): Resume =
-    if votedChecksum != currentChecksum then Resume(definition.resetStep, contentChanged = true)
+    val contentChanged = votedChecksum != currentChecksum
+    if contentChanged || voterEdited then Resume(definition.resetStep, contentChanged, voterEdited)
     else Resume(returnedStep.filter(definition.step(_).isDefined).getOrElse(definition.firstStep), false)
 
-  final case class Resume(step: String, contentChanged: Boolean)
+  final case class Resume(step: String, contentChanged: Boolean, voterEdited: Boolean = false):
+    def reset: Boolean = contentChanged || voterEdited
+
+  /** Whether an approving vote that still stands was cast by one of the version's authors, or for one, where
+    * the step excludes them: someone who voted and changed the version afterwards, e.g. after a return,
+    * without touching what the checksum covers.
+    */
+  def voterEdited(
+      votes: List[Vote],
+      authors: Set[UserId],
+      fourEyes: Boolean,
+      definition: WorkflowDefinition
+  ): Boolean =
+    votes.exists(v =>
+      v.decision.approves && v.invalidatedAt.isEmpty &&
+        (authors.contains(v.voter) || v.actingFor.exists(authors.contains)) &&
+        definition.step(v.step).forall(s => excludesAuthors(fourEyes, s.kind))
+    )
 
   /** Step-up for approval votes: the sign-in must not be older than `window`. A token without `auth_time`
     * fails closed.
@@ -121,14 +152,14 @@ object Rules:
   /** Deputies who may complete an open task now (DMS-49): deputies of its candidates whose deputyship is
     * active and covers the lane's role and the document's class, and who still hold that role themselves
     * (`deputyRoles`: their active roles, any scope; same authority at use time). Neither the deputy nor the
-    * principal may be the author, whatever the four-eyes setting: nobody approves their own version, and
-    * nobody stands in for the author. Candidates act for themselves. Lanes of the document owner are not
-    * forwarded (owner deputies are DMS-88). One entry per deputy.
+    * principal may be one of the version's authors, whatever the four-eyes setting: nobody approves their own
+    * version, and nobody stands in for an author. Candidates act for themselves. Lanes of the document owner
+    * are not forwarded (owner deputies are DMS-88). One entry per deputy.
     */
   def taskDeputies(
       role: String,
       candidates: List[UserId],
-      author: UserId,
+      authors: Set[UserId],
       classPath: List[String],
       deputyships: List[Deputyship],
       deputyRoles: Map[UserId, Set[String]],
@@ -140,8 +171,8 @@ object Rules:
         .filter(d =>
           d.isActiveAt(now) &&
             candidates.contains(d.principal) &&
-            d.principal != author &&
-            d.deputy != author &&
+            !authors.contains(d.principal) &&
+            !authors.contains(d.deputy) &&
             !candidates.contains(d.deputy) &&
             d.roles.contains(role) &&
             d.documentClass.forall(classPath.contains) &&
@@ -213,18 +244,18 @@ object Rules:
 
   /** Whether `deputy` may still act for an approval they gave as deputy (DMS-145, ADR 0070): the rules of
     * [[taskDeputies]] at the moment they act. The deputyship is active and covers the lane's role and the
-    * document's class, and the deputy still holds that role. Neither of them is the author.
+    * document's class, and the deputy still holds that role. Neither of them is one of the version's authors.
     */
   def standsIn(
       approval: DeputyApproval,
       deputy: UserId,
-      author: UserId,
+      authors: Set[UserId],
       classPath: List[String],
       deputyships: List[Deputyship],
       deputyRoles: Map[UserId, Set[String]],
       now: Instant
   ): Boolean =
-    approval.principal != author && deputy != author &&
+    !authors.contains(approval.principal) && !authors.contains(deputy) &&
       deputiesInRole(approval.principal, approval.role, classPath, deputyships, deputyRoles, now)
         .exists(_.deputy == deputy)
 

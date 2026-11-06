@@ -71,6 +71,8 @@ export const tasks: Translation<typeof en.tasks> = {
       'Eine Freigabe erfordert eine aktuelle Anmeldung. Liegt sie zu lange zurück, wird eine erneute Anmeldung verlangt; danach lässt sich das Votum wiederholen.',
     stepUpNeeded:
       'Das Votum wurde nicht erfasst: Eine Freigabe erfordert eine erneute Anmeldung. Nach der Anmeldung lässt sich das Votum wiederholen.',
+    fourEyes:
+      'Diese Version wurde von Ihnen erstellt oder geändert. Vier-Augen-Prinzip: Eine andere Person muss sie prüfen und freigeben.',
     signInAgain: 'Erneut anmelden',
     casting: 'Votum wird abgegeben …',
     cast: 'Votum abgeben',
