@@ -116,6 +116,11 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
                            ${"author"}, ${"author"})""".update.run()
     id
 
+  private def recordEditor(version: UUID, user: String)(using DbTx): Unit =
+    val _ = sql"""insert into dms.document_version_editor (tenant_id, version_id, user_id)
+                  values (dms.current_tenant(), $version, $user)
+                  on conflict (version_id, user_id) do nothing""".update.run()
+
   private def setStatus(version: UUID, status: String)(using DbTx): Int =
     sql"update dms.document_version set status = $status where id = $version".update.run()
 
@@ -531,6 +536,108 @@ object DocumentVersionSchemaSpec extends ZIOSpecDefault:
         // Referencing another tenant's document fails: the composite foreign key includes the tenant.
         crossInsert <- asApp(other.tenant)(insertVersion(other, doc, 2)).either
       yield assertTrue(own == 1L, foreign == 0L, docs == 0L, crossInsert.isLeft)
+    },
+    test("nobody who changed a version approves it, for every writer (DMS-159)") {
+      for
+        f   <- fixture
+        doc <- asApp(f.tenant)(insertDocument(f))
+        v   <- asApp(f.tenant) {
+          val v = insertVersion(f, doc, 1)
+          recordEditor(v, "editor")
+          recordEditor(v, "editor")
+          val _ = setStatus(v, "InReview") + setStatus(v, "InApproval")
+          val _ = sql"""update dms.document_version set rendition_key = ${"k"}, rendition_sha256 = $checksum
+                        where id = $v""".update.run()
+          v
+        }
+        byEditor <- asApp(f.tenant)(
+          sql"""update dms.document_version
+                set status = 'Approved', metadata_snapshot = $snapshot, released_by = ${"editor"}, released_at = now()
+                where id = $v""".update.run()
+        ).either
+        byOther <- asApp(f.tenant)(
+          sql"""update dms.document_version
+                set status = 'Approved', metadata_snapshot = $snapshot, released_by = ${"approver"}, released_at = now()
+                where id = $v""".update.run()
+        )
+      yield assertTrue(isGuardViolation(byEditor), byOther == 1)
+    },
+    test("the approval record refuses whoever changed the version, also as the one stood in for (DMS-159)") {
+      def approval(version: UUID, caseId: UUID, by: String, actingFor: Option[String])(using DbTx) =
+        sql"""insert into dms.workflow_approval
+                (id, tenant_id, case_id, version_id, version_label, content_sha256, author_id, approved_by,
+                 authenticated_at, acting_for)
+              values (${UUID.randomUUID()}, dms.current_tenant(), $caseId, $version, ${"1.0"}, $checksum,
+                      ${"author"}, $by, now(), $actingFor)""".update.run()
+      for
+        f       <- fixture
+        created <- asApp(f.tenant) {
+          val doc = insertDocument(f)
+          val v   = insertVersion(f, doc, 1)
+          recordEditor(v, "editor")
+          val caseId = UUID.randomUUID()
+          val _      =
+            sql"""insert into dms.workflow_case
+                    (id, tenant_id, document_id, version_id, class_key, definition, four_eyes,
+                     process_definition_id, status, content_sha256, author_id, started_by)
+                  values ($caseId, dms.current_tenant(), $doc, $v, ${"contract"}, ${Jsonb(
+                "{}"
+              )}, true, ${"p"},
+                          ${"Returned"}, $checksum, ${"author"}, ${"author"})""".update.run()
+          (v, caseId)
+        }
+        (v, caseId) = created
+        byEditor  <- asApp(f.tenant)(approval(v, caseId, "editor", None)).either
+        forEditor <- asApp(f.tenant)(approval(v, caseId, "deputy", Some("editor"))).either
+        byOther   <- asApp(f.tenant)(approval(v, caseId, "approver", None))
+      yield assertTrue(
+        isGuardViolation(byEditor),
+        isGuardViolation(forEditor),
+        byOther == 1
+      )
+    },
+    test("the editors of a version are kept for good and stay inside the tenant (DMS-159)") {
+      for
+        f     <- fixture
+        other <- fixture
+        doc   <- asApp(f.tenant)(insertDocument(f))
+        v     <- asApp(f.tenant) {
+          val v = insertVersion(f, doc, 1)
+          recordEditor(v, "editor")
+          v
+        }
+        update <- asApp(f.tenant)(
+          sql"update dms.document_version_editor set user_id = 'x' where version_id = $v".update.run()
+        ).either
+        delete <- asApp(f.tenant)(
+          sql"delete from dms.document_version_editor where version_id = $v".update.run()
+        ).either
+        ownerDelete <- ZIO.serviceWithZIO[Env](
+          _.owner
+            .transactSystem(
+              Db.sql(sql"delete from dms.document_version_editor where version_id = $v".update.run())
+            )
+            .either
+        )
+        seen <- asApp(f.tenant)(
+          sql"select user_id from dms.document_version_editor where version_id = $v"
+            .query[String]
+            .run()
+            .toList
+        )
+        foreign <- asApp(other.tenant)(
+          sql"select user_id from dms.document_version_editor where version_id = $v"
+            .query[String]
+            .run()
+            .toList
+        )
+      yield assertTrue(
+        update.left.exists(_.isInstanceOf[DbError.PermissionDenied]),
+        delete.left.exists(_.isInstanceOf[DbError.PermissionDenied]),
+        isGuardViolation(ownerDelete),
+        seen == List("editor"),
+        foreign.isEmpty
+      )
     },
     test("working states are append-only") {
       for

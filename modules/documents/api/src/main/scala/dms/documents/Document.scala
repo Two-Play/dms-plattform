@@ -129,6 +129,9 @@ final case class VersionWithdrawal(at: Instant, by: UserId, reason: String, acti
   *   draft, `None` for structured documents and for a file document before the first upload
   * @param withdrawal
   *   set if the version was approved but withdrawn before it became valid (DMS-143); it was never in force
+  * @param editors
+  *   everyone who changed this version while it was a draft, in any round (DMS-159, ADR 0075): recorded once
+  *   per person and never compacted. See [[authors]].
   */
 final case class DocumentVersion(
     id: UUID,
@@ -158,9 +161,13 @@ final case class DocumentVersion(
     publishedAt: Option[Instant] = None,
     attachments: List[VersionAttachment] = Nil,
     file: Option[VersionFile] = None,
-    withdrawal: Option[VersionWithdrawal] = None
+    withdrawal: Option[VersionWithdrawal] = None,
+    editors: Set[UserId] = Set.empty
 ):
   def label: String = Versioning.label(number, status, workingState)
+
+  /** Who counts as an author for the four-eyes rule: whoever started this version and whoever changed it. */
+  def authors: Set[UserId] = editors + createdBy
 
   /** True if a locked template section has an active deviation request, whether its text changed yet or not:
     * the workflow then adds the additional review step of the document class (business concept US-01.1, ADR

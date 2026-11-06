@@ -417,6 +417,11 @@ private[core] object WorkflowStore:
           where case_id = $caseId and invalidated_at is null and content_sha256 <> $currentChecksum""".update
       .run()
 
+  /** Invalidates every vote that still stands, whatever content it was cast on. */
+  def invalidateAllVotes(caseId: UUID, reason: String)(using DbTx): Int =
+    sql"""update dms.workflow_vote set invalidated_at = now(), invalidation_reason = $reason
+          where case_id = $caseId and invalidated_at is null""".update.run()
+
   private type ApprovalRow =
     (UUID, UUID, UUID, String, String, String, OffsetDateTime, OffsetDateTime, Option[String])
 

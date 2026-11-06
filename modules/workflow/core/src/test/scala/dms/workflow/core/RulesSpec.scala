@@ -6,6 +6,7 @@ import dms.workflow.*
 import zio.test.*
 
 import java.time.{Duration, Instant}
+import java.util.UUID
 
 /** Pure rules: participant resolution with the four-eyes rule, resuming after a return, votes and step-up. */
 object RulesSpec extends ZIOSpecDefault:
@@ -36,13 +37,31 @@ object RulesSpec extends ZIOSpecDefault:
   def spec = suite("Rules")(
     suite("participants and the four-eyes rule")(
       test("the author is not a participant; the next holders take the task") {
-        assertTrue(Rules.eligible(List(clara, anna, ben), author = anna, fourEyes = true) == List(ben, clara))
+        assertTrue(
+          Rules.eligible(List(clara, anna, ben), Set(anna), excludeAuthors = true) == List(ben, clara)
+        )
       },
       test("if the author is the only holder, nobody is eligible and the task waits") {
-        assertTrue(Rules.eligible(List(anna), author = anna, fourEyes = true).isEmpty)
+        assertTrue(Rules.eligible(List(anna), Set(anna), excludeAuthors = true).isEmpty)
       },
       test("without the four-eyes rule the author may take part") {
-        assertTrue(Rules.eligible(List(ben, anna, anna), author = anna, fourEyes = false) == List(anna, ben))
+        assertTrue(
+          Rules.eligible(List(ben, anna, anna), Set(anna), excludeAuthors = false) == List(anna, ben)
+        )
+      },
+      test("whoever changed the version counts like the author; with only them the task waits (DMS-159)") {
+        assertTrue(
+          Rules.eligible(List(clara, anna, ben), Set(anna, ben), excludeAuthors = true) == List(clara),
+          Rules.eligible(List(anna, ben), Set(anna, ben), excludeAuthors = true).isEmpty
+        )
+      },
+      test("reviews follow the four-eyes setting, approvals leave the authors out whatever it says") {
+        assertTrue(
+          Rules.excludesAuthors(fourEyes = true, StepKind.Review),
+          !Rules.excludesAuthors(fourEyes = false, StepKind.Review),
+          Rules.excludesAuthors(fourEyes = true, StepKind.Approval),
+          Rules.excludesAuthors(fourEyes = false, StepKind.Approval)
+        )
       }
     ),
     suite("resuming a returned version")(
@@ -54,6 +73,50 @@ object RulesSpec extends ZIOSpecDefault:
       test("changed content resets to the configured step") {
         assertTrue(
           Rules.resume(definition, Some("approval"), a, b) == Rules.Resume("review", contentChanged = true)
+        )
+      },
+      test("a voter who changed the version since resets it, even with the same content (DMS-159)") {
+        assertTrue(
+          Rules.resume(definition, Some("approval"), a, a, voterEdited = true) ==
+            Rules.Resume("review", contentChanged = false, voterEdited = true),
+          Rules.resume(definition, Some("approval"), a, a, voterEdited = true).reset,
+          !Rules.resume(definition, Some("approval"), a, a).reset
+        )
+      },
+      test("only approving votes that stand count against someone who changed the version (DMS-159)") {
+        def voted(
+            voter: UserId,
+            decision: VoteDecision = VoteDecision.Approve,
+            step: String = "review",
+            invalidated: Option[Instant] = None,
+            actingFor: Option[UserId] = None
+        ) = Vote(
+          UUID.randomUUID(),
+          UUID.randomUUID(),
+          "task",
+          UUID.randomUUID(),
+          1,
+          step,
+          "lane",
+          voter,
+          decision,
+          None,
+          a,
+          None,
+          now,
+          invalidated,
+          actingFor
+        )
+        def edited(votes: Vote*)(fourEyes: Boolean = true) =
+          Rules.voterEdited(votes.toList, Set(anna), fourEyes, definition)
+        assertTrue(
+          edited(voted(anna))(),
+          edited(voted(ben, actingFor = Some(anna)))(),
+          edited(voted(anna, step = "approval"))(fourEyes = false),
+          !edited(voted(ben))(),
+          !edited(voted(anna, VoteDecision.RequestChanges))(),
+          !edited(voted(anna, invalidated = Some(now)))(),
+          !edited(voted(anna))(fourEyes = false)
         )
       },
       test("changed content resets to the first step by default") {
@@ -122,9 +185,11 @@ object RulesSpec extends ZIOSpecDefault:
         val owner  = UserId("owner-1")
         val author = UserId("author-1")
         assertTrue(
-          Rules.ownerConfirmation(Some(owner), author) == List(owner),
-          Rules.ownerConfirmation(Some(author), author).isEmpty,
-          Rules.ownerConfirmation(None, author).isEmpty
+          Rules.ownerConfirmation(Some(owner), Set(author)) == List(owner),
+          Rules.ownerConfirmation(Some(author), Set(author)).isEmpty,
+          Rules.ownerConfirmation(None, Set(author)).isEmpty,
+          // An owner who changed the version does not confirm it either (DMS-159).
+          Rules.ownerConfirmation(Some(owner), Set(author, owner)).isEmpty
         )
       },
       test("task keys round-trip") {

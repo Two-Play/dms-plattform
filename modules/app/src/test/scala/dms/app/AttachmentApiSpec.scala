@@ -635,6 +635,34 @@ object AttachmentApiSpec extends ZIOSpecDefault:
         files == 1L
       )
     },
+    test("adding, renaming and removing an attachment make the actor an editor of the version (DMS-159)") {
+      def editors(version: UUID) = ownerQuery(
+        sql"select user_id from dms.document_version_editor where version_id = $version"
+          .query[String]
+          .run()
+          .toSet
+      )
+      for
+        added   <- draft
+        _       <- upload(owner, added.id, "a.pdf", pdf).map(as[AttachmentView])
+        renamed <- draft
+        first   <- upload(author, renamed.id, "a.pdf", pdf).map(as[AttachmentView])
+        _       <- call(
+          owner,
+          "PATCH",
+          s"/api/v1/documents/${renamed.id}/attachments/${first.id}",
+          Some("""{"name":"Annex 1.pdf"}""")
+        )
+        removed <- draft
+        second  <- upload(author, removed.id, "a.pdf", pdf).map(as[AttachmentView])
+        before  <- editors(removed.current.id)
+        _       <- call(owner, "DELETE", s"/api/v1/documents/${removed.id}/attachments/${second.id}")
+        all     <- ZIO.foreach(List(added, renamed, removed))(d => editors(d.current.id))
+      yield assertTrue(
+        before == Set(author.value),
+        all.forall(_ == Set(author.value, owner.value))
+      )
+    },
     test("the body limit lets only attachment uploads stream large bodies") {
       val streamed = Body.fromStreamChunked(ZStream.fromIterable(Array.fill(10)('x'.toByte)))
       val handler  = Main.limitStreamedBodies(zio.http.Handler.ok)

@@ -16,6 +16,9 @@ enum WorkflowError:
   /** The caller may not act on this task, e.g. not a candidate or the author under the four-eyes rule. */
   case Forbidden(message: String)
 
+  /** The four-eyes rule refuses the caller: they created or changed the version (DMS-159, ADR 0075). */
+  case FourEyes(message: String)
+
   /** An approval vote needs a sign-in within the configured window (step-up, DMS-41). */
   case ReauthenticationRequired
 
@@ -33,6 +36,7 @@ enum WorkflowError:
     case NotFound(m)              => m
     case Invalid(p)               => p.mkString("; ")
     case Forbidden(m)             => m
+    case FourEyes(m)              => m
     case ReauthenticationRequired => "sign in again to confirm this approval"
     case Conflict(m)              => m
     case Document(_, m)           => m
@@ -56,6 +60,8 @@ object WorkflowError:
   *   `None` for a version everyone with a role in scope may see; for a confidential version (DMS-101, ADR
   *   0032) the access groups whose members may see it besides author and owner. Only those people take part
   *   in its workflow, see [[ParticipantDirectory.cleared]].
+  * @param editors
+  *   everyone who changed the version while it was a draft, in any round (DMS-159, ADR 0075)
   */
 final case class ReviewSubject(
     documentId: DocumentId,
@@ -68,8 +74,11 @@ final case class ReviewSubject(
     owner: Option[UserId],
     contentSha256: String,
     changeKind: ChangeKind = ChangeKind.Major,
-    accessGroups: Option[Set[String]] = None
-)
+    accessGroups: Option[Set[String]] = None,
+    editors: Set[UserId] = Set.empty
+):
+  /** Who counts as an author for the four-eyes rule: whoever started this version and whoever changed it. */
+  def authors: Set[UserId] = editors + author
 
 /** Port to the documents module, implemented by the application (module rule: `workflow-core` depends on
   * `documents-api` only). Runs inside the caller's transaction.
@@ -80,6 +89,10 @@ trait DocumentGateway:
   /** [[subject]] for several versions at once, by version id, for lists (DMS-138); unknown ones are left out.
     */
   def subjects(versions: List[(DocumentId, UUID)]): IO[WorkflowError, Map[UUID, ReviewSubject]]
+
+  /** The people who changed the given versions, by version id; cheap enough for a check over all open tasks.
+    */
+  def editors(versions: List[UUID]): IO[WorkflowError, Map[UUID, Set[UserId]]]
 
   /** Applies a lifecycle event to the version as `actor` (`ReviewPassed`, `Approve`, `RequestChanges`,
     * `Reject`).

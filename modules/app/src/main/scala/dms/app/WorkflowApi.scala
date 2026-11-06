@@ -347,6 +347,7 @@ object WorkflowApi:
                 .fromOption(details.versions.find(_.id == task.versionId))
                 .orElseFail(WorkflowError.NotFound(s"document version ${task.versionId} does not exist"))
               action = if task.kind == StepKind.Approval then Action.Approve else Action.Review
+              _ <- ctx.workflow.refuseOwnVersion(id, p.userId)
               _ <- ctx.checkFor(
                 List(task),
                 action,
@@ -739,6 +740,7 @@ object WorkflowApi:
     case WorkflowError.NotFound(m)    => (StatusCode.NotFound, ApiError("not_found", m))
     case e @ WorkflowError.Invalid(_) => (StatusCode.UnprocessableEntity, ApiError("invalid", e.describe))
     case WorkflowError.Forbidden(m)   => (StatusCode.Forbidden, ApiError("forbidden", m))
+    case WorkflowError.FourEyes(m)    => (StatusCode.Forbidden, ApiError("segregation_of_duties", m))
     case WorkflowError.ReauthenticationRequired =>
       SecuredApi.toResponse(dms.identity.AuthError.ReauthenticationRequired)
     case WorkflowError.Conflict(m)       => (StatusCode.Conflict, ApiError("conflict", m))

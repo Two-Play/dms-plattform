@@ -285,8 +285,15 @@ private[core] object DocumentStore:
       case versions =>
         val attachments = AttachmentStore.ofDocuments(ids)
         val files       = VersionFileStore.ofDocuments(ids)
+        val editors     = editorsOf(versions.map(_.id))
         versions
-          .map(v => v.copy(attachments = attachments.getOrElse(v.id, Nil), file = files.get(v.id)))
+          .map(v =>
+            v.copy(
+              attachments = attachments.getOrElse(v.id, Nil),
+              file = files.get(v.id),
+              editors = editors.getOrElse(v.id, Set.empty)
+            )
+          )
           .groupBy(_.documentId)
 
   /** A version, locked for a change. */
@@ -302,7 +309,11 @@ private[core] object DocumentStore:
       .headOption
       .map(toVersion(_, codec))
       .map(v =>
-        v.copy(attachments = AttachmentStore.ofVersion(v.id), file = VersionFileStore.ofVersion(v.id))
+        v.copy(
+          attachments = AttachmentStore.ofVersion(v.id),
+          file = VersionFileStore.ofVersion(v.id),
+          editors = editorsOf(List(v.id)).getOrElse(v.id, Set.empty)
+        )
       )
 
   /** The open version of a document, locked for a change. */
@@ -319,7 +330,11 @@ private[core] object DocumentStore:
       .headOption
       .map(toVersion(_, codec))
       .map(v =>
-        v.copy(attachments = AttachmentStore.ofVersion(v.id), file = VersionFileStore.ofVersion(v.id))
+        v.copy(
+          attachments = AttachmentStore.ofVersion(v.id),
+          file = VersionFileStore.ofVersion(v.id),
+          editors = editorsOf(List(v.id)).getOrElse(v.id, Set.empty)
+        )
       )
 
   def insertVersion(v: DocumentVersion, codec: ContentCodec)(using DbTx): Unit =
@@ -378,11 +393,35 @@ private[core] object DocumentStore:
           set withdrawn_by = ${by.value}, withdrawn_at = ${OffsetDateTime.ofInstant(at, ZoneOffset.UTC)}
           where id = $id and withdrawn_at is null""".update.run() == 1
 
+  /** Saves a working state and records who saved it as an editor of the version. */
   def insertWorkingState(v: DocumentVersion, savedBy: UserId, codec: ContentCodec)(using DbTx): Unit =
     val _ = sql"""insert into dms.document_working_state
                     (tenant_id, version_id, working_state, content, field_values, saved_by)
                   values (dms.current_tenant(), ${v.id}, ${v.workingState}, ${Jsonb(codec.encode(v.content))},
                           ${Jsonb(v.values.toJson)}, ${savedBy.value})""".update.run()
+    recordEditor(v.id, savedBy)
+
+  /** Records that `user` changed the version (ADR 0075); every change of a draft goes through here, also
+    * those that are no working state. The four-eyes rule reads this list, never the working states:
+    * compaction removes those.
+    */
+  def recordEditor(versionId: UUID, user: UserId)(using DbTx): Unit =
+    val _ = sql"""insert into dms.document_version_editor (tenant_id, version_id, user_id)
+                  values (dms.current_tenant(), $versionId, ${user.value})
+                  on conflict (version_id, user_id) do nothing""".update.run()
+
+  /** The people who changed the given versions, by version id; versions nobody changed are left out. */
+  def editorsOf(versions: List[UUID])(using DbTx): Map[UUID, Set[UserId]] =
+    val array = versions.distinct.map(_.toString).toArray
+    sql"""select version_id, user_id from dms.document_version_editor
+          where version_id = any(cast($array as uuid[]))"""
+      .query[(UUID, String)]
+      .run()
+      .toList
+      .groupMap(_._1)(r => UserId(r._2))
+      .view
+      .mapValues(_.toSet)
+      .toMap
 
   /** The highest working state of earlier (withdrawn) versions with the same number, for continuous counting.
     */

@@ -204,3 +204,8 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | – | DMS-160 | Bug | Backlog (MVP) | – | Security review: SSRF in the conversion worker, memory exhaustion through Office files, ReDoS |
 | – | DMS-161 | Task | Backlog (MVP) | – | DMS-118: time limit in the worker, further endpoints, measure the defaults |
 | – | DMS-162 | Task | Backlog (MVP) | – | DMS-158: lowering confidentiality with extra approval, past owner changes, unit change in a draft |
+| – | DMS-163 | Task | Backlog (MVP) | – | DMS-159: retroactive report, way out for cases in rendering, meaning of the switch, hint before editing |
+| – | DMS-164 | Task | Backlog (MVP) | – | DMS-160: stored formats and originals, formats in the browser, large workbooks, gate fairness |
+| – | DMS-165 | Bug | Backlog (MVP) | – | UX review: numbers parsed wrongly, drafts without protection, testing unsaved templates |
+| – | DMS-166 | Task | Backlog (MVP) | – | UX review: error texts, error boundary, dialogs, focus, contrast |
+| – | DMS-167 | Task | Backlog (MVP) | – | UX review: document page order, 375 px, status tones, paged lists, consistency |

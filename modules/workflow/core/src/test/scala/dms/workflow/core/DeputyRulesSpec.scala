@@ -62,11 +62,11 @@ object DeputyRulesSpec extends ZIOSpecDefault:
       deputyships: List[Deputyship],
       role: String = "Approver",
       candidates: List[UserId] = List(anna, dora),
-      author: UserId = clara,
+      authors: Set[UserId] = Set(clara),
       classPath: List[String] = List("contract", "service-contract"),
       deputyRoles: Map[UserId, Set[String]] = Map(ben -> Set("Approver"), dora -> Set("Approver")),
       at: Instant = now
-  ) = Rules.taskDeputies(role, candidates, author, classPath, deputyships, deputyRoles, at)
+  ) = Rules.taskDeputies(role, candidates, authors, classPath, deputyships, deputyRoles, at)
 
   private val version = UUID.randomUUID()
 
@@ -146,10 +146,10 @@ object DeputyRulesSpec extends ZIOSpecDefault:
       deputyships: List[Deputyship] = List(deputyship()),
       approval: DeputyApproval = DeputyApproval(anna, "Approver"),
       deputy: UserId = ben,
-      author: UserId = clara,
+      authors: Set[UserId] = Set(clara),
       held: Set[String] = Set("Approver"),
       at: Instant = now
-  ) = Rules.standsIn(approval, deputy, author, List("contract"), deputyships, Map(deputy -> held), at)
+  ) = Rules.standsIn(approval, deputy, authors, List("contract"), deputyships, Map(deputy -> held), at)
 
   def spec = suite("Deputy rules")(
     suite("same authority")(
@@ -242,8 +242,11 @@ object DeputyRulesSpec extends ZIOSpecDefault:
       test("four-eyes: a deputy never acts on their own version, and nobody stands in for the author") {
         val d = deputyship()
         assertTrue(
-          deputies(List(d), author = ben).isEmpty,
-          deputies(List(d), author = anna).isEmpty,
+          deputies(List(d), authors = Set(ben)).isEmpty,
+          deputies(List(d), authors = Set(anna)).isEmpty,
+          // Whoever changed the version counts like the author (DMS-159).
+          deputies(List(d), authors = Set(clara, ben)).isEmpty,
+          deputies(List(d), authors = Set(clara, anna)).isEmpty,
           // a candidate acts for themselves, not as deputy
           deputies(List(d), candidates = List(anna, ben)).isEmpty
         )
@@ -308,8 +311,10 @@ object DeputyRulesSpec extends ZIOSpecDefault:
           !stands(List(deputyship(cls = Some("policy")))),
           !stands(held = Set("Reader")),
           // Nobody stands in for an author, and no author for anybody.
-          !stands(author = anna),
-          !stands(author = ben)
+          !stands(authors = Set(anna)),
+          !stands(authors = Set(ben)),
+          !stands(authors = Set(clara, anna)),
+          !stands(authors = Set(clara, ben))
         )
       }
     ),

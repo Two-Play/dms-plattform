@@ -45,6 +45,9 @@ final class WorkflowDocuments(service: DocumentService) extends DocumentGateway:
           }.toMap
       )
 
+  def editors(versions: List[UUID]): IO[WorkflowError, Map[UUID, Set[UserId]]] =
+    service.editors(versions).mapError(WorkflowDocuments.toWorkflowError)
+
   def advance(
       documentId: DocumentId,
       versionId: UUID,
@@ -72,7 +75,8 @@ object WorkflowDocuments:
       details.document.ownerId,
       contentSha256(v),
       v.changeKind,
-      Option.when(CoreFields.isRestricted(v.metadata))(DocumentResource.allowedGroups(v.metadata))
+      Option.when(CoreFields.isRestricted(v.metadata))(DocumentResource.allowedGroups(v.metadata)),
+      v.editors
     )
 
   /** SHA-256 (lowercase hex) over the canonical JSON of the content and the field values with their origin

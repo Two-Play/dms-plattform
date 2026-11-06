@@ -132,8 +132,8 @@ final case class Resource(
     ownerMayApprove: Boolean = false,
     /** Set for configuration resources instead of documents. */
     configurationArea: Option[ConfigurationArea] = None,
-    /** Users who changed the resource besides its author, e.g. editors of a template version (segregation of
-      * duties).
+    /** Users who changed the resource besides its author, e.g. editors of a template version or of a document
+      * version (segregation of duties).
       */
     contributors: Set[UserId] = Set.empty,
     /** Whether the version was withdrawn before it became valid (ADR 0059): it was never in force. */

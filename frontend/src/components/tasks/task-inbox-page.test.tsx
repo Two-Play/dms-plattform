@@ -342,6 +342,23 @@ describe('task inbox', () => {
     })
   })
 
+  it('says why someone who changed the version cannot vote (DMS-159)', async () => {
+    state.voteReplies.push(() =>
+      failed(403, { code: 'segregation_of_duties', message: 'four-eyes rule' }),
+    )
+    const { user } = renderAt('/tasks')
+    const [approval] = await rows()
+
+    await user.click(within(must(approval)).getByRole('button', { name: 'Vote…' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByLabelText('Approve'))
+    await user.click(within(dialog).getByRole('button', { name: 'Cast vote' }))
+
+    expect(
+      await within(dialog).findByText(/You created or changed this version. Four-eyes principle/),
+    ).toBeInTheDocument()
+  })
+
   it('lets the user open a published version and then confirm reading it', async () => {
     state.tasks = []
     state.acks = [

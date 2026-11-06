@@ -32,6 +32,8 @@ final case class DeadlineScheduleConfig(checkInterval: Duration = 15.minutes)
   * its own transaction and recorded in `dms.workflow_task_deadline_notice`, so every notice is published
   * once; stages missed while no instance ran are not caught up. The notifications module delivers them.
   * Further [[DeadlineSource]]s, e.g. review tasks (DMS-141, ADR 0057), run in the same job by the same rules.
+  * The same job takes people who changed a version off its open tasks (ADR 0075,
+  * [[ApprovalWorkflow.excludeEditors]]), so that such a task does not stay with someone who can never act.
   */
 final class DeadlineJobs(
     db: Db,
@@ -74,8 +76,9 @@ final class DeadlineJobs(
     */
   def check(tenant: TenantId): IO[String, Int] =
     for
-      now     <- Clock.instant
-      results <- ZIO.foreach(workflowTasks :: others)(source =>
+      now      <- Clock.instant
+      excluded <- inTenant(tenant)(workflow.excludeEditors).either
+      results  <- ZIO.foreach(workflowTasks :: others)(source =>
         inTenant(tenant)(source.dueNotices(now)).foldZIO(
           e => ZIO.succeed(List(Left(e))),
           due =>
@@ -85,7 +88,7 @@ final class DeadlineJobs(
             )
         )
       )
-      failures = results.flatten.collect { case Left(e) => e }
+      failures = excluded.left.toSeq.toList ++ results.flatten.collect { case Left(e) => e }
       _ <- ZIO.unless(failures.isEmpty)(ZIO.fail(failures.mkString("; ")))
     yield results.flatten.count(_.contains(true))
 

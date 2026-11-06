@@ -54,7 +54,10 @@ final class AttachmentService(audit: AuditTrail):
         ZIO.fail(DocumentError.Conflict(s"the same file is already attached as \"${a.name}\""))
       )
       id = UUID.randomUUID()
-      _     <- sql(AttachmentStore.insertLink(id, draft.id, stored.id, name, actor, None))
+      _ <- sql {
+        AttachmentStore.insertLink(id, draft.id, stored.id, name, actor, None)
+        DocumentStore.recordEditor(draft.id, actor)
+      }
       added <- sql(AttachmentStore.ofVersion(draft.id))
         .map(_.find(_.id == id))
         .someOrFail(conflict("not added"))
@@ -90,7 +93,10 @@ final class AttachmentService(audit: AuditTrail):
         .orElseFail(notInDraft(draft, attachmentId))
       _ <- uniqueName(existing, name, Some(attachmentId))
       _ <- ZIO.when(current.name != name)(
-        sql(AttachmentStore.rename(attachmentId, name)) *>
+        sql {
+          val _ = AttachmentStore.rename(attachmentId, name)
+          DocumentStore.recordEditor(draft.id, actor)
+        } *>
           record(
             actor,
             "document.attachment-renamed",
@@ -119,7 +125,10 @@ final class AttachmentService(audit: AuditTrail):
       current  <- ZIO
         .fromOption(existing.find(_.id == attachmentId))
         .orElseFail(notInDraft(draft, attachmentId))
-      _ <- sql(AttachmentStore.remove(attachmentId))
+      _ <- sql {
+        val _ = AttachmentStore.remove(attachmentId)
+        DocumentStore.recordEditor(draft.id, actor)
+      }
       _ <- record(
         actor,
         "document.attachment-removed",
