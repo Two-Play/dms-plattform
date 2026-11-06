@@ -13,9 +13,10 @@ import java.security.MessageDigest
 import java.time.{Instant, LocalDate}
 import java.util.{HexFormat, Locale, UUID}
 
-// The payload of an evidence report (US-12.1, DMS-57, ADR 0034), format 1. Persons are identified by their user
-// ids: the platform has no source of display names yet. Field names are part of the format; change them only
-// together with a new format version.
+// The payload of an evidence report (US-12.1, DMS-57, ADR 0034), format 2 (ADR 0077). Persons are identified by
+// their user ids; `persons` records the display names they had when the report was created. Reports of format 1 have
+// no such field and still parse. Field names are part of the format; change them only together with a new format
+// version.
 
 final case class EvidenceDocument(
     id: UUID,
@@ -242,9 +243,21 @@ final case class EvidenceAuditEntry(
 
 final case class EvidenceViolation(chainSeq: Long, kind: String, detail: String) derives JsonCodec
 
-/** The audit chain of the tenant as verified for the report: the whole chain (links, hashes, timestamp
-  * anchors, newest write-once checkpoint), and whether the document's entries lie in its verified, anchored
-  * and checkpointed part.
+/** What a report took from the last full verification of the chain instead of reading it again (ADR 0077).
+  *
+  * @param untilSeq
+  *   the chain up to this position, which is a timestamp anchor
+  * @param hash
+  *   the hash of that entry, checked against the anchor and its token for this report
+  * @param verifiedAt
+  *   when the whole chain was last verified
+  */
+final case class EvidenceTrustedPrefix(untilSeq: Long, hash: String, verifiedAt: Instant) derives JsonCodec
+
+/** The audit chain of the tenant as verified for the report (links, hashes, timestamp anchors, newest
+  * write-once checkpoint), and whether the document's entries lie in its verified, anchored and checkpointed
+  * part. With `trustedPrefix` the report read only what follows it, and `entriesChecked` counts these
+  * entries.
   */
 final case class EvidenceChain(
     intact: Boolean,
@@ -260,7 +273,8 @@ final case class EvidenceChain(
     documentEntriesAnchored: Boolean,
     checkpointedUntilSeq: Option[Long],
     documentEntriesCheckpointed: Boolean,
-    checkpointProblem: Option[String]
+    checkpointProblem: Option[String],
+    trustedPrefix: Option[EvidenceTrustedPrefix] = None
 ) derives JsonCodec
 
 /** A check of one version: `Match`, `Mismatch` or `Unverified` (e.g. object storage unavailable). */
@@ -296,7 +310,9 @@ final case class EvidenceReportPayload(
     legalHolds: List[EvidenceLegalHold],
     auditTrail: List[EvidenceAuditEntry],
     integrity: EvidenceIntegrity,
-    notes: List[String]
+    notes: List[String],
+    /** Display names by user id, as the user directory knew them when the report was created (ADR 0077). */
+    persons: Option[Map[String, String]] = None
 ) derives JsonCodec
 
 /** Everything a report is built from, gathered in one transaction (except the integrity results). */
@@ -328,8 +344,8 @@ enum RenditionCheck:
 
 object EvidenceReport:
 
-  val Format: String = "dms.evidence-report/1"
-  val FormatNo: Int  = 1
+  val Format: String = "dms.evidence-report/2"
+  val FormatNo: Int  = 2
   val Intact: String = "Intact"
   val Violated       = "Violated"
   val Incomplete     = "Incomplete"
@@ -337,7 +353,16 @@ object EvidenceReport:
   val Mismatch       = "Mismatch"
   val Unverified     = "Unverified"
   val PersonNote     =
-    "Persons are identified by their user ids: the platform has no source of display names yet."
+    "Persons are identified by their user ids: the user directory knew none of their names when the report " +
+      "was created."
+  val NamedPersonNote =
+    "Persons are shown with the display name the user directory knew when the report was created; a person " +
+      "without one is shown with the user id. The user id stays the identifier: the table of persons maps " +
+      "the names to it."
+  val PrefixNote =
+    "The audit chain up to the stated timestamp anchor was verified as a whole by the regular integrity check " +
+      "and not read again for this report, except for the anchor itself and the document's own entries; what " +
+      "follows was verified entry by entry (ADR 0077)."
   val AudienceNote =
     "Acknowledgement audience: everyone who may read the version under the current role assignments and " +
       "access groups, evaluated when the report was created (ADR 0027)."
@@ -444,8 +469,37 @@ object EvidenceReport:
         )
       ),
       integrity = EvidenceIntegrity(status, createdAt, chainView, checks, findings),
-      notes = List(PersonNote, AudienceNote)
+      notes = List(PersonNote, AudienceNote) ++ Option.when(chainView.trustedPrefix.isDefined)(PrefixNote)
     )
+
+  /** Every person the report names, by user id. */
+  def personIds(r: EvidenceReportPayload): Set[String] =
+    val versions = r.versions.flatMap { v =>
+      val files = v.attachments.getOrElse(Nil) ++ v.original.toList
+      List(v.createdBy) ++ v.releasedBy ++ files.map(_.addedBy) ++
+        v.deviationRequests.flatMap(d => d.requestedBy :: d.withdrawnBy.toList) ++
+        v.workflow.flatMap(w =>
+          w.startedBy :: w.votes.flatMap(x => x.voter :: x.actingFor.toList) ++
+            w.approval.toList.flatMap(a => a.approvedBy :: a.actingFor.toList)
+        ) ++
+        v.acknowledgements.toList.flatMap(_.entries.map(_.userId)) ++ v.reviews.flatMap(_.decidedBy) ++
+        v.destruction.toList.flatMap(d => List(d.proposedBy, d.approvedBy)) ++
+        v.withdrawal.toList.flatMap(w => w.by :: w.actingFor.toList)
+    }
+    val holds = r.legalHolds.flatMap(h => h.createdBy :: h.releasedBy.toList ++ h.documentRemovedBy.toList)
+    val audit = r.auditTrail.flatMap(e => e.actorId :: e.onBehalfOf.toList)
+    (r.createdBy :: r.document.authorId :: r.document.ownerId.toList ++ versions ++ holds ++ audit).toSet
+
+  /** The report with the display names of its persons, which are part of what the checksum covers. Without
+    * any name, it says so.
+    */
+  def named(r: EvidenceReportPayload, names: Map[String, String]): EvidenceReportPayload =
+    if names.isEmpty then r
+    else
+      r.copy(
+        persons = Some(names),
+        notes = r.notes.map(n => if n == PersonNote then NamedPersonNote else n)
+      )
 
   private def version(v: DocumentVersion, facts: EvidenceFacts, at: Instant): EvidenceVersion =
     val cases = facts.cases.filter(_.workflowCase.versionId == v.id)
@@ -653,7 +707,8 @@ object EvidenceReport:
       documentEntriesAnchored = covers(c.anchor.map(_.anchoredUntilSeq)),
       checkpointedUntilSeq = c.checkpointedUntilSeq,
       documentEntriesCheckpointed = covers(c.checkpointedUntilSeq),
-      checkpointProblem = c.checkpointProblem
+      checkpointProblem = c.checkpointProblem,
+      trustedPrefix = r.trustedPrefix.map(p => EvidenceTrustedPrefix(p.untilSeq, p.hash, p.verifiedAt))
     )
 
   private def chainFindings(c: EvidenceChain): List[String] =

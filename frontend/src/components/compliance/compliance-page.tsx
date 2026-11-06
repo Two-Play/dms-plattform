@@ -1,15 +1,25 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearch } from '@tanstack/react-router'
-import { CheckCircle2, X } from 'lucide-react'
+import { CheckCircle2, Download, X } from 'lucide-react'
 import { useId, useState, type ReactNode, type SyntheticEvent } from 'react'
+import { isTooSoon, sendReminder } from '@/api/acknowledgement-overview'
 import {
   acknowledgementRatesQuery,
   complianceOverviewQuery,
+  deviationFiguresQuery,
+  downloadComplianceList,
+  downloadOpenAcknowledgements,
   fetchOpenAcknowledgements,
   formatRate,
+  noticeRefusal,
   overdueReviewsQuery,
+  sendComplianceNotice,
+  unownedDocumentsQuery,
   type AcknowledgementPurpose,
+  type ComplianceList,
+  type NoticeKind,
   type OpenAcknowledgements,
+  type OverdueReview,
   type VersionRate,
 } from '@/api/compliance'
 import { useApiClient } from '@/api/context'
@@ -32,7 +42,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { useUserLabel } from '@/api/users'
 import { UserName } from '@/components/shared/user-name'
 import { t } from '@/i18n'
-import { formatPlainDate as formatDate } from '@/i18n/format'
+import { formatDateTime, formatPlainDate as formatDate } from '@/i18n/format'
+import { toast } from '@/lib/toast'
 import { groupLabel, type CompliancePageSearch } from './compliance-params'
 
 const MAX_REASON = 500
@@ -139,7 +150,7 @@ function Overview() {
       <p className="text-sm text-muted-foreground">
         {t('compliance.asOf', { date: formatDate(o.today) })}
       </p>
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
         <KeyFigure
           label={t('compliance.overdueReviews')}
           value={String(o.overdueReviews)}
@@ -161,6 +172,18 @@ function Overview() {
           value={String(acks.open)}
           detail={t('compliance.openAcksDetail')}
           search={{ view: 'acknowledgements' }}
+        />
+        <KeyFigure
+          label={t('compliance.withoutOwner')}
+          value={String(o.documentsWithoutOwner)}
+          detail={t('compliance.withoutOwnerDetail')}
+          search={{ view: 'unowned' }}
+        />
+        <KeyFigure
+          label={t('compliance.deviations')}
+          value={String(o.deviations)}
+          detail={t('compliance.deviationsDetail', { count: o.versionsWithDeviations })}
+          search={{ view: 'deviations' }}
         />
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
@@ -277,13 +300,67 @@ function filterText(search: CompliancePageSearch): string | undefined {
   return parts.length === 0 ? undefined : parts.join(', ')
 }
 
-function ListHeader({ title, search }: { title: string; search: CompliancePageSearch }) {
+/** Downloads the list as the backend builds it, with the filters of the screen. */
+function ExportButton({
+  list,
+  label,
+  search,
+  disabled,
+}: {
+  list: ComplianceList
+  label: string
+  search: CompliancePageSearch
+  disabled: boolean
+}) {
+  const client = useApiClient()
+  const download = useMutation({
+    mutationFn: () =>
+      downloadComplianceList(client, list, {
+        unit: search.unit,
+        owner: search.owner,
+        document: search.document,
+      }),
+  })
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={disabled || download.isPending}
+        aria-label={t('compliance.exportLabel', { list: label })}
+        onClick={() => {
+          download.mutate()
+        }}
+      >
+        <Download className="size-4" aria-hidden />
+        {download.isPending ? t('compliance.exporting') : t('compliance.export')}
+      </Button>
+      {download.isError && <InlineError error={download.error} />}
+    </div>
+  )
+}
+
+function ListHeader({
+  title,
+  search,
+  list,
+  empty,
+}: {
+  title: string
+  search: CompliancePageSearch
+  list: ComplianceList
+  /** Whether there is nothing to export (yet). */
+  empty: boolean
+}) {
   const filter = filterText(search)
   return (
     <CardHeader>
-      <CardTitle>
-        <h2>{title}</h2>
-      </CardTitle>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <CardTitle>
+          <h2>{title}</h2>
+        </CardTitle>
+        <ExportButton list={list} label={title} search={search} disabled={empty} />
+      </div>
       {filter && (
         <CardDescription className="flex flex-wrap items-center gap-2">
           <span>
@@ -303,12 +380,168 @@ function ListHeader({ title, search }: { title: string; search: CompliancePageSe
   )
 }
 
+/** Asks whom to tell and why, then sends the notice about an overdue review (ADR 0077). */
+function NoticeDialog({
+  review,
+  onClose,
+}: {
+  review: OverdueReview | undefined
+  onClose: () => void
+}) {
+  const client = useApiClient()
+  const queryClient = useQueryClient()
+  const id = useId()
+  const [chosen, setChosen] = useState<NoticeKind | undefined>(undefined)
+  const [reason, setReason] = useState('')
+  const [attempted, setAttempted] = useState(false)
+  const reasonMissing = reason.trim() === ''
+
+  const reminderOpen = review?.owner !== undefined && review.nextReminderAt === undefined
+  const escalationOpen = review?.nextEscalationAt === undefined
+  const kind = chosen ?? (reminderOpen ? 'reminder' : 'escalation')
+
+  function close() {
+    setChosen(undefined)
+    setReason('')
+    setAttempted(false)
+    mutation.reset()
+    onClose()
+  }
+
+  const mutation = useMutation({
+    mutationFn: (r: OverdueReview) =>
+      sendComplianceNotice(client, r.documentId, r.versionId, kind, reason.trim()),
+    onSuccess: (sent) => {
+      toast(t('compliance.notice.sent', { count: sent.recipients }))
+      close()
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['compliance'] }),
+  })
+
+  function submit(e: SyntheticEvent) {
+    e.preventDefault()
+    setAttempted(true)
+    if (reasonMissing || !review) return
+    mutation.mutate(review)
+  }
+
+  const refusal = mutation.isError ? noticeRefusal(mutation.error) : undefined
+  const reasonError = attempted && reasonMissing
+  const hint = (next: string | undefined) =>
+    next === undefined ? undefined : t('compliance.notice.next', { date: formatDateTime(next) })
+  const options: [NoticeKind, string, boolean, string | undefined][] = [
+    [
+      'reminder',
+      t('compliance.notice.reminder'),
+      reminderOpen,
+      review?.owner === undefined ? t('compliance.notice.noOwner') : hint(review.nextReminderAt),
+    ],
+    [
+      'escalation',
+      t('compliance.notice.escalation'),
+      escalationOpen,
+      hint(review?.nextEscalationAt),
+    ],
+  ]
+  return (
+    <Dialog
+      open={review !== undefined}
+      onOpenChange={(open) => {
+        if (!open) close()
+      }}
+    >
+      {review && (
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {t('compliance.notice.title', {
+                title: review.title,
+                version: review.versionLabel,
+              })}
+            </DialogTitle>
+            <DialogDescription>{t('compliance.notice.description')}</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submit} className="grid gap-4" noValidate>
+            <fieldset className="grid gap-2">
+              <legend className="mb-1 text-sm font-medium">{t('compliance.notice.kind')}</legend>
+              {options.map(([value, label, open, note]) => (
+                <div key={value} className="grid gap-0.5">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name={`${id}-kind`}
+                      value={value}
+                      checked={kind === value}
+                      disabled={!open}
+                      onChange={() => {
+                        setChosen(value)
+                      }}
+                    />
+                    {label}
+                  </label>
+                  {note && <p className="pl-6 text-xs text-muted-foreground">{note}</p>}
+                </div>
+              ))}
+            </fieldset>
+            <div className="grid gap-1.5">
+              <Label htmlFor={`${id}-reason`}>{t('compliance.notice.reason')}</Label>
+              <Textarea
+                id={`${id}-reason`}
+                value={reason}
+                maxLength={MAX_REASON}
+                onChange={(e) => {
+                  setReason(e.target.value)
+                }}
+                aria-invalid={reasonError || undefined}
+                aria-required
+                aria-describedby={`${id}-reason-hint`}
+              />
+              <p
+                id={`${id}-reason-hint`}
+                role={reasonError ? 'alert' : undefined}
+                className={
+                  reasonError ? 'text-sm text-destructive' : 'text-xs text-muted-foreground'
+                }
+              >
+                {reasonError
+                  ? t('compliance.notice.reasonMissing')
+                  : t('compliance.notice.reasonHint', { max: MAX_REASON })}
+              </p>
+            </div>
+            {refusal ? (
+              <p role="alert" className="text-sm text-destructive">
+                {t(`compliance.notice.${refusal}`)}
+              </p>
+            ) : (
+              mutation.isError && <InlineError error={mutation.error} />
+            )}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={close}>
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" disabled={mutation.isPending}>
+                {mutation.isPending ? t('compliance.notice.sending') : t('compliance.notice.send')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      )}
+    </Dialog>
+  )
+}
+
 function OverdueReviewList({ search }: { search: CompliancePageSearch }) {
   const client = useApiClient()
   const list = useQuery(overdueReviewsQuery(client, search.unit, search.owner))
+  const [notify, setNotify] = useState<OverdueReview | undefined>(undefined)
   return (
     <Card>
-      <ListHeader title={t('compliance.overdueReviews')} search={search} />
+      <ListHeader
+        title={t('compliance.overdueReviews')}
+        search={search}
+        list="overdue-reviews"
+        empty={!list.data?.length}
+      />
       <CardContent>
         {list.isPending ? (
           <LoadingState label={t('compliance.loadingList')} />
@@ -330,6 +563,7 @@ function OverdueReviewList({ search }: { search: CompliancePageSearch }) {
               t('compliance.owner'),
               t('compliance.reviewDate'),
               t('compliance.overdue'),
+              '',
             ]}
           >
             {list.data.map((r) => (
@@ -357,6 +591,141 @@ function OverdueReviewList({ search }: { search: CompliancePageSearch }) {
                     ? t('compliance.dueToday')
                     : t('compliance.days', { count: r.daysOverdue })}
                 </td>
+                <td className="py-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      r.nextEscalationAt !== undefined &&
+                      (r.owner === undefined || r.nextReminderAt !== undefined)
+                    }
+                    aria-label={t('compliance.notifyLabel', {
+                      title: r.title,
+                      version: r.versionLabel,
+                    })}
+                    onClick={() => {
+                      setNotify(r)
+                    }}
+                  >
+                    {t('compliance.notify')}
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </CardContent>
+      <NoticeDialog
+        review={notify}
+        onClose={() => {
+          setNotify(undefined)
+        }}
+      />
+    </Card>
+  )
+}
+
+function DocumentLink({ documentId, title }: { documentId: string; title: string }) {
+  return (
+    <Link to="/documents/$documentId" params={{ documentId }} className={linkClass}>
+      {title}
+    </Link>
+  )
+}
+
+function UnownedList({ search }: { search: CompliancePageSearch }) {
+  const client = useApiClient()
+  const list = useQuery(unownedDocumentsQuery(client, search.unit))
+  return (
+    <Card>
+      <ListHeader
+        title={t('compliance.withoutOwner')}
+        search={search}
+        list="documents-without-owner"
+        empty={!list.data?.length}
+      />
+      <CardContent>
+        {list.isPending ? (
+          <LoadingState label={t('compliance.loadingList')} />
+        ) : list.isError ? (
+          <ErrorState error={list.error} onRetry={() => void list.refetch()} />
+        ) : list.data.length === 0 ? (
+          <EmptyState
+            icon={CheckCircle2}
+            title={t('compliance.noWithoutOwner')}
+            description={t('compliance.noWithoutOwnerText')}
+          />
+        ) : (
+          <Table
+            caption={t('compliance.withoutOwner')}
+            head={[
+              t('compliance.document'),
+              t('compliance.version'),
+              t('compliance.unit'),
+              t('compliance.published'),
+            ]}
+          >
+            {list.data.map((r) => (
+              <tr key={r.documentId} className="border-b last:border-0">
+                <td className={td}>
+                  <DocumentLink documentId={r.documentId} title={r.title} />
+                </td>
+                <td className={`${td} font-mono text-xs`}>{r.versionLabel}</td>
+                <td className={td}>{groupLabel(r.unit, noUnit())}</td>
+                <td className={td}>{r.publishedAt ? formatDateTime(r.publishedAt) : '–'}</td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function DeviationList({ search }: { search: CompliancePageSearch }) {
+  const client = useApiClient()
+  const list = useQuery(deviationFiguresQuery(client, search.unit, search.owner))
+  return (
+    <Card>
+      <ListHeader
+        title={t('compliance.deviations')}
+        search={search}
+        list="deviations"
+        empty={!list.data?.length}
+      />
+      <CardContent>
+        {list.isPending ? (
+          <LoadingState label={t('compliance.loadingList')} />
+        ) : list.isError ? (
+          <ErrorState error={list.error} onRetry={() => void list.refetch()} />
+        ) : list.data.length === 0 ? (
+          <EmptyState
+            icon={CheckCircle2}
+            title={t('compliance.noDeviations')}
+            description={t('compliance.noDeviationsText')}
+          />
+        ) : (
+          <Table
+            caption={t('compliance.deviations')}
+            head={[
+              t('compliance.document'),
+              t('compliance.version'),
+              t('compliance.unit'),
+              t('compliance.owner'),
+              t('compliance.deviationCount'),
+            ]}
+          >
+            {list.data.map((r) => (
+              <tr key={r.versionId} className="border-b last:border-0">
+                <td className={td}>
+                  <DocumentLink documentId={r.documentId} title={r.title} />
+                </td>
+                <td className={`${td} font-mono text-xs`}>{r.versionLabel}</td>
+                <td className={td}>{groupLabel(r.unit, noUnit())}</td>
+                <td className={td}>
+                  <OwnerName owner={r.owner || undefined} />
+                </td>
+                <td className={td}>{r.deviations}</td>
               </tr>
             ))}
           </Table>
@@ -387,12 +756,17 @@ function OpenAcknowledgementsDialog({
       fetchOpenAcknowledgements(client, v.documentId, v.versionId, purpose, reason.trim()),
     onSuccess: setResult,
   })
+  const download = useMutation({
+    mutationFn: (v: VersionRate) =>
+      downloadOpenAcknowledgements(client, v.documentId, v.versionId, purpose, reason.trim()),
+  })
 
   function close() {
     setReason('')
     setAttempted(false)
     setResult(undefined)
     mutation.reset()
+    download.reset()
     onClose()
   }
 
@@ -439,7 +813,20 @@ function OpenAcknowledgementsDialog({
                   ))}
                 </ul>
               )}
+              {download.isError && <InlineError error={download.error} />}
               <DialogFooter>
+                {(result.open ?? []).length > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={download.isPending}
+                    onClick={() => {
+                      download.mutate(version)
+                    }}
+                  >
+                    {download.isPending ? t('compliance.exporting') : t('compliance.downloadNames')}
+                  </Button>
+                )}
                 <Button type="button" onClick={close}>
                   {t('common.close')}
                 </Button>
@@ -513,13 +900,60 @@ function OpenAcknowledgementsDialog({
   )
 }
 
+/** Reminds the readers of a version, as owners can on the document page (ADR 0048). */
+function RemindButton({ version }: { version: VersionRate }) {
+  const client = useApiClient()
+  const queryClient = useQueryClient()
+  const remind = useMutation({
+    mutationFn: () => sendReminder(client, version.documentId, version.versionId),
+    onSuccess: (sent) => {
+      toast(t('compliance.reminded', { count: sent.reminded }))
+    },
+    onError: (e) => {
+      if (isTooSoon(e)) toast(t('compliance.remindTooSoon'), 'error')
+    },
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ['compliance', 'acknowledgements'] }),
+  })
+  const next = version.nextReminderAt
+  return (
+    <div className="grid gap-1">
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={next !== undefined || remind.isPending}
+        aria-label={t('compliance.remindLabel', {
+          title: version.title,
+          version: version.versionLabel,
+        })}
+        onClick={() => {
+          remind.mutate()
+        }}
+      >
+        {remind.isPending ? t('compliance.reminding') : t('compliance.remind')}
+      </Button>
+      {next !== undefined && (
+        <p className="text-xs text-muted-foreground">
+          {t('compliance.remindedAgain', { date: formatDateTime(next) })}
+        </p>
+      )}
+      {remind.isError && !isTooSoon(remind.error) && <InlineError error={remind.error} />}
+    </div>
+  )
+}
+
 function AcknowledgementList({ search }: { search: CompliancePageSearch }) {
   const client = useApiClient()
   const list = useQuery(acknowledgementRatesQuery(client, search.unit, search.document))
   const [names, setNames] = useState<VersionRate | undefined>(undefined)
   return (
     <Card>
-      <ListHeader title={t('compliance.acknowledgements')} search={search} />
+      <ListHeader
+        title={t('compliance.acknowledgements')}
+        search={search}
+        list="acknowledgements"
+        empty={!list.data?.length}
+      />
       <CardContent>
         {list.isPending ? (
           <LoadingState label={t('compliance.loadingList')} />
@@ -567,19 +1001,22 @@ function AcknowledgementList({ search }: { search: CompliancePageSearch }) {
                 <td className={td}>{r.open}</td>
                 <td className="py-2">
                   {r.open > 0 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-label={t('compliance.whoLabel', {
-                        title: r.title,
-                        version: r.versionLabel,
-                      })}
-                      onClick={() => {
-                        setNames(r)
-                      }}
-                    >
-                      {t('compliance.who')}
-                    </Button>
+                    <div className="flex flex-wrap items-start gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label={t('compliance.whoLabel', {
+                          title: r.title,
+                          version: r.versionLabel,
+                        })}
+                        onClick={() => {
+                          setNames(r)
+                        }}
+                      >
+                        {t('compliance.who')}
+                      </Button>
+                      <RemindButton version={r} />
+                    </div>
                   )}
                 </td>
               </tr>
@@ -606,6 +1043,8 @@ export function CompliancePage() {
       <Overview />
       {search.view === 'reviews' && <OverdueReviewList search={search} />}
       {search.view === 'acknowledgements' && <AcknowledgementList search={search} />}
+      {search.view === 'unowned' && <UnownedList search={search} />}
+      {search.view === 'deviations' && <DeviationList search={search} />}
     </div>
   )
 }

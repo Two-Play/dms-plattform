@@ -50,6 +50,13 @@ export const docPanels = {
     checksum: 'SHA-256 {sha}',
     downloadPdf: 'Download PDF',
     downloadJson: 'Download JSON',
+    downloadPdfOf: 'Download the report of {date} as PDF',
+    downloadJsonOf: 'Download the report of {date} as JSON',
+    earlier: 'Earlier reports',
+    loading: 'Loading the earlier reports',
+    none: 'No report has been created for this document yet.',
+    more: 'Show more',
+    removed: 'Content removed on {date} after its retention; the checksum stays verifiable.',
   },
   attachments: {
     title: 'Attachments',

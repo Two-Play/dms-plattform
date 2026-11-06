@@ -222,12 +222,22 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
     AcknowledgementService & ReviewService & LegalHoldService & RoleAssignments & AuditTrail & AuditEvidence &
     EvidenceReportRegistry & RenditionArchive & PdfRenderer & PdfValidator & Deputyships & RenditionSource &
     ObjectStore & AuditCheckpoints & AttachmentUploads & DestructionService & ObjectCleanup &
-    DocumentClassService
+    DocumentClassService & TenantOrganizations & UserDirectory
+
+  /** Display names of two people; everybody else is unknown to the directory. */
+  private val directory: ULayer[UserDirectory & TenantOrganizations] =
+    val names = Map(reviewer -> "Rita Reviewer", auditor -> "Anna Auditor")
+    ZLayer.succeed[UserDirectory](new UserDirectory:
+      def lookup(organizationId: String, ids: Set[UserId]): IO[UserDirectoryError, Map[UserId, UserInfo]] =
+        ZIO.succeed(ids.flatMap(id => names.get(id).map(n => id -> UserInfo(id, n, None))).toMap)) ++ ZLayer
+      .succeed[TenantOrganizations](new TenantOrganizations:
+        def organizationOf(tenant: TenantId): IO[DbError, Option[String]] = ZIO.succeed(Some(orgId)))
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
       database,
       authenticator,
+      directory,
       objectStore,
       RenditionWiring.archive,
       RenderingWorker.renderer,
@@ -604,7 +614,7 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         parsed.auditTrail.map(_.action).contains("workflow.voted"),
         parsed.auditTrail.map(_.action).contains("document.acknowledged"),
         parsed.auditTrail.forall(_.hash.matches("[0-9a-f]{64}")),
-        parsed.notes.contains(EvidenceReport.PersonNote),
+        parsed.notes.contains(EvidenceReport.NamedPersonNote),
         audited == List((view.sha256, auditor.value)),
         registered == List((view.sha256, auditor.value)),
         pdf.status == Status.Ok,
@@ -819,6 +829,80 @@ object EvidenceReportApiSpec extends ZIOSpecDefault:
         otherDoc.status == Status.NotFound,
         pdfByReader.status == Status.Forbidden
       )
+    },
+    test("the PDF names people, the JSON keeps their ids and records the names (ADR 0077)") {
+      for
+        doc     <- publishedDocument("Namen AG")
+        created <- createReport(auditor, doc.id)
+        view = as[EvidenceReportView](created)
+        json <- payloadOf(auditor, view)
+        parsed = EvidenceReport.parse(json.text).fold(e => throw AssertionError(e), identity)
+        pdf <- call(auditor, "GET", view.pdfUrl)
+        pages = RenderingWorker.pageTexts(pdf.body).map(RenderingWorker.normalized)
+        texts = pages.mkString(" ")
+      yield assertTrue(
+        parsed.format == "dms.evidence-report/2",
+        parsed.createdBy == auditor.value,
+        parsed.persons.exists(_.get(reviewer.value).contains("Rita Reviewer")),
+        !parsed.persons.exists(_.contains(author.value)),
+        parsed.notes.contains(EvidenceReport.NamedPersonNote),
+        EvidenceReport.sha256(json.text) == view.sha256,
+        texts.contains("Rita Reviewer"),
+        // the footer of every page, and the table of persons with the id
+        pages.forall(_.contains("by Anna Auditor")),
+        texts.contains("Persons"),
+        texts.contains(reviewer.value)
+      )
+    },
+    test(
+      "earlier reports are listed for those who may create one, also when their content is gone (ADR 0077)"
+    ) {
+      for
+        doc    <- publishedDocument("Liste AG")
+        none   <- call(auditor, "GET", s"/api/v1/documents/${doc.id}/evidence-reports")
+        first  <- createReport(auditor, doc.id).map(as[EvidenceReportView])
+        second <- createReport(records, doc.id).map(as[EvidenceReportView])
+        all    <- call(auditor, "GET", s"/api/v1/documents/${doc.id}/evidence-reports")
+        one    <- call(auditor, "GET", s"/api/v1/documents/${doc.id}/evidence-reports?limit=1")
+        next   <- call(auditor, "GET", s"/api/v1/documents/${doc.id}/evidence-reports?limit=1&offset=1")
+        reader <- call(reader, "GET", s"/api/v1/documents/${doc.id}/evidence-reports")
+        sales  <- call(salesAuditor, "GET", s"/api/v1/documents/${doc.id}/evidence-reports")
+        _      <- ownerQuery {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          sql"""update dms.evidence_report
+                set payload = null, payload_removed_at = now(), payload_removed_by = 'system:retention'
+                where id = ${first.id}""".update.run()
+        }
+        after   <- call(auditor, "GET", s"/api/v1/documents/${doc.id}/evidence-reports")
+        gone    <- call(auditor, "GET", first.jsonUrl)
+        gonePdf <- call(auditor, "GET", first.pdfUrl)
+        kept    <- call(auditor, "GET", second.jsonUrl)
+      yield
+        val page = as[EvidenceReportPageView](all)
+        val left = as[EvidenceReportPageView](after).items.find(_.id == first.id).get
+        assertTrue(
+          as[EvidenceReportPageView](none) == EvidenceReportPageView(Nil, 0, None),
+          page.total == 2,
+          page.items.map(_.id) == List(second.id, first.id),
+          page.items.head.createdBy == records.value,
+          page.items.head.integrityStatus.contains(second.integrityStatus),
+          page.items.head.pdfUrl.contains(second.pdfUrl),
+          page.items.head.format == "dms.evidence-report/2",
+          as[EvidenceReportPageView](one).nextOffset.contains(1),
+          as[EvidenceReportPageView](next).items.map(_.id) == List(first.id),
+          as[EvidenceReportPageView](next).nextOffset.isEmpty,
+          reader.status == Status.Forbidden,
+          sales.status == Status.Forbidden,
+          left.removedAt.isDefined,
+          left.integrityStatus.isEmpty,
+          left.jsonUrl.isEmpty,
+          left.pdfUrl.isEmpty,
+          left.sha256 == first.sha256,
+          gone.status == Status.Gone,
+          gone.text.contains("report_removed"),
+          gonePdf.status == Status.Gone,
+          kept.status == Status.Ok
+        )
     },
     test("the registry only accepts a payload with its own checksum") {
       for

@@ -25,6 +25,8 @@ import java.util.UUID
   *   working states saved within this period are never compacted
   * @param discardedContentGrace
   *   the content of a discarded draft is removed this long after it was discarded (data protection, ADR 0050)
+  * @param evidenceReportRetention
+  *   the payload of an evidence report is kept at least this long after its creation (ADR 0077)
   * @param sweepOrphans
   *   whether the maintenance also removes orphaned objects (otherwise only on request)
   */
@@ -34,12 +36,18 @@ final case class MaintenanceConfig(
     keepLatestClosed: Int = 1,
     keepRecent: Duration = 7.days,
     discardedContentGrace: Duration = 30.days,
+    evidenceReportRetention: Duration = 3650.days,
     sweepOrphans: Boolean = true,
     batchSize: Int = 500
 )
 
 /** What one maintenance run of a tenant did. */
-final case class MaintenanceResult(compactedVersions: Int, removedStates: Int, purgedDrafts: Int)
+final case class MaintenanceResult(
+    compactedVersions: Int,
+    removedStates: Int,
+    purgedDrafts: Int,
+    purgedReports: Int = 0
+)
 
 /** Pure rules of the compaction of working states (ADR 0054). */
 object WorkingStateCompaction:
@@ -77,6 +85,10 @@ object WorkingStateCompaction:
   *     database, migration V33);
   *   - removal of the content of discarded drafts after the grace period (ADR 0050): working states deleted,
   *     content and values emptied; the version row and the audit trail stay; not while under legal hold;
+  *   - removal of the payload of evidence reports whose retention ended (ADR 0077): only once the document is
+  *     gone (all its versions destroyed or discarded), the report is older than the retention period and no
+  *     legal hold holds the document; the registry entry and the audit trail stay. The database refuses it
+  *     otherwise as well (migration V54);
   *   - the clean-up of orphaned objects ([[ObjectCleanup.sweep]]), if enabled.
   *
   * Each version runs in its own transaction; every step is idempotent.
@@ -118,7 +130,8 @@ final class RetentionMaintenance(
       result <- maintain(tenant)
       _      <- ZIO.logInfo(
         s"Retention maintenance of tenant ${tenant.value}: ${result.removedStates} working states of " +
-          s"${result.compactedVersions} versions compacted, ${result.purgedDrafts} discarded drafts emptied"
+          s"${result.compactedVersions} versions compacted, ${result.purgedDrafts} discarded drafts emptied, " +
+          s"${result.purgedReports} evidence reports emptied"
       )
       _ <- ZIO.when(config.sweepOrphans)(cleanup.sweep(tenant, dryRun = false, Maintainer))
     yield ()
@@ -128,7 +141,8 @@ final class RetentionMaintenance(
     for
       compacted <- compact(tenant)
       purged    <- purgeDiscarded(tenant)
-    yield MaintenanceResult(compacted.count(_ > 0), compacted.sum, purged)
+      reports   <- purgeEvidenceReports(tenant)
+    yield MaintenanceResult(compacted.count(_ > 0), compacted.sum, purged, reports)
 
   /** Compacts the working states of every version with more states than its rule keeps; the removed count per
     * version.
@@ -188,7 +202,7 @@ final class RetentionMaintenance(
               ) *> record(
                 "document.working-states-compacted",
                 document,
-                s"$major.$minor",
+                Some(s"$major.$minor"),
                 Json.Obj(
                   "versionId" -> Json.Str(id.toString),
                   "removed"   -> Json.Arr(Chunk.fromIterable(numbers.map(n => Json.Num(n)))),
@@ -240,7 +254,7 @@ final class RetentionMaintenance(
         record(
           "document.discarded-content-removed",
           document,
-          s"$major.$minor",
+          Some(s"$major.$minor"),
           Json.Obj(
             "versionId"     -> Json.Str(id.toString),
             "workingStates" -> Json.Num(states),
@@ -250,13 +264,56 @@ final class RetentionMaintenance(
       }
     yield found.isDefined
 
-  private def record(action: String, document: UUID, version: String, details: Json.Obj): IO[DbError, Unit] =
+  /** Removes the payload of the evidence reports whose retention ended; the number of reports emptied. */
+  def purgeEvidenceReports(tenant: TenantId): IO[String, Int] =
+    for
+      now <- Clock.instant
+      cutoff = OffsetDateTime.ofInstant(now.minus(config.evidenceReportRetention), ZoneOffset.UTC)
+      ids    <- inTenant(tenant)(Db.sql(reportsDue(cutoff, config.batchSize)))
+      purged <- ZIO.foreach(ids)(id => inTenant(tenant)(purgeReport(id, cutoff)))
+    yield purged.count(identity)
+
+  private def purgeReport(id: UUID, cutoff: OffsetDateTime): IO[DbError, Boolean] =
+    for
+      found <- Db.sql {
+        val report =
+          sql"""select r.document_id, r.sha256 from dms.evidence_report r
+                where r.id = $id and r.payload is not null and r.created_at < $cutoff
+                  and not dms.document_under_legal_hold(r.document_id)
+                for update""".query[(UUID, String)].run().headOption
+        report.foreach { _ =>
+          val _ = sql"""update dms.evidence_report
+                        set payload = null, payload_removed_at = now(), payload_removed_by = ${Maintainer.value}
+                        where id = $id""".update.run()
+        }
+        report
+      }
+      _ <- ZIO.foreachDiscard(found) { (document, sha256) =>
+        record(
+          "document.evidence-report-removed",
+          document,
+          None,
+          Json.Obj(
+            "reportId"      -> Json.Str(id.toString),
+            "sha256"        -> Json.Str(sha256),
+            "retentionDays" -> Json.Num(config.evidenceReportRetention.toDays)
+          )
+        )
+      }
+    yield found.isDefined
+
+  private def record(
+      action: String,
+      document: UUID,
+      version: Option[String],
+      details: Json.Obj
+  ): IO[DbError, Unit] =
     audit
       .record(
         AuditEvent(
           Actor(Maintainer.value, ActorKind.Technical),
           action,
-          AuditObject("document", Some(document), Some(version)),
+          AuditObject("document", Some(document), version),
           Channel.Automation,
           Jsonb(details.toJson)
         )
@@ -272,6 +329,17 @@ object RetentionMaintenance:
   val Maintainer: UserId = UserId("system:retention")
 
   private val OpenStatuses = Set("Draft", "InReview", "InApproval")
+
+  /** Evidence reports past their retention whose document is gone and not under legal hold, the oldest first.
+    */
+  private def reportsDue(cutoff: OffsetDateTime, limit: Int)(using DbTx): List[UUID] =
+    sql"""select r.id from dms.evidence_report r
+          where r.payload is not null and r.created_at < $cutoff
+            and not dms.document_under_legal_hold(r.document_id)
+            and not exists (select 1 from dms.document_version v
+                            where v.document_id = r.document_id and v.status not in ('Destroyed', 'Discarded'))
+          order by r.created_at, r.id
+          limit $limit""".query[UUID].run().toList
 
   /** Versions (not destroyed, not discarded, not under legal hold) with more working states than kept. */
   private def versionsToCompact(open: Int, closed: Int, limit: Int)(using DbTx): List[UUID] =

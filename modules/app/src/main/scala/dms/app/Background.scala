@@ -91,7 +91,12 @@ object Background:
         db,
         anchoring,
         checkpoints,
-        AuditScheduleConfig(config.audit.checkpointIntervalSeconds.seconds, config.audit.anchorHourUtc)
+        AuditEvidenceLive(db, trail, Some(checkpoints)),
+        AuditScheduleConfig(
+          config.audit.checkpointIntervalSeconds.seconds,
+          config.audit.anchorHourUtc,
+          (config.audit.anchorHourUtc + 1) % 24
+        )
       )
       publications = PublicationJobs(
         db,

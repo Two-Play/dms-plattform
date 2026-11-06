@@ -24,8 +24,8 @@ import dms.documents.core.{
   ReviewService
 }
 import dms.documents.{DocumentStatus, DocumentVersion}
-import dms.identity.Principal
-import dms.kernel.{DocumentId, TenantId}
+import dms.identity.{Principal, TenantOrganizations, UserDirectory}
+import dms.kernel.{DocumentId, TenantId, UserId}
 import dms.rendering.core.{PdfRenderer, PdfValidator, RenderingError, RenditionArchive}
 import dms.storage.ObjectStore
 import sttp.model.{Header, MediaType, StatusCode}
@@ -60,6 +60,34 @@ final case class EvidenceReportView(
 ) derives JsonCodec,
       Schema
 
+/** An earlier report of a document (ADR 0077). Once its retention ended only the entry stays: `removedAt` is
+  * set, status and download links are gone, and the checksum still matches the audit entry of its creation.
+  */
+final case class EvidenceReportEntryView(
+    id: UUID,
+    documentId: UUID,
+    createdAt: Instant,
+    createdBy: String,
+    /** SHA-256 (lowercase hex) of the UTF-8 bytes of the JSON report. */
+    sha256: String,
+    format: String,
+    /** Intact, Violated or Incomplete; empty once the report is removed. */
+    integrityStatus: Option[String],
+    /** When the content of the report was removed after its retention ended. */
+    removedAt: Option[Instant],
+    jsonUrl: Option[String],
+    pdfUrl: Option[String]
+) derives JsonCodec,
+      Schema
+
+/** One page of the reports of a document, the latest first; `nextOffset` is missing on the last page. */
+final case class EvidenceReportPageView(
+    items: List[EvidenceReportEntryView],
+    total: Int,
+    nextOffset: Option[Int]
+) derives JsonCodec,
+      Schema
+
 /** Evidence reports of documents (US-12.1, DMS-57, ADR 0034).
   *
   * Internal audit and records managers (`GenerateEvidenceReport`) create a complete report of a document: the
@@ -67,15 +95,20 @@ final case class EvidenceReportView(
   * deviation requests, acknowledgement rates, periodic reviews, legal holds, the document's audit entries and
   * the integrity status (audit chain with anchors and checkpoints, rendition checksums against object
   * storage, approved content checksums). The report is registered with the SHA-256 of its canonical JSON
-  * (migration V21) and its creation is audited; it can be downloaded as that JSON or as PDF/A.
+  * (migration V21) and its creation is audited; it can be downloaded as that JSON or as PDF/A. Earlier
+  * reports are listed per document, for the same callers (ADR 0072, 0077).
   */
 object EvidenceReportApi:
   type Env = DocumentApi.Env & AcknowledgementService & ReviewService & LegalHoldService &
     DestructionService & RoleAssignments & AuditTrail & AuditEvidence & EvidenceReportRegistry &
-    RenditionArchive & PdfRenderer & PdfValidator & AttachmentUploads
+    RenditionArchive & PdfRenderer & PdfValidator & AttachmentUploads & TenantOrganizations & UserDirectory
 
   /** Audit action of a created report. */
   val CreatedAction: String = "document.evidence-report-created"
+
+  /** Reports per page of the list, by default and at most. */
+  val DefaultPage = 20
+  val MaxPage     = 100
 
   private val documents  = "api" / "v1" / "documents"
   private val documentId = path[UUID]("id").description("Document id")
@@ -101,6 +134,19 @@ object EvidenceReportApi:
       .tag("Evidence reports")
       .serverLogic(p => id => createReport(p, DocumentId(id)))
 
+  val list: ZServerEndpoint[Env, Any] =
+    SecuredApi.base.get
+      .in(documents / documentId / "evidence-reports")
+      .in(query[Option[Int]]("limit").description(s"Reports per page, 1 to $MaxPage; default $DefaultPage"))
+      .in(query[Option[Int]]("offset").description("Reports to skip; default 0"))
+      .out(jsonBody[EvidenceReportPageView])
+      .description(
+        "The evidence reports of a document, the latest first, also those whose content was removed after their " +
+          "retention ended. For whoever may create a report of the document now (ADR 0072, 0077)."
+      )
+      .tag("Evidence reports")
+      .serverLogic(p => (id, limit, offset) => page(p, DocumentId(id), limit, offset))
+
   val json: ZServerEndpoint[Env, Any] =
     SecuredApi.base.get
       .in(documents / documentId / "evidence-reports" / path[UUID]("reportId").description("Report id"))
@@ -111,7 +157,8 @@ object EvidenceReportApi:
       .out(byteArrayBody)
       .description(
         "The JSON form of an evidence report, byte for byte as registered: its SHA-256 is the report checksum " +
-          "(also sent as Repr-Digest and ETag). Requires the auditor or records manager role."
+          "(also sent as Repr-Digest and ETag). Requires the auditor or records manager role. 410 report_removed " +
+          "once its retention ended."
       )
       .tag("Evidence reports")
       .serverLogic(p =>
@@ -138,7 +185,8 @@ object EvidenceReportApi:
       .out(byteArrayBody)
       .description(
         "An evidence report as PDF/A-2b, printed from the registered JSON; every page names the report id and the " +
-          "SHA-256 of the JSON form. Requires the auditor or records manager role."
+          "SHA-256 of the JSON form. Requires the auditor or records manager role. 410 report_removed once its " +
+          "retention ended."
       )
       .tag("Evidence reports")
       .serverLogic(p =>
@@ -165,7 +213,7 @@ object EvidenceReportApi:
       )
 
   // The PDF endpoint first: `<id>.pdf` must not be read as a report id.
-  def endpoints: List[ZServerEndpoint[Env, Any]] = List(create, pdf, json)
+  def endpoints: List[ZServerEndpoint[Env, Any]] = List(create, list, pdf, json)
 
   /** The [[AuditEvidence]] of the application: verification with the configured TSA trust anchors and the
     * write-once checkpoints in object storage (ADR 0017), as the background audit jobs use them.
@@ -239,12 +287,12 @@ object EvidenceReportApi:
         )
       }
       // Outside the transaction: the chain verification opens its own, the renditions come from object storage.
-      chain      <- evidence.integrity(p.tenantId).mapError(DocumentApi.toResponse)
+      chain      <- evidence.integrity(p.tenantId, id.value).mapError(DocumentApi.toResponse)
       renditions <- checkRenditions(facts.details.versions)
       files      <- checkAttachments(facts.details.versions)
       now        <- Clock.instant.map(_.truncatedTo(ChronoUnit.MICROS))
       reportId = UUID.randomUUID()
-      payload  = EvidenceReport.build(
+      built    = EvidenceReport.build(
         reportId,
         now,
         p.userId.value,
@@ -254,8 +302,12 @@ object EvidenceReportApi:
         renditions,
         files
       )
-      text   = EvidenceReport.canonical(payload)
-      stored = StoredEvidenceReport(
+      // After the transaction: the directory is another system (ADR 0037). The names at this moment are recorded
+      // in the report, so the same report always prints the same names (ADR 0077).
+      names <- VersionViewApi.displayNames(p, EvidenceReport.personIds(built).map(UserId(_)))
+      payload = EvidenceReport.named(built, names.map((id, name) => id.value -> name))
+      text    = EvidenceReport.canonical(payload)
+      stored  = StoredEvidenceReport(
         reportId,
         id.value,
         EvidenceReport.FormatNo,
@@ -400,6 +452,7 @@ object EvidenceReportApi:
     yield ()
 
   /** A registered report of the document, checked against its checksum; only for callers who may create one.
+    * Its content goes when its retention ended (ADR 0077), which is not the same as a report that never was.
     */
   private def load(
       p: Principal,
@@ -408,20 +461,73 @@ object EvidenceReportApi:
   ): ZIO[Env, (StatusCode, ApiError), StoredEvidenceReport] =
     for
       registry <- ZIO.service[EvidenceReportRegistry]
-      stored   <- DocumentApi.inTransaction(p) { ctx =>
+      found    <- DocumentApi.inTransaction(p) { ctx =>
         for
           details <- ctx.service.get(id)
           _       <- authorize(ctx, p.tenantId, details)
-          found   <- registry.find(reportId).mapError(DocumentError.Database(_))
-          report  <- ZIO
-            .fromOption(found.filter(_.documentId == id.value))
-            .orElseFail(DocumentError.NotFound(s"document ${id.value} has no evidence report $reportId"))
-        yield report
+          stored  <- registry.find(reportId).mapError(DocumentError.Database(_))
+          entry   <- registry.entry(reportId).mapError(DocumentError.Database(_))
+          _       <- ZIO.unless(entry.exists(_.documentId == id.value))(
+            ZIO.fail(DocumentError.NotFound(s"document ${id.value} has no evidence report $reportId"))
+          )
+        yield stored
       }
+      stored <- ZIO
+        .fromOption(found)
+        .orElseFail(
+          (
+            StatusCode.Gone,
+            ApiError(
+              "report_removed",
+              s"the content of evidence report $reportId was removed after its retention"
+            )
+          )
+        )
       _ <- ZIO.unless(EvidenceReport.sha256(stored.payload) == stored.sha256)(
         ZIO.fail(integrityError(s"evidence report ${stored.id} does not match its registered checksum"))
       )
     yield stored
+
+  /** The reports of a document for whoever may create one now: a stored report follows the same rule as a new
+    * one (ADR 0072), and so does knowing that it exists.
+    */
+  private def page(
+      p: Principal,
+      id: DocumentId,
+      limit: Option[Int],
+      offset: Option[Int]
+  ): ZIO[Env, (StatusCode, ApiError), EvidenceReportPageView] =
+    val size = limit.getOrElse(DefaultPage).max(1).min(MaxPage)
+    val from = offset.getOrElse(0).max(0)
+    for
+      registry <- ZIO.service[EvidenceReportRegistry]
+      found    <- DocumentApi.inTransaction(p) { ctx =>
+        for
+          details <- ctx.service.get(id)
+          _       <- authorize(ctx, p.tenantId, details)
+          entries <- registry.entries(id.value, size, from).mapError(DocumentError.Database(_))
+          total   <- registry.count(id.value).mapError(DocumentError.Database(_))
+        yield (entries, total)
+      }
+      (entries, total) = found
+      next             = from + entries.size
+    yield EvidenceReportPageView(entries.map(entryView), total, Option.when(next < total)(next))
+
+  private def entryView(e: EvidenceReportEntry): EvidenceReportEntryView =
+    val base = s"/api/v1/documents/${e.documentId}/evidence-reports/${e.id}"
+    val kept = e.removedAt.isEmpty
+    EvidenceReportEntryView(
+      e.id,
+      e.documentId,
+      e.createdAt,
+      e.createdBy,
+      e.sha256,
+      s"dms.evidence-report/${e.format}",
+      e.integrityStatus,
+      e.removedAt,
+      Option.when(kept)(base),
+      Option.when(kept)(s"$base.pdf")
+    )
 
   private def view(stored: StoredEvidenceReport, payload: EvidenceReportPayload): EvidenceReportView =
     val base = s"/api/v1/documents/${stored.documentId}/evidence-reports/${stored.id}"

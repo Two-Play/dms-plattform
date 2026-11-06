@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-10-29, implemented in DMS-57) |
+| Status | Accepted (2026-10-29, implemented in DMS-57); verification per report, retention and persons amended by [0077](0077-evidence-report-prefix-retention-and-cockpit-actions.md) (DMS-108) |
 | Date | 2026-10-29 |
 | Decided by | Philippe |
 

@@ -20,6 +20,7 @@ import dms.identity.*
 import dms.kernel.{DocumentId, TemplateId, TenantId, UserId}
 import dms.templates.*
 import dms.templates.core.{TemplateDraft, TemplateService}
+import dms.workflow.core.DeadlineAudience
 import org.testcontainers.utility.DockerImageName
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import zio.*
@@ -262,6 +263,22 @@ object ComplianceApiSpec extends ZIOSpecDefault:
     Authenticator(verifier, tenants)
   }
 
+  /** The owner of the HR documents; `admin` beyond them, nobody for `officerHr` (ADR 0077). */
+  private val noticeAudience: ULayer[ComplianceNoticeAudience] =
+    ZLayer.succeed(new ComplianceNoticeAudience:
+      def of(document: DocumentId, version: UUID, escalate: Boolean, sender: UserId) =
+        ZIO.succeed(
+          DeadlineAudience(List(ownerA), Nil, if escalate && sender != officerHr then List(admin) else Nil)
+        ))
+
+  /** A name that would be a formula in a spreadsheet. */
+  private val directory: ULayer[UserDirectory & TenantOrganizations] =
+    ZLayer.succeed[UserDirectory](new UserDirectory:
+      def lookup(organizationId: String, ids: Set[UserId]): IO[UserDirectoryError, Map[UserId, UserInfo]] =
+        ZIO.succeed(ids.filter(_ == ownerA).map(id => id -> UserInfo(id, "=Owner A", None)).toMap)) ++ ZLayer
+      .succeed[TenantOrganizations](new TenantOrganizations:
+        def organizationOf(tenant: TenantId): IO[DbError, Option[String]] = ZIO.succeed(Some(orgId)))
+
   private val env: ZLayer[Any, Throwable, ComplianceApi.Env] =
     ZLayer.make[ComplianceApi.Env](
       database,
@@ -276,7 +293,9 @@ object ComplianceApiSpec extends ZIOSpecDefault:
       TemplateService.layer,
       DocumentTemplates.layer,
       DocumentService.layer,
-      AcknowledgementService.layer
+      AcknowledgementService.layer,
+      noticeAudience,
+      directory
     )
 
   private def token(user: UserId): String =
@@ -328,6 +347,28 @@ object ComplianceApiSpec extends ZIOSpecDefault:
 
   private val purpose = """{"purpose":"escalation","reason":"Rate below target"}"""
 
+  private def asOwner[A](f: DbTx ?=> A) =
+    setup.await.flatMap(_.owner.transactSystem(Db.sql {
+      val _ = sql"set local session_replication_role = replica".update.run()
+      f
+    }))
+
+  private def audited(action: String) =
+    asOwner(
+      sql"""select actor_id, reason, details::text from dms.audit_event where action = $action
+            order by chain_seq""".query[(String, Option[String], String)].run().toList
+    )
+
+  private def exportOf(user: UserId, list: String, query: String = "") =
+    post(user, s"/api/v1/compliance/exports/$list$query", "{}")
+
+  private def notice(user: UserId, v: DocumentVersion, kind: String) =
+    post(
+      user,
+      s"/api/v1/compliance/overdue-reviews/${v.documentId.value}/${v.id}/notices",
+      s"""{"kind":"$kind","reason":"Owner did not react"}"""
+    )
+
   /** Audit entries of the person lists: actor, reason and details. */
   private def personAudit: ZIO[Any, DbError, List[(String, Option[String], String)]] =
     setup.await.flatMap(s =>
@@ -351,8 +392,219 @@ object ComplianceApiSpec extends ZIOSpecDefault:
         docs.paths.pathItems.contains("/api/v1/compliance/overview"),
         docs.paths.pathItems.contains("/api/v1/compliance/overdue-reviews"),
         docs.paths.pathItems.contains("/api/v1/compliance/acknowledgements"),
-        docs.paths.pathItems.contains("/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open")
+        docs.paths.pathItems.contains("/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open"),
+        docs.paths.pathItems.contains(
+          "/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open/export"
+        ),
+        docs.paths.pathItems.contains("/api/v1/compliance/documents-without-owner"),
+        docs.paths.pathItems.contains("/api/v1/compliance/deviations"),
+        docs.paths.pathItems.contains("/api/v1/compliance/exports/{list}"),
+        docs.paths.pathItems.contains("/api/v1/compliance/overdue-reviews/{documentId}/{versionId}/notices")
       )
+    },
+    test(
+      "documents without owner and deviations from standard clauses, within the caller's scope (ADR 0077)"
+    ) {
+      val report = """{"format":1,"deviations":[{"a":1},{"a":2}]}"""
+      for
+        f <- fixture
+        _ <- asOwner {
+          val _ =
+            sql"update dms.document set owner_id = null where id = ${f.financeV2.documentId.value}".update
+              .run()
+          val _ = sql"""update dms.document_version set deviation_report = cast($report as jsonb)
+                        where id = ${f.hrPolicy.id}""".update.run()
+          sql"""update dms.document_version set deviation_report = cast($report as jsonb)
+                where id = ${f.secret.id}""".update.run()
+        }
+        overview   <- get(officer, "/api/v1/compliance/overview").map(as[ComplianceOverviewView])
+        overviewHr <- get(officerHr, "/api/v1/compliance/overview").map(as[ComplianceOverviewView])
+        unowned    <- get(officer, "/api/v1/compliance/documents-without-owner").map(
+          as[List[UnownedDocumentView]]
+        )
+        unownedHr <- get(officerHr, "/api/v1/compliance/documents-without-owner")
+          .map(as[List[UnownedDocumentView]])
+        deviating <- get(officer, "/api/v1/compliance/deviations?unit=HR").map(as[List[DeviationFigureView]])
+        otherUnit <- get(officer, "/api/v1/compliance/deviations?unit=Finance").map(
+          as[List[DeviationFigureView]]
+        )
+        denied <- get(readerAll, "/api/v1/compliance/documents-without-owner")
+        _      <- asOwner {
+          val _ = sql"""update dms.document set owner_id = ${ownerB.value}
+                        where id = ${f.financeV2.documentId.value}""".update.run()
+          sql"""update dms.document_version
+                set deviation_report = cast('{"format":1,"deviations":[]}' as jsonb)
+                where id in (${f.hrPolicy.id}, ${f.secret.id})""".update.run()
+        }
+      yield assertTrue(
+        overview.documentsWithoutOwner == 1,
+        overviewHr.documentsWithoutOwner == 0,
+        // the secret version the officer is not cleared for is not counted
+        overview.versionsWithDeviations == 1,
+        overview.deviations == 2,
+        unowned.map(_.versionId) == List(f.financeV2.id),
+        unownedHr.isEmpty,
+        deviating.map(d => (d.versionId, d.deviations)) == List((f.hrPolicy.id, 2)),
+        otherUnit.isEmpty,
+        denied._1 == Status.Forbidden
+      )
+    },
+    test("exports carry the rights and filters of the screen and are audited") {
+      for
+        f       <- fixture
+        before  <- audited(ComplianceApi.ListExported).map(_.size)
+        screen  <- get(officer, "/api/v1/compliance/overdue-reviews?unit=HR").map(as[List[OverdueReviewView]])
+        all     <- exportOf(officer, "overdue-reviews", "?unit=HR&lang=de")
+        scoped  <- exportOf(officerHr, "acknowledgements")
+        wide    <- exportOf(officer, "acknowledgements")
+        unowned <- exportOf(officer, "documents-without-owner")
+        deviating <- exportOf(officer, "deviations")
+        reader    <- exportOf(readerAll, "overdue-reviews")
+        owner     <- exportOf(ownerA, "acknowledgements")
+        unknown   <- exportOf(officer, "everything")
+        trail     <- audited(ComplianceApi.ListExported)
+      yield
+        val rows = all._2.split("\r\n").toList
+        assertTrue(
+          all._1 == Status.Ok,
+          rows.head.contains("Dokument-ID;Titel;"),
+          rows.size == screen.size + 1,
+          screen.forall(r => all._2.contains(r.versionId.toString) || all._2.contains(r.title)),
+          !all._2.contains(f.secret.id.toString),
+          !scoped._2.contains("Finance"),
+          wide._2.contains("Finance"),
+          unowned._1 == Status.Ok,
+          deviating._1 == Status.Ok,
+          reader._1 == Status.Forbidden,
+          owner._1 == Status.Forbidden,
+          unknown._1 == Status.NotFound,
+          trail.size == before + 5,
+          trail.exists((actor, _, details) =>
+            actor == officer.value && details.contains("overdue-reviews") && details.contains(
+              "\"unit\": \"HR\""
+            ) &&
+              details.contains(s"\"rows\": ${screen.size}")
+          ),
+          trail.forall((actor, _, _) => actor == officer.value || actor == officerHr.value)
+        )
+    },
+    test("a title or a name in an export cannot run as a formula") {
+      for
+        f <- fixture
+        document = f.hrPolicy.documentId.value
+        title <- asOwner(sql"select title from dms.document where id = $document".query[String].run().head)
+        _     <- asOwner(
+          sql"""update dms.document set title = '=HYPERLINK("http://evil")' where id = $document""".update
+            .run()
+        )
+        csv <- exportOf(officer, "overdue-reviews")
+        _   <- asOwner(sql"update dms.document set title = $title where id = $document".update.run())
+      yield assertTrue(
+        csv._2.contains("\"'=HYPERLINK(\"\"http://evil\"\")\""),
+        csv._2.contains("'=Owner A"),
+        !csv._2.contains(";=")
+      )
+    },
+    test("the name list as a file needs the same purpose and is audited like the list") {
+      for
+        f <- fixture
+        path =
+          s"/api/v1/compliance/acknowledgements/${f.hrPolicy.documentId.value}/${f.hrPolicy.id}/open/export"
+        none    <- post(officer, path, "{}")
+        foreign <- post(ownerB, path, purpose)
+        before  <- personAudit.map(_.size)
+        csv     <- post(officer, s"$path?lang=en", purpose)
+        trail   <- personAudit
+      yield assertTrue(
+        none._1 == Status.Forbidden,
+        code(none).contains("purpose_required"),
+        foreign._1 == Status.Forbidden,
+        csv._1 == Status.Ok,
+        csv._2.contains("User id;Name"),
+        csv._2.contains(readerHr2.value),
+        trail.size == before + 1,
+        trail.last._1 == officer.value,
+        trail.last._2.contains("Rate below target"),
+        trail.last._3.contains("csv")
+      )
+    },
+    test("a notice about an overdue review goes out once per kind and day, for all officers (ADR 0077)") {
+      for
+        f      <- fixture
+        before <- audited(ComplianceNotices.Action).map(_.size)
+        reader <- notice(readerAll, f.hrPolicy, "reminder")
+        owner  <- notice(ownerA, f.hrPolicy, "reminder")
+        secret <- notice(officer, f.secret, "reminder")
+        notDue <- notice(officer, f.financeV2, "reminder")
+        old    <- notice(officer, f.financeV1, "reminder")
+        noKind <- post(
+          officer,
+          s"/api/v1/compliance/overdue-reviews/${f.hrPolicy.documentId.value}/${f.hrPolicy.id}/notices",
+          """{"reason":"x"}"""
+        )
+        noReason <- post(
+          officer,
+          s"/api/v1/compliance/overdue-reviews/${f.hrPolicy.documentId.value}/${f.hrPolicy.id}/notices",
+          """{"kind":"reminder","reason":"  "}"""
+        )
+        nobody <- notice(officerHr, f.hrPolicy, "escalation")
+        first  <- notice(officer, f.hrPolicy, "reminder")
+        again  <- notice(officer, f.hrPolicy, "reminder")
+        other  <- notice(officerHr, f.hrPolicy, "reminder")
+        up     <- notice(officer, f.hrPolicy, "escalation")
+        race   <- ZIO.collectAllPar(List.fill(4)(notice(officer, f.hrHandbook, "reminder")))
+        listed <- get(officer, "/api/v1/compliance/overdue-reviews").map(as[List[OverdueReviewView]])
+        trail  <- audited(ComplianceNotices.Action)
+        events <- asOwner(
+          sql"""select payload::text from dms.outbox_event where event_type = ${ComplianceNotices.Event}
+                and aggregate_id = ${f.hrPolicy.documentId.value} order by id""".query[String].run().toList
+        )
+        foreign <- setup.await.flatMap(
+          _.app.transact(TenantId.random())(
+            Db.sql(sql"select count(*) from dms.compliance_notice".query[Long].run().head)
+          )
+        )
+        deleted <- setup.await.flatMap(
+          _.app
+            .transact(tenantId)(Db.sql(sql"delete from dms.compliance_notice".update.run()))
+            .either
+        )
+      yield
+        val sent = as[ComplianceNoticeView](first)
+        val row  = listed.find(_.versionId == f.hrPolicy.id).get
+        assertTrue(
+          reader._1 == Status.Forbidden,
+          owner._1 == Status.Forbidden,
+          secret._1 == Status.Forbidden,
+          notDue._1 == Status.UnprocessableEntity,
+          code(notDue).contains("not_overdue"),
+          old._1 == Status.NotFound,
+          noKind._1 == Status.UnprocessableEntity,
+          noReason._1 == Status.UnprocessableEntity,
+          code(nobody).contains("no_recipient"),
+          first._1 == Status.Created,
+          sent.recipients == 1,
+          sent.nextNoticeAt == sent.sentAt.plus(java.time.Duration.ofHours(24)),
+          again._1 == Status.TooManyRequests,
+          code(again).contains("notice_too_soon"),
+          other._1 == Status.TooManyRequests,
+          up._1 == Status.Created,
+          as[ComplianceNoticeView](up).recipients == 2,
+          race.count(_._1 == Status.Created) == 1,
+          race.count(_._1 == Status.TooManyRequests) == 3,
+          row.nextReminderAt.contains(sent.nextNoticeAt),
+          row.nextEscalationAt.isDefined,
+          trail.size == before + 3,
+          trail.exists((actor, reason, details) =>
+            actor == officer.value && reason.contains("Owner did not react") && details.contains("reminder")
+          ),
+          events.size == 2,
+          events.head.contains(ownerA.value),
+          // the reason stays in the audit trail
+          !events.exists(_.contains("Owner did not react")),
+          foreign == 0L,
+          deleted.isLeft
+        )
     },
     test("the overview counts overdue reviews per unit and owner and acknowledgement rates") {
       for

@@ -695,6 +695,12 @@ final class DocumentService(
   def currentlyValid: IO[DocumentError, List[CurrentVersion]] =
     sql(DocumentStore.currentlyValid()).flatMap(currentVersions)
 
+  /** How many deviations from locked sections of the template the versions have (ADR 0022), as far as they
+    * have any.
+    */
+  def deviationCounts(versions: Set[UUID]): IO[DocumentError, Map[UUID, Int]] =
+    if versions.isEmpty then ZIO.succeed(Map.empty) else sql(DocumentStore.deviationCounts(versions))
+
   /** [[currentlyValid]] of one version: empty if it is not valid (any more). */
   def validVersion(id: UUID): IO[DocumentError, List[CurrentVersion]] =
     sql(DocumentStore.currentlyValid(Some(id))).flatMap(currentVersions)

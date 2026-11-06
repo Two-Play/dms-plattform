@@ -640,6 +640,91 @@ object DestructionServiceSpec extends ZIOSpecDefault:
       )
     },
     test(
+      "an evidence report loses its payload after its retention, once the document is gone, never under a hold"
+    ) {
+      def report(f: Fixture, document: DocumentId, at: String) =
+        val id      = UUID.randomUUID()
+        val created = java.time.OffsetDateTime.parse(at)
+        val payload = """{"integrity":{"status":"Intact"}}"""
+        owner(
+          sql"""insert into dms.evidence_report (id, tenant_id, document_id, format, created_at, created_by, payload, sha256)
+                values ($id, ${f.tenant.value}, ${document.value}, 2, $created, ${"auditor-1"}, $payload,
+                        encode(sha256(convert_to($payload, 'UTF8')), 'hex'))""".update.run()
+        ).as(id)
+      def gone(r: Record) =
+        owner {
+          val _ = sql"set local session_replication_role = replica".update.run()
+          sql"""update dms.document_version set status = 'Discarded' where id = ${r.version}""".update.run()
+        }
+      val old    = "2010-01-01T00:00:00Z"
+      val recent = java.time.OffsetDateTime.now().minusDays(1).toString
+      for
+        f      <- tenant
+        due    <- record(f)
+        fresh  <- record(f)
+        living <- record(f)
+        held   <- record(f)
+        _      <- gone(due) *> gone(fresh) *> gone(held)
+        _      <- holds(f.tenant)(
+          _.create(NewLegalHold("Hold", None, "Claim"), List(held.document), HoldSource.Document, first)
+        )
+        purged  <- report(f, due.document, old)
+        kept    <- report(f, fresh.document, recent)
+        alive   <- report(f, living.document, old)
+        holding <- report(f, held.document, old)
+        m       <- maintenance(MaintenanceConfig(evidenceReportRetention = 3650.days))
+        removed <- m.purgeEvidenceReports(f.tenant)
+        again   <- m.purgeEvidenceReports(f.tenant)
+        rows    <- owner(
+          sql"""select id, payload is null, payload_removed_at is not null, payload_removed_by, sha256 is not null
+                from dms.evidence_report where tenant_id = ${f.tenant.value}"""
+            .query[(UUID, Boolean, Boolean, Option[String], Boolean)]
+            .run()
+            .toList
+        )
+        logged <- auditOf("document.evidence-report-removed").map(
+          _.filter(_.target.id.contains(due.document.value))
+        )
+        // The database refuses it as well, whatever the application does.
+        forLiving <- app(f.tenant)(
+          sql"""update dms.evidence_report set payload = null, payload_removed_at = now(),
+                  payload_removed_by = 'x' where id = $alive""".update.run()
+        ).either
+        forHeld <- app(f.tenant)(
+          sql"""update dms.evidence_report set payload = null, payload_removed_at = now(),
+                  payload_removed_by = 'x' where id = $holding""".update.run()
+        ).either
+        changed <- app(f.tenant)(
+          sql"update dms.evidence_report set payload = 'other' where id = $kept".update.run()
+        ).either
+        twice <- app(f.tenant)(
+          sql"update dms.evidence_report set payload = '{}' where id = $purged".update.run()
+        ).either
+        creator <- app(f.tenant)(
+          sql"update dms.evidence_report set created_by = 'x' where id = $kept".update.run()
+        ).either
+        deleted <- app(f.tenant)(sql"delete from dms.evidence_report where id = $purged".update.run()).either
+      yield
+        val byId = rows.map((id, gone, at, by, sha) => id -> (gone, at, by, sha)).toMap
+        assertTrue(
+          removed == 1,
+          again == 0,
+          byId(purged) == (true, true, Some(RetentionMaintenance.Maintainer.value), true),
+          byId(kept)._1 == false,
+          byId(alive)._1 == false,
+          byId(holding)._1 == false,
+          logged.size == 1,
+          logged.head.actor.kind == ActorKind.Technical,
+          logged.head.details.value.contains(purged.toString),
+          forLiving.left.exists(_.toString.contains("still exists")),
+          forHeld.left.exists(_.toString.contains("legal hold")),
+          changed.isLeft,
+          twice.isLeft,
+          creator.isLeft,
+          deleted.isLeft
+        )
+    },
+    test(
       "the content of a discarded draft is removed after the grace period, unless it is under legal hold"
     ) {
       def discarded(f: Fixture, at: String) =

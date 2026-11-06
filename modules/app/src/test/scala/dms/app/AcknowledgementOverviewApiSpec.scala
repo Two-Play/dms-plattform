@@ -239,7 +239,7 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
   /** What the overview, acknowledgement, settings and compliance endpoints need, each type once. */
   private type Env = Authenticator & Db & Authorizer & DocumentService & ApprovalWorkflow &
     AcknowledgementService & RoleAssignments & Groups & AuditTrail & TenantOrganizations & UserDirectory &
-    AcknowledgementReminderConfig & DocumentClassService
+    AcknowledgementReminderConfig & DocumentClassService & ComplianceNoticeAudience
 
   private val env: ZLayer[Any, Throwable, Env] =
     ZLayer.make[Env](
@@ -258,6 +258,7 @@ object AcknowledgementOverviewApiSpec extends ZIOSpecDefault:
       DocumentService.layer,
       AcknowledgementService.layer,
       ZLayer.succeed(AcknowledgementReminderConfig(defaultDays = 14)),
+      ComplianceNoticeAudience.layer,
       FlowableEngine.layer,
       WorkflowDocuments.layer,
       RoleDirectory.layer,

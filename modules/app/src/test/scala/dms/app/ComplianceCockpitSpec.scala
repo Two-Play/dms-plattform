@@ -83,5 +83,57 @@ object ComplianceCockpitSpec extends ZIOSpecDefault:
         Rate(0, 0).share.isEmpty,
         Rate(4, 1).share.contains(0.25)
       )
+    },
+    test("documents without owner count once, whatever their validity scopes") {
+      val one     = version("A", Some("HR"), None, None)
+      val entries = List(Entry(one, None), Entry(one.copy(versionId = UUID.randomUUID()), None)) ++
+        List(Entry(version("B", Some("HR"), Some("o"), None), None))
+      assertTrue(
+        ComplianceCockpit.withoutOwner(entries, None).size == 1,
+        ComplianceCockpit.withoutOwner(entries, Some("Finance")).isEmpty
+      )
+    },
+    test("deviations: only versions that have any, the most first, by unit and owner") {
+      val entries = List(
+        Entry(version("A", Some("HR"), Some("o"), None), None, deviations = 1),
+        Entry(version("B", Some("HR"), Some("p"), None), None, deviations = 3),
+        Entry(version("C", Some("Finance"), Some("o"), None), None)
+      )
+      assertTrue(
+        ComplianceCockpit.deviationList(entries, None, None).map(_.deviations) == List(3, 1),
+        ComplianceCockpit.deviationList(entries, Some("HR"), Some("o")).map(_.deviations) == List(1)
+      )
+    },
+    test("a CSV cell cannot become a formula, whichever field it comes from") {
+      val hostile = "=HYPERLINK(\"http://x\";\"y\")"
+      val row     = OverdueReviewView(
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        hostile,
+        "+1",
+        List("-class", "b"),
+        Some("@unit"),
+        Some(" =owner"),
+        "Published",
+        today,
+        3
+      )
+      val csv   = ComplianceCsv.overdueReviews(Some("de"), List(row), _ => Some("\tname"))
+      val lines = csv.stripPrefix("\uFEFF").split("\r\n").toList
+      val cells = lines(1)
+      assertTrue(
+        csv.startsWith("\uFEFF"),
+        lines.head.startsWith("Dokument-ID;Titel;"),
+        cells.contains("\"'=HYPERLINK(\"\"http://x\"\";\"\"y\"\")\""),
+        cells.contains(";'+1;"),
+        cells.contains(";'-class/b;"),
+        cells.contains(";'@unit;"),
+        cells.contains(";' =owner;"),
+        cells.contains(";'\tname;"),
+        // numbers and dates are ours, and stay numbers and dates
+        cells.endsWith(s";$today;3"),
+        ComplianceCsv.overdueReviews(None, Nil, _ => None).contains("Document id;Title;"),
+        ComplianceCsv.persons(Some("en"), List(("-id", Some("@name")))).contains("'-id;'@name")
+      )
     }
   )

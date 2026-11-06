@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, RouterProvider } from '@tanstack/react-router'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { AuthContextProps } from 'react-oidc-context'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
 import type { ComplianceOverview, OverdueReview, VersionRate } from '@/api/compliance'
 import { ApiClientProvider } from '@/api/context'
@@ -24,8 +24,12 @@ const signedIn = {
 vi.mock('react-oidc-context', () => ({ useAuth: () => signedIn }))
 
 type Reply = Promise<{ data: unknown; error: unknown; response: Response }>
-const ok = (data: unknown): Reply =>
-  Promise.resolve({ data, error: undefined, response: new Response(null, { status: 200 }) })
+const ok = (data: unknown, headers: Record<string, string> = {}): Reply =>
+  Promise.resolve({
+    data,
+    error: undefined,
+    response: new Response(null, { status: 200, headers }),
+  })
 const failed = (status: number, body: unknown): Reply =>
   Promise.resolve({ data: undefined, error: body, response: new Response(null, { status }) })
 
@@ -42,22 +46,25 @@ const overview: ComplianceOverview = {
     { unit: 'HR', rate: { versions: 1, audience: 7, acknowledged: 1, open: 6, rate: 1 / 7 } },
     { unit: 'Finance', rate: { versions: 1, audience: 5, acknowledged: 2, open: 3, rate: 0.4 } },
   ],
+  documentsWithoutOwner: 2,
+  versionsWithDeviations: 1,
+  deviations: 4,
 }
 
-const overdue: OverdueReview[] = [
-  {
-    documentId: 'd1',
-    versionId: 'v1',
-    title: 'HR policy',
-    versionLabel: '1.0',
-    classPath: ['policy'],
-    unit: 'HR',
-    owner: 'owner-a',
-    status: 'ReviewDue',
-    dueOn: '2026-10-24',
-    daysOverdue: 5,
-  },
-]
+const hrReview: OverdueReview = {
+  documentId: 'd1',
+  versionId: 'v1',
+  title: 'HR policy',
+  versionLabel: '1.0',
+  classPath: ['policy'],
+  unit: 'HR',
+  owner: 'owner-a',
+  status: 'ReviewDue',
+  dueOn: '2026-10-24',
+  daysOverdue: 5,
+}
+
+const overdue: OverdueReview[] = [hrReview]
 
 const rates: VersionRate[] = [
   {
@@ -76,10 +83,36 @@ const rates: VersionRate[] = [
 ]
 
 let me: Me
+let reviews: OverdueReview[]
+let notices: () => Reply
 
 beforeEach(() => {
   me = { userId: 'officer', tenantId: 'tenant-1', roles: ['ComplianceOfficer'] }
+  reviews = overdue
+  notices = () =>
+    ok({
+      versionId: 'v1',
+      kind: 'reminder',
+      sentAt: '2026-10-29T10:00:00Z',
+      recipients: 2,
+      nextNoticeAt: '2026-10-30T10:00:00Z',
+    })
 })
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+function captureDownloads(): string[] {
+  Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:list'), revokeObjectURL: vi.fn() })
+  const downloads: string[] = []
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+    this: HTMLAnchorElement,
+  ) {
+    downloads.push(this.download)
+  })
+  return downloads
+}
 
 function renderAt(path: string) {
   const get = vi.fn((p: string, init?: { params?: { query?: Record<string, string> } }) => {
@@ -89,9 +122,33 @@ function renderAt(path: string) {
       case '/api/v1/compliance/overview':
         return ok(overview)
       case '/api/v1/compliance/overdue-reviews':
-        return ok(init?.params?.query?.unit === 'Finance' ? [] : overdue)
+        return ok(init?.params?.query?.unit === 'Finance' ? [] : reviews)
       case '/api/v1/compliance/acknowledgements':
         return ok(rates)
+      case '/api/v1/compliance/documents-without-owner':
+        return ok([
+          {
+            documentId: 'd2',
+            versionId: 'v2',
+            title: 'Orphan policy',
+            versionLabel: '2.0',
+            classPath: ['policy'],
+            publishedAt: '2026-01-01T08:00:00Z',
+          },
+        ])
+      case '/api/v1/compliance/deviations':
+        return ok([
+          {
+            documentId: 'd3',
+            versionId: 'v3',
+            title: 'Supplier contract',
+            versionLabel: '1.0',
+            classPath: ['contract'],
+            unit: 'Legal',
+            owner: 'owner-b',
+            deviations: 4,
+          },
+        ])
       default:
         return failed(404, { code: 'not_found', message: `unexpected ${p}` })
     }
@@ -111,6 +168,14 @@ function renderAt(path: string) {
               open: ['reader-hr-2', 'reader-all'],
             })
           : failed(403, { code: 'purpose_required', message: 'State the purpose.' })
+      case '/api/v1/compliance/overdue-reviews/{documentId}/{versionId}/notices':
+        return notices()
+      case '/api/v1/compliance/exports/{list}':
+        return ok(new Blob(['x']), { 'Content-Disposition': 'attachment; filename="list.csv"' })
+      case '/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open/export':
+        return ok(new Blob(['x']), { 'Content-Disposition': 'attachment; filename="names.csv"' })
+      case '/api/v1/documents/{id}/versions/{versionId}/acknowledgement-reminders':
+        return ok({ versionId: 'v1', sentAt: 'x', reminded: 6, nextReminderAt: 'y' })
       default:
         return failed(404, { code: 'not_found', message: `unexpected ${p}` })
     }
@@ -230,6 +295,156 @@ describe('compliance cockpit', () => {
       },
     )
   })
+
+  it('leads to the documents without owner and the deviations', async () => {
+    const { user } = renderAt('/compliance')
+
+    await user.click(
+      await screen.findByRole('link', { name: 'Documents without owner: 2. Show the list' }),
+    )
+    const unowned = await screen.findByRole('table', { name: 'Documents without owner' })
+    expect(within(unowned).getByRole('link', { name: 'Orphan policy' })).toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole('link', { name: 'Deviations from standard clauses: 4. Show the list' }),
+    )
+    const deviating = await screen.findByRole('table', { name: 'Deviations from standard clauses' })
+    expect(within(deviating).getByRole('link', { name: 'Supplier contract' })).toBeInTheDocument()
+    expect(within(deviating).getByText('4')).toBeInTheDocument()
+  })
+
+  it('exports the list with the filters of the screen', async () => {
+    const downloads = captureDownloads()
+    const { post, user } = renderAt('/compliance?view=reviews&unit=HR')
+
+    await screen.findByRole('table', { name: 'Overdue reviews' })
+    await user.click(screen.getByRole('button', { name: 'Export Overdue reviews as CSV' }))
+
+    await waitFor(() => {
+      expect(downloads).toEqual(['list.csv'])
+    })
+    expect(post).toHaveBeenCalledWith('/api/v1/compliance/exports/{list}', {
+      params: {
+        path: { list: 'overdue-reviews' },
+        query: { unit: 'HR', owner: undefined, document: undefined, lang: 'en' },
+      },
+      parseAs: 'blob',
+    })
+  })
+
+  it('has nothing to export from an empty list', async () => {
+    renderAt('/compliance?view=reviews&unit=Finance')
+
+    await screen.findByText('All periodic reviews in this selection are on time.')
+    expect(screen.getByRole('button', { name: 'Export Overdue reviews as CSV' })).toBeDisabled()
+  })
+
+  it('asks whom to tell and why before a notice goes out', async () => {
+    const { post, user } = renderAt('/compliance?view=reviews')
+
+    const list = await screen.findByRole('table', { name: 'Overdue reviews' })
+    await user.click(within(list).getByRole('button', { name: 'Notify about HR policy 1.0' }))
+
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }))
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('State why you send this notice.')
+    expect(post).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole('radio', { name: 'Escalate beyond the owner' }))
+    await user.type(within(dialog).getByLabelText('Reason *'), 'No reaction')
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/compliance/overdue-reviews/{documentId}/{versionId}/notices',
+      {
+        params: { path: { documentId: 'd1', versionId: 'v1' } },
+        body: { kind: 'escalation', reason: 'No reaction' },
+      },
+    )
+  })
+
+  it('names a notice refused as too soon and keeps the dialog open', async () => {
+    notices = () => failed(429, { code: 'notice_too_soon', message: 'too soon' })
+    const { user } = renderAt('/compliance?view=reviews')
+
+    const list = await screen.findByRole('table', { name: 'Overdue reviews' })
+    await user.click(within(list).getByRole('button', { name: 'Notify about HR policy 1.0' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText('Reason *'), 'No reaction')
+    await user.click(within(dialog).getByRole('button', { name: 'Send' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'A notice of this kind went out less than 24 hours ago.',
+    )
+  })
+
+  it('offers only what is possible now', async () => {
+    reviews = [
+      { ...hrReview, owner: undefined },
+      {
+        ...hrReview,
+        versionId: 'v2',
+        title: 'Handbook',
+        nextReminderAt: '2026-10-30T10:00:00Z',
+        nextEscalationAt: '2026-10-30T10:00:00Z',
+      },
+    ]
+    const { user } = renderAt('/compliance?view=reviews')
+
+    const list = await screen.findByRole('table', { name: 'Overdue reviews' })
+    expect(within(list).getByRole('button', { name: 'Notify about Handbook 1.0' })).toBeDisabled()
+    await user.click(within(list).getByRole('button', { name: 'Notify about HR policy 1.0' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('radio', { name: 'Remind the owner' })).toBeDisabled()
+    expect(within(dialog).getByRole('radio', { name: 'Escalate beyond the owner' })).toBeChecked()
+    expect(within(dialog).getByText('This document has no owner to remind.')).toBeInTheDocument()
+  })
+
+  it('reminds the readers of a version from the list', async () => {
+    const { post, user } = renderAt('/compliance?view=acknowledgements')
+
+    const list = await screen.findByRole('table', { name: 'Acknowledgement rate per version' })
+    await user.click(
+      within(list).getByRole('button', { name: 'Remind the readers of HR policy 1.0' }),
+    )
+
+    await waitFor(() => {
+      expect(post).toHaveBeenCalledWith(
+        '/api/v1/documents/{id}/versions/{versionId}/acknowledgement-reminders',
+        { params: { path: { id: 'd1', versionId: 'v1' } } },
+      )
+    })
+  })
+
+  it('exports the names with the purpose and reason already stated', async () => {
+    const downloads = captureDownloads()
+    const { post, user } = renderAt('/compliance?view=acknowledgements')
+
+    const list = await screen.findByRole('table', { name: 'Acknowledgement rate per version' })
+    await user.click(
+      within(list).getByRole('button', { name: 'Who has not acknowledged HR policy 1.0' }),
+    )
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText('Reason *'), 'Rate below target')
+    await user.click(within(dialog).getByRole('button', { name: 'Show names' }))
+    await user.click(await within(dialog).findByRole('button', { name: 'Download as CSV' }))
+
+    await waitFor(() => {
+      expect(downloads).toEqual(['names.csv'])
+    })
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/compliance/acknowledgements/{documentId}/{versionId}/open/export',
+      {
+        params: { path: { documentId: 'd1', versionId: 'v1' }, query: { lang: 'en' } },
+        body: { purpose: 'escalation', reason: 'Rate below target' },
+        parseAs: 'blob',
+      },
+    )
+  })
 })
 
 describe('compliance search parameters', () => {
@@ -248,5 +463,13 @@ describe('compliance search parameters', () => {
       document: 'd',
     })
     expect(parseCompliancePageSearch({ view: 'other', unit: 'HR' })).toEqual({})
+    expect(parseCompliancePageSearch({ view: 'unowned', unit: 'HR', owner: 'o' })).toEqual({
+      view: 'unowned',
+      unit: 'HR',
+    })
+    expect(parseCompliancePageSearch({ view: 'deviations', owner: 'o' })).toEqual({
+      view: 'deviations',
+      owner: 'o',
+    })
   })
 })

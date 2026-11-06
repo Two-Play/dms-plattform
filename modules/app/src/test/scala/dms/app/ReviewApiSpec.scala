@@ -975,5 +975,54 @@ object ReviewApiSpec extends ZIOSpecDefault:
           )
           .either
       yield assertTrue(own >= 1, foreign == 0, deleted.isLeft)
+    },
+    test(
+      "a notice from the cockpit reaches the people of the deadlines, not the officer who sent it (ADR 0077)"
+    ) {
+      val sender    = UserId("officer-notice")
+      val colleague = UserId("officer-colleague")
+      for
+        sent     <- Ref.make(List.empty[Mail])
+        s        <- setup.await
+        roles    <- ZIO.service[RoleAssignments]
+        workflow <- ZIO.service[ApprovalWorkflow]
+        _        <- s.app.transact(tenantId)(
+          roles.grant(sender, RoleAssignment(Role.ComplianceOfficer), admin) *>
+            roles.grant(colleague, RoleAssignment(Role.ComplianceOfficer), admin)
+        )
+        doc      <- validDocument()
+        audience <- ZIO
+          .service[ComplianceNoticeAudience]
+          .provide(ZLayer.succeed(workflow) >>> ComplianceNoticeAudience.layer)
+        target = ComplianceNotices.Target(dms.kernel.DocumentId(doc.id), doc.current.id, "1.0", None)
+        audit <- ZIO.service[AuditTrail]
+        reach = (escalate: Boolean) =>
+          s.app.transact(tenantId)(audience.of(target.document, target.version, escalate, sender))
+        reminder <- reach(false)
+        up       <- reach(true)
+        _        <- s.app.transact(tenantId)(
+          ComplianceNotices
+            .send(target, ComplianceNotices.Reminder, reminder, sender, "Why")
+            .provideEnvironment(ZEnvironment(audit)) *>
+            ComplianceNotices
+              .send(target, ComplianceNotices.Escalation, up, sender, "Why")
+              .provideEnvironment(ZEnvironment(audit))
+        )
+        _         <- instance("cockpit", sent).flatMap(_.drain)
+        delivered <- deliveries(doc.id)
+        stored    <- inApp(doc.id)
+        people = (kind: String) => delivered.filter(d => d._2 == kind && d._3 == "in-app").map(_._1)
+      yield assertTrue(
+        !up.escalatedTo.contains(sender),
+        up.escalatedTo.contains(colleague),
+        people("review.compliance-reminder") == List(owner.value),
+        people("review.compliance-escalation").contains(colleague.value),
+        people("review.compliance-escalation").contains(owner.value),
+        !people("review.compliance-escalation").contains(sender.value),
+        stored.exists((to, kind, _, body, _) =>
+          to == owner.value && kind == "review.compliance-reminder" && body.contains("Compliance")
+        ),
+        !stored.exists((_, _, _, body, _) => body.contains("Why"))
+      )
     }
   ).provideShared(env) @@ TestAspect.sequential @@ TestAspect.withLiveClock

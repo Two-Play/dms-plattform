@@ -101,8 +101,11 @@ export function recipientsCsv(
   headers: { name: string; userId: string; status: string; acknowledgedAt: string },
   statusLabel: (status: string) => string,
 ): string {
-  const cell = (value: string) =>
-    /[";\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+  const cell = (raw: string) => {
+    // A spreadsheet must not run a name as a formula (CSV injection, as the backend's exports).
+    const value = /^ *[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw
+    return /[";\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value
+  }
   const rows = (list.recipients ?? []).map((r) =>
     [r.displayName ?? '', r.userId, statusLabel(r.status), r.acknowledgedAt ?? '']
       .map(cell)

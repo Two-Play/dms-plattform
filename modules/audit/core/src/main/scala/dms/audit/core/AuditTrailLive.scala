@@ -9,6 +9,7 @@ import zio.*
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.UUID
 
 /** [[AuditTrail]] on `dms.audit_event` with one hash chain per tenant (ADR 0017). */
 final class AuditTrailLive(db: Db, trust: TsaTrust) extends AuditTrail:
@@ -22,6 +23,13 @@ final class AuditTrailLive(db: Db, trust: TsaTrust) extends AuditTrail:
 
   def verify(tenant: TenantId): IO[DbError, VerificationReport] =
     db.transact(tenant)(Db.sql(ChainVerifier.verify(tenant, trust)))
+
+  override def verifyAfter(
+      tenant: TenantId,
+      prefix: VerifiedPrefix,
+      objectId: UUID
+  ): IO[DbError, Option[VerificationReport]] =
+    db.transact(tenant)(Db.sql(ChainVerifier.verifyAfter(tenant, prefix, objectId, trust)))
 
 object AuditTrailLive:
   val layer: ZLayer[Db & TsaTrust, Nothing, AuditTrail] = ZLayer.fromFunction(AuditTrailLive(_, _))
@@ -54,18 +62,56 @@ object AuditTrailLive:
 private[core] object ChainVerifier:
 
   def verify(tenant: TenantId, trust: TsaTrust)(using DbTx): VerificationReport =
-    val anchors   = ChainStore.anchors(tenant.value)
+    walk(tenant, ChainStore.anchors(tenant.value), None, trust)
+
+  /** Walks what follows `prefix`, if the prefix can be trusted; see [[AuditTrail.verifyAfter]]. */
+  def verifyAfter(tenant: TenantId, prefix: VerifiedPrefix, objectId: UUID, trust: TsaTrust)(using
+      DbTx
+  ): Option[VerificationReport] =
+    val hash    = AuditHash.unhex(prefix.hash)
+    val anchors = ChainStore.anchors(tenant.value, from = prefix.untilSeq)
+    val anchor  = anchors.find(_.anchoredUntilSeq == prefix.untilSeq)
+    val trusted =
+      anchor.exists(checkAnchor(_, hash, trust).isEmpty) &&
+        ChainStore.hashAt(tenant.value, prefix.untilSeq).exists(MessageDigest.isEqual(_, hash)) &&
+        ChainStore.anchorsMatchEntries(tenant.value, prefix.untilSeq) &&
+        entriesIntact(tenant, objectId, prefix.untilSeq)
+    Option.when(trusted) {
+      val tail   = anchors.filter(_.anchoredUntilSeq > prefix.untilSeq)
+      val report = walk(tenant, tail, Some((prefix.untilSeq, hash)), trust)
+      report.copy(anchorsChecked = report.anchorsChecked + 1, trustedPrefix = Some(prefix))
+    }
+
+  /** Whether the entries about `objectId` up to `until` match their hashes and the links of their successors.
+    * The report prints these entries, so it reads them again even below the verified prefix.
+    */
+  private def entriesIntact(tenant: TenantId, objectId: UUID, until: Long)(using DbTx): Boolean =
+    val entries = ChainStore.entriesOf(objectId).filter(_.entry.chainSeq <= until)
+    val links   = ChainStore.prevHashes(tenant.value, entries.map(_.entry.chainSeq + 1))
+    entries.forall { stored =>
+      val seq    = stored.entry.chainSeq
+      val linked = seq == until || links.get(seq + 1).exists(MessageDigest.isEqual(_, stored.hash))
+      linked && stored.format == AuditHash.CurrentFormat &&
+      MessageDigest.isEqual(AuditHash.hash(stored.entry), stored.hash)
+    }
+
+  private def walk(
+      tenant: TenantId,
+      anchors: Vector[StoredAnchor],
+      start: Option[(Long, Array[Byte])],
+      trust: TsaTrust
+  )(using DbTx): VerificationReport =
     val bySeq     = anchors.groupBy(_.anchoredUntilSeq)
     var checked   = 0L
     var anchorsOk = 0
-    var last      = Option.empty[(Long, Array[Byte])]
+    var last      = start
     var violation = Option.empty[Violation]
 
     def fail(seq: Long, kind: Violation.Kind, detail: String): Boolean =
       violation = Some(Violation(seq, kind, detail))
       false
 
-    ChainStore.foreachEntry(tenant.value) { stored =>
+    ChainStore.foreachEntry(tenant.value, after = start.fold(0L)(_._1)) { stored =>
       val e        = stored.entry
       val expected = last.fold(1L)(_._1 + 1)
       if e.chainSeq != expected then

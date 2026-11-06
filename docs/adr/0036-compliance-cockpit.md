@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-10-29, implemented in DMS-59); person-list request amended by [0060](0060-purpose-and-reason-in-the-request-body.md) (DMS-144) |
+| Status | Accepted (2026-10-29, implemented in DMS-59); person-list request amended by [0060](0060-purpose-and-reason-in-the-request-body.md) (DMS-144); notices, export and further figures in [0077](0077-evidence-report-prefix-retention-and-cockpit-actions.md) (DMS-108) |
 | Date | 2026-10-29 |
 | Decided by | Philippe |
 

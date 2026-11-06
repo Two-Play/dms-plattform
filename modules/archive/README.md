@@ -61,6 +61,8 @@ All endpoints require `ManageRetention` (records manager) for the whole tenant; 
 
 A document whose versions are all destroyed (or discarded) is left out of `GET /api/v1/documents` and answers 404; evidence reports show a destroyed version's destruction and check it against the destruction record (`destruction record`, `destroyed rendition`) instead of re-reading the rendition.
 
+The maintenance also removes the payload of evidence reports (ADR 0077): once the report is older than `dms.retention.evidenceReportRetentionDays` (default 3650), its document is gone and no legal hold holds it. The registry entry stays, audited as `document.evidence-report-removed`.
+
 Tests: `DestructionServiceSpec` (PostgreSQL and SeaweedFS: destruction list, four eyes in service and database, tombstone, legal hold at proposal and approval, rejection, database guards, object removal with Object Lock retention, compaction rules and guard, discarded drafts, orphan clean-up with dry run, grace, holds and locks), `EvidenceReportApiSpec` (destruction through the API, 404 and list, intact evidence report), `SearchApiSpec` (a destroyed version leaves the index), `DocumentVersionSchemaSpec` (V33 transitions equal the lifecycle).
 ## Object Lock retention (DMS-93, ADR 0055)
 

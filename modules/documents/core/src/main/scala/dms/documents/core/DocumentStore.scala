@@ -610,6 +610,15 @@ private[core] object DocumentStore:
       .run()
       .toList
 
+  /** How many deviations from locked sections the stored reports of `versions` hold, for those that have any.
+    */
+  def deviationCounts(versions: Set[UUID])(using DbTx): Map[UUID, Int] =
+    sql"""select id, jsonb_array_length(deviation_report -> 'deviations') from dms.document_version
+          where id = any(${versions.toArray}) and jsonb_array_length(deviation_report -> 'deviations') > 0"""
+      .query[(UUID, Int)]
+      .run()
+      .toMap
+
   def attachRendition(id: UUID, r: Rendition)(using DbTx): Boolean =
     sql"""update dms.document_version
           set rendition_key = ${r.objectKey}, rendition_version = ${r.objectVersion},

@@ -16,7 +16,7 @@ import java.time.{Instant, ZoneOffset}
 object EvidenceReportLayout:
 
   /** Version of the layout; bump it when the output changes. */
-  val Version: String = "evidence-report-layout-1"
+  val Version: String = "evidence-report-layout-2"
 
   private val time = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss 'UTC'").withZone(ZoneOffset.UTC)
 
@@ -32,12 +32,21 @@ object EvidenceReportLayout:
     )
 
   def footer(report: EvidenceReportPayload, sha256: String): String =
-    s"Evidence report ${report.reportId} · created ${at(report.createdAt)} by ${report.createdBy}\nSHA-256 (JSON payload): $sha256"
+    s"Evidence report ${report.reportId} · created ${at(report.createdAt)} by ${person(report)(report.createdBy)}\nSHA-256 (JSON payload): $sha256"
+
+  /** How the report shows a person (ADR 0077): the display name recorded in it, with the user id if two
+    * people share a name, or the user id for someone without a name. Reports of format 1 hold no names.
+    */
+  private[app] def person(r: EvidenceReportPayload): String => String =
+    val names  = r.persons.getOrElse(Map.empty)
+    val shared = names.values.groupBy(identity).collect { case (name, all) if all.size > 1 => name }.toSet
+    id => names.get(id).fold(id)(name => if shared(name) then s"$name ($id)" else name)
 
   def html(r: EvidenceReportPayload, sha256: String): String =
     val created = DateTimeFormatter.ISO_INSTANT.format(r.createdAt.truncatedTo(ChronoUnit.SECONDS))
     val margin = "font-family: \"Noto Sans\", sans-serif; font-size: 7pt; color: #333; white-space: pre-wrap;"
     val out    = StringBuilder(32768)
+    val who    = person(r)
     def add(parts: String*): Unit = parts.foreach(p => out.append(p): Unit)
     add(
       "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n",
@@ -82,14 +91,14 @@ object EvidenceReportLayout:
     facts(
       out,
       List(
-        "Document"                    -> s"${r.document.title} (${r.document.id})",
-        "Document class"              -> r.document.classPath.mkString(" › "),
-        "Author / owner"              -> s"${r.document.authorId} / ${r.document.ownerId.getOrElse("–")}",
-        "Created"                     -> at(r.document.createdAt),
-        "Template"                    -> s"${r.document.templateId} version ${r.document.templateVersion}",
-        "Report id"                   -> r.reportId.toString,
-        "Report created"              -> s"${at(r.createdAt)} by ${r.createdBy}",
-        "Report format"               -> r.format,
+        "Document"       -> s"${r.document.title} (${r.document.id})",
+        "Document class" -> r.document.classPath.mkString(" › "),
+        "Author / owner" -> s"${who(r.document.authorId)} / ${r.document.ownerId.fold("–")(who)}",
+        "Created"        -> at(r.document.createdAt),
+        "Template"       -> s"${r.document.templateId} version ${r.document.templateVersion}",
+        "Report id"      -> r.reportId.toString,
+        "Report created" -> s"${at(r.createdAt)} by ${who(r.createdBy)}",
+        "Report format"  -> r.format,
         "SHA-256 of the JSON payload" -> sha256,
         "Integrity status"            -> r.integrity.status
       ),
@@ -102,9 +111,17 @@ object EvidenceReportLayout:
       out,
       List(
         "Checked at"  -> at(r.integrity.checkedAt),
-        "Audit chain" -> (if c.intact then s"intact, ${c.entriesChecked} entries verified" else "violated"),
-        "Chain head"  -> s"${c.headSeq.fold("–")(_.toString)} ${c.headHash.getOrElse("")}",
-        "Violation"   -> c.violation.fold("none")(v => s"position ${v.chainSeq}: ${v.kind} (${v.detail})"),
+        "Audit chain" -> (if !c.intact then "violated"
+                          else
+                            c.trustedPrefix.fold(s"intact, ${c.entriesChecked} entries verified")(p =>
+                              s"intact, ${c.entriesChecked} entries after position ${p.untilSeq} verified"
+                            )),
+        "Chain head" -> s"${c.headSeq.fold("–")(_.toString)} ${c.headHash.getOrElse("")}",
+        "Violation"  -> c.violation.fold("none")(v => s"position ${v.chainSeq}: ${v.kind} (${v.detail})")
+      ) ++ c.trustedPrefix.toList.map(p =>
+        "Verified prefix" ->
+          s"up to anchored position ${p.untilSeq} (${p.hash}); whole chain last verified ${at(p.verifiedAt)}"
+      ) ++ List(
         "Document entries" -> s"${c.documentEntries}, verified: ${yesNo(c.documentEntriesVerified)}",
         "Timestamp anchor" ->
           (c.anchoredUntilSeq.fold("none")(s =>
@@ -138,8 +155,8 @@ object EvidenceReportLayout:
           v.version,
           v.status,
           v.changeKind + v.changeReason.fold("")(c => s": $c"),
-          s"${at(v.createdAt)} by ${v.createdBy}",
-          v.releasedAt.fold("–")(at) + v.releasedBy.fold("")(b => s" by $b"),
+          s"${at(v.createdAt)} by ${who(v.createdBy)}",
+          v.releasedAt.fold("–")(at) + v.releasedBy.fold("")(b => s" by ${who(b)}"),
           v.validity.fold("never valid")(p => s"${at(p.from)} – ${p.until.fold("now")(at)}"),
           v.rendition.fold("–")(_.sha256)
         )
@@ -160,7 +177,7 @@ object EvidenceReportLayout:
         ) ++ v.withdrawal.toList.flatMap(w =>
           List(
             "Withdrawn, never valid" ->
-              (at(w.at) + s" by ${w.by}" + w.actingFor.fold("")(p => s" on behalf of $p")),
+              (at(w.at) + s" by ${who(w.by)}" + w.actingFor.fold("")(p => s" on behalf of ${who(p)}")),
             "Reason of the withdrawal" -> w.reason
           )
         )
@@ -185,8 +202,8 @@ object EvidenceReportLayout:
           out,
           List(
             "Destroyed"         -> at(d.destroyedAt),
-            "Proposed"          -> s"${at(d.proposedAt)} by ${d.proposedBy}: ${d.proposalReason}",
-            "Approved"          -> s"${at(d.approvedAt)} by ${d.approvedBy}: ${d.approvalReason}",
+            "Proposed"          -> s"${at(d.proposedAt)} by ${who(d.proposedBy)}: ${d.proposalReason}",
+            "Approved"          -> s"${at(d.approvedAt)} by ${who(d.approvedBy)}: ${d.approvalReason}",
             "Retention"         -> s"${d.retentionRule}, ended ${d.retentionEndedOn}",
             "Rendition SHA-256" -> d.renditionSha256.getOrElse("–"),
             "Approved content"  -> d.contentSha256.getOrElse("–")
@@ -207,7 +224,9 @@ object EvidenceReportLayout:
         table(
           out,
           List("Name", "Size (bytes)", "SHA-256", "Uploaded", "Virus scan"),
-          List(List(o.name, o.size.toString, o.sha256, s"${at(o.addedAt)} by ${o.addedBy}", o.scanStatus)),
+          List(
+            List(o.name, o.size.toString, o.sha256, s"${at(o.addedAt)} by ${who(o.addedBy)}", o.scanStatus)
+          ),
           mono = Set(2)
         )
       }
@@ -217,7 +236,7 @@ object EvidenceReportLayout:
           out,
           List("Name", "Size (bytes)", "SHA-256", "Added", "Virus scan"),
           attachments.map(a =>
-            List(a.name, a.size.toString, a.sha256, s"${at(a.addedAt)} by ${a.addedBy}", a.scanStatus)
+            List(a.name, a.size.toString, a.sha256, s"${at(a.addedAt)} by ${who(a.addedBy)}", a.scanStatus)
           ),
           mono = Set(2)
         )
@@ -231,8 +250,8 @@ object EvidenceReportLayout:
             List(
               d.sectionId,
               d.reason,
-              s"${at(d.requestedAt)} by ${d.requestedBy}",
-              d.withdrawnAt.fold("–")(w => s"${at(w)} by ${d.withdrawnBy.getOrElse("")}")
+              s"${at(d.requestedAt)} by ${who(d.requestedBy)}",
+              d.withdrawnAt.fold("–")(w => s"${at(w)} by ${d.withdrawnBy.fold("")(who)}")
             )
           )
         )
@@ -244,7 +263,7 @@ object EvidenceReportLayout:
           w.votes.map(vote =>
             List(
               s"${vote.round} / ${vote.step} (${vote.lane})",
-              vote.voter + vote.actingFor.fold("")(p => s" on behalf of $p"),
+              who(vote.voter) + vote.actingFor.fold("")(p => s" on behalf of ${who(p)}"),
               vote.decision + vote.invalidatedAt.fold("")(i => s" (invalidated ${at(i)})"),
               vote.reason.getOrElse("–"),
               at(vote.votedAt),
@@ -256,8 +275,8 @@ object EvidenceReportLayout:
           facts(
             out,
             List(
-              "Approved" -> s"${at(a.approvedAt)} by ${a.approvedBy}${a.actingFor
-                  .fold("")(p => s" on behalf of $p")}",
+              "Approved" -> s"${at(a.approvedAt)} by ${who(a.approvedBy)}${a.actingFor
+                  .fold("")(p => s" on behalf of ${who(p)}")}",
               "Approved content SHA-256" -> a.contentSha256
             )
           )
@@ -276,7 +295,7 @@ object EvidenceReportLayout:
           table(
             out,
             List("Reader", "Opened", "Acknowledged"),
-            a.entries.map(e => List(e.userId, at(e.openedAt), at(e.acknowledgedAt)))
+            a.entries.map(e => List(who(e.userId), at(e.openedAt), at(e.acknowledgedAt)))
           )
       }
       if v.reviews.nonEmpty then
@@ -288,7 +307,7 @@ object EvidenceReportLayout:
             List(
               t.dueOn.toString,
               reviewStatus(t, v.reviews),
-              t.decidedAt.fold("–")(d => s"${at(d)} by ${t.decidedBy.getOrElse("")}"),
+              t.decidedAt.fold("–")(d => s"${at(d)} by ${t.decidedBy.fold("")(who)}"),
               t.nextDueOn.fold("–")(_.toString),
               t.comment.getOrElse("–")
             )
@@ -306,13 +325,13 @@ object EvidenceReportLayout:
           List(
             h.name + h.matterReference.fold("")(m => s" ($m)"),
             h.reason,
-            s"${at(h.createdAt)} by ${h.createdBy}",
+            s"${at(h.createdAt)} by ${who(h.createdBy)}",
             h.documentRemovedAt.fold(
               h.releasedAt.fold("active")(t =>
-                s"${at(t)} by ${h.releasedBy.getOrElse("")}: ${h.releaseReason.getOrElse("")}"
+                s"${at(t)} by ${h.releasedBy.fold("")(who)}: ${h.releaseReason.getOrElse("")}"
               )
             )(t =>
-              s"document removed ${at(t)} by ${h.documentRemovedBy.getOrElse("")}: " +
+              s"document removed ${at(t)} by ${h.documentRemovedBy.fold("")(who)}: " +
                 h.documentRemovalReason.getOrElse("")
             )
           )
@@ -327,7 +346,8 @@ object EvidenceReportLayout:
         List(
           e.chainSeq.toString,
           at(e.occurredAt),
-          e.actorId + e.onBehalfOf.fold("")(p => s" on behalf of $p") + s" (${e.actorKind}, ${e.channel})",
+          who(e.actorId) + e.onBehalfOf.fold("")(p => s" on behalf of ${who(p)}") +
+            s" (${e.actorKind}, ${e.channel})",
           e.action,
           e.objectVersion.getOrElse("–"),
           e.reason.getOrElse("–"),
@@ -336,6 +356,15 @@ object EvidenceReportLayout:
       ),
       mono = Set(6)
     )
+
+    r.persons.filter(_.nonEmpty).foreach { names =>
+      add("<h2>Persons</h2>\n")
+      table(
+        out,
+        List("Display name when the report was created", "User id"),
+        names.toList.sortBy((id, name) => (name, id)).map((id, name) => List(name, id))
+      )
+    }
 
     add("<h2>Notes and verification</h2>\n<ul>\n")
     r.notes.foreach(n => add("<li>", escape(n), "</li>\n"))

@@ -1,5 +1,6 @@
 package dms.audit.core
 
+import dms.audit.AuditEvidence
 import dms.db.queue.{ClaimedJob, JobQueue}
 import dms.db.{Db, DbError}
 import dms.kernel.TenantId
@@ -11,11 +12,18 @@ import java.time.{Instant, LocalDate, ZoneOffset}
   *   how often the chain head of every tenant is checkpointed; this is the unprotected window (ADR 0017)
   * @param anchorHourUtc
   *   hour of the day (UTC) at which the daily RFC 3161 anchor is due
+  * @param verifyHourUtc
+  *   hour of the day (UTC) at which the daily full verification is due; after the anchor, so that the
+  *   verified prefix reaches it
   */
-final case class AuditScheduleConfig(checkpointInterval: Duration = 5.minutes, anchorHourUtc: Int = 2)
+final case class AuditScheduleConfig(
+    checkpointInterval: Duration = 5.minutes,
+    anchorHourUtc: Int = 2,
+    verifyHourUtc: Int = 3
+)
 
-/** Schedules and runs the periodic audit work as jobs (DMS-75): a checkpoint per tenant and interval, and one
-  * timestamp anchor per tenant and day.
+/** Schedules and runs the periodic audit work as jobs (DMS-75): a checkpoint per tenant and interval, one
+  * timestamp anchor and one full verification of the chain per tenant and day (ADR 0077).
   *
   * Every instance calls [[tick]]; idempotency keys per tenant and period make sure each job exists only once,
   * and the job queue makes sure only one worker runs it. Without trusted TSA certificates `anchoring` is
@@ -25,13 +33,14 @@ final class AuditJobs(
     db: Db,
     anchoring: Option[AuditAnchoring],
     checkpoints: AuditCheckpoints,
+    evidence: AuditEvidence,
     config: AuditScheduleConfig
 ):
   import AuditJobs.*
 
   /** Handlers to register with the job runner. */
   val handlers: Map[String, ClaimedJob => IO[String, Unit]] =
-    Map(CheckpointKind -> forTenant(checkpoints.write(_).unit)) ++
+    Map(CheckpointKind -> forTenant(checkpoints.write(_).unit), VerifyKind -> forTenant(verify)) ++
       anchoring.map(a => AnchorKind -> forTenant(a.anchor(_).unit))
 
   /** Enqueues the jobs that are due at `now` for all tenants. Returns how many jobs were newly enqueued. */
@@ -39,6 +48,7 @@ final class AuditJobs(
     val window   = now.getEpochSecond / config.checkpointInterval.toSeconds.max(1)
     val day      = LocalDate.ofInstant(now, ZoneOffset.UTC)
     val anchorAt = day.atTime(config.anchorHourUtc, 0).toInstant(ZoneOffset.UTC)
+    val verifyAt = day.atTime(config.verifyHourUtc, 0).toInstant(ZoneOffset.UTC)
     JobQueue.tenantIds(db).flatMap { tenants =>
       ZIO
         .foreach(tenants) { tenant =>
@@ -57,7 +67,13 @@ final class AuditJobs(
                   maxAttempts = 24
                 )
               )
-            yield checkpoint.size + anchor.flatten.size
+              verify <- JobQueue.enqueue(
+                VerifyKind,
+                idempotencyKey = Some(s"$VerifyKind:${tenant.value}:$day"),
+                runAt = Some(verifyAt),
+                maxAttempts = 3
+              )
+            yield checkpoint.size + anchor.flatten.size + verify.size
           )
         }
         .map(_.sum)
@@ -68,9 +84,22 @@ final class AuditJobs(
     (Clock.instant.flatMap(tick).catchAll(e => ZIO.logWarning(s"Scheduling audit jobs failed: $e").as(0)) *>
       ZIO.sleep(config.checkpointInterval)).forever
 
+  /** The whole chain, recorded as a run. A violation is a finding, not a failure of the job: it stays on
+    * record, and from then on every report verifies the whole chain and shows it.
+    */
+  private def verify(tenant: TenantId): IO[DbError, Unit] =
+    evidence.verifyFully(tenant).flatMap { state =>
+      ZIO.foreachDiscard(state.verification.violation)(v =>
+        ZIO.logError(
+          s"Audit chain of tenant ${tenant.value} violated at position ${v.chainSeq}: ${v.kind} (${v.detail})"
+        )
+      )
+    }
+
 object AuditJobs:
   val CheckpointKind = "audit.checkpoint"
   val AnchorKind     = "audit.anchor"
+  val VerifyKind     = "audit.verify"
 
   private def forTenant(work: TenantId => IO[Any, Unit]): ClaimedJob => IO[String, Unit] = job =>
     job.tenant match

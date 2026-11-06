@@ -261,6 +261,9 @@ object Profile:
   *   working states saved within this many days are never compacted
   * @param discardedContentGraceDays
   *   the content of a discarded draft is removed this many days after it was discarded
+  * @param evidenceReportRetentionDays
+  *   the payload of an evidence report is kept at least this many days after its creation, and always as long
+  *   as its document exists or a legal hold holds it (ADR 0077)
   * @param orphanGraceHours
   *   orphaned objects and files are removed only once they are older than this
   * @param sweepOrphans
@@ -274,6 +277,7 @@ final case class RetentionConfig(
     keepWorkingStatesClosed: Int = 1,
     keepRecentWorkingStatesDays: Int = 7,
     discardedContentGraceDays: Int = 30,
+    evidenceReportRetentionDays: Int = 3650,
     orphanGraceHours: Int = 168,
     sweepOrphans: Boolean = true,
     objectLock: ObjectLockConfig = ObjectLockConfig()
@@ -285,6 +289,7 @@ final case class RetentionConfig(
       keepLatestClosed = keepWorkingStatesClosed.max(1),
       keepRecent = zio.Duration.fromSeconds(keepRecentWorkingStatesDays.max(0).toLong * 86400),
       discardedContentGrace = zio.Duration.fromSeconds(discardedContentGraceDays.max(0).toLong * 86400),
+      evidenceReportRetention = zio.Duration.fromSeconds(evidenceReportRetentionDays.max(1).toLong * 86400),
       sweepOrphans = sweepOrphans
     )
 
