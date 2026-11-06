@@ -20,6 +20,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { UserName } from '@/components/shared/user-name'
 import { t, tOptional } from '@/i18n'
 import { formatDate } from '@/i18n/format'
+import { pageHeading, useReturnFocus } from '@/lib/return-focus'
 import { toast } from '@/lib/toast'
 import { InlineError } from '@/components/shared/error-state'
 import { errorText } from '@/components/shared/error-messages'
@@ -153,6 +154,7 @@ function description(version: WithdrawableVersion): string {
 export function WithdrawVersionAction({ document }: { document: DocumentView }) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
+  const focusReturn = useReturnFocus(pageHeading)
   const version = document.withdrawable
   if (!version) return null
 
@@ -167,6 +169,7 @@ export function WithdrawVersionAction({ document }: { document: DocumentView }) 
         size="sm"
         variant="destructive"
         onClick={() => {
+          focusReturn.remember()
           setOpen(true)
         }}
       >
@@ -180,7 +183,7 @@ export function WithdrawVersionAction({ document }: { document: DocumentView }) 
           else close()
         }}
       >
-        <DialogContent>
+        <DialogContent onCloseAutoFocus={focusReturn.restore}>
           <DialogHeader>
             <DialogTitle>{t('withdrawVersion.title', { label: version.version })}</DialogTitle>
             <DialogDescription>{description(version)}</DialogDescription>

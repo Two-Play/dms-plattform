@@ -81,7 +81,7 @@ export const compliance = {
     position: 'at position {position}',
     since: '(found since {date})',
     violatedHint:
-      'Evidence reports state this until a verification finds the chain intact again. Compliance officers and tenant administrators have been told.',
+      'Evidence reports state this until a verification finds the chain intact again. Compliance officers and tenant administrators get a notice with the daily verification.',
     stale:
       'This result is out of date: the last verification is more than {days} days old, so the daily verification has not run.',
     noCheckpoints:

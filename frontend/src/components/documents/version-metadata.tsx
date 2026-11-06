@@ -11,6 +11,7 @@ import { formatDate, formatPlainDate } from '@/i18n/format'
 import { displayValue } from './draft-values'
 import { RetentionRow } from './retention-row'
 import { StatusBadge } from './status-badge'
+import { versionStatus } from './status-label'
 
 /**
  * Keys of the values the metadata panel shows in its own rows; the "further details" list leaves them
@@ -107,7 +108,7 @@ export function VersionMetadata({
       <CardContent className="space-y-6">
         <dl className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-x-4 gap-y-2 text-sm">
           <Row label={t('docs.meta.status')}>
-            <StatusBadge status={version.status} />
+            <StatusBadge status={versionStatus(version)} />
           </Row>
           <Row label={t('docs.meta.index')}>
             {t('docs.meta.indexValue', { index })}

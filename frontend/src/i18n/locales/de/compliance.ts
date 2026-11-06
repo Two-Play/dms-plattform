@@ -107,7 +107,7 @@ export const compliance: Translation<typeof en.compliance> = {
     position: 'an Position {position}',
     since: '(gefunden seit {date})',
     violatedHint:
-      'Nachweisberichte weisen das aus, bis eine Prüfung die Kette wieder als intakt bestätigt. Compliance-Beauftragte und Mandantenadministration sind informiert.',
+      'Nachweisberichte weisen das aus, bis eine Prüfung die Kette wieder als intakt bestätigt. Compliance-Beauftragte und Mandantenadministration erhalten mit der täglichen Prüfung eine Meldung.',
     stale:
       'Dieses Ergebnis ist veraltet: Die letzte Prüfung ist älter als {days} Tage, die tägliche Prüfung ist also nicht gelaufen.',
     noCheckpoints:
