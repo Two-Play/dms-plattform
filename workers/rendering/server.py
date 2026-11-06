@@ -12,12 +12,18 @@ external resource fails the render.
 Variants: PDF/A for everything archived, "plain" for drafts printed on demand (DMS-118, ADR 0073): an ordinary PDF
 with no PDF/A identification, no output intent and no XMP packet, so that it cannot pass for an archive copy.
 
+Limits (DMS-171, ADR 0081): a page estimated above DMS_RENDER_MAX_PAGES is refused before it is rendered. Every render
+runs in a child process of its own that is killed after DMS_RENDER_TIME_LIMIT_SECONDS: WeasyPrint cannot be interrupted
+in a thread. So neither a long document nor the memory it needs can take this process, or its lock, with it.
+
 Endpoints:
   GET  /health   200 {"status": "ok", "renderer": "..."}
   POST /render   JSON request (see RenderRequest below) -> 200 application/pdf
                  headers X-Renderer (renderer versions), X-Pages (page count), X-Worker-Image (image
                  reference from DMS_WORKER_IMAGE) and X-Worker-Build (build fingerprint)
                  400 malformed request, 422 the page cannot be rendered as requested, 500 unexpected failure
+                 errors are JSON with "error"; a 422 for a limit also has "code": "too_long" (over the page limit, or
+                 the render ran out of memory) or "time_limit" (killed at the time limit), which a retry cannot cure
 """
 
 import argparse
@@ -26,8 +32,12 @@ import html
 import importlib.metadata
 import json
 import logging
+import math
+import multiprocessing
+import multiprocessing.forkserver
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -75,6 +85,21 @@ VARIANTS = {"pdf/a-2b", "pdf/a-3b", PLAIN}
 MAX_REQUEST_BYTES = 32 * 1024 * 1024
 IDENTIFIER = re.compile(r"^[0-9a-f]{32}$")
 
+
+def limit_from_env(name: str, default: int) -> int:
+    """A limit of the deployment. A value that is no positive number stops the worker at start instead of turning
+    the limit off unnoticed."""
+    value = os.environ.get(name, "").strip()
+    limit = int(value) if value else default
+    if limit <= 0:
+        raise ValueError(f"{name} must be positive")
+    return limit
+
+
+# Keep the application's dms.rendering.timeoutSeconds above the time limit, or it gives up first and retries.
+RENDER_TIME_LIMIT_SECONDS = limit_from_env("DMS_RENDER_TIME_LIMIT_SECONDS", 120)
+MAX_ESTIMATED_PAGES = limit_from_env("DMS_RENDER_MAX_PAGES", 300)
+
 DMS_NS = "https://dms.it-heimnet.de/ns/document/1.0/"
 for _prefix, _uri in {
     "pdfaExtension": "http://www.aiim.org/pdfa/ns/extension/",
@@ -114,6 +139,14 @@ class BadRequest(Exception):
 
 class Unrenderable(Exception):
     """The page cannot be rendered as requested (422)."""
+
+
+class OverLimit(Unrenderable):
+    """The page is beyond a limit of this worker (422 with a code). It would fail the same way on every attempt."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
 
 
 def xmp_packet(properties: dict) -> bytes:
@@ -181,24 +214,103 @@ class NoFetching(URLFetcher):
         raise Unrenderable(f"external resource not allowed: {url[:200]}")
 
 
-# WeasyPrint and its native libraries are not documented as thread-safe: one render at a time per process.
-# Scale with more containers.
-RENDER_LOCK = threading.Lock()
+# What a page of the document stylesheet holds, measured on the samples of spike DMS-23 (ADR 0081): running text fills
+# a page at about 2,000 characters, clauses and tables at about 105 tags. Tags are also what memory and time grow with.
+CHARS_PER_PAGE = 2000
+TAGS_PER_PAGE = 105
+TAG = re.compile(r"<[^<>]*>")  # linear also on malformed input; an image's data URI goes with its tag
+
+
+def estimated_pages(page: str) -> int:
+    """The pages to expect, from the body alone, without any layout. This runs in the server, so it stays linear."""
+    body = page[max(page.find("<body"), 0):]
+    text, tags = TAG.subn("", body)
+    return math.ceil(max(len(text) / CHARS_PER_PAGE, tags / TAGS_PER_PAGE))
+
+
+def check_length(page: str) -> None:
+    estimate = estimated_pages(page)
+    if estimate > MAX_ESTIMATED_PAGES:
+        raise OverLimit("too_long", f"the document has about {estimate} pages, the limit is {MAX_ESTIMATED_PAGES}")
 
 
 def render(request: dict) -> tuple[bytes, int]:
     plain = request["variant"] == PLAIN
     xmp = None if plain else xmp_packet({**request["xmp"], "renderer": request["xmp"].get("renderer") or RENDERER})
-    with RENDER_LOCK:
-        try:
-            document = weasyprint.HTML(string=request["html"], url_fetcher=NoFetching()).render()
-        except FatalURLFetchingError as e:
-            raise Unrenderable(str(e.__cause__ or e)) from e
-        if xmp is not None:
-            merge_xmp(document.metadata, xmp)
-        identifier = request["identifier"].encode() if request["identifier"] else None
-        pdf = document.write_pdf(pdf_variant=None if plain else request["variant"], pdf_identifier=identifier)
+    try:
+        document = weasyprint.HTML(string=request["html"], url_fetcher=NoFetching()).render()
+    except FatalURLFetchingError as e:
+        raise Unrenderable(str(e.__cause__ or e)) from e
+    if xmp is not None:
+        merge_xmp(document.metadata, xmp)
+    identifier = request["identifier"].encode() if request["identifier"] else None
+    pdf = document.write_pdf(pdf_variant=None if plain else request["variant"], pdf_identifier=identifier)
     return pdf, len(document.pages)
+
+
+def configure_logging() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    # WeasyPrint's progress messages are noise; its warnings (layout, CSS) explain unexpected output and stay.
+    logging.getLogger("weasyprint.progress").setLevel(logging.WARNING)
+
+
+def render_in_child(request: dict, result) -> None:
+    """The child process of one render: sends back the outcome, or dies and says nothing."""
+    configure_logging()
+    try:
+        outcome = ("rendered", *render(request))
+    except Unrenderable as e:
+        outcome = ("unrenderable", str(e))
+    except Exception as e:  # noqa: BLE001 - every other failure is reported as 500 with its type
+        logging.exception("render failed")
+        outcome = ("failed", f"{type(e).__name__}: {e}")
+    result.send(outcome)
+    result.close()
+
+
+# A single-threaded process that has imported this file forks one child per render: forking this threaded server
+# would copy its locks, and a fresh interpreter per render would pay for the imports each time.
+CHILDREN = multiprocessing.get_context("forkserver")
+
+# WeasyPrint and its native libraries are not documented as thread-safe: one render at a time per process, and one
+# child at a time per container, also because of the memory limit. Scale with more containers.
+RENDER_LOCK = threading.Lock()
+
+
+def render_limited(request: dict) -> tuple[bytes, int]:
+    """Renders in a child process and ends it at the time limit. The lock is free again in every case."""
+    with RENDER_LOCK:
+        receiver, sender = CHILDREN.Pipe(duplex=False)
+        child = CHILDREN.Process(target=render_in_child, args=(request, sender), daemon=True)
+        child.start()
+        sender.close()
+        try:
+            if not receiver.poll(RENDER_TIME_LIMIT_SECONDS):
+                logging.warning("render stopped at the time limit of %d s", RENDER_TIME_LIMIT_SECONDS)
+                raise OverLimit("time_limit", f"the render took longer than {RENDER_TIME_LIMIT_SECONDS} seconds")
+            try:
+                outcome = receiver.recv()
+            except (EOFError, OSError):  # poll() also ends when the child dies
+                outcome = None
+                child.join(5)
+        finally:
+            child.kill()
+            child.join()
+            receiver.close()
+    if outcome is None:
+        # SIGKILL from anyone but us: the kernel, at the container's memory limit. One render at a time, so it was
+        # this document that needed the memory.
+        logging.warning("render child ended without a result, exit code %s", child.exitcode)
+        if child.exitcode == -signal.SIGKILL:
+            raise OverLimit("too_long", "the document needs more memory than the rendering worker has")
+        raise RuntimeError(f"the render ended unexpectedly with exit code {child.exitcode}")
+    match outcome:
+        case ("rendered", pdf, pages):
+            return pdf, pages
+        case ("unrenderable", message):
+            raise Unrenderable(message)
+        case (_, message):
+            raise RuntimeError(message)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -223,9 +335,12 @@ class Handler(BaseHTTPRequestHandler):
             if length <= 0 or length > MAX_REQUEST_BYTES:
                 raise BadRequest(f"Content-Length must be between 1 and {MAX_REQUEST_BYTES}")
             request = parse_request(self.rfile.read(length))
-            pdf, pages = render(request)
+            check_length(request["html"])
+            pdf, pages = render_limited(request)
         except BadRequest as e:
             self.reply_json(HTTPStatus.BAD_REQUEST, {"error": str(e)})
+        except OverLimit as e:
+            self.reply_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": str(e), "code": e.code})
         except Unrenderable as e:
             self.reply_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"error": str(e)})
         except Exception as e:  # noqa: BLE001 - report every other failure as 500 with its type
@@ -259,15 +374,15 @@ def main() -> int:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    # WeasyPrint's progress messages are noise; its warnings (layout, CSS) explain unexpected output and stay.
-    logging.getLogger("weasyprint.progress").setLevel(logging.WARNING)
+    configure_logging()
     global WORKER_BUILD
     WORKER_BUILD = build_fingerprint()
+    CHILDREN.set_forkserver_preload(["__main__"])
+    multiprocessing.forkserver.ensure_running()  # the imports happen now, not in the first render
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     logging.info(
-        "rendering worker listening on %s:%d (%s; image %s; build %s)",
-        args.host, args.port, RENDERER, WORKER_IMAGE, WORKER_BUILD,
+        "rendering worker listening on %s:%d (%s; image %s; build %s; time limit %d s; about %d pages at most)",
+        args.host, args.port, RENDERER, WORKER_IMAGE, WORKER_BUILD, RENDER_TIME_LIMIT_SECONDS, MAX_ESTIMATED_PAGES,
     )
     server.serve_forever()
     return 0
@@ -275,3 +390,7 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+elif __name__ == "__mp_main__":
+    # The fork server imports this file under that name. It loads the fonts once for all its children: on its own, every
+    # render would spend more than a second on that.
+    weasyprint.HTML(string="<p>fonts</p>", url_fetcher=NoFetching()).render()

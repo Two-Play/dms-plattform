@@ -31,6 +31,10 @@ export const renditions: Translation<typeof en.renditions> = {
       'Das PDF besteht die Prüfung gegen den Archivstandard (PDF/A-2b) nicht, z. B. wegen einer nicht eingebetteten Schrift.',
     invalid: 'Die Version kann in ihrem jetzigen Zustand nicht gerendert werden.',
     too_complex: 'Die Originaldatei ist zu groß oder zu komplex, um ihre Felder zu füllen.',
+    too_long:
+      'Das Dokument ist zu lang, um daraus ein PDF zu erzeugen. Es wird nicht automatisch wiederholt: Kürzen oder teilen Sie das Dokument.',
+    time_limit:
+      'Das Erzeugen des PDFs hat die Zeitgrenze überschritten. Es wird nicht automatisch wiederholt: Kürzen oder teilen Sie das Dokument.',
     integrity: 'Eine gespeicherte Datei stimmt nicht mit ihrer Prüfsumme überein.',
     segregation_of_duties:
       'Die letzte Freigabe stammt von jemandem, der diese Version geändert hat; das Vier-Augen-Prinzip lässt sie nicht zu. Ein erneuter Versuch hilft nicht.',

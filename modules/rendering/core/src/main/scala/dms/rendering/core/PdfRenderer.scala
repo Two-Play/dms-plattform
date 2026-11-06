@@ -28,6 +28,14 @@ enum RenderingError:
   /** The original is too large or too complex to fill its fields (DMS-160, ADR 0076). */
   case TooComplex(message: String)
 
+  /** The document is too long for the rendering worker: over its page limit, or more than its memory holds
+    * (DMS-171, ADR 0081). Fails the same way on every attempt.
+    */
+  case TooLong(message: String)
+
+  /** The worker ended the render at its time limit (DMS-171, ADR 0081). */
+  case TimeLimit(message: String)
+
   /** A stored rendition does not match its checksum. */
   case Integrity(message: String)
 
@@ -39,7 +47,8 @@ enum RenderingError:
   case Database(error: DbError)
 
   /** A stable code of the kind of failure, for clients that explain it (DMS-93): `unavailable`, `rejected`,
-    * `not_archivable`, `invalid`, `too_complex`, `integrity`, `segregation_of_duties` or `database`.
+    * `not_archivable`, `invalid`, `too_complex`, `too_long`, `time_limit`, `integrity`,
+    * `segregation_of_duties` or `database`.
     */
   def code: String = this match
     case Unavailable(_)   => "unavailable"
@@ -47,6 +56,8 @@ enum RenderingError:
     case NotArchivable(_) => "not_archivable"
     case Invalid(_)       => "invalid"
     case TooComplex(_)    => "too_complex"
+    case TooLong(_)       => RenderingError.TooLongCode
+    case TimeLimit(_)     => RenderingError.TimeLimitCode
     case Integrity(_)     => "integrity"
     case Refused(_)       => RenderingError.SegregationOfDuties
     case Database(_)      => "database"
@@ -59,6 +70,8 @@ enum RenderingError:
         report.failures.take(5).mkString("; ")
     case Invalid(m)    => m
     case TooComplex(m) => m
+    case TooLong(m)    => m
+    case TimeLimit(m)  => m
     case Integrity(m)  => m
     case Refused(m)    => m
     case Database(e)   => s"database error: $e"
@@ -66,6 +79,15 @@ enum RenderingError:
 object RenderingError:
   /** The code of [[Refused]]: the one failure a retry can never cure. */
   val SegregationOfDuties: String = "segregation_of_duties"
+
+  /** The codes of [[TooLong]] and [[TimeLimit]], the same in the answer of the rendering worker. */
+  val TooLongCode: String   = "too_long"
+  val TimeLimitCode: String = "time_limit"
+
+  /** Codes that end a job on the first failure (ADR 0081): the worker's limits refuse the same page on every
+    * attempt. The same list as `dms.job_failure_is_final`, which decides it for the job queue.
+    */
+  val NoRetry: Set[String] = Set(TooLongCode, TimeLimitCode)
 
 /** A page to print.
   *
@@ -115,11 +137,14 @@ trait PdfRenderer:
 
 /** @param url
   *   base URL of the rendering worker, e.g. `http://localhost:9180`
+  * @param timeoutSeconds
+  *   how long to wait for the worker, a waiting turn included; above the worker's own time limit
+  *   (`DMS_RENDER_TIME_LIMIT_SECONDS`, ADR 0081), so that a render at the limit is reported as such
   * @param parallelJobs
   *   rendition jobs at a time per application instance (ADR 0079). A worker prints one page at a time: more
   *   jobs than worker replicas only wait in the worker, and run into `timeoutSeconds` there.
   */
-final case class RendererConfig(url: String, timeoutSeconds: Int = 60, parallelJobs: Int = 1)
+final case class RendererConfig(url: String, timeoutSeconds: Int = 150, parallelJobs: Int = 1)
 
 /** The rendering worker (`workers/rendering`, WeasyPrint) over HTTP: `POST /render`. */
 final class WeasyPrintRenderer(client: HttpClient, config: RendererConfig) extends PdfRenderer:
@@ -140,9 +165,7 @@ final class WeasyPrintRenderer(client: HttpClient, config: RendererConfig) exten
       .mapError(e => RenderingError.Unavailable(s"${e.getClass.getSimpleName}: ${e.getMessage}"))
       .flatMap { response =>
         val bytes   = Chunk.fromArray(response.body())
-        def message = String(response.body(), StandardCharsets.UTF_8)
-          .fromJson[ErrorBody]
-          .fold(_ => s"HTTP ${response.statusCode()}", _.error)
+        def message = errorBody(response).fold(s"HTTP ${response.statusCode()}")(_.error)
         response.statusCode() match
           case 200 =>
             ZIO.succeed(
@@ -153,8 +176,14 @@ final class WeasyPrintRenderer(client: HttpClient, config: RendererConfig) exten
                 WorkerIdentity.from(response)
               )
             )
-          case 400 | 422 => ZIO.fail(RenderingError.Rejected(message))
-          case _         => ZIO.fail(RenderingError.Unavailable(message))
+          case 400 | 422 =>
+            ZIO.fail(
+              errorBody(response).flatMap(_.code) match
+                case Some(RenderingError.TooLongCode)   => RenderingError.TooLong(message)
+                case Some(RenderingError.TimeLimitCode) => RenderingError.TimeLimit(message)
+                case _                                  => RenderingError.Rejected(message)
+            )
+          case _ => ZIO.fail(RenderingError.Unavailable(message))
       }
 
 object WeasyPrintRenderer:
@@ -165,7 +194,13 @@ object WeasyPrintRenderer:
       xmp: Map[String, String]
   ) derives JsonEncoder
 
-  private final case class ErrorBody(error: String) derives JsonDecoder
+  /** @param code
+    *   for a limit of the worker: `too_long` or `time_limit`
+    */
+  private final case class ErrorBody(error: String, code: Option[String]) derives JsonDecoder
+
+  private def errorBody(response: HttpResponse[Array[Byte]]): Option[ErrorBody] =
+    String(response.body(), StandardCharsets.UTF_8).fromJson[ErrorBody].toOption
 
   private def header(response: HttpResponse[?], name: String): Option[String] =
     val value = response.headers().firstValue(name)

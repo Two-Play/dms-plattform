@@ -166,6 +166,7 @@ export const errors = {
     attachment_too_large: 'This file is too large to be attached.',
     body_too_large: 'The request is too large.',
     database_error: 'The request could not be completed. Try again in a moment.',
+    document_too_long: 'The document is too long to produce a PDF from it. Shorten or split it.',
     file_not_convertible: 'Files of this type cannot be archived as PDF/A.',
     file_type_mismatch: 'The content of this file does not fit its file type.',
     four_eyes: 'Someone else has to confirm this: the four-eyes principle applies.',
@@ -194,6 +195,8 @@ export const errors = {
     reminder_too_soon: 'A reminder was sent only recently. Try again later.',
     report_removed: 'The content of this report was removed after its retention.',
     rendering_failed: 'The document could not be rendered.',
+    rendering_time_limit:
+      'Producing the PDF ran into the time limit. Shorten or split the document.',
     rendering_unavailable: 'The PDF cannot be produced right now. Try again in a moment.',
     rendition_not_failed: 'The rendering has not failed, so there is nothing to retry.',
     rendition_integrity: 'The archived file is damaged and cannot be read.',
