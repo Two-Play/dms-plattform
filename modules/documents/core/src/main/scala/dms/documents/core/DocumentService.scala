@@ -19,6 +19,7 @@ import dms.templates.{
   EditRules,
   EditViolation,
   MissingComputed,
+  Section,
   SectionId,
   TemplateContent,
   TemplateStatus,
@@ -139,11 +140,16 @@ final case class NewDocument(
 
 /** Change of a draft: the entered values replace the previous ones; content, if given, replaces the content.
   * The title defaults to the current title.
+  *
+  * @param expectedWorkingState
+  *   the working state this change was made on: if the draft has moved on, the change is refused as a
+  *   conflict instead of overwriting what was saved since (ADR 0071)
   */
 final case class DraftChange(
     title: Option[String],
     values: Map[String, FieldEntry],
-    content: Option[TemplateContent]
+    content: Option[TemplateContent],
+    expectedWorkingState: Option[Int] = None
 )
 
 /** A document with all its versions and the effective profile of its class version.
@@ -771,6 +777,13 @@ final class DocumentService(
       _        <- ZIO.unless(Versioning.isEditable(current.status))(
         ZIO.fail(
           DocumentError.Conflict(s"version ${current.label} is ${current.status}; only drafts can be changed")
+        )
+      )
+      _ <- ZIO.foreachDiscard(change.expectedWorkingState.filter(_ != current.workingState))(expected =>
+        ZIO.fail(
+          DocumentError.Conflict(
+            s"the draft was saved in the meantime (working state ${current.workingState}, expected $expected)"
+          )
         )
       )
       template <- templates.version(current.templateId, current.templateVersion)
@@ -1539,9 +1552,14 @@ final class DocumentService(
   def deviationRequests(versionId: UUID): IO[DocumentError, List[RecordedDeviationRequest]] =
     sql(DocumentStore.deviationRequests(versionId))
 
+  /** The locked sections of the template of a version with their standard text. */
+  def standardSections(version: DocumentVersion): IO[DocumentError, List[Section]] =
+    templates.version(version.templateId, version.templateVersion).map(_.content.sections.filter(_.locked))
+
   /** Records a deviation request for a locked section of the template on the open draft (US-01.1): it permits
-    * changing the section's standard text; the additional review step approves the change. One active request
-    * per section; the reason is required. The deviation report is recomputed and stored with the draft.
+    * changing the section's standard text and gives the document the additional review step, which approves
+    * the change (ADR 0071). One active request per section; the reason is required. The deviation report is
+    * recomputed and stored with the draft.
     */
   def requestDeviation(
       id: DocumentId,

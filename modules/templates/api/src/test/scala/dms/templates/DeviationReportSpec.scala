@@ -16,7 +16,7 @@ object DeviationReportSpec extends ZIOSpecDefault:
 
   def spec = suite("DeviationReport")(
     test("an unchanged document produces an empty report") {
-      val report = DeviationReport.compare(template, template, List(request("rules")))
+      val report = DeviationReport.compare(template, template, Nil)
       assertTrue(report.isEmpty, !DeviationReport.requiresExtraReview(report))
     },
     test("changes in editable sections are not reported") {
@@ -52,12 +52,30 @@ object DeviationReportSpec extends ZIOSpecDefault:
     test("a deviation without a request is flagged as unauthorized and does not add the extra review") {
       val edited =
         rules.copy(blocks = rules.blocks.updated(0, Heading(2, List(Text("Rules"), Text("(binding)")))))
-      val report = DeviationReport.compare(template, replace(template, edited), List(request("violations")))
+      val report = DeviationReport.compare(template, replace(template, edited), Nil)
       assertTrue(
         report.deviations.map(_.change) == List(TextInserted("(binding)")),
         report.unauthorized.size == 1,
         !DeviationReport.requiresExtraReview(report)
       )
+    },
+    test("a request alone adds the extra review, without being a deviation (ADR 0071)") {
+      val alone = DeviationReport.compare(template, template, List(request("rules")))
+      assertTrue(
+        alone.isEmpty,
+        alone.requested == List(request("rules")),
+        DeviationReport.requiresExtraReview(alone)
+      )
+    },
+    test("a request for a section that is not locked in the template adds nothing") {
+      val report = DeviationReport.compare(template, template, List(request("scope"), request("unknown")))
+      assertTrue(report.requested.isEmpty, !DeviationReport.requiresExtraReview(report))
+    },
+    test("a report stored before ADR 0071 decides by its authorized deviations") {
+      val edited =
+        rules.copy(blocks = rules.blocks.updated(0, Heading(2, List(Text("Rules"), Text("(binding)")))))
+      val report = DeviationReport.compare(template, replace(template, edited), List(request("rules")))
+      assertTrue(DeviationReport.requiresExtraReview(report.copy(requested = Nil)))
     },
     test("word-level diff reports insertions, deletions and replacements at their word position") {
       val edited = effective.copy(blocks =

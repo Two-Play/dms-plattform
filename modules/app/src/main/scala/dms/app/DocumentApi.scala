@@ -72,12 +72,18 @@ final case class VersionFileView(
 final case class UpdateDraft(
     /** Default: the current title. */
     title: Option[String],
-    /** Replaces the entered values of the draft. Values from business systems are kept and cannot be changed
-      * here (see `/references`); computed values are recomputed.
+    /** Replaces the entered values of the draft; default: they stay as they are. Values from business systems
+      * are kept and cannot be changed here (see `/references`); computed values are recomputed.
       */
-    values: Map[String, MetadataValue],
-    /** Default: the current content. Locked sections must keep the template's text. */
-    content: Option[TemplateContent]
+    values: Option[Map[String, MetadataValue]],
+    /** Default: the current content. A locked section keeps the template's text unless it has an active
+      * deviation request.
+      */
+    content: Option[TemplateContent],
+    /** The `workingState` this change was made on. If the draft has moved on, the save fails with 409 instead
+      * of overwriting what was saved since. Default: no check.
+      */
+    expectedWorkingState: Option[Int] = None
 ) derives JsonCodec,
       Schema
 
@@ -585,10 +591,11 @@ object DocumentApi:
       .in(jsonBody[UpdateDraft])
       .out(jsonBody[DocumentVersionView])
       .description(
-        "Changes the draft and saves it as the next working state. Locked sections and computed fields of the " +
-          "template cannot be changed (422); versions in review or later cannot be changed (409). Values taken " +
-          "over from a business system (origin System, e.g. the partner master) keep their origin; a different " +
-          "value for them is rejected (422 `not_editable`)."
+        "Changes the draft and saves it as the next working state. Locked sections without an active deviation " +
+          "request and computed fields of the template cannot be changed (422); versions in review or later " +
+          "cannot be changed (409), nor can a draft that has moved past `expectedWorkingState` (409). Values " +
+          "taken over from a business system (origin System, e.g. the partner master) keep their origin; a " +
+          "different value for them is rejected (422 `not_editable`)."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -598,11 +605,13 @@ object DocumentApi:
               details <- ctx.service.get(DocumentId(id))
               open    <- openVersion(details)
               _       <- ctx.check(Action.EditDraft, resource(p, details, open))
-              _       <- ctx.checkGroups(details.profile, req.values)
-              entered = req.values.map((k, v) => k -> FieldEntry(v, ValueOrigin.Manual))
+              _       <- ZIO.foreachDiscard(req.values)(ctx.checkGroups(details.profile, _))
+              entered = req.values.fold(open.values.filter((_, e) => e.origin == ValueOrigin.Manual))(
+                _.map((k, v) => k -> FieldEntry(v, ValueOrigin.Manual))
+              )
               updated <- ctx.service.updateDraft(
                 DocumentId(id),
-                DraftChange(req.title, keepExternal(open) ++ entered, req.content),
+                DraftChange(req.title, keepExternal(open) ++ entered, req.content, req.expectedWorkingState),
                 p.userId
               )
             yield versionViewIn(details, ctx.service.settings)(updated)
@@ -807,7 +816,8 @@ object DocumentApi:
       .in(jsonBody[RequestDeviation])
       .out(statusCode(StatusCode.Created).and(jsonBody[DeviationsView]))
       .description(
-        "Records a deviation request for a locked section of the draft's template: with a reason, the section's " +
+        "Records a deviation request for a locked section of the draft's template, which gives the version the " +
+          "additional review step even before the text changes: with a reason, the section's " +
           "standard text may be changed; the change then needs the additional review step. One active request " +
           "per section (409); unknown or editable sections and empty reasons are rejected (422). Returns the " +
           "draft's deviation report."

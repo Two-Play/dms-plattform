@@ -47,6 +47,32 @@ export function deviationsQuery(client: ApiClient, documentId: string, versionId
   })
 }
 
+/**
+ * The locked sections of the template of a version with their text (GET …/versions/{versionId}/standard-text).
+ * Template versions do not change, so what was loaded stays valid.
+ */
+export function standardTextQuery(client: ApiClient, documentId: string, versionId: string) {
+  return queryOptions({
+    queryKey: ['documents', documentId, 'standard-text', versionId],
+    queryFn: async () => {
+      const { data, error, response } = await client.GET(
+        '/api/v1/documents/{id}/versions/{versionId}/standard-text',
+        { params: { path: { id: documentId, versionId } } },
+      )
+      if (!response.ok || !data) {
+        throw requestError(
+          response,
+          error,
+          `Loading the standard text failed with HTTP ${response.status}`,
+        )
+      }
+      return data
+    },
+    staleTime: Infinity,
+    retry: false,
+  })
+}
+
 /** Records a deviation request for a locked section of the draft (POST …/deviation-requests). */
 export async function requestDeviation(
   client: ApiClient,

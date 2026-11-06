@@ -150,9 +150,12 @@ describe('Deviations panel on a draft', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('says that the text itself cannot be changed here', async () => {
+  it('says where the text can be changed and that other sections stay read-only', async () => {
     renderPanel({ load: () => ok(report()) })
-    expect(await screen.findByText(/cannot be changed on this page yet/)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/you can change the text of that section here/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Sections without a request stay read-only/)).toBeInTheDocument()
   })
 
   it('requests a deviation by keyboard and shows the new state', async () => {

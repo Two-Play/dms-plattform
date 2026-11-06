@@ -6,6 +6,7 @@ import { createWordDocument } from '@/api/word'
 import {
   applyReference,
   createDocument,
+  draftPreviewQuery,
   removeReference,
   submitDocument,
   updateDraft,
@@ -160,6 +161,8 @@ export interface DocumentWorkspaceProps {
    * draft is continued and for keys the template has no field for.
    */
   initialValues?: Partial<FormInputs>
+  /** The title of a locked section whose text has unsaved changes (ADR 0071): submitting would lose them. */
+  unsavedSection?: string
 }
 
 /** The empty inputs of the fields, with the given initial values for the fields that exist. */
@@ -197,6 +200,7 @@ export function DocumentWorkspace({
   onCreated,
   afterCreate,
   initialValues,
+  unsavedSection,
 }: DocumentWorkspaceProps) {
   const client = useApiClient()
   const queryClient = useQueryClient()
@@ -242,8 +246,11 @@ export function DocumentWorkspace({
     }
   }, [fields, formInputs])
   const sent = useDebouncedValue(values, PREVIEW_DEBOUNCE_MS)
+  // A saved draft has content of its own: locked text can differ from the template (ADR 0071).
   const preview = useQuery({
-    ...previewQuery(client, templateId, version, sent, language),
+    ...(draft
+      ? draftPreviewQuery(client, draft.documentId, draft.version, sent, language)
+      : previewQuery(client, templateId, version, sent, language)),
     placeholderData: keepPreviousData,
     enabled: kind === 'structured',
   })
@@ -348,6 +355,13 @@ export function DocumentWorkspace({
   }
 
   const submit = async () => {
+    if (unsavedSection !== undefined) {
+      setSaveState({
+        kind: 'failed',
+        message: t('deviations.edit.submitBlocked', { section: unsavedSection }),
+      })
+      return
+    }
     const documentId = await save(true)
     if (!documentId) return
     setSaveState({ kind: 'submitting' })

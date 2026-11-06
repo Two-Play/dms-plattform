@@ -3,13 +3,14 @@ import type { ApiClient } from './client'
 import { requestError } from './errors'
 import type { DocumentVersionView, DocumentView } from './partners'
 import type { components } from './schema'
-import type { MetadataValue } from './templates'
+import type { DocumentLanguage, MetadataValue } from './templates'
 
 export type DocumentSummary = components['schemas']['DocumentSummaryView']
 export type FieldValue = components['schemas']['FieldValueView']
 export type WorkflowCase = components['schemas']['WorkflowCaseView']
 export type WorkflowTask = components['schemas']['TaskView']
 export type WorkflowVote = components['schemas']['VoteView']
+type TemplateContent = components['schemas']['TemplateContent']
 
 /** The most recently changed documents the caller may read (GET /api/v1/documents). */
 export function documentListQuery(client: ApiClient) {
@@ -106,6 +107,67 @@ export async function updateDraft(
     throw requestError(response, error, `Saving the draft failed with HTTP ${response.status}`)
   }
   return data
+}
+
+/**
+ * Saves changed content of the draft and nothing else (PUT /api/v1/documents/{id}/draft, ADR 0071):
+ * `expectedWorkingState` is the state the change was made on, so a draft that moved on answers 409 instead of
+ * being overwritten. The server checks the edit rules of the template.
+ */
+export async function updateDraftContent(
+  client: ApiClient,
+  id: string,
+  body: { content: TemplateContent; expectedWorkingState: number },
+): Promise<DocumentVersionView> {
+  const { data, error, response } = await client.PUT('/api/v1/documents/{id}/draft', {
+    params: { path: { id } },
+    body,
+  })
+  if (!response.ok || !data) {
+    throw requestError(response, error, `Saving the text failed with HTTP ${response.status}`)
+  }
+  return data
+}
+
+/**
+ * Live preview of a saved draft from its own content, which can differ from the template, with the values
+ * entered so far (POST …/versions/{versionId}/preview, ADR 0071). The working state is part of the key: the
+ * preview changes with the saved content.
+ */
+export function draftPreviewQuery(
+  client: ApiClient,
+  documentId: string,
+  version: { id: string; workingState: number },
+  values: Record<string, MetadataValue>,
+  language: DocumentLanguage,
+) {
+  return queryOptions({
+    queryKey: [
+      'documents',
+      documentId,
+      'preview',
+      version.id,
+      version.workingState,
+      language,
+      values,
+    ],
+    queryFn: async ({ signal }) => {
+      const { data, response } = await client.POST(
+        '/api/v1/documents/{id}/versions/{versionId}/preview',
+        {
+          params: { path: { id: documentId, versionId: version.id } },
+          body: { values, language },
+          signal,
+        },
+      )
+      if (!response.ok || !data) {
+        throw new Error(`The preview failed with HTTP ${response.status}`)
+      }
+      return data
+    },
+    staleTime: Infinity,
+    retry: false,
+  })
 }
 
 /** Submits the draft for review and starts its workflow (POST /api/v1/documents/{id}/submit). */

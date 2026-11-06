@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-10-28, implemented in DMS-79) |
+| Status | Accepted (2026-10-28, implemented in DMS-79); the trigger of the additional review step is amended by [0071](0071-editing-locked-text-and-extra-review-on-request.md): the active request, not only a changed text |
 | Date | 2026-10-28 |
 | Decided by | Philippe |
 

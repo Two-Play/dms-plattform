@@ -1481,6 +1481,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/documents/{id}/versions/{versionId}/preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** @description Live preview while changing a draft: like the preview of a template, but from the saved content of the draft, with the values entered so far. Nothing is stored. 409 if the version is not a draft. Requires ReadDocument on the version. */
+    post: operations['postApiV1DocumentsIdVersionsVersionidPreview']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/documents/{id}/versions/{versionId}/standard-text': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The locked sections of the template of a version, with the text they have there: what restores a section that deviates. Requires ReadDocument on the version. */
+    get: operations['getApiV1DocumentsIdVersionsVersionidStandard-text']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/documents/{id}/versions/{versionId}/html': {
     parameters: {
       query?: never
@@ -5038,6 +5072,10 @@ export interface components {
     SetDocumentRetention: {
       rule?: string
     }
+    /** StandardTextView */
+    StandardTextView: {
+      sections?: components['schemas']['Section'][]
+    }
     /** StatusCountView */
     StatusCountView: {
       status: string
@@ -5395,8 +5433,10 @@ export interface components {
     /** UpdateDraft */
     UpdateDraft: {
       title?: string
-      values: components['schemas']['Map_MetadataValue']
+      values?: components['schemas']['Map_MetadataValue']
       content?: components['schemas']['TemplateContent']
+      /** Format: int32 */
+      expectedWorkingState?: number
     }
     /** UploadAnalysisView */
     UploadAnalysisView: {
@@ -9896,6 +9936,92 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['PublicationFailureView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  postApiV1DocumentsIdVersionsVersionidPreview: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PreviewRequest']
+      }
+    }
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PreviewView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId, Invalid value for: body */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1DocumentsIdVersionsVersionidStandard-text': {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        /** @description Document id */
+        id: string
+        /** @description Version id */
+        versionId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StandardTextView']
+        }
+      }
+      /** @description Invalid value for: path parameter id, Invalid value for: path parameter versionId */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/plain': string
         }
       }
       default: {

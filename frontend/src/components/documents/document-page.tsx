@@ -105,6 +105,8 @@ export function DocumentPage({
   const document = useQuery(documentQuery(client, documentId))
   const versions = useQuery({ ...documentVersionsQuery(client, documentId), enabled: !!versionId })
   const [language, setLanguage] = useState<DocumentLanguage | undefined>(undefined)
+  // The locked section whose text has unsaved changes: the workspace must not submit past them.
+  const [unsavedSection, setUnsavedSection] = useState<string | undefined>(undefined)
 
   const current = document.data?.current
   const picked = versionId ? versions.data?.find((v) => v.id === versionId) : undefined
@@ -224,6 +226,7 @@ export function DocumentPage({
                 language={language ?? documentLanguage(document.data)}
                 draft={{ documentId: document.data.id, version: shown }}
                 kind={fileDocument ? 'file' : 'structured'}
+                unsavedSection={unsavedSection}
                 aside={
                   fileDocument ? (
                     <FileContentPanel documentId={document.data.id} version={shown} editable />
@@ -248,6 +251,7 @@ export function DocumentPage({
               documentId={document.data.id}
               version={shown}
               editable={editing}
+              onUnsavedChange={setUnsavedSection}
             />
           )}
           <AttachmentsPanel

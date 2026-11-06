@@ -143,26 +143,32 @@ object TemplatePreviewApi:
       .serverLogic(p =>
         (id, v, req) =>
           for
-            language <- ZIO
-              .fromOption(req.language.fold(Some(Language.default))(Language.parse))
-              .orElseFail(
-                (
-                  StatusCode.UnprocessableEntity,
-                  ApiError("invalid", s"unknown language '${req.language.getOrElse("")}'; use en or de")
-                )
-              )
+            language <- previewLanguage(req)
             template <- released(p, id, v)
             // Resolve and render outside the transaction: it needs no database and must not hold a connection.
             result <- ZIO.attempt(Preview.run(template, req.values, language)).orDie
-          yield PreviewView(
-            result.html,
-            result.missingRequired.map(m => MissingValueView(m.field, m.label)),
-            result.issues.map(i => PreviewIssueView(i.field, i.label, i.code, i.message)),
-            result.conditionHints.map(h =>
-              ConditionHintView(h.condition, h.missingInputs.map(m => MissingValueView(m.field, m.label)))
-            )
-          )
+          yield previewView(result)
       )
+
+  private[app] def previewLanguage(req: PreviewRequest): IO[(StatusCode, ApiError), Language] =
+    ZIO
+      .fromOption(req.language.fold(Some(Language.default))(Language.parse))
+      .orElseFail(
+        (
+          StatusCode.UnprocessableEntity,
+          ApiError("invalid", s"unknown language '${req.language.getOrElse("")}'; use en or de")
+        )
+      )
+
+  private[app] def previewView(result: PreviewResult): PreviewView =
+    PreviewView(
+      result.html,
+      result.missingRequired.map(m => MissingValueView(m.field, m.label)),
+      result.issues.map(i => PreviewIssueView(i.field, i.label, i.code, i.message)),
+      result.conditionHints.map(h =>
+        ConditionHintView(h.condition, h.missingInputs.map(m => MissingValueView(m.field, m.label)))
+      )
+    )
 
   def endpoints: List[ZServerEndpoint[Env, Any]] = List(fields, preview)
 

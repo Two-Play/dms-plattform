@@ -47,6 +47,17 @@ object DeviationJsonSpec extends ZIOSpecDefault:
     )
 
   def spec = suite("DeviationJson")(
+    test("active requests are stored with the report; a report without any keeps its old form") {
+      val alone = DeviationReport.compare(template, template, List(request))
+      val json  = DeviationJson.encodeStored(alone)
+      assertTrue(
+        alone.requested == List(request),
+        json.contains(""""requested":[{"sectionId":"liability""""),
+        DeviationJson.decodeStored(json) == Right(alone),
+        DeviationJson.encodeStored(DeviationReport(Nil)) == """{"format":1,"deviations":[]}""",
+        DeviationJson.decodeStored("""{"format":1,"deviations":[]}""") == Right(DeviationReport(Nil))
+      )
+    },
     test("a stored report round-trips with its format version") {
       val report = DeviationReport.compare(template, document, List(request))
       val json   = DeviationJson.encodeStored(report)

@@ -196,3 +196,9 @@ Open points found in review, created after each sprint (first: DMS-29 and DMS-30
 | – | DMS-152 | Task | Backlog (MVP) | – | DMS-138: repeat load test, paging, narrower read, GIN index when needed |
 | – | DMS-153 | Task | Backlog (MVP) | – | DMS-104: announce the rollout, review settings in the UI, notice of moved dates, report of kept dates |
 | – | DMS-154 | Task | Backlog (MVP) | – | DMS-84: change locked text in the UI so that a deviation request takes effect |
+| – | DMS-155 | Task | Backlog (MVP) | – | DMS-145: rights on what stands for the document, marking of versions out of force |
+| – | DMS-156 | Task | Backlog (MVP) | – | DMS-155: legal hold past a stricter draft, partial evidence report, marking of original files |
+| – | DMS-157 | Task | Backlog (MVP) | – | DMS-154: browser check of the section editor, editor for editable sections, conflict guard in the form |
+| – | DMS-158 | Bug | Backlog (MVP) | – | Security review: confidential content through a new version, drafts changing the live document |
+| – | DMS-159 | Bug | Backlog (MVP) | – | Security review: four eyes bypassed by editing another author's draft |
+| – | DMS-160 | Bug | Backlog (MVP) | – | Security review: SSRF in the conversion worker, memory exhaustion through Office files, ReDoS |

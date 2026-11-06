@@ -3,9 +3,10 @@ import { createMemoryHistory, RouterProvider } from '@tanstack/react-router'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { AuthContextProps } from 'react-oidc-context'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ApiClient } from '@/api/client'
 import { ApiClientProvider } from '@/api/context'
+import type { Deviations } from '@/api/deviations'
 import type { DocumentSummary, FieldValue, WorkflowCase } from '@/api/documents'
 import type { DocumentView } from '@/api/partners'
 import type { TemplateFields } from '@/api/templates'
@@ -22,6 +23,14 @@ const signedIn = {
 } as unknown as AuthContextProps
 
 vi.mock('react-oidc-context', () => ({ useAuth: () => signedIn }))
+
+beforeAll(() => {
+  // jsdom has no layout; ProseMirror asks for coordinates when it maps the caret while typing.
+  const none: DOMRect[] = []
+  Range.prototype.getBoundingClientRect = () => new DOMRect()
+  Range.prototype.getClientRects = () => Object.assign(none, { item: () => null })
+  document.elementFromPoint = () => null
+})
 
 const templateId = '7c1e2f0a-0000-4000-8000-000000000001'
 const documentId = '7c1e2f0a-0000-4000-8000-0000000000d1'
@@ -200,6 +209,7 @@ interface State {
   saveReply: () => Reply
   submitReplies: (() => Reply)[]
   missing?: boolean
+  deviations?: Deviations
   ack: { opened: boolean; acknowledgedAt?: string; openedReply?: () => Reply }
 }
 
@@ -229,6 +239,10 @@ function renderAt(path: string) {
           : ok(state.document)
       case '/api/v1/documents/{id}/workflow':
         return ok(state.cases)
+      case '/api/v1/documents/{id}/versions/{versionId}/deviations':
+        return ok(state.deviations ?? fields)
+      case '/api/v1/documents/{id}/versions/{versionId}/standard-text':
+        return ok({ sections: state.document.current.content.sections ?? [] })
       case '/api/v1/documents/{id}/versions':
         return ok([state.document.current])
       case '/api/v1/workflow/tasks':
@@ -569,6 +583,55 @@ describe('Document page with a draft', () => {
     expect(await screen.findByTestId('locked-section')).toHaveFocus()
     // Only locked sections have a place on the page to go to.
     expect(within(blocked).queryByRole('button', { name: 'Extra' })).not.toBeInTheDocument()
+  })
+
+  it('previews the draft from its own content and does not submit past unsaved locked text', async () => {
+    const paragraph = {
+      type: 'Paragraph' as const,
+      content: [{ type: 'Text' as const, value: 'Liability is limited.', marks: [] }],
+    }
+    state.document.current.content = {
+      sections: [{ id: 'liability', title: 'Liability', locked: true, blocks: [paragraph] }],
+    }
+    state.deviations = {
+      versionId: 'v1',
+      version: '1.0-draft.2',
+      status: 'Draft',
+      requiresExtraReview: true,
+      requests: [
+        {
+          id: 'r1',
+          sectionId: 'liability',
+          reason: 'Cap for this customer',
+          requestedBy: 'author-1',
+          requestedAt: '2026-11-02T09:00:00Z',
+          active: true,
+        },
+      ],
+      deviations: [],
+    }
+    const { post, put, user } = renderAt(`/documents/${documentId}`)
+
+    await waitFor(() => {
+      expect(post).toHaveBeenCalledWith(
+        '/api/v1/documents/{id}/versions/{versionId}/preview',
+        expect.objectContaining({ params: { path: { id: documentId, versionId: 'v1' } } }),
+      )
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Edit text of Liability' }))
+    const text = await screen.findByRole('textbox', { name: 'Paragraph text' })
+    await user.click(text)
+    document.getSelection()?.collapse(text, text.childNodes.length)
+    document.dispatchEvent(new Event('selectionchange'))
+    await user.keyboard(' Capped.')
+
+    await user.click(screen.getByRole('button', { name: 'Submit for review' }))
+    await waitFor(() => {
+      expect(statusAlert()).toHaveTextContent('The text of Liability has unsaved changes.')
+    })
+    expect(put).not.toHaveBeenCalled()
+    expect(post).not.toHaveBeenCalledWith('/api/v1/documents/{id}/submit', expect.anything())
   })
 
   it('tells the reader when the document does not exist', async () => {
