@@ -139,14 +139,10 @@ describe('Deviations panel on a draft', () => {
     expect(requested.getByText(/Carried over from the previous version/)).toBeInTheDocument()
     expect(requested.getByTitle('author-1')).toBeInTheDocument()
     // Each row offers what can be done with it, named for screen readers.
+    expect(screen.getByRole('button', { name: 'Request deviation: Parties' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Withdraw request: Liability' })).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: 'Request deviation for Parties' }),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: 'Withdraw request for Liability' }),
-    ).toBeInTheDocument()
-    expect(
-      screen.queryByRole('button', { name: 'Request deviation for Liability' }),
+      screen.queryByRole('button', { name: 'Request deviation: Liability' }),
     ).not.toBeInTheDocument()
   })
 
@@ -170,7 +166,7 @@ describe('Deviations panel on a draft', () => {
       },
     })
 
-    const action = await screen.findByRole('button', { name: 'Request deviation for Parties' })
+    const action = await screen.findByRole('button', { name: 'Request deviation: Parties' })
     action.focus()
     await user.keyboard('{Enter}')
     const dialog = await screen.findByRole('dialog')
@@ -199,7 +195,7 @@ describe('Deviations panel on a draft', () => {
 
   it('asks for a reason and refuses one that is too long, without calling the server', async () => {
     const { post, user } = renderPanel({ load: () => ok(report()) })
-    await user.click(await screen.findByRole('button', { name: 'Request deviation for Parties' }))
+    await user.click(await screen.findByRole('button', { name: 'Request deviation: Parties' }))
     const dialog = await screen.findByRole('dialog')
 
     await user.click(within(dialog).getByRole('button', { name: 'Send request' }))
@@ -222,7 +218,7 @@ describe('Deviations panel on a draft', () => {
       load: () => ok(report()),
       post: () => (replies.shift() as Reply)(),
     })
-    await user.click(await screen.findByRole('button', { name: 'Request deviation for Parties' }))
+    await user.click(await screen.findByRole('button', { name: 'Request deviation: Parties' }))
     const dialog = await screen.findByRole('dialog')
     await user.type(within(dialog).getByLabelText('Reason'), 'Affiliates')
     await user.click(within(dialog).getByRole('button', { name: 'Send request' }))
@@ -255,7 +251,7 @@ describe('Deviations panel on a draft', () => {
           message: "section 'parties' already has an active deviation request",
         }),
     })
-    await user.click(await screen.findByRole('button', { name: 'Request deviation for Parties' }))
+    await user.click(await screen.findByRole('button', { name: 'Request deviation: Parties' }))
     const dialog = await screen.findByRole('dialog')
     await user.type(within(dialog).getByLabelText('Reason'), 'Mine')
     await user.click(within(dialog).getByRole('button', { name: 'Send request' }))
@@ -275,7 +271,7 @@ describe('Deviations panel on a draft', () => {
       load: () => ok(report()),
       post: () => failed(403, { code: 'forbidden', message: 'You are not allowed to do this.' }),
     })
-    await user.click(await screen.findByRole('button', { name: 'Request deviation for Parties' }))
+    await user.click(await screen.findByRole('button', { name: 'Request deviation: Parties' }))
     const dialog = await screen.findByRole('dialog')
     await user.type(within(dialog).getByLabelText('Reason'), 'Affiliates')
     await user.click(within(dialog).getByRole('button', { name: 'Send request' }))
@@ -308,7 +304,7 @@ describe('Deviations panel on a draft', () => {
     })
     expect(await screen.findByText('Additional review step')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Withdraw request for Liability' }))
+    await user.click(screen.getByRole('button', { name: 'Withdraw request: Liability' }))
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('Without a request the draft cannot be submitted')
     await user.click(within(dialog).getByRole('button', { name: 'Withdraw' }))
@@ -331,7 +327,7 @@ describe('Deviations panel on a draft', () => {
       load: () => ok(report({ requests: [request()] })),
       post: () => failed(409, { code: 'conflict', message: 'already withdrawn.' }),
     })
-    await user.click(await screen.findByRole('button', { name: 'Withdraw request for Liability' }))
+    await user.click(await screen.findByRole('button', { name: 'Withdraw request: Liability' }))
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('You can request a deviation for this section again later.')
     await user.click(within(dialog).getByRole('button', { name: 'Withdraw' }))
@@ -428,9 +424,7 @@ describe('Deviation report', () => {
 
     await user.click(screen.getByRole('button', { name: 'Try again' }))
     expect(await screen.findByText('No deviations')).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: 'Request deviation for Parties' }),
-    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Request deviation: Parties' })).toBeInTheDocument()
   })
 
   it('speaks German', async () => {
@@ -441,7 +435,7 @@ describe('Deviation report', () => {
     expect(await screen.findByText('Abweichungsbericht')).toBeInTheDocument()
     expect(screen.getByText('Liability › Block 2 › Wort 5')).toBeInTheDocument()
     expect(screen.getByText('Text ersetzt')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Antrag für Liability zurückziehen' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Antrag zurückziehen: Liability' })).toBeEnabled()
   })
 })
 

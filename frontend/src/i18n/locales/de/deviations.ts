@@ -72,7 +72,7 @@ export const deviations: Translation<typeof en.deviations> = {
   },
   request: {
     action: 'Abweichung beantragen',
-    actionFor: 'Abweichung für {section} beantragen',
+    actionFor: 'Abweichung beantragen: {section}',
     title: 'Abweichung für {section} beantragen',
     description:
       'Der Antrag und seine Begründung werden den Prüfenden angezeigt und im Audit-Trail festgehalten. Das Dokument erhält den zusätzlichen Prüfschritt, sobald der Antrag erfasst ist, und Sie können dann den Text dieses Abschnitts ändern.',
@@ -90,7 +90,7 @@ export const deviations: Translation<typeof en.deviations> = {
   },
   withdraw: {
     action: 'Antrag zurückziehen',
-    actionFor: 'Antrag für {section} zurückziehen',
+    actionFor: 'Antrag zurückziehen: {section}',
     title: 'Antrag für {section} zurückziehen?',
     description:
       'Der Antrag bleibt als zurückgezogen sichtbar. Sie können für diesen Abschnitt später erneut eine Abweichung beantragen.',

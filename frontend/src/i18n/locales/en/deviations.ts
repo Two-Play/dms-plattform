@@ -70,7 +70,7 @@ export const deviations = {
   },
   request: {
     action: 'Request deviation',
-    actionFor: 'Request deviation for {section}',
+    actionFor: 'Request deviation: {section}',
     title: 'Request a deviation for {section}',
     description:
       'The request and its reason are shown to reviewers and recorded in the audit trail. The document gets the additional review step as soon as the request is recorded, and you can then change the text of this section.',
@@ -87,7 +87,7 @@ export const deviations = {
   },
   withdraw: {
     action: 'Withdraw request',
-    actionFor: 'Withdraw request for {section}',
+    actionFor: 'Withdraw request: {section}',
     title: 'Withdraw the request for {section}?',
     description:
       'The request stays visible as withdrawn. You can request a deviation for this section again later.',
