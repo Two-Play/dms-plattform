@@ -122,6 +122,10 @@ Given: a document has one owner and one title, and the versions have their own v
 
 **high**: No schema or stored data changes. The checks are in `DocumentApi`, `ReviewApi` and `DocumentService`; two issue codes are added. Going back means writing to `dms.document` in `updateDraft` again, which reopens the defect. Owners applied at publication stay, and rightly so.
 
+## Addendum 2026-11-06 (DMS-162)
+
+ADR 0084 (Proposed) takes up the follow-ups on the report of past owner changes, the list of open drafts below their basis, and the move of a draft to another organizational unit.
+
 ## Addendum 2026-11-06
 
 The user decided on 2026-11-06 to build the additional approval of business concept 3.2 for lowering confidentiality. Until it exists the refusal of decision 2 stands; implementation in DMS-162.

@@ -165,11 +165,14 @@ object PartnerApi:
       */
     def replace(id: DocumentId, key: String, partner: Option[Partner]): IO[Failure, DocumentVersion] =
       for
-        (open, _) <- draft(id)
-        reference <- referenceOf(open, key)
+        (open, details) <- draft(id)
+        reference       <- referenceOf(open, key)
         kept  = open.values.filter((field, e) => entered(e.origin) && !reference.fieldKeys.contains(field))
         taken = partner.fold(Map.empty[String, FieldEntry])(referenceValues(reference, _))
         updated <- service.updateDraft(id, DraftChange(None, kept ++ taken, None), principal.userId)
+        // A reference field can fill the unit.
+        subject <- authz.subject(principal)
+        _       <- DocumentApi.checkUnitReach(subject, details, open, updated)
       yield updated
 
     private def draft(id: DocumentId): IO[Failure, (DocumentVersion, DocumentDetails)] =

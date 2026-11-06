@@ -120,7 +120,7 @@ Who approves:
 - Should: a list for records management of open drafts below their basis, from before ADR 0074 (a follow-up of that ADR).
 - Could: let a class name the role or lane of this step, if a department wants to own it.
 - Could: tell the owner and author when a request stays open at submission with no eligible approver, beyond the existing notice to administrators.
-- Left open in this issue, as asked: the report of past owner changes (ADR 0074, decision 10) and moving a draft to another organizational unit.
+- Left open in this issue, as asked: the report of past owner changes (ADR 0074, decision 10) and moving a draft to another organizational unit. Taken up with the list above in [0084](0084-reports-for-records-management-and-moving-a-draft-to-another-unit.md).
 
 ## Reversibility
 

@@ -527,7 +527,8 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
       def leaks(response: (Status, String)) = response._2.contains(secret) || response._2.contains(unit)
       for
         doc <- validDocument("Rahmenvertrag Kranich")
-        // The author starts a version and makes it confidential, with a title of its own.
+        // The author starts a version; the owner, who alone moves it to another unit (ADR 0084), makes it
+        // confidential, with a title of its own.
         _ <- call(
           author,
           "POST",
@@ -535,7 +536,7 @@ object LegalHoldApiSpec extends ZIOSpecDefault:
           Some("""{"changeKind":"Major","reason":"Revised"}""")
         )
         saved <- call(
-          author,
+          owner,
           "PUT",
           s"/api/v1/documents/${doc.id}/draft",
           Some(s"""{"title":"$secret","values":${values(unit, "Confidential")}}""")

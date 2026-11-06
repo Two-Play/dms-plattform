@@ -222,6 +222,8 @@ export const errors = {
   /** Texts for the `code` of a field issue; issues not listed here keep the backend's text. */
   issues: {
     access_groups_widened: 'Only the owner of the document can add access groups.',
+    unit_moved: 'Only the owner of the document can move a new version to another unit.',
+    unit_out_of_reach: 'A new version can only move to a unit in which you can edit it.',
     confidentiality_lowered:
       'A new version cannot be less confidential than the version it started from without an additional approval. Ask for the lower level with a reason.',
     missing_required: 'This field is required.',

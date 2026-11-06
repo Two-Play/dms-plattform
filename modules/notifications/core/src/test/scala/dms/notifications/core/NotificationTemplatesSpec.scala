@@ -280,6 +280,16 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
       )
       assertTrue(r.body.contains("Ben Becker"), !r.body.contains("Reiserichtlinie"))
     },
+    test("a corrected owner reads who has the document now, without a title if they may not read it") {
+      val r = NotificationTemplates.render(
+        "record.owner-corrected",
+        Language.De,
+        Map("version" -> "2.0", "newOwner" -> "ben"),
+        Some(doc),
+        ctx(None)
+      )
+      assertTrue(r.body.contains("Ben Becker"), !r.body.contains("Reiserichtlinie"))
+    },
     test("deputyships: different texts for principal and deputy, dates in the tenant's time zone") {
       val params = Map(
         "principal"  -> "anna",

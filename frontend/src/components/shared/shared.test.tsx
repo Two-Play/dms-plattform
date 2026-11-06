@@ -72,6 +72,8 @@ describe('issueText', () => {
     setLocale('de')
     expect(issueText({ code: 'confidentiality_lowered', message: 'x' })).toContain('vertraulich')
     expect(issueText({ code: 'access_groups_widened', message: 'x' })).toContain('Eigentümer')
+    expect(issueText({ code: 'unit_moved', message: 'x' })).toContain('Eigentümer')
+    expect(issueText({ code: 'unit_out_of_reach', message: 'x' })).toContain('bearbeiten')
     expect(issueText({ code: 'out_of_range', message: 'at most 5' })).toBe('at most 5')
   })
 })

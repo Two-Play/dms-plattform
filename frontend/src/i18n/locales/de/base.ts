@@ -237,6 +237,10 @@ export const errors: Translation<typeof en.errors> = {
   },
   issues: {
     access_groups_widened: 'Nur der Eigentümer des Dokuments kann Zugriffsgruppen hinzufügen.',
+    unit_moved:
+      'Nur der Eigentümer des Dokuments kann eine neue Version in eine andere Organisationseinheit verschieben.',
+    unit_out_of_reach:
+      'Eine neue Version lässt sich nur in eine Organisationseinheit verschieben, in der Sie sie bearbeiten dürfen.',
     confidentiality_lowered:
       'Eine neue Version darf ohne zusätzliche Freigabe nicht weniger vertraulich sein als die Version, von der sie ausgeht. Beantragen Sie die niedrigere Stufe mit Begründung.',
     missing_required: 'Dieses Feld ist erforderlich.',

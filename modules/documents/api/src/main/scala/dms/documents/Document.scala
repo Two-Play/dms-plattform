@@ -206,6 +206,11 @@ final case class DocumentVersion(
   def namedOwner: Option[UserId] =
     metadata.get("owner").collect { case MetadataValue.PersonRef(user) => UserId(user) }
 
+  /** The title this version names. Like [[namedOwner]] it reaches the document when the version takes effect.
+    */
+  def namedTitle: Option[String] =
+    metadata.get("title").collect { case MetadataValue.Text(t) => t.trim }.filter(_.nonEmpty)
+
   /** The clause versions the content references, in document order without duplicates. */
   def clauses: List[(String, Int)] =
     TemplateContent.blocks(content).collect { case Block.ClauseRef(key, version) => (key, version) }.distinct

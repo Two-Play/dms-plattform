@@ -866,6 +866,107 @@ final class DocumentService(
       )
     yield next
 
+  /** The documents whose owner or title differ from their last version in force (ADR 0084). The caller
+    * decides who sees which.
+    */
+  def recordDifferences: IO[DocumentError, List[(DocumentDetails, RecordDifference)]] =
+    sql(DocumentStore.recordDifferenceCandidates)
+      .flatMap(getAll)
+      .map(_.values.toList.flatMap(d => DocumentRecord.difference(d.document, d.versions).map(d -> _)))
+
+  /** The documents whose open version stands below its basis (ADR 0084). The caller decides who sees which.
+    */
+  def draftsBelowBasis: IO[DocumentError, List[(DocumentDetails, DraftBelowBasis)]] =
+    sql(DocumentStore.belowBasisCandidates)
+      .flatMap(getAll)
+      .map(_.values.toList.flatMap(d => DocumentRecord.belowBasis(d.versions).map(d -> _)))
+
+  /** Gives the document what its last version in force names, as publication would have (ADR 0084): owner,
+    * title or both, as a decision per case with a reason. There is no free choice of value. The version and
+    * the difference are those the caller saw, or the correction is refused. It waits for a version in the
+    * workflow, which read the owner when it started and takes its own values to the document at publication.
+    * A draft returned by its workflow is such a version too, but only the workflow knows it: the caller asks
+    * after [[lockRecord]] (ADR 0084, decision 10).
+    */
+  def correctRecord(
+      id: DocumentId,
+      versionId: UUID,
+      owner: Boolean,
+      title: Boolean,
+      reason: String,
+      actor: UserId
+  ): IO[DocumentError, Document] =
+    val why = reason.trim
+    for
+      _ <- ZIO.when(why.isEmpty)(ZIO.fail(DocumentError.Invalid(List("a reason is required"))))
+      _ <- ZIO.when(why.length > MaxReasonLength)(
+        ZIO.fail(DocumentError.Invalid(List(s"the reason must have at most $MaxReasonLength characters")))
+      )
+      _ <- ZIO.unless(owner || title)(
+        ZIO.fail(DocumentError.Invalid(List("choose the owner, the title or both")))
+      )
+      document <- lockRecord(id)
+      versions <- sql(DocumentStore.versions(id, templates))
+      _        <- ZIO.foreachDiscard(DocumentRecord.inWorkflow(versions))(v =>
+        ZIO.fail(
+          DocumentError.Conflict(
+            s"version ${v.label} is ${v.status}; correct the document after it is through"
+          )
+        )
+      )
+      difference <- ZIO
+        .fromOption(DocumentRecord.difference(document, versions).filter(_.version.id == versionId))
+        .orElseFail(DocumentError.Conflict("the document no longer differs from this version"))
+      _ <- ZIO.when((owner && difference.owner.isEmpty) || (title && difference.title.isEmpty))(
+        ZIO.fail(DocumentError.Conflict("the document no longer differs from this version in that value"))
+      )
+      newOwner = difference.owner.filter(_ => owner).orElse(document.ownerId)
+      newTitle = difference.title.filter(_ => title).getOrElse(document.title)
+      _ <- sql(DocumentStore.updateDocument(id, newTitle, newOwner))
+      user = (u: Option[UserId]) => u.fold[Json](Json.Null)(o => Json.Str(o.value))
+      _ <- record(
+        actor,
+        RecordCorrected,
+        difference.version,
+        Json.Obj(
+          "ownerBefore" -> user(document.ownerId),
+          "owner"       -> user(newOwner),
+          "titleBefore" -> Json.Str(document.title),
+          "title"       -> Json.Str(newTitle)
+        ),
+        Some(why)
+      )
+      _ <- ZIO.when(newOwner != document.ownerId)(
+        Outbox
+          .publish(
+            "document",
+            id.value,
+            OwnerCorrected,
+            Jsonb(
+              Json
+                .Obj(
+                  "documentId" -> Json.Str(id.value.toString),
+                  "versionId"  -> Json.Str(difference.version.id.toString),
+                  "version"    -> Json.Str(difference.version.label),
+                  "newOwner"   -> user(newOwner),
+                  "recipients" -> Json.Arr(
+                    (document.ownerId.toList ++ newOwner).filterNot(_ == actor).map(u => Json.Str(u.value))*
+                  )
+                )
+                .toJson
+            )
+          )
+          .mapError(DocumentError.Database(_))
+      )
+    yield document.copy(ownerId = newOwner, title = newTitle)
+
+  /** Locks the document and its open version until the transaction ends. Publication, submission and the
+    * return of a version take these locks, so none of them passes between a check and the correction.
+    */
+  def lockRecord(id: DocumentId): IO[DocumentError, Document] =
+    sql(DocumentStore.lockDocument(id)).someOrFail(documentNotFound(id)) <*
+      sql(DocumentStore.lockOpenVersion(id, templates))
+
   /** Submits the open draft for review. Blocked while fields required in review or later are missing: the
     * values freeze here, so this is the last moment the author can add them (ADR 0062).
     */
@@ -900,7 +1001,8 @@ final class DocumentService(
     * content from the first moment (DMS-158, ADR 0074). A draft never goes below the level of its basis
     * (business concept 3.2: it can only be raised without an additional approval), for nobody: the way down
     * is [[requestLowering]], and the level changes when that is approved (ADR 0083). Access groups are added
-    * by the document's owner only. A missing level counts as `Internal`, as for access.
+    * by the document's owner only, and so is a move to another organizational unit, whose authors would read
+    * the same content (ADR 0084). A missing level counts as `Internal`, as for access.
     */
   private def checkProtection(
       profile: MetadataProfile,
@@ -921,6 +1023,10 @@ final class DocumentService(
       )
       .sorted
     val label = profile.field(CoreFields.AllowedGroups).fold(CoreFields.AllowedGroups)(_.definition.label)
+    // Like an added group, what the owner decided stays when someone else saves the draft.
+    val reached = Versioning
+      .reachedUnit(current, metadataOf(values), versions)
+      .filterNot(_ => document.ownerId.contains(actor))
     checkLevel(document, current, values, versions) *>
       ZIO
         .unless(added.isEmpty)(
@@ -930,7 +1036,20 @@ final class DocumentService(
             )
           )
         )
-        .unit
+        .unit *>
+      ZIO.foreachDiscard(reached)(unit =>
+        ZIO.fail(
+          DocumentError.InvalidValues(
+            List(
+              FieldIssue(
+                UnitField,
+                profile.field(UnitField).fold(UnitField)(_.definition.label),
+                IssueKind.UnitMoved(unit)
+              )
+            )
+          )
+        )
+      )
 
   private def checkLevel(
       document: Document,
@@ -2555,6 +2674,14 @@ object DocumentService:
 
   /** A version took effect and named another owner: told to the person who lost the document (ADR 0083). */
   val OwnerReplaced = "document.owner-replaced"
+
+  /** Audit action of [[DocumentService.correctRecord]]. */
+  val RecordCorrected = "document.record-corrected"
+
+  /** Records management gave the document the owner its last version in force names: told to the owner it had
+    * and the owner it has now (ADR 0084).
+    */
+  val OwnerCorrected = "document.owner-corrected"
 
   /** Why `v` cannot be withdrawn at `now`, if so: it must be approved, and before its valid-from date unless
     * its publication failed for good, or in approval with a rendition that failed for good.

@@ -1,6 +1,6 @@
 package dms.documents
 
-import dms.documents.metadata.MetadataValue
+import dms.documents.metadata.{CoreFields, MetadataValue}
 import dms.kernel.VersionNo
 
 /** Kind of change a new version makes (business concept 5.2). */
@@ -98,6 +98,36 @@ object Versioning:
       .maxByOption(_.number)
       .orElse(candidates.filter(_.publishedAt.isDefined).maxByOption(_.number))
       .orElse(candidates.lastOption)
+
+  /** The version the document is compared with in the report of ADR 0084: of the valid versions the one
+    * published last, as several can be valid with different scopes; without a valid one the one published
+    * last among those that were in force. `None` if no version ever took effect: then a first draft sets
+    * owner and title. A destroyed version has no values left.
+    *
+    * Usually this is the version that gave the document its owner and title (ADR 0074, decision 5), but not
+    * always: if that version was withdrawn while another stayed valid, or was destroyed, the document keeps
+    * what it set, rightly, and differs from this one.
+    */
+  def lastInForce(versions: List[DocumentVersion]): Option[DocumentVersion] =
+    def latest(vs: List[DocumentVersion]) = vs.maxByOption(_.publishedAt.fold(0L)(_.toEpochMilli))
+    latest(versions.filter(v => isValid(v.status)))
+      .orElse(latest(versions.filter(v => v.publishedAt.isDefined && v.status != Destroyed)))
+
+  /** The unit an open version would newly reach with `after` (DMS-162, ADR 0084): one that neither it nor its
+    * [[basis]] is in. `None` for a first version, which copied nothing, and for a way back to the unit of the
+    * basis. A version without a unit reaches nobody new: only assignments for the whole tenant cover it.
+    */
+  def reachedUnit(
+      v: DocumentVersion,
+      after: Map[String, MetadataValue],
+      versions: List[DocumentVersion]
+  ): Option[String] =
+    for
+      b    <- basis(v, versions)
+      unit <- CoreFields.organizationalUnit(after)
+      if !CoreFields.organizationalUnit(v.metadata).contains(unit) &&
+        !CoreFields.organizationalUnit(b.metadata).contains(unit)
+    yield unit
 
   /** The number of the first version of a document. */
   val first: VersionNo = VersionNo.Initial

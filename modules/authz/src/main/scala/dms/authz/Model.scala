@@ -51,6 +51,10 @@ enum Role:
   * roles. On an approved version that is not valid yet it stops the publication (DMS-143, ADR 0059): those
   * who could have published it, the owner role and whoever approved this version.
   *
+  * `CorrectDocumentRecord` is seeing and correcting what records management keeps straight about a document
+  * (DMS-162, ADR 0084): where owner or title differ from the version that last took effect, and which open
+  * versions stand below their basis. Records managers in scope who are cleared.
+  *
   * `SearchUsers` is finding people of the own tenant by name or email, to pick a group member, a deputy or a
   * person in a metadata field (DMS-111, ADR 0037 addendum): every role of the tenant, the tenant
   * administrator included; users without any role assignment may not browse the directory.
@@ -71,7 +75,7 @@ enum Action:
     EditTemplates, ReleaseTemplate, ReadTemplateCatalog,
     ManageRetention, Destroy, ViewHistory, Configure,
     MonitorCompliance, ViewAcknowledgementPersons, GenerateEvidenceReport, AssignDocumentNumber, SearchUsers,
-    DiscardDraft, RetryRendition, RetryPublication
+    DiscardDraft, RetryRendition, RetryPublication, CorrectDocumentRecord
 
 /** Areas of tenant configuration (matrix row "Configuration"). `Search` is the operation of the tenant's
   * search index, e.g. rebuilding it (DMS-51, ADR 0029). `Groups` is the administration of access groups and

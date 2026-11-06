@@ -37,6 +37,16 @@ enum IssueKind:
     */
   case AccessGroupsWidened(groups: List[String])
 
+  /** A later version moves to an organizational unit that neither it nor the version it started from is in,
+    * and the caller is not the document's owner (DMS-162, ADR 0084).
+    */
+  case UnitMoved(unit: String)
+
+  /** The document's owner moves a later version to an organizational unit they have no right in (DMS-162, ADR
+    * 0084).
+    */
+  case UnitOutOfReach(unit: String)
+
   def code: String = this match
     case MissingRequired(_)        => "missing_required"
     case UnknownField              => "unknown_field"
@@ -51,6 +61,8 @@ enum IssueKind:
     case ComputedFieldMissing(_)   => "computed_field_missing"
     case ConfidentialityLowered(_) => "confidentiality_lowered"
     case AccessGroupsWidened(_)    => "access_groups_widened"
+    case UnitMoved(_)              => "unit_moved"
+    case UnitOutOfReach(_)         => "unit_out_of_reach"
 
   def message: String = this match
     case MissingRequired(status)     => s"The field is required in status $status."
@@ -72,6 +84,10 @@ enum IssueKind:
         "additional approval: ask for it with a reason."
     case AccessGroupsWidened(groups) =>
       s"Only the document's owner can add access groups: ${groups.mkString(", ")}."
+    case UnitMoved(unit) =>
+      s"Only the document's owner can move a new version to another organizational unit: $unit."
+    case UnitOutOfReach(unit) =>
+      s"A new version can only move to an organizational unit in which you can edit it: $unit."
 
 /** A computed field of a template by its stable key and the name people read: its label, otherwise its key.
   */

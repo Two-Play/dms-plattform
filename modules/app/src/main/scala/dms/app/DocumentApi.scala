@@ -630,7 +630,9 @@ object DocumentApi:
           "document; a later version keeps them in its values until it is published. A later version cannot be " +
           "less confidential than the version it started from without the additional approval (422 " +
           "`confidentiality_lowered`, also if the field " +
-          "is left out), and only the document's owner can add access groups (422 `access_groups_widened`)."
+          "is left out), and only the document's owner can add access groups (422 `access_groups_widened`) or " +
+          "move it to another organizational unit (422 `unit_moved`), one in which they can edit it (422 " +
+          "`unit_out_of_reach`)."
       )
       .tag("Documents")
       .serverLogic(p =>
@@ -649,6 +651,7 @@ object DocumentApi:
                 DraftChange(req.title, keepExternal(open) ++ entered, req.content, req.expectedWorkingState),
                 p.userId
               )
+              _ <- checkUnitReach(ctx.subject, details, open, updated)
             yield versionViewIn(details, ctx.service.settings)(updated)
           }
       )
@@ -1237,6 +1240,39 @@ object DocumentApi:
     ZIO
       .fromOption(details.open)
       .orElseFail(DocumentError.Conflict(s"document ${details.document.id.value} has no open version"))
+
+  /** For every way of saving a draft, after the save, whose transaction a failure undoes: the check before it
+    * saw the draft where it stood, and where it goes decides who reads what it copied (ADR 0084, decision
+    * 15).
+    */
+  private[app] def checkUnitReach(
+      subject: Subject,
+      details: DocumentDetails,
+      open: DocumentVersion,
+      updated: DocumentVersion
+  ): IO[DocumentError, Unit] =
+    val field = DocumentResource.OrganizationalUnitField
+    ZIO.foreachDiscard(Versioning.reachedUnit(open, updated.metadata, details.versions))(unit =>
+      Clock.instant.flatMap(now =>
+        ZIO.unless(
+          Policy
+            .decide(subject, Action.EditDraft, resource(subject.tenantId, details, updated), now)
+            .isPermitted
+        )(
+          ZIO.fail(
+            DocumentError.InvalidValues(
+              List(
+                FieldIssue(
+                  field,
+                  details.profile.field(field).fold(field)(_.definition.label),
+                  IssueKind.UnitOutOfReach(unit)
+                )
+              )
+            )
+          )
+        )
+      )
+    )
 
   /** Values a business system set keep their origin until the system changes them. */
   private def keepExternal(v: DocumentVersion): Map[String, FieldEntry] =

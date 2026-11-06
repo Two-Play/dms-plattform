@@ -91,6 +91,7 @@ object Main extends ZIOAppDefault:
       RetentionApi.endpoints.map(_.widen[Env]) ++
       ComplianceApi.endpoints.map(_.widen[Env]) ++
       FourEyesReportApi.endpoints.map(_.widen[Env]) ++
+      RecordsApi.endpoints.map(_.widen[Env]) ++
       EvidenceReportApi.endpoints.map(_.widen[Env]) ++
       WebhookApi.endpoints.map(_.widen[Env]) ++
       NotificationApi.endpoints.map(_.widen[Env])
