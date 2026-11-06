@@ -15,12 +15,20 @@ import java.time.{Instant, LocalDate, ZoneOffset}
   * @param verifyHourUtc
   *   hour of the day (UTC) at which the daily full verification is due; after the anchor, so that the
   *   verified prefix reaches it
+  * @param violationReminderDays
+  *   days after the first notice of a violation on which a reminder is due while it stays open, ascending;
+  *   empty: no reminders
   */
 final case class AuditScheduleConfig(
     checkpointInterval: Duration = 5.minutes,
     anchorHourUtc: Int = 2,
-    verifyHourUtc: Int = 3
+    verifyHourUtc: Int = 3,
+    violationReminderDays: List[Int] = AuditScheduleConfig.DefaultReminderDays
 )
+
+object AuditScheduleConfig:
+  /** As for what stays open after a failed job (business concept 8.3, ADR 0064). */
+  val DefaultReminderDays: List[Int] = List(3, 7)
 
 /** Schedules and runs the periodic audit work as jobs (DMS-75): a checkpoint per tenant and interval, one
   * timestamp anchor and one full verification of the chain per tenant and day (ADR 0077).
@@ -85,14 +93,16 @@ final class AuditJobs(
       ZIO.sleep(config.checkpointInterval)).forever
 
   /** The whole chain, recorded as a run. A violation is a finding, not a failure of the job: it stays on
-    * record, and from then on every report verifies the whole chain and shows it.
+    * record, and from then on every report verifies the whole chain and shows it. The run tells people of a
+    * new violation; a run that still finds it reminds them on the reminder days (ADR 0080).
     */
   private def verify(tenant: TenantId): IO[DbError, Unit] =
     evidence.verifyFully(tenant).flatMap { state =>
       ZIO.foreachDiscard(state.verification.violation)(v =>
         ZIO.logError(
           s"Audit chain of tenant ${tenant.value} violated at position ${v.chainSeq}: ${v.kind} (${v.detail})"
-        )
+        ) *> Clock.instant
+          .flatMap(now => db.transact(tenant)(ViolationNotices.remind(now, config.violationReminderDays)))
       )
     }
 

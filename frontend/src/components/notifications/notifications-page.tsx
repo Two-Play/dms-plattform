@@ -167,6 +167,7 @@ type CategoryKey =
   | 'publication'
   | 'processing-failure'
   | 'legal-hold'
+  | 'audit-integrity'
 
 function categoryKey(category: string): CategoryKey {
   switch (category) {
@@ -177,6 +178,7 @@ function categoryKey(category: string): CategoryKey {
     case 'publication':
     case 'processing-failure':
     case 'legal-hold':
+    case 'audit-integrity':
       return category
     default:
       return 'workflow'

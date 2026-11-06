@@ -52,7 +52,7 @@ Set `DMS_PROFILE=production`. The application then refuses to start with the set
 - [ ] Heap: reading an Office file can take about 1 GiB; one runs at a time per 2 GiB of JVM heap, at most four (ADR 0076). Give the application at least 2 GiB beyond the library cache.
 
 - [ ] `DMS_LOG_APPENDER=JSON` writes one JSON object per line.
-- [ ] Alerts on: `/ready` not 200, `level=ERROR`, 503 answers (the database is overloaded), dead jobs (`select kind, count(*) from dms.job where status = 'dead' group by 1`), the age of the oldest unpublished outbox event, and `dms_rendering_queue_oldest_seconds` of `GET /metrics`: above 60 for several minutes means renditions come in faster than they are printed (see Capacity).
+- [ ] Alerts on: `/ready` not 200, `level=ERROR` (also the signal of a violation of the audit chain, ADR 0080), 503 answers (the database is overloaded), dead jobs (`select kind, count(*) from dms.job where status = 'dead' group by 1`), the age of the oldest unpublished outbox event, and `dms_rendering_queue_oldest_seconds` of `GET /metrics`: above 60 for several minutes means renditions come in faster than they are printed (see Capacity).
 - [ ] Log retention follows the data protection concept. Logs contain ids, not names, titles or field values; database error details are switched off at the driver.
 
 ## Service user of the user directory

@@ -33,7 +33,38 @@ object NotificationTemplatesSpec extends ZIOSpecDefault:
   ) =
     NotificationTemplates.render(kind, language, params, Some(doc), ctx(facts))
 
+  private def chainViolation(language: Language, audience: String, reminder: Boolean) =
+    NotificationTemplates.render(
+      NotificationTemplates.ChainViolation,
+      language,
+      Map("foundAt" -> "2026-11-02T02:30:00Z", "audience" -> audience) ++
+        Option.when(reminder)("reminder" -> "1"),
+      None,
+      ctx(None)
+    )
+
   def spec = suite("NotificationTemplates")(
+    test("a violation of the audit chain: when, not what, and the cockpit only for those who can open it") {
+      import NotificationTemplates.ChainAudience.*
+      val officer   = chainViolation(Language.De, Compliance, reminder = false)
+      val officerEn = chainViolation(Language.En, Compliance, reminder = false)
+      val admin     = chainViolation(Language.De, Admin, reminder = false)
+      val later     = chainViolation(Language.De, Compliance, reminder = true)
+      val laterEn   = chainViolation(Language.En, Admin, reminder = true)
+      assertTrue(
+        officer.subject == "Verletzung der Audit-Kette gefunden",
+        officer.body.contains("am 02.11.2026"),
+        officer.link.contains("/compliance"),
+        officerEn.subject == "Violation of the audit chain found",
+        officerEn.body.contains("2 Nov 2026"),
+        admin.link.isEmpty,
+        admin.body.contains("Compliance-Beauftragten"),
+        later.subject.startsWith("Erinnerung: "),
+        later.body.startsWith("Seit 02.11.2026 noch offen: "),
+        laterEn.subject.startsWith("Reminder: "),
+        laterEn.link.isEmpty
+      )
+    },
     test("review tasks: German and English, the date, the task inbox for the owner (DMS-141)") {
       val created   = review("review.task-created", Language.De, Some(facts), reviewParams)
       val createdEn = review("review.task-created", Language.En, Some(facts), reviewParams)

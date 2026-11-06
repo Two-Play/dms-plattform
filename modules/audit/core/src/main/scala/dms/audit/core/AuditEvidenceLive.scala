@@ -16,7 +16,8 @@ import java.util.UUID
   * A report does not read the whole chain again: it starts after the prefix of the newest full verification.
   * That verification comes from the regular job `audit.verify`, or from here when the prefix cannot be used.
   * Anything that is not clean ends in a full verification, which is recorded, so a violation closes the
-  * shortcut until a later full verification finds the chain intact.
+  * shortcut until a later full verification finds the chain intact. A run that finds a violation nobody was
+  * told of yet tells them in its own transaction, however the run came about ([[ViolationNotices]]).
   *
   * @param checkpoints
   *   the write-once checkpoints to compare the chain with; `None` where no object storage is configured
@@ -44,13 +45,27 @@ final class AuditEvidenceLive(
       verified <- trail.verify(tenant).flatMap(compared(tenant, _))
       (report, problem) = verified
       now <- Clock.instant.map(_.truncatedTo(ChronoUnit.MICROS))
-      _   <- db.transact(tenant)(Db.sql {
-        val prefix =
-          if report.ok then report.headSeq.flatMap(ChainStore.newestAnchorUpTo(tenant.value, _)) else None
-        ChainStore.insertRun(tenant.value, VerificationRun(now, report, problem, prefix))
-      })
+      _   <- db.transact(tenant)(
+        Db.sql {
+          if !report.ok then ChainStore.lockViolations(tenant.value)
+          val prefix =
+            if report.ok then report.headSeq.flatMap(ChainStore.newestAnchorUpTo(tenant.value, _)) else None
+          ChainStore.insertRun(tenant.value, VerificationRun(now, report, problem, prefix))
+        } *> ViolationNotices.tellOfNew(now).when(!report.ok)
+      )
       integrity <- state(tenant, report, problem)
     yield integrity
+
+  def lastVerification: IO[DbError, Option[VerificationSummary]] =
+    Db.sql {
+      val tenant = ChainStore.currentTenant
+      ChainStore
+        .lastRun(tenant)
+        .map(run =>
+          if run.violationKind.isEmpty then run
+          else run.copy(violatedSince = ChainStore.openViolation(tenant).map(_.foundAt))
+        )
+    }
 
   /** What follows the prefix of the newest full verification; `None` if there is no prefix to rely on. */
   private def afterPrefix(

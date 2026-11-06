@@ -1,6 +1,7 @@
 package dms.audit.core
 
 import com.augustnagro.magnum.DbTx
+import dms.audit.{VerificationSummary, Violation}
 
 import java.sql.{Connection, PreparedStatement, ResultSet}
 import java.time.{Instant, OffsetDateTime, ZoneOffset}
@@ -29,6 +30,17 @@ final case class VerificationRun(
     checkpointProblem: Option[String],
     prefix: Option[(Long, Array[Byte])]
 )
+
+/** A violation the newest full verification still found (ADR 0080).
+  *
+  * @param firstRun
+  *   the run that found it first; it names the violation
+  * @param foundAt
+  *   when that run was
+  * @param told
+  *   when the first notice went out and the newest round so far; `None` before the first notice
+  */
+final case class OpenViolation(firstRun: Long, foundAt: Instant, told: Option[(Instant, Int)])
 
 /** JDBC access to the audit tables. Runs on the connection of the current transaction (via `Db.sql`). */
 private[core] object ChainStore:
@@ -158,8 +170,8 @@ private[core] object ChainStore:
         ps.setArray(2, tx.connection.createArrayOf("bigint", positions.map(Long.box).toArray[AnyRef]))
     }(rs => rs.getLong(1) -> rs.getBytes(2)).toMap
 
-  /** Records a full verification. */
-  def insertRun(tenant: UUID, run: VerificationRun)(using DbTx): Unit =
+  /** Records a full verification and returns its id. */
+  def insertRun(tenant: UUID, run: VerificationRun)(using DbTx): Long =
     query(
       """insert into dms.audit_verification_run (tenant_id, verified_at, ok, entries_checked, anchors_checked,
         |  head_seq, violation_seq, violation_kind, violation_detail, checkpoint_problem, prefix_seq, prefix_hash)
@@ -178,7 +190,7 @@ private[core] object ChainStore:
       ps.setString(10, run.checkpointProblem.orNull)
       ps.setObject(11, run.prefix.map(p => Long.box(p._1)).orNull, java.sql.Types.BIGINT)
       ps.setBytes(12, run.prefix.map(_._2).orNull)
-    }(_.getLong(1)): Unit
+    }(_.getLong(1)).head
 
   /** The newest full verification of the tenant: when it ran, whether it was intact, and its prefix. */
   def newestRun(tenant: UUID)(using DbTx): Option[(Instant, Boolean, Option[(Long, Array[Byte])])] =
@@ -192,6 +204,78 @@ private[core] object ChainStore:
       val none = rs.wasNull()
       (at, ok, Option.unless(none)((seq, rs.getBytes(4))))
     }.headOption
+
+  /** What the cockpit shows of the newest full verification; the detail stays in the run. */
+  def lastRun(tenant: UUID)(using DbTx): Option[VerificationSummary] =
+    query(
+      """select verified_at, entries_checked, violation_seq, violation_kind, checkpoint_problem is null
+        |from dms.audit_verification_run where tenant_id = ? order by id desc limit 1""".stripMargin
+    )(_.setObject(1, tenant)) { rs =>
+      val at      = rs.getObject(1, classOf[OffsetDateTime]).toInstant
+      val entries = rs.getLong(2)
+      val seq     = rs.getLong(3)
+      val none    = rs.wasNull()
+      val kind    = Option(rs.getString(4))
+      VerificationSummary(at, entries, kind, Option.unless(none)(seq), None, rs.getBoolean(5))
+    }.headOption
+
+  /** Serializes the runs and notices about violations of a tenant until the end of the transaction, so that
+    * two runs that find one violation at once agree on which of them found it first.
+    */
+  def lockViolations(tenant: UUID)(using DbTx): Unit =
+    query("select pg_advisory_xact_lock(hashtextextended('dms.audit_violation_notice:' || ?, 0))")(
+      _.setString(1, tenant.toString)
+    )(_ => ()): Unit
+
+  /** The violation the newest run stands on, if that run found one: the first run of the unbroken series of
+    * runs that found the same violation, and the notices about it so far.
+    *
+    * The same violation is the same kind at the same position, except for a checkpoint: only the newest one
+    * is compared, and an unreadable one is reported at the head of the chain, so its position moves with the
+    * chain and says nothing about the violation.
+    */
+  def openViolation(tenant: UUID)(using DbTx): Option[OpenViolation] =
+    query(
+      """with newest as (
+        |  select violation_seq, violation_kind from dms.audit_verification_run
+        |  where tenant_id = ? order by id desc limit 1
+        |), first_run as (
+        |  select min(r.id) as id from dms.audit_verification_run r, newest n
+        |  where r.tenant_id = ? and n.violation_kind is not null and r.id > coalesce((
+        |    select max(o.id) from dms.audit_verification_run o
+        |    where o.tenant_id = ?
+        |      and (o.violation_kind is distinct from n.violation_kind
+        |           or (n.violation_kind <> ? and o.violation_seq is distinct from n.violation_seq))
+        |  ), 0)
+        |)
+        |select r.id, r.verified_at,
+        |       (select min(a.sent_at) from dms.audit_violation_notice a where a.run_id = r.id),
+        |       (select max(a.round) from dms.audit_violation_notice a where a.run_id = r.id)
+        |from dms.audit_verification_run r join first_run f on r.id = f.id""".stripMargin
+    ) { ps =>
+      ps.setObject(1, tenant)
+      ps.setObject(2, tenant)
+      ps.setObject(3, tenant)
+      ps.setString(4, Violation.Kind.CheckpointMismatch.toString)
+    } { rs =>
+      val id    = rs.getLong(1)
+      val found = rs.getObject(2, classOf[OffsetDateTime]).toInstant
+      val told  = Option(rs.getObject(3, classOf[OffsetDateTime])).map(_.toInstant)
+      val round = rs.getInt(4)
+      OpenViolation(id, found, told.map(_ -> round))
+    }.headOption
+
+  /** Records a notice; returns false if this round of the violation was already sent. */
+  def insertViolationNotice(tenant: UUID, runId: Long, round: Int, at: Instant)(using DbTx): Boolean =
+    query(
+      """insert into dms.audit_violation_notice (tenant_id, run_id, round, sent_at) values (?, ?, ?, ?)
+        |on conflict do nothing returning run_id""".stripMargin
+    ) { ps =>
+      ps.setObject(1, tenant)
+      ps.setLong(2, runId)
+      ps.setInt(3, round)
+      ps.setObject(4, OffsetDateTime.ofInstant(at, ZoneOffset.UTC))
+    }(_.getLong(1)).nonEmpty
 
   /** Stores an anchor; returns false if the position was already anchored (concurrent anchoring run). */
   def insertAnchor(tenant: UUID, anchor: StoredAnchor, tsaTime: Instant)(using DbTx): Boolean =

@@ -101,7 +101,7 @@ The unprotected window shrinks to the checkpoint interval.
 
 ## Scheduling (DMS-75)
 
-`AuditJobs` turns the periodic work into jobs of the PostgreSQL job queue (ADR 0010): `tick` enqueues one `audit.checkpoint` job per tenant and checkpoint window, one `audit.anchor` job per tenant and day (due at `anchorHourUtc`) and one `audit.verify` job per tenant and day (an hour later, the regular full verification, ADR 0077). Idempotency keys (`audit.checkpoint:<tenant>:<window>`, `audit.anchor:<tenant>:<date>`, `audit.verify:<tenant>:<date>`) make it safe for every instance to tick; the job runner makes sure only one worker runs each job, with retries. The app (`dms.app.Background`) runs the scheduler and a job runner; settings under `dms.audit` (`checkpointIntervalSeconds`, default 300; `anchorHourUtc`, default 2; `tsaUrl`; `tsaTrustedCertificates`). Without trusted TSA certificates anchoring is disabled with a warning and only checkpoints run.
+`AuditJobs` turns the periodic work into jobs of the PostgreSQL job queue (ADR 0010): `tick` enqueues one `audit.checkpoint` job per tenant and checkpoint window, one `audit.anchor` job per tenant and day (due at `anchorHourUtc`) and one `audit.verify` job per tenant and day (an hour later, the regular full verification, ADR 0077). Idempotency keys (`audit.checkpoint:<tenant>:<window>`, `audit.anchor:<tenant>:<date>`, `audit.verify:<tenant>:<date>`) make it safe for every instance to tick; the job runner makes sure only one worker runs each job, with retries. The app (`dms.app.Background`) runs the scheduler and a job runner; settings under `dms.audit` (`checkpointIntervalSeconds`, default 300; `anchorHourUtc`, default 2; `tsaUrl`; `tsaTrustedCertificates`; `violationReminderDays`, default 3 and 7). Without trusted TSA certificates anchoring is disabled with a warning and only checkpoints run.
 
 ## Evidence reports (DMS-57)
 
@@ -112,6 +112,12 @@ ADR [0034](../../docs/adr/0034-evidence-reports.md). `AuditEvidence` (api) gives
 ### Verified prefix (DMS-108)
 
 ADR [0077](../../docs/adr/0077-evidence-report-prefix-retention-and-cockpit-actions.md). `verifyFully(tenant)` verifies the whole chain and records the run in `dms.audit_verification_run` (V54, insert-only), intact or not; an intact run records the newest anchor it reached as the verified prefix. `integrity` starts after that prefix if the newest run is intact and at most `AuditEvidenceLive.PrefixMaxAge` old, and if `AuditTrail.verifyAfter` still trusts it: the anchor exists with the recorded hash, its token is valid, the entry has the recorded hash, every older anchor has the hash of its entry, and the entries about the object match their hashes and successors. Anything else, also a violation after the prefix, ends in `verifyFully`, so a violation closes the shortcut until a full run finds the chain intact again. A changed entry of another object below the prefix is found by the regular run, not by a report.
+
+### Telling people of a violation (DMS-169)
+
+ADR [0080](../../docs/adr/0080-telling-of-chain-violations-and-orphaned-documents.md). A full run that finds a violation nobody was told of writes the event `audit.chain-violated` in the transaction of the run, so also a run of a report that fell back to `verifyFully`. A violation is named by the first run of the unbroken series of runs that found the same kind at the same position; for `CheckpointMismatch` the kind alone, as its position moves with the chain. `dms.audit_violation_notice` (V57, insert-only) records every round under a primary key, and an advisory lock per tenant makes two runs at once agree on the first one. The job `audit.verify` also sends the reminder that is due while the newest run still finds the violation: by default 3 and 7 calendar days (UTC) after the first notice, `dms.audit.violationReminderDays`, empty for none; missed days are not caught up. An intact run ends a violation; found again, it is a new one. The event carries `foundAt` and `reminder` only: position, kind and detail stay in the run. Who is told is decided in `dms.app.PlatformNotificationEvents`.
+
+`lastVerification` gives the cockpit the newest run without its detail.
 
 ### Report formats 1 and 2 (`dms.evidence-report/1`, `/2`)
 

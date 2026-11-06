@@ -28,6 +28,7 @@ export const notifications = {
     publication: 'Veröffentlichung meiner Dokumente',
     'processing-failure': 'Fehlgeschlagene Archiv-PDFs und Veröffentlichungen',
     'legal-hold': 'Legal Holds',
+    'audit-integrity': 'Verletzungen der Audit-Kette',
   },
   page: {
     documentTitle: 'Benachrichtigungen',
@@ -82,6 +83,8 @@ export const notifications = {
       'processing-failure':
         'Ein Archiv-PDF oder eine Veröffentlichung ist endgültig fehlgeschlagen und muss erneut versucht werden (Eigentümer und Records Manager).',
       'legal-hold': 'Gesetzte oder aufgehobene Legal Holds (Records Manager).',
+      'audit-integrity':
+        'Die regelmäßige Prüfung hat eine Verletzung der Audit-Kette gefunden (Compliance-Beauftragte und Mandantenadministration).',
     },
   },
 } as const

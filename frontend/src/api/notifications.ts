@@ -23,6 +23,7 @@ export const notificationCategories = [
   'publication',
   'processing-failure',
   'legal-hold',
+  'audit-integrity',
 ] as const
 export type NotificationCategory = (typeof notificationCategories)[number]
 

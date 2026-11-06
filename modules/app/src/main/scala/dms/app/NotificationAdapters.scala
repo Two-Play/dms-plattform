@@ -2,6 +2,7 @@ package dms.app
 
 import dms.archive.LegalHoldId
 import dms.archive.core.LegalHoldService
+import dms.audit.AuditViolation
 import dms.authz.{Action, Authorizer, Groups, Policy, Resource, Role, RoleAssignments, Subject}
 import dms.db.Db
 import dms.db.queue.OutboxEvent
@@ -59,6 +60,8 @@ import scala.util.Try
   *     published in the meantime)
   *   - `document.failure-reminder` (DMS-146, ADR 0064): the same people as far as they have not read a notice
   *     of this failure
+  *   - `audit.chain-violated` (DMS-169, ADR 0080): the active compliance officers, whatever their scope, and
+  *     the tenant administrators; reminders too, as reading a notice does not close a violation
   */
 final class PlatformNotificationEvents(
     documents: DocumentService,
@@ -86,6 +89,7 @@ final class PlatformNotificationEvents(
         )
       def params(keys: String*): Map[String, String] = keys.flatMap(k => text(k).map(k -> _)).toMap
       event.eventType match
+        case AuditViolation.Event     => chainViolation(params("foundAt", "reminder"))
         case "workflow.task-assigned" =>
           val base = params("version", "stepKind", "taskId") ++ text("stepName").map("step" -> _)
           ZIO.succeed(
@@ -507,6 +511,29 @@ final class PlatformNotificationEvents(
       (wide, restricted.map(_._1).distinct.diff(wide))
     }
 
+  /** Who hears of a violation of the audit chain. Each person once: officers have the cockpit, so someone who
+    * is both gets their text.
+    */
+  private def chainViolation(params: Map[String, String]): IO[String, List[Notice]] =
+    for
+      now     <- Clock.instant
+      holders <- roles.holders(Role.ComplianceOfficer).mapError(_.toString)
+      admins  <- tenantAdministrators
+      officers = holders.collect { case (user, a) if a.isActiveAt(now) => user }.distinct
+    yield List(
+      NotificationTemplates.ChainAudience.Compliance -> officers,
+      NotificationTemplates.ChainAudience.Admin      -> admins.diff(officers)
+    ).collect {
+      case (audience, people) if people.nonEmpty =>
+        Notice(
+          NotificationTemplates.ChainViolation,
+          NotificationCategory.AuditIntegrity,
+          people,
+          None,
+          params + ("audience" -> audience)
+        )
+    }
+
   /** Tenant administrators: told of failures when no records manager can be. */
   private def tenantAdministrators: IO[String, List[UserId]] =
     for
@@ -548,7 +575,8 @@ object PlatformNotificationEvents:
     "legal-hold.released",
     RenditionEvents.Dead,
     Publication.DeadEvent,
-    FailureFollowUps.ReminderEvent
+    FailureFollowUps.ReminderEvent,
+    AuditViolation.Event
   )
 
 /** The read check at delivery time (DMS-130): the recipient's current role assignments and access group

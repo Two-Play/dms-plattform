@@ -12,6 +12,7 @@ import {
   fetchOpenAcknowledgements,
   formatRate,
   noticeRefusal,
+  orphanedDocumentsQuery,
   overdueReviewsQuery,
   sendComplianceNotice,
   unownedDocumentsQuery,
@@ -44,6 +45,7 @@ import { UserName } from '@/components/shared/user-name'
 import { t } from '@/i18n'
 import { formatDateTime, formatPlainDate as formatDate } from '@/i18n/format'
 import { toast } from '@/lib/toast'
+import { AuditVerificationCard } from './audit-verification-card'
 import { groupLabel, type CompliancePageSearch } from './compliance-params'
 import { FourEyesFindings } from './four-eyes-findings'
 
@@ -151,7 +153,7 @@ function Overview() {
       <p className="text-sm text-muted-foreground">
         {t('compliance.asOf', { date: formatDate(o.today) })}
       </p>
-      <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-6">
         <KeyFigure
           label={t('compliance.overdueReviews')}
           value={String(o.overdueReviews)}
@@ -179,6 +181,12 @@ function Overview() {
           value={String(o.documentsWithoutOwner)}
           detail={t('compliance.withoutOwnerDetail')}
           search={{ view: 'unowned' }}
+        />
+        <KeyFigure
+          label={t('compliance.orphaned')}
+          value={String(o.orphanedDocuments)}
+          detail={t('compliance.orphanedDetail')}
+          search={{ view: 'orphaned' }}
         />
         <KeyFigure
           label={t('compliance.deviations')}
@@ -682,6 +690,59 @@ function UnownedList({ search }: { search: CompliancePageSearch }) {
   )
 }
 
+function OrphanedList({ search }: { search: CompliancePageSearch }) {
+  const client = useApiClient()
+  const list = useQuery(orphanedDocumentsQuery(client, search.unit, search.owner))
+  return (
+    <Card>
+      <ListHeader
+        title={t('compliance.orphaned')}
+        search={search}
+        list="orphaned-documents"
+        empty={!list.data?.length}
+      />
+      <CardContent>
+        {list.isPending ? (
+          <LoadingState label={t('compliance.loadingList')} />
+        ) : list.isError ? (
+          <ErrorState error={list.error} onRetry={() => void list.refetch()} />
+        ) : list.data.length === 0 ? (
+          <EmptyState
+            icon={CheckCircle2}
+            title={t('compliance.noOrphaned')}
+            description={t('compliance.noOrphanedText')}
+          />
+        ) : (
+          <Table
+            caption={t('compliance.orphaned')}
+            head={[
+              t('compliance.document'),
+              t('compliance.version'),
+              t('compliance.unit'),
+              t('compliance.owner'),
+              t('compliance.published'),
+            ]}
+          >
+            {list.data.map((r) => (
+              <tr key={r.documentId} className="border-b last:border-0">
+                <td className={td}>
+                  <DocumentLink documentId={r.documentId} title={r.title} />
+                </td>
+                <td className={`${td} font-mono text-xs`}>{r.versionLabel}</td>
+                <td className={td}>{groupLabel(r.unit, noUnit())}</td>
+                <td className={td}>
+                  <OwnerName owner={r.owner} />
+                </td>
+                <td className={td}>{r.publishedAt ? formatDateTime(r.publishedAt) : '–'}</td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 function DeviationList({ search }: { search: CompliancePageSearch }) {
   const client = useApiClient()
   const list = useQuery(deviationFiguresQuery(client, search.unit, search.owner))
@@ -1043,10 +1104,12 @@ export function CompliancePage() {
   return (
     <div className="space-y-6">
       <PageHeader title={t('compliance.title')} description={t('compliance.description')} />
+      <AuditVerificationCard />
       <Overview />
       {search.view === 'reviews' && <OverdueReviewList search={search} />}
       {search.view === 'acknowledgements' && <AcknowledgementList search={search} />}
       {search.view === 'unowned' && <UnownedList search={search} />}
+      {search.view === 'orphaned' && <OrphanedList search={search} />}
       {search.view === 'deviations' && <DeviationList search={search} />}
       <FourEyesFindings />
     </div>

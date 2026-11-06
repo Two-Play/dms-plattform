@@ -28,6 +28,7 @@ export const notifications = {
     publication: 'Publications of my documents',
     'processing-failure': 'Failed archive PDFs and publications',
     'legal-hold': 'Legal holds',
+    'audit-integrity': 'Violations of the audit chain',
   },
   page: {
     documentTitle: 'Notifications',
@@ -78,6 +79,8 @@ export const notifications = {
       'processing-failure':
         'An archive PDF or a publication failed for good and needs a retry (owners and records managers).',
       'legal-hold': 'Legal holds set or released (records managers).',
+      'audit-integrity':
+        'The regular verification found a violation of the audit chain (compliance officers and tenant administrators).',
     },
   },
 } as const

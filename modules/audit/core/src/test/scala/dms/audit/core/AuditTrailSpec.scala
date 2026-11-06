@@ -3,6 +3,7 @@ package dms.audit.core
 import com.augustnagro.magnum.{DbTx, sql}
 import com.dimafeng.testcontainers.PostgreSQLContainer
 import dms.audit.*
+import dms.db.queue.ClaimedJob
 import dms.db.{Db, DbConfig, DbError, Jsonb, Migrations}
 import dms.kernel.TenantId
 import org.testcontainers.utility.DockerImageName
@@ -141,6 +142,54 @@ object AuditTrailSpec extends ZIOSpecDefault:
         )
       )
     )
+
+  private val tenDays = java.time.Duration.ofDays(10)
+
+  /** What the outbox says about violations of the chain of `tenant`, oldest first. */
+  private def notices(tenant: TenantId): ZIO[Env, DbError, List[String]] =
+    ZIO.serviceWithZIO[Env](
+      _.owner.transactSystem(
+        Db.sql(
+          sql"""select payload::text from dms.outbox_event
+                where tenant_id = ${tenant.value} and event_type = ${AuditViolation.Event} order by id"""
+            .query[String]
+            .run()
+            .toList
+        )
+      )
+    )
+
+  private def forgeEntry(tenant: TenantId, seq: Int) =
+    tamperEvents(
+      execute(
+        s"update dms.audit_event set reason = 'forged' where tenant_id = '${tenant.value}' and chain_seq = $seq"
+      )
+    )
+
+  /** A chain whose entry 2 was changed. */
+  private def violatedChain: ZIO[Env, DbError, TenantId] =
+    for
+      t <- newTenantZ
+      _ <- recordMany(3, t)
+      _ <- forgeEntry(t, 2)
+    yield t
+
+  /** Records a run that found `violation`, as `verifyFully` does. */
+  private def found(tenant: TenantId, violation: Option[Violation]): ZIO[Env, DbError, Unit] =
+    ZIO.serviceWithZIO[Env](e =>
+      Clock.instant.flatMap(now =>
+        e.app.transact(tenant)(
+          Db.sql(
+            ChainStore.insertRun(
+              tenant.value,
+              VerificationRun(now, VerificationReport(tenant, 0, None, None, 0, violation), None, None)
+            )
+          ) *> ViolationNotices.tellOfNew(now).when(violation.nonEmpty)
+        )
+      ) *> ZIO.unit
+    )
+
+  private def hashMismatch(seq: Long) = Some(Violation(seq, Violation.Kind.HashMismatch, "secret"))
 
   def spec = suite("AuditTrail")(
     test("every entry links to its predecessor and the chain verifies") {
@@ -509,6 +558,194 @@ object AuditTrailSpec extends ZIOSpecDefault:
           .transact(t)(Db.sql(sql"update dms.audit_verification_run set ok = true".update.run()))
           .either
       yield assertTrue(own == 1L, foreign == 0L, deleted.isLeft, changed.isLeft)
+    },
+    test("a violation is told once, however often runs find it, and the notice carries no content") {
+      for
+        e     <- ZIO.service[Env]
+        t     <- violatedChain
+        _     <- evidence(e).verifyFully(t)
+        _     <- evidence(e).verifyFully(t)
+        first <- notices(t)
+        _     <- evidence(e).verifyFully(t)
+        all   <- notices(t)
+      yield assertTrue(
+        first.size == 1,
+        all == first,
+        all.head.contains("foundAt"),
+        !all.head.contains("reminder"),
+        !all.head.toLowerCase.contains("hash"),
+        !all.head.contains("forged")
+      )
+    },
+    test("a report that falls back to a full verification tells of what it found") {
+      for
+        e    <- ZIO.service[Env]
+        t    <- violatedChain
+        _    <- evidence(e).integrity(t, UUID.randomUUID())
+        told <- notices(t)
+      yield assertTrue(told.size == 1)
+    },
+    test("two runs at once tell of a violation once") {
+      for
+        e    <- ZIO.service[Env]
+        t    <- violatedChain
+        _    <- ZIO.foreachParDiscard(1 to 4)(_ => evidence(e).verifyFully(t))
+        told <- notices(t)
+      yield assertTrue(told.size == 1)
+    },
+    test("an intact chain tells nobody, and the first run after an intact one is a new violation") {
+      for
+        t     <- newTenantZ
+        _     <- found(t, None)
+        quiet <- notices(t)
+        _     <- found(t, hashMismatch(2))
+        _     <- found(t, None)
+        _     <- found(t, hashMismatch(2))
+        _     <- found(t, hashMismatch(2))
+        told  <- notices(t)
+      yield assertTrue(quiet.isEmpty, told.size == 2)
+    },
+    test("another position is another violation, but a checkpoint is the same wherever it is reported") {
+      for
+        a                 <- newTenantZ
+        _                 <- found(a, hashMismatch(2))
+        _                 <- found(a, hashMismatch(5))
+        b                 <- newTenantZ
+        _                 <- found(b, Some(Violation(40, Violation.Kind.CheckpointMismatch, "unreadable")))
+        _                 <- found(b, Some(Violation(41, Violation.Kind.CheckpointMismatch, "unreadable")))
+        c                 <- newTenantZ
+        _                 <- found(c, Some(Violation(40, Violation.Kind.CheckpointMismatch, "unreadable")))
+        _                 <- found(c, Some(Violation(40, Violation.Kind.AnchorMismatch, "anchor")))
+        differentPosition <- notices(a)
+        movedCheckpoint   <- notices(b)
+        differentKind     <- notices(c)
+      yield assertTrue(differentPosition.size == 2, movedCheckpoint.size == 1, differentKind.size == 2)
+    },
+    test("a violation that stays open is reminded of on the reminder days, once each") {
+      for
+        e   <- ZIO.service[Env]
+        t   <- violatedChain
+        _   <- evidence(e).verifyFully(t)
+        now <- Clock.instant
+        remindAt = (days: Long) =>
+          e.app.transact(t)(
+            ViolationNotices.remind(now.plus(java.time.Duration.ofDays(days)), List(3, 7))
+          )
+        _       <- remindAt(0) *> remindAt(2)
+        before  <- notices(t)
+        _       <- remindAt(3) *> remindAt(3) *> remindAt(4)
+        third   <- notices(t)
+        _       <- remindAt(7) *> remindAt(8)
+        seventh <- notices(t)
+      yield assertTrue(
+        before.size == 1,
+        third.size == 2,
+        third.last.contains("\"reminder\": \"1\""),
+        seventh.size == 3,
+        seventh.last.contains("\"reminder\": \"2\""),
+        // the date of the first finding, in every round
+        seventh.map(_.takeWhile(_ != ',').replace("}", "")).distinct.size == 1
+      )
+    },
+    test("missed reminder days are not caught up, and no days means no reminders") {
+      for
+        e   <- ZIO.service[Env]
+        t   <- violatedChain
+        _   <- evidence(e).verifyFully(t)
+        now <- Clock.instant
+        _   <- e.app.transact(t)(ViolationNotices.remind(now.plus(tenDays), Nil))
+        off <- notices(t)
+        _   <- e.app.transact(t)(ViolationNotices.remind(now.plus(tenDays), List(3, 7)))
+        one <- notices(t)
+      yield assertTrue(off.size == 1, one.size == 2, one.last.contains("\"reminder\": \"2\""))
+    },
+    test("an intact run ends the reminders") {
+      for
+        e   <- ZIO.service[Env]
+        t   <- newTenantZ
+        _   <- found(t, hashMismatch(2))
+        _   <- found(t, None)
+        now <- Clock.instant
+        _   <- e.app.transact(t)(ViolationNotices.remind(now.plus(tenDays), List(3, 7)))
+        all <- notices(t)
+      yield assertTrue(all.size == 1)
+    },
+    test("reminder days are calendar days, as the job does not run at the very second of the notice") {
+      val notice        = java.time.Instant.parse("2026-11-02T03:00:05Z")
+      val days          = List(3, 7)
+      def at(s: String) = ViolationNotices.dueRound(notice, java.time.Instant.parse(s), days)
+      assertTrue(
+        at("2026-11-04T23:59:59Z").isEmpty,
+        at("2026-11-05T03:00:01Z").contains(1),
+        at("2026-11-09T03:00:01Z").contains(2),
+        at("2026-12-01T03:00:01Z").contains(2),
+        ViolationNotices.dueRound(notice, notice.plus(tenDays), Nil).isEmpty
+      )
+    },
+    test("the job reminds of what stays open and logs nothing new for an intact chain") {
+      for
+        e <- ZIO.service[Env]
+        t <- violatedChain
+        job  = ClaimedJob(1, Some(t), AuditJobs.VerifyKind, Jsonb("{}"), 1, 3)
+        jobs = AuditJobs(
+          e.app,
+          None,
+          AuditCheckpoints(e.app, e.trail, null, CheckpointConfig()),
+          evidence(e),
+          AuditScheduleConfig()
+        )
+        _     <- jobs.handlers(AuditJobs.VerifyKind)(job)
+        _     <- jobs.handlers(AuditJobs.VerifyKind)(job)
+        first <- notices(t)
+        _     <- tamper("audit_violation_notice", "audit_violation_notice_guard")(
+          execute(
+            s"""update dms.audit_violation_notice set sent_at = sent_at - interval '3 days'
+                where tenant_id = '${t.value}'"""
+          )
+        )
+        _     <- jobs.handlers(AuditJobs.VerifyKind)(job)
+        after <- notices(t)
+      yield assertTrue(first.size == 1, after.size == 2, after.last.contains("reminder"))
+    },
+    test("notices of violations are limited to the tenant and cannot be changed by the application") {
+      for
+        e   <- ZIO.service[Env]
+        t   <- newTenantZ
+        _   <- found(t, hashMismatch(2))
+        own <- e.app.transact(t)(
+          Db.sql(sql"select count(*) from dms.audit_violation_notice".query[Long].run().head)
+        )
+        foreign <- e.app.transact(TenantId.random())(
+          Db.sql(sql"select count(*) from dms.audit_violation_notice".query[Long].run().head)
+        )
+        deleted <- e.app.transact(t)(Db.sql(sql"delete from dms.audit_violation_notice".update.run())).either
+        changed <- e.app
+          .transact(t)(Db.sql(sql"update dms.audit_violation_notice set round = 9".update.run()))
+          .either
+      yield assertTrue(own == 1L, foreign == 0L, deleted.isLeft, changed.isLeft)
+    },
+    test("the last verification says when, what and since when, without any detail") {
+      for
+        e      <- ZIO.service[Env]
+        t      <- newTenantZ
+        never  <- e.app.transact(t)(evidence(e).lastVerification)
+        _      <- recordMany(3, t)
+        _      <- evidence(e).verifyFully(t)
+        intact <- e.app.transact(t)(evidence(e).lastVerification)
+        _      <- forgeEntry(t, 2)
+        _      <- evidence(e).verifyFully(t)
+        first  <- e.app.transact(t)(evidence(e).lastVerification)
+        _      <- evidence(e).verifyFully(t)
+        later  <- e.app.transact(t)(evidence(e).lastVerification)
+      yield assertTrue(
+        never.isEmpty,
+        intact.exists(r => r.violationKind.isEmpty && r.entriesChecked == 3L && r.checkpointsCompared),
+        intact.exists(_.violatedSince.isEmpty),
+        later.flatMap(_.violationKind).contains("HashMismatch"),
+        later.flatMap(_.violationSeq).contains(2L),
+        later.flatMap(_.violatedSince) == first.map(_.verifiedAt),
+        later.map(_.verifiedAt) != first.map(_.verifiedAt)
+      )
     },
     test("tokens from a TSA outside the trust anchors are rejected") {
       ZIO.scoped(

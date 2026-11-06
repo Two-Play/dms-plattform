@@ -37,6 +37,9 @@ enum NotificationCategory(val key: String, val emailByDefault: Boolean):
   /** Legal holds set or released (records managers). */
   case LegalHold extends NotificationCategory("legal-hold", false)
 
+  /** The regular verification found a violation of the audit chain (compliance, administrators; ADR 0080). */
+  case AuditIntegrity extends NotificationCategory("audit-integrity", true)
+
 object NotificationCategory:
   def fromKey(key: String): Option[NotificationCategory] = values.find(_.key == key)
 

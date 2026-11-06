@@ -30,13 +30,16 @@ final case class MigrationConfig(user: String, password: String)
   *   PEM files of the TSA's CA; without them daily RFC 3161 anchoring is disabled and only checkpoints run
   * @param allowUnanchoredInProduction
   *   lets the profile `production` start without anchoring (explicit opt-out, warned about at start)
+  * @param violationReminderDays
+  *   days after the first notice of a violation of the chain on which a reminder is due; empty: no reminders
   */
 final case class AuditConfig(
     checkpointIntervalSeconds: Int,
     anchorHourUtc: Int,
     tsaUrl: String,
     tsaTrustedCertificates: List[String],
-    allowUnanchoredInProduction: Boolean = false
+    allowUnanchoredInProduction: Boolean = false,
+    violationReminderDays: List[Int] = List(3, 7)
 )
 
 /** @param name

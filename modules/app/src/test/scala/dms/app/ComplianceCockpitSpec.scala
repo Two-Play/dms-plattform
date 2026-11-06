@@ -93,6 +93,21 @@ object ComplianceCockpitSpec extends ZIOSpecDefault:
         ComplianceCockpit.withoutOwner(entries, Some("Finance")).isEmpty
       )
     },
+    test("orphaned: an owner without role, once per document; no owner at all is another figure") {
+      val gone    = version("A", Some("HR"), Some("gone"), None)
+      val entries = List(
+        Entry(gone, None, ownerHasRole = false),
+        Entry(gone.copy(versionId = UUID.randomUUID()), None, ownerHasRole = false),
+        Entry(version("B", Some("Finance"), Some("here"), None), None),
+        Entry(version("C", Some("HR"), None, None), None, ownerHasRole = false)
+      )
+      assertTrue(
+        ComplianceCockpit.orphaned(entries, None, None).map(_.version.document.title) == List("A"),
+        ComplianceCockpit.orphaned(entries, Some("HR"), Some("gone")).size == 1,
+        ComplianceCockpit.orphaned(entries, Some("Finance"), None).isEmpty,
+        ComplianceCockpit.orphaned(entries, None, Some("here")).isEmpty
+      )
+    },
     test("deviations: only versions that have any, the most first, by unit and owner") {
       val entries = List(
         Entry(version("A", Some("HR"), Some("o"), None), None, deviations = 1),

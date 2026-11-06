@@ -2411,6 +2411,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/v1/compliance/orphaned-documents': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Documents with a valid version in the caller's scope whose owner has no active Owner role that covers the document, by title. Documents without any owner are in documents-without-owner. */
+    get: operations['getApiV1ComplianceOrphaned-documents']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/v1/compliance/audit-verification': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The newest full verification of the tenant's audit chain: when it ran, what it found and whether it is stale. For compliance officers, whatever their scope. Never the content of an audit entry. */
+    get: operations['getApiV1ComplianceAudit-verification']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/v1/compliance/deviations': {
     parameters: {
       query?: never
@@ -3000,6 +3034,23 @@ export interface components {
       maxSizeBytes: number
       attachments?: components['schemas']['AttachmentView'][]
     }
+    /** AuditVerificationView */
+    AuditVerificationView: {
+      /** Format: date-time */
+      lastRunAt?: string
+      result?: string
+      stale: boolean
+      /** Format: int64 */
+      staleAfterDays: number
+      /** Format: int64 */
+      entriesChecked?: number
+      violationKind?: string
+      /** Format: int64 */
+      violationPosition?: number
+      /** Format: date-time */
+      violatedSince?: string
+      checkpointsCompared?: boolean
+    }
     /** Block */
     Block:
       | components['schemas']['BulletList']
@@ -3349,6 +3400,8 @@ export interface components {
       versionsWithDeviations: number
       /** Format: int32 */
       deviations: number
+      /** Format: int32 */
+      orphanedDocuments: number
     }
     /** ComponentView */
     ComponentView: {
@@ -4576,6 +4629,20 @@ export interface components {
       /** Format: int64 */
       size: number
       sha256: string
+    }
+    /** OrphanedDocumentView */
+    OrphanedDocumentView: {
+      /** Format: uuid */
+      documentId: string
+      /** Format: uuid */
+      versionId: string
+      title: string
+      versionLabel: string
+      classPath?: string[]
+      unit?: string
+      owner: string
+      /** Format: date-time */
+      publishedAt?: string
     }
     /** Otherwise */
     Otherwise: {
@@ -12687,6 +12754,65 @@ export interface operations {
       }
     }
   }
+  'getApiV1ComplianceOrphaned-documents': {
+    parameters: {
+      query?: {
+        /** @description Organizational unit; empty for versions without unit; absent for all */
+        unit?: string
+        /** @description Owner's user id */
+        owner?: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['OrphanedDocumentView'][]
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
+  'getApiV1ComplianceAudit-verification': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AuditVerificationView']
+        }
+      }
+      default: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ApiError']
+        }
+      }
+    }
+  }
   getApiV1ComplianceDeviations: {
     parameters: {
       query?: {
@@ -12830,7 +12956,7 @@ export interface operations {
       }
       header?: never
       path: {
-        /** @description overdue-reviews, acknowledgements, documents-without-owner, deviations or four-eyes-findings */
+        /** @description overdue-reviews, acknowledgements, documents-without-owner, orphaned-documents, deviations or four-eyes-findings */
         list: string
       }
       cookie?: never
